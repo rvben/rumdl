@@ -35,6 +35,8 @@ update-cargo-version:
 	@sed -i.bak -E 's/^version = "[0-9]+\.[0-9]+\.[0-9]+"/version = "$(VERSION_NO_V)"/' Cargo.toml
 	@rm -f Cargo.toml.bak
 	@echo "Cargo.toml updated to version $(VERSION_NO_V)"
+	@echo "Updating Cargo.lock..."
+	@cargo update
 
 version-major:
 	@echo "Creating new major version tag..."
@@ -45,7 +47,7 @@ version-major:
 	$(eval VERSION_NO_V := $(NEW_MAJOR).0.0)
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
-	@git add Cargo.toml
+	@git add Cargo.toml Cargo.lock
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
@@ -60,7 +62,7 @@ version-minor:
 	$(eval VERSION_NO_V := $(MAJOR).$(NEW_MINOR).0)
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
-	@git add Cargo.toml
+	@git add Cargo.toml Cargo.lock
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
@@ -76,7 +78,7 @@ version-patch:
 	$(eval VERSION_NO_V := $(MAJOR).$(MINOR).$(NEW_PATCH))
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
-	@git add Cargo.toml
+	@git add Cargo.toml Cargo.lock
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
