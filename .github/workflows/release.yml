@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu,x86_64-unknown-linux-musl,aarch64-unknown-linux-gnu,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-msvc
+
+      - name: Install cross-compilation tools
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Get Version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        
+      - name: Build Linux (x86_64) Binary
+        run: |
+          cross build --release --target x86_64-unknown-linux-gnu
+          cp target/x86_64-unknown-linux-gnu/release/rumdl rumdl_linux_amd64
+
+      - name: Build Linux (ARM64) Binary
+        run: |
+          cross build --release --target aarch64-unknown-linux-gnu
+          cp target/aarch64-unknown-linux-gnu/release/rumdl rumdl_linux_arm64
+      
+      - name: Build macOS (x86_64) Binary
+        run: |
+          cross build --release --target x86_64-apple-darwin
+          cp target/x86_64-apple-darwin/release/rumdl rumdl_darwin_amd64
+      
+      - name: Build macOS (ARM64) Binary
+        run: |
+          cross build --release --target aarch64-apple-darwin
+          cp target/aarch64-apple-darwin/release/rumdl rumdl_darwin_arm64
+      
+      - name: Build Windows Binary
+        run: |
+          cross build --release --target x86_64-pc-windows-msvc
+          cp target/x86_64-pc-windows-msvc/release/rumdl.exe rumdl_windows_amd64.exe
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            rumdl_linux_amd64
+            rumdl_linux_arm64
+            rumdl_darwin_amd64
+            rumdl_darwin_arm64
+            rumdl_windows_amd64.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
