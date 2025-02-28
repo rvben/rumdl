@@ -1,4 +1,4 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::rule::{LintError, LintResult, LintWarning, Rule};
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
 
 #[derive(Debug)]

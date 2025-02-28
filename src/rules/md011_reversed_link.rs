@@ -19,8 +19,8 @@ impl Rule for MD011ReversedLink {
 
         for (line_num, line) in content.lines().enumerate() {
             for cap in re.captures_iter(line) {
-                let url = &cap[1];
-                let text = &cap[2];
+                let text = &cap[1];
+                let url = &cap[2];
                 let start = cap.get(0).unwrap().start();
                 warnings.push(LintWarning {
                     line: line_num + 1,
@@ -45,8 +45,8 @@ impl Rule for MD011ReversedLink {
         for line in content.lines() {
             let mut fixed_line = line.to_string();
             for cap in re.captures_iter(line).collect::<Vec<_>>().iter().rev() {
-                let url = &cap[1];
-                let text = &cap[2];
+                let text = &cap[1];
+                let url = &cap[2];
                 let start = cap.get(0).unwrap().start();
                 let end = cap.get(0).unwrap().end();
                 fixed_line.replace_range(start..end, &format!("[{}]({})", text, url));

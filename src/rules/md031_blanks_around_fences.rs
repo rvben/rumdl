@@ -1,4 +1,4 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::rule::{LintError, LintResult, LintWarning, Rule};
 
 #[derive(Debug, Default)]
 pub struct MD031BlanksAroundFences;
@@ -33,94 +33,87 @@ impl Rule for MD031BlanksAroundFences {
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-
-        for (i, line) in lines.iter().enumerate() {
-            if Self::is_code_fence_line(line) {
-                // Check line before code fence
+        let mut i = 0;
+        
+        while i < lines.len() {
+            if Self::is_code_fence_line(lines[i]) {
+                // Check for blank line before fence
                 if i > 0 && !Self::is_empty_line(lines[i - 1]) {
                     warnings.push(LintWarning {
-                        message: "No blank line before fenced code block".to_string(),
                         line: i + 1,
                         column: 1,
-                        fix: Some(Fix {
+                        message: "No blank line before fenced code block".to_string(),
+                        fix: None,
+                    });
+                }
+                
+                // Find closing fence
+                let _opening_fence = i;
+                i += 1;
+                while i < lines.len() && !Self::is_code_fence_line(lines[i]) {
+                    i += 1;
+                }
+                
+                // If we found a closing fence
+                if i < lines.len() {
+                    // Check for blank line after fence
+                    if i + 1 < lines.len() && !Self::is_empty_line(lines[i + 1]) {
+                        warnings.push(LintWarning {
                             line: i + 1,
                             column: 1,
-                            replacement: format!("\n{}", line),
-                        }),
-                    });
-                }
-
-                // Find the closing fence
-                let mut j = i + 1;
-                while j < lines.len() && !Self::is_code_fence_line(lines[j]) {
-                    j += 1;
-                }
-
-                // Check line after code fence if we found a closing fence
-                if j < lines.len() && j + 1 < lines.len() && !Self::is_empty_line(lines[j + 1]) {
-                    warnings.push(LintWarning {
-                        message: "No blank line after fenced code block".to_string(),
-                        line: j + 2,
-                        column: 1,
-                        fix: Some(Fix {
-                            line: j + 2,
-                            column: 1,
-                            replacement: format!("\n{}", lines[j + 1]),
-                        }),
-                    });
+                            message: "No blank line after fenced code block".to_string(),
+                            fix: None,
+                        });
+                    }
                 }
             }
+            i += 1;
         }
-
+        
         Ok(warnings)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = String::new();
         let lines: Vec<&str> = content.lines().collect();
+        let mut result = Vec::new();
         let mut i = 0;
-
+        
         while i < lines.len() {
             if Self::is_code_fence_line(lines[i]) {
-                // Add blank line before code fence if needed
+                // Add blank line before fence if needed
                 if i > 0 && !Self::is_empty_line(lines[i - 1]) {
-                    result.push('\n');
+                    result.push(String::new());
                 }
-
-                // Add the code fence line
-                result.push_str(lines[i]);
-                result.push('\n');
-                i += 1;
-
-                // Copy the code block content
-                while i < lines.len() && !Self::is_code_fence_line(lines[i]) {
-                    result.push_str(lines[i]);
-                    result.push('\n');
-                    i += 1;
+                
+                // Add opening fence
+                result.push(lines[i].to_string());
+                
+                // Find and add content within code block
+                let mut j = i + 1;
+                while j < lines.len() && !Self::is_code_fence_line(lines[j]) {
+                    result.push(lines[j].to_string());
+                    j += 1;
                 }
-
-                // Add the closing fence if found
-                if i < lines.len() {
-                    result.push_str(lines[i]);
-                    result.push('\n');
+                
+                // Add closing fence if found
+                if j < lines.len() {
+                    result.push(lines[j].to_string());
                     
-                    // Add blank line after code fence if needed
-                    if i + 1 < lines.len() && !Self::is_empty_line(lines[i + 1]) {
-                        result.push('\n');
+                    // Add blank line after fence if needed
+                    if j + 1 < lines.len() && !Self::is_empty_line(lines[j + 1]) {
+                        result.push(String::new());
                     }
+                    
+                    i = j;
+                } else {
+                    i = j;
                 }
             } else {
-                result.push_str(lines[i]);
-                result.push('\n');
+                result.push(lines[i].to_string());
             }
             i += 1;
         }
-
-        // Remove trailing newline if the original content didn't have one
-        if !content.ends_with('\n') {
-            result.pop();
-        }
-
-        Ok(result)
+        
+        Ok(result.join("\n"))
     }
 } 

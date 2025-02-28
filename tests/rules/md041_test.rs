@@ -6,6 +6,7 @@ fn test_valid_first_line_heading() {
     let rule = MD041FirstLineHeading::new(1, false);
     let content = "# First heading\nSome text";
     let result = rule.check(content).unwrap();
+    println!("Valid test result: {:?}", result);
     assert!(result.is_empty());
 }
 
@@ -27,7 +28,7 @@ fn test_wrong_level_heading() {
 
 #[test]
 fn test_with_front_matter() {
-    let rule = MD041FirstLineHeading::new(1, false);
+    let rule = MD041FirstLineHeading::new(1, true);
     let content = "---\ntitle: Test\n---\n# First heading\nSome text";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
@@ -54,5 +55,6 @@ fn test_custom_level() {
     let rule = MD041FirstLineHeading::new(2, false);
     let content = "## Second level heading\nSome text";
     let result = rule.check(content).unwrap();
+    println!("Custom level test result: {:?}", result);
     assert!(result.is_empty());
 } 

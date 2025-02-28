@@ -18,13 +18,69 @@ impl MD034NoBareUrls {
         in_code_block
     }
 
+    fn is_in_inline_code(&self, line: &str, position: usize) -> bool {
+        let mut in_code = false;
+        let mut code_start = 0;
+        
+        for (i, c) in line.chars().enumerate() {
+            if c == '`' {
+                if !in_code {
+                    code_start = i;
+                    in_code = true;
+                } else {
+                    if position >= code_start && position < i {
+                        return true;
+                    }
+                    in_code = false;
+                }
+            }
+            
+            if i >= position && !in_code {
+                break;
+            }
+        }
+        
+        false
+    }
+    
+    fn is_in_markdown_link(&self, line: &str, position: usize) -> bool {
+        // Check for standard markdown links: [text](url)
+        let link_re = Regex::new(r"\[.*?\]\((?P<url>.*?)\)").unwrap();
+        for cap in link_re.captures_iter(line) {
+            if let Some(url_match) = cap.name("url") {
+                let start = url_match.start();
+                let end = url_match.end();
+                if position >= start && position < end {
+                    return true;
+                }
+            }
+        }
+        
+        // Check for angle-bracket enclosed URLs: <http://example.com>
+        let angle_re = Regex::new(r"<(?:https?|ftp)://[^>]+>").unwrap();
+        for cap in angle_re.find_iter(line) {
+            let start = cap.start();
+            let end = cap.end();
+            if position >= start && position < end {
+                return true;
+            }
+        }
+        
+        false
+    }
+
     fn find_bare_urls(&self, line: &str) -> Vec<(usize, String)> {
         let mut urls = Vec::new();
-        let url_re = Regex::new(r#"(?i)https?://[^\s<>\[\]()'"]+[^\s<>\[\]()'".,]"#).unwrap();
+        let url_re = Regex::new(r#"(?:https?|ftp)://[^\s<>\[\]()'"]+[^\s<>\[\]()'".,]"#).unwrap();
 
         for cap in url_re.find_iter(line) {
             let url = cap.as_str().to_string();
-            urls.push((cap.start(), url));
+            let position = cap.start();
+            
+            // Skip URLs that are in inline code or markdown links
+            if !self.is_in_inline_code(line, position) && !self.is_in_markdown_link(line, position) {
+                urls.push((position, url));
+            }
         }
 
         urls

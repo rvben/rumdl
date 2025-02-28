@@ -18,7 +18,8 @@ impl MD052ReferenceLinkImages {
 
         for line in content.lines() {
             if let Some(cap) = ref_regex.captures(line) {
-                references.insert(cap[1].to_string());
+                // Store references in lowercase for case-insensitive comparison
+                references.insert(cap[1].to_lowercase());
             }
         }
 
@@ -27,28 +28,59 @@ impl MD052ReferenceLinkImages {
 
     fn find_undefined_references<'a>(&self, content: &'a str, references: &HashSet<String>) -> Vec<(usize, usize, &'a str)> {
         let mut undefined = Vec::new();
-        let link_regex = Regex::new(r"\[([^\]]+)\]\[([^\]]*)\]|\!\[([^\]]+)\]\[([^\]]*)\]").unwrap();
+        // Use a regex that doesn't require negative lookaheads
+        let link_regex = Regex::new(r"\[([^\]]+)\](?:\[([^\]]*)\])?|\!\[([^\]]+)\](?:\[([^\]]*)\])?").unwrap();
+        
+        // Replace the shortcut regex that was using negative lookahead
+        let ref_def_pattern = Regex::new(r"^\s*\[([^\]]+)\]:\s*\S+").unwrap();
 
         for (line_num, line) in content.lines().enumerate() {
+            // Skip reference definitions to avoid false positives
+            if ref_def_pattern.is_match(line) {
+                continue;
+            }
+
+            // Handle regular reference links/images with [text][id] format
             for cap in link_regex.captures_iter(line) {
                 let reference = if let Some(m) = cap.get(2) {
+                    // [text][id] format
                     if m.as_str().is_empty() {
+                        // [text][] format - use text as reference
                         cap.get(1).map(|m| m.as_str())
                     } else {
                         Some(m.as_str())
                     }
                 } else if let Some(m) = cap.get(4) {
+                    // ![text][id] format
                     if m.as_str().is_empty() {
+                        // ![text][] format - use text as reference
                         cap.get(3).map(|m| m.as_str())
                     } else {
                         Some(m.as_str())
+                    }
+                } else if let Some(m1) = cap.get(1) {
+                    let text = m1.as_str();
+                    // Handle [text] shortcut reference format - check that it's not part of [text][id] or [text]: definition
+                    if !line.contains(&format!("[{}][", text)) && !line.contains(&format!("[{}]:", text)) {
+                        Some(text)
+                    } else {
+                        None
+                    }
+                } else if let Some(m3) = cap.get(3) {
+                    let text = m3.as_str();
+                    // Handle ![text] shortcut reference format
+                    if !line.contains(&format!("![{}][", text)) {
+                        Some(text)
+                    } else {
+                        None
                     }
                 } else {
                     None
                 };
 
                 if let Some(ref_text) = reference {
-                    if !references.contains(ref_text) {
+                    // Compare in lowercase for case-insensitive matching
+                    if !references.contains(&ref_text.to_lowercase()) {
                         undefined.push((line_num + 1, cap.get(0).unwrap().start(), ref_text));
                     }
                 }

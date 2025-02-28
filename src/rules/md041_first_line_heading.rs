@@ -1,5 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
-use super::heading_utils::HeadingUtils;
+use regex::Regex;
 
 #[derive(Debug)]
 pub struct MD041FirstLineHeading {
@@ -42,25 +42,54 @@ impl MD041FirstLineHeading {
         }
         false
     }
+    
+    fn is_heading_line(&self, line: &str) -> Option<usize> {
+        // Check for ATX style heading
+        let re = Regex::new(r"^(#{1,6})(?:\s+.+)?(?:\s+#{0,})?$").unwrap();
+        if let Some(cap) = re.captures(line) {
+            return Some(cap[1].len());
+        }
+        
+        // Check for Setext style heading would require next line, 
+        // but not needed for this rule's implementation
+        None
+    }
 
     fn find_first_heading(&self, content: &str) -> Option<(usize, usize)> {
+        let lines: Vec<&str> = content.lines().collect();
+        
         let mut in_front_matter = false;
-        for (i, line) in content.lines().enumerate() {
+        
+        for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
+            
+            // Check for front matter
             if i == 0 && trimmed == "---" {
                 in_front_matter = true;
                 continue;
             }
+            
             if in_front_matter {
                 if trimmed == "---" {
                     in_front_matter = false;
                 }
                 continue;
             }
-            if let Some(heading) = HeadingUtils::parse_heading(line, i + 1) {
-                return Some((i + 1, heading.level));
+            
+            // Skip blank lines after front matter
+            if trimmed.is_empty() {
+                continue;
+            }
+            
+            // Check if line is a heading
+            if let Some(level) = self.is_heading_line(trimmed) {
+                return Some((i + 1, level));
+            } else {
+                // If we hit non-empty, non-heading content, no first heading exists
+                return None;
             }
         }
+        
         None
     }
 }
@@ -134,15 +163,20 @@ impl Rule for MD041FirstLineHeading {
                 result.push_str(&format!("{} Title\n\n", "#".repeat(self.level)));
                 result.push_str(content);
             }
-            Some((line_num, _)) => {
-                // Fix the existing heading level
-                for (i, line) in lines.iter().enumerate() {
-                    if i + 1 == line_num {
-                        result.push_str(&format!("{} {}\n", "#".repeat(self.level), line.trim_start().trim_start_matches('#').trim_start()));
-                    } else {
-                        result.push_str(line);
-                        result.push('\n');
+            Some((line_num, level)) => {
+                if level != self.level {
+                    // Fix the existing heading level
+                    for (i, line) in lines.iter().enumerate() {
+                        if i + 1 == line_num {
+                            result.push_str(&format!("{} {}\n", "#".repeat(self.level), line.trim_start().trim_start_matches('#').trim_start()));
+                        } else {
+                            result.push_str(line);
+                            result.push('\n');
+                        }
                     }
+                } else {
+                    // Heading is already at the correct level
+                    return Ok(content.to_string());
                 }
             }
         }

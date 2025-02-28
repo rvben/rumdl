@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use crate::rules::heading_utils::HeadingUtils;
+use regex::Regex;
 
 #[derive(Debug, Default)]
 pub struct MD023HeadingStartLeft;
@@ -15,19 +16,50 @@ impl Rule for MD023HeadingStartLeft {
 
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
+        let atx_re = Regex::new(r"^(\s+)(#{1,6}(?:\s+.+?|\s*))(?:\s+(#+))?\s*$").unwrap();
+        let setext_underline_re = Regex::new(r"^(=+|-+)\s*$").unwrap();
 
-        for (line_num, line) in content.lines().enumerate() {
-            if let Some(heading) = HeadingUtils::parse_heading(line, line_num + 1) {
-                let indentation = HeadingUtils::get_indentation(line);
+        let lines: Vec<&str> = content.lines().collect();
+        for i in 0..lines.len() {
+            let line = lines[i];
+            
+            // Check for indented ATX headings
+            if let Some(caps) = atx_re.captures(line) {
+                let indentation = caps[1].len();
+                let heading_content = &caps[2];
+                let closing_sequence = caps.get(3).map_or("", |m| m.as_str());
+                
+                let replacement = if !closing_sequence.is_empty() {
+                    format!("{} {}", heading_content, closing_sequence)
+                } else {
+                    heading_content.to_string()
+                };
+                
+                warnings.push(LintWarning {
+                    line: i + 1,
+                    column: 1,
+                    message: format!("Heading should not be indented by {} spaces", indentation),
+                    fix: Some(Fix {
+                        line: i + 1,
+                        column: 1,
+                        replacement,
+                    }),
+                });
+            }
+            
+            // Check for indented Setext headings
+            if i > 0 && setext_underline_re.is_match(line) {
+                let prev_line = lines[i - 1];
+                let indentation = HeadingUtils::get_indentation(prev_line);
                 if indentation > 0 {
                     warnings.push(LintWarning {
-                        line: line_num + 1,
+                        line: i,
                         column: 1,
-                        message: format!("Heading should not be indented by {} spaces", indentation),
+                        message: format!("Setext heading should not be indented by {} spaces", indentation),
                         fix: Some(Fix {
-                            line: line_num + 1,
+                            line: i,
                             column: 1,
-                            replacement: HeadingUtils::convert_heading_style(&heading, &heading.style),
+                            replacement: prev_line.trim_start().to_string(),
                         }),
                     });
                 }
@@ -38,28 +70,43 @@ impl Rule for MD023HeadingStartLeft {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = String::new();
+        let mut result = Vec::new();
+        let atx_re = Regex::new(r"^(\s+)(#{1,6}(?:\s+.+?|\s*))(?:\s+(#+))?\s*$").unwrap();
+        let setext_underline_re = Regex::new(r"^(=+|-+)\s*$").unwrap();
 
-        for line in content.lines() {
-            if let Some(heading) = HeadingUtils::parse_heading(line, 0) {
-                let indentation = HeadingUtils::get_indentation(line);
-                if indentation > 0 {
-                    result.push_str(&HeadingUtils::convert_heading_style(&heading, &heading.style));
-                    result.push('\n');
+        let lines: Vec<&str> = content.lines().collect();
+        for i in 0..lines.len() {
+            let line = lines[i];
+            
+            // Handle indented ATX headings
+            if let Some(caps) = atx_re.captures(line) {
+                let heading_content = &caps[2];
+                let closing_sequence = caps.get(3).map_or("", |m| m.as_str());
+                
+                if !closing_sequence.is_empty() {
+                    result.push(format!("{} {}", heading_content, closing_sequence));
                 } else {
-                    result.push_str(line);
-                    result.push('\n');
+                    result.push(heading_content.to_string());
+                }
+            } 
+            // Handle indented Setext headings
+            else if i > 0 && setext_underline_re.is_match(line) {
+                // Underline line - add it as is
+                result.push(line.to_string());
+                
+                // Check if we need to fix the previous line (the heading text)
+                let prev_line = lines[i - 1];
+                let indentation = HeadingUtils::get_indentation(prev_line);
+                if indentation > 0 {
+                    // We already added the previous line, so replace it
+                    result[i - 1] = prev_line.trim_start().to_string();
                 }
             } else {
-                result.push_str(line);
-                result.push('\n');
+                // Regular line
+                result.push(line.to_string());
             }
         }
 
-        if !content.ends_with('\n') {
-            result.pop();
-        }
-
-        Ok(result)
+        Ok(result.join("\n"))
     }
-} 
+}

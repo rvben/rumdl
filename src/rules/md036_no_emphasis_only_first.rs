@@ -5,22 +5,39 @@ use regex::Regex;
 pub struct MD036NoEmphasisOnlyFirst;
 
 impl MD036NoEmphasisOnlyFirst {
-    fn is_emphasis_only_first_word(line: &str) -> bool {
+    fn is_entire_line_emphasized(line: &str) -> Option<(usize, String)> {
         let line = line.trim();
         
-        // Check for *emphasis* or **strong** patterns at start
-        let re_asterisk = Regex::new(r"^\*{1,2}[^*\n]+\*{1,2}\s+\S.*$").unwrap();
-        if re_asterisk.is_match(line) {
-            return true;
+        // Skip if line is empty
+        if line.is_empty() {
+            return None;
         }
-
-        // Check for _emphasis_ or __strong__ patterns at start
-        let re_underscore = Regex::new(r"^_{1,2}[^_\n]+_{1,2}\s+\S.*$").unwrap();
-        if re_underscore.is_match(line) {
-            return true;
+        
+        // Check for *emphasis* pattern (entire line)
+        let re_asterisk_single = Regex::new(r"^\*([^*\n]+)\*$").unwrap();
+        if let Some(caps) = re_asterisk_single.captures(line) {
+            return Some((1, caps.get(1).unwrap().as_str().trim().to_string()));
         }
-
-        false
+        
+        // Check for _emphasis_ pattern (entire line)
+        let re_underscore_single = Regex::new(r"^_([^_\n]+)_$").unwrap();
+        if let Some(caps) = re_underscore_single.captures(line) {
+            return Some((1, caps.get(1).unwrap().as_str().trim().to_string()));
+        }
+        
+        // Check for **strong** pattern (entire line)
+        let re_asterisk_double = Regex::new(r"^\*\*([^*\n]+)\*\*$").unwrap();
+        if let Some(caps) = re_asterisk_double.captures(line) {
+            return Some((2, caps.get(1).unwrap().as_str().trim().to_string()));
+        }
+        
+        // Check for __strong__ pattern (entire line)
+        let re_underscore_double = Regex::new(r"^__([^_\n]+)__$").unwrap();
+        if let Some(caps) = re_underscore_double.captures(line) {
+            return Some((2, caps.get(1).unwrap().as_str().trim().to_string()));
+        }
+        
+        None
     }
 
     fn is_in_code_block(&self, content: &str, line_num: usize) -> bool {
@@ -36,22 +53,9 @@ impl MD036NoEmphasisOnlyFirst {
         in_code_block
     }
 
-    fn fix_emphasis_only_first(line: &str) -> String {
-        let line = line.trim();
-        
-        // Fix *emphasis* pattern
-        let re_asterisk = Regex::new(r"^\*{1,2}([^*\n]+)\*{1,2}(\s+\S.*)$").unwrap();
-        if let Some(caps) = re_asterisk.captures(line) {
-            return format!("{}{}", caps.get(1).unwrap().as_str().trim(), caps.get(2).unwrap().as_str());
-        }
-
-        // Fix _emphasis_ pattern
-        let re_underscore = Regex::new(r"^_{1,2}([^_\n]+)_{1,2}(\s+\S.*)$").unwrap();
-        if let Some(caps) = re_underscore.captures(line) {
-            return format!("{}{}", caps.get(1).unwrap().as_str().trim(), caps.get(2).unwrap().as_str());
-        }
-
-        line.to_string()
+    fn get_heading_for_emphasis(level: usize, text: &str) -> String {
+        let prefix = "#".repeat(level);
+        format!("{} {}", prefix, text)
     }
 }
 
@@ -61,24 +65,26 @@ impl Rule for MD036NoEmphasisOnlyFirst {
     }
 
     fn description(&self) -> &'static str {
-        "Emphasis should not be used for the first word only"
+        "No emphasis used instead of headings"
     }
 
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
 
         for (i, line) in content.lines().enumerate() {
-            if !self.is_in_code_block(content, i + 1) && Self::is_emphasis_only_first_word(line) {
-                warnings.push(LintWarning {
-                    message: "Emphasis should not be used for the first word only".to_string(),
-                    line: i + 1,
-                    column: 1,
-                    fix: Some(Fix {
+            if !self.is_in_code_block(content, i + 1) {
+                if let Some((level, text)) = Self::is_entire_line_emphasized(line) {
+                    warnings.push(LintWarning {
+                        message: "Emphasis should not be used instead of a heading".to_string(),
                         line: i + 1,
                         column: 1,
-                        replacement: Self::fix_emphasis_only_first(line),
-                    }),
-                });
+                        fix: Some(Fix {
+                            line: i + 1,
+                            column: 1,
+                            replacement: Self::get_heading_for_emphasis(level, &text),
+                        }),
+                    });
+                }
             }
         }
 
@@ -90,8 +96,12 @@ impl Rule for MD036NoEmphasisOnlyFirst {
         let lines: Vec<&str> = content.lines().collect();
 
         for i in 0..lines.len() {
-            if !self.is_in_code_block(content, i + 1) && Self::is_emphasis_only_first_word(lines[i]) {
-                result.push_str(&Self::fix_emphasis_only_first(lines[i]));
+            if !self.is_in_code_block(content, i + 1) {
+                if let Some((level, text)) = Self::is_entire_line_emphasized(lines[i]) {
+                    result.push_str(&Self::get_heading_for_emphasis(level, &text));
+                } else {
+                    result.push_str(lines[i]);
+                }
             } else {
                 result.push_str(lines[i]);
             }

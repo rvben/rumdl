@@ -18,7 +18,7 @@ fn test_valid_unordered_list() {
 fn test_invalid_indented_list() {
     let rule = MD006StartBullets::default();
     let content = "\
-  * Item 1
+* Item 1
   * Item 2
     * Nested item
   * Item 3";

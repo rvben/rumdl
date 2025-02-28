@@ -46,7 +46,7 @@ fn test_indented_code_block() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "```text\n  some code\n  ```");
+    assert_eq!(fixed, "```text\n  some code\n```");
 }
 
 #[test]
