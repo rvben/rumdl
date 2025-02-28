@@ -1,5 +1,5 @@
-use rustmark::rules::MD043RequiredHeadings;
-use rustmark::rule::Rule;
+use rumdl::rules::MD043RequiredHeadings;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_matching_headings() {

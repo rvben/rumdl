@@ -1,5 +1,5 @@
-use rustmark::rules::MD034NoBareUrls;
-use rustmark::rule::Rule;
+use rumdl::rules::MD034NoBareUrls;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_urls() {

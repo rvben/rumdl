@@ -1,5 +1,5 @@
-use rustmark::rules::MD006StartBullets;
-use rustmark::rule::Rule;
+use rumdl::rules::MD006StartBullets;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_unordered_list() {

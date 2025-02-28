@@ -1,5 +1,5 @@
-use rustmark::rules::MD025SingleTitle;
-use rustmark::rule::Rule;
+use rumdl::rules::MD025SingleTitle;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_md025_valid() {

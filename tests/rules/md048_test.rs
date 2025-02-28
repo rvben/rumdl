@@ -1,6 +1,6 @@
-use rustmark::rules::MD048CodeFenceStyle;
-use rustmark::rules::md048_code_fence_style::CodeFenceStyle;
-use rustmark::rule::Rule;
+use rumdl::rules::MD048CodeFenceStyle;
+use rumdl::rules::md048_code_fence_style::CodeFenceStyle;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_consistent_backticks() {

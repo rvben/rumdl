@@ -1,5 +1,5 @@
-use rustmark::rules::MD051LinkFragments;
-use rustmark::rule::Rule;
+use rumdl::rules::MD051LinkFragments;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_link_fragment() {

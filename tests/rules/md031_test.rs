@@ -1,5 +1,5 @@
-use rustmark::rules::MD031BlanksAroundFences;
-use rustmark::rule::Rule;
+use rumdl::rules::MD031BlanksAroundFences;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_fenced_blocks() {

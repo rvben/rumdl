@@ -1,5 +1,5 @@
-use rustmark::rules::MD012NoMultipleBlanks;
-use rustmark::rule::Rule;
+use rumdl::rules::MD012NoMultipleBlanks;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_md012_valid() {

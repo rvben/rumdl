@@ -1,5 +1,5 @@
-use rustmark::rules::MD038NoSpaceInCode;
-use rustmark::rule::Rule;
+use rumdl::rules::MD038NoSpaceInCode;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_code_spans() {

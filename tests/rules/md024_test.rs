@@ -1,5 +1,5 @@
-use rustmark::rules::MD024MultipleHeadings;
-use rustmark::rule::Rule;
+use rumdl::rules::MD024MultipleHeadings;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_md024_valid() {

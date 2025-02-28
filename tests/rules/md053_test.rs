@@ -1,5 +1,5 @@
-use rustmark::rules::MD053LinkImageReferenceDefinitions;
-use rustmark::rule::Rule;
+use rumdl::rules::MD053LinkImageReferenceDefinitions;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_all_references_used() {

@@ -1,5 +1,5 @@
-use rustmark::rules::MD008ULStyle;
-use rustmark::rule::Rule;
+use rumdl::rules::MD008ULStyle;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_list_style() {

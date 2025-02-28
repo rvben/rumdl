@@ -1,5 +1,5 @@
-use rustmark::rules::MD013LineLength;
-use rustmark::rule::Rule;
+use rumdl::rules::MD013LineLength;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_line_length() {

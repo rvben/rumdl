@@ -1,5 +1,5 @@
-use rustmark::rules::MD007ULIndent;
-use rustmark::rule::Rule;
+use rumdl::rules::MD007ULIndent;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_list_indent() {

@@ -1,5 +1,5 @@
-use rustmark::rules::MD010NoHardTabs;
-use rustmark::rule::Rule;
+use rumdl::rules::MD010NoHardTabs;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_no_hard_tabs() {

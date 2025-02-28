@@ -1,5 +1,5 @@
-use rustmark::rules::MD044ProperNames;
-use rustmark::rule::Rule;
+use rumdl::rules::MD044ProperNames;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_correct_names() {

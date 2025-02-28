@@ -1,5 +1,5 @@
-use rustmark::rules::MD037SpacesAroundEmphasis;
-use rustmark::rule::Rule;
+use rumdl::rules::MD037SpacesAroundEmphasis;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_emphasis() {

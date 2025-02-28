@@ -1,5 +1,5 @@
-use rustmark::rules::MD011ReversedLink;
-use rustmark::rule::Rule;
+use rumdl::rules::MD011ReversedLink;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_md011_valid() {

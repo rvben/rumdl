@@ -1,5 +1,5 @@
-use rustmark::rules::MD015NoMissingSpaceAfterListMarker;
-use rustmark::rule::Rule;
+use rumdl::rules::MD015NoMissingSpaceAfterListMarker;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_unordered_list() {

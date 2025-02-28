@@ -1,8 +1,8 @@
 [package]
-name = "rustmark"
+name = "rumdl"
 version = "0.1.0"
 edition = "2021"
-description = "A fast Markdown linter written in Rust"
+description = "A fast Markdown linter written in Rust (Ru(st) MarkDown Linter)"
 authors = ["Your Name <your.email@example.com>"]
 license = "MIT"
 

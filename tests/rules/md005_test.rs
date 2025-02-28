@@ -1,5 +1,5 @@
-use rustmark::rules::MD005ListIndent;
-use rustmark::rule::Rule;
+use rumdl::rules::MD005ListIndent;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_unordered_list() {

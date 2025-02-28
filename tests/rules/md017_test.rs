@@ -1,5 +1,5 @@
-use rustmark::rules::MD017NoEmphasisAsHeading;
-use rustmark::rule::Rule;
+use rumdl::rules::MD017NoEmphasisAsHeading;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_headings() {

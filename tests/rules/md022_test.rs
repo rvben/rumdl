@@ -1,5 +1,5 @@
-use rustmark::rules::MD022BlanksAroundHeadings;
-use rustmark::rule::Rule;
+use rumdl::rules::MD022BlanksAroundHeadings;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_headings() {

@@ -1,5 +1,5 @@
-use rustmark::rules::MD001HeadingIncrement;
-use rustmark::rule::Rule;
+use rumdl::rules::MD001HeadingIncrement;
+use rumdl::rule::Rule;
 
 #[test]
 pub fn test_md001_valid() {

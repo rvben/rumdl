@@ -1,5 +1,5 @@
-use rustmark::rules::MD027MultipleSpacesBlockquote;
-use rustmark::rule::Rule;
+use rumdl::rules::MD027MultipleSpacesBlockquote;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_md027_valid() {

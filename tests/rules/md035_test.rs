@@ -1,5 +1,5 @@
-use rustmark::rules::MD035HRStyle;
-use rustmark::rule::Rule;
+use rumdl::rules::MD035HRStyle;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_hr_style() {

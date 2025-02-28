@@ -1,6 +1,6 @@
-use rustmark::rules::MD046CodeBlockStyle;
-use rustmark::rules::md046_code_block_style::CodeBlockStyle;
-use rustmark::rule::Rule;
+use rumdl::rules::MD046CodeBlockStyle;
+use rumdl::rules::md046_code_block_style::CodeBlockStyle;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_consistent_fenced_blocks() {

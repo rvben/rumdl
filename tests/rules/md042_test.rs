@@ -1,5 +1,5 @@
-use rustmark::rules::MD042NoEmptyLinks;
-use rustmark::rule::Rule;
+use rumdl::rules::MD042NoEmptyLinks;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_links() {

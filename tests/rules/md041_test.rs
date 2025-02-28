@@ -1,5 +1,5 @@
-use rustmark::rules::MD041FirstLineHeading;
-use rustmark::rule::Rule;
+use rumdl::rules::MD041FirstLineHeading;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_first_line_heading() {

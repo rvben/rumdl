@@ -1,5 +1,5 @@
-use rustmark::rules::MD029OrderedListPrefix;
-use rustmark::rule::Rule;
+use rumdl::rules::MD029OrderedListPrefix;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_md029_valid() {

@@ -1,5 +1,5 @@
-use rustmark::rules::MD032BlanksAroundLists;
-use rustmark::rule::Rule;
+use rumdl::rules::MD032BlanksAroundLists;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_lists() {

@@ -1,5 +1,5 @@
-use rustmark::rules::MD018NoMissingSpaceAtx;
-use rustmark::rule::Rule;
+use rumdl::rules::MD018NoMissingSpaceAtx;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_atx_headings() {

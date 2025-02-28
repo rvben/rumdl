@@ -1,5 +1,5 @@
-use rustmark::rules::MD023HeadingStartLeft;
-use rustmark::rule::Rule;
+use rumdl::rules::MD023HeadingStartLeft;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_heading_positions() {

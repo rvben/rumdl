@@ -1,5 +1,5 @@
-use rustmark::rules::MD036NoEmphasisOnlyFirst;
-use rustmark::rule::Rule;
+use rumdl::rules::MD036NoEmphasisOnlyFirst;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_emphasis() {

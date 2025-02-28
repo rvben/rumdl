@@ -1,5 +1,5 @@
-use rustmark::rules::MD039NoSpaceInLinks;
-use rustmark::rule::Rule;
+use rumdl::rules::MD039NoSpaceInLinks;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_links() {

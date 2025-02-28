@@ -1,5 +1,5 @@
-use rustmark::rules::MD045NoAltText;
-use rustmark::rule::Rule;
+use rumdl::rules::MD045NoAltText;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_alt_text() {

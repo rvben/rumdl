@@ -1,5 +1,5 @@
-use rustmark::rules::MD047FileEndNewline;
-use rustmark::rule::Rule;
+use rumdl::rules::MD047FileEndNewline;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_file_end_newline() {

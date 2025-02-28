@@ -1,5 +1,5 @@
-use rustmark::rules::{MD004UnorderedListStyle, md004_unordered_list_style::UnorderedListStyle};
-use rustmark::rule::Rule;
+use rumdl::rules::{MD004UnorderedListStyle, md004_unordered_list_style::UnorderedListStyle};
+use rumdl::rule::Rule;
 
 #[test]
 fn test_md004_consistent_valid() {

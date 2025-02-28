@@ -1,5 +1,5 @@
-use rustmark::rules::MD040FencedCodeLanguage;
-use rustmark::rule::Rule;
+use rumdl::rules::MD040FencedCodeLanguage;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_code_blocks() {

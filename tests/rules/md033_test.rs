@@ -1,5 +1,5 @@
-use rustmark::rules::MD033NoInlineHtml;
-use rustmark::rule::Rule;
+use rumdl::rules::MD033NoInlineHtml;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_no_html() {

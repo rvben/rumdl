@@ -1,5 +1,5 @@
-use rustmark::rules::MD026NoTrailingPunctuation;
-use rustmark::rule::Rule;
+use rumdl::rules::MD026NoTrailingPunctuation;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_md026_valid() {

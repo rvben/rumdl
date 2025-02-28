@@ -1,5 +1,5 @@
-use rustmark::rules::MD002FirstHeadingH1;
-use rustmark::rule::Rule;
+use rumdl::rules::MD002FirstHeadingH1;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_custom_level() {

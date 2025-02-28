@@ -1,6 +1,6 @@
-# Rustmark - A Markdown Linter in Rust
+# rumdl - A Markdown Linter written in Rust
 
-Rustmark is a fast and efficient Markdown linter that helps ensure consistency and best practices in your Markdown files.
+rumdl is a fast and efficient Markdown linter that helps ensure consistency and best practices in your Markdown files.
 
 ## Features
 
@@ -12,13 +12,13 @@ Rustmark is a fast and efficient Markdown linter that helps ensure consistency a
 ## Installation 
 
 ```
-cargo install rustmark
+cargo install rumdl
 ```
 
 ## Usage
 
 ```
-rustmark [options] <file>...
+rumdl [options] <file>...
 ```
 
 ### Options
@@ -31,7 +31,7 @@ rustmark [options] <file>...
 
 ## Rules
 
-For a complete list of rules and their descriptions, run `rustmark --list-rules` or visit our [documentation](docs/RULES.md).
+For a complete list of rules and their descriptions, run `rumdl --list-rules` or visit our [documentation](docs/RULES.md).
 
 ## Development
 

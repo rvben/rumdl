@@ -1,5 +1,5 @@
-use rustmark::rules::MD028NoBlanksBlockquote;
-use rustmark::rule::Rule;
+use rumdl::rules::MD028NoBlanksBlockquote;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_md028_valid() {

@@ -1,5 +1,5 @@
-use rustmark::rules::MD014CommandsShowOutput;
-use rustmark::rule::Rule;
+use rumdl::rules::MD014CommandsShowOutput;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_command() {

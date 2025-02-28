@@ -1,5 +1,5 @@
-use rustmark::rules::MD009TrailingSpaces;
-use rustmark::rule::Rule;
+use rumdl::rules::MD009TrailingSpaces;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_md009_valid() {

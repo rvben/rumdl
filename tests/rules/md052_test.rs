@@ -1,5 +1,5 @@
-use rustmark::rules::MD052ReferenceLinkImages;
-use rustmark::rule::Rule;
+use rumdl::rules::MD052ReferenceLinkImages;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_reference_link() {

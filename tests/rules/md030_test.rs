@@ -1,5 +1,5 @@
-use rustmark::rules::MD030ListMarkerSpace;
-use rustmark::rule::Rule;
+use rumdl::rules::MD030ListMarkerSpace;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_valid_single_line_lists() {

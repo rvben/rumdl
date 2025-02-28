@@ -1,6 +1,6 @@
-use rustmark::rules::MD003HeadingStyle;
-use rustmark::rules::heading_utils::HeadingStyle;
-use rustmark::rule::Rule;
+use rumdl::rules::MD003HeadingStyle;
+use rumdl::rules::heading_utils::HeadingStyle;
+use rumdl::rule::Rule;
 
 #[test]
 fn test_consistent_atx() {
