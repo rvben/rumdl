@@ -1,0 +1,38 @@
+use rustmark::rules::MD015NoMissingSpaceAfterListMarker;
+use rustmark::rule::Rule;
+
+#[test]
+fn test_valid_list_marker_space() {
+    let rule = MD015NoMissingSpaceAfterListMarker::default();
+    let content = "* Item 1\n* Item 2\n* Item 3";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_missing_space_after_marker() {
+    let rule = MD015NoMissingSpaceAfterListMarker::default();
+    let content = "*Item 1\n*Item 2\n*Item 3";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].line, 1);
+    assert_eq!(result[0].column, 1);
+}
+
+#[test]
+fn test_mixed_list_markers() {
+    let rule = MD015NoMissingSpaceAfterListMarker::default();
+    let content = "* Item 1\n+ Item 2\n-Item 3";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 3);
+    assert_eq!(result[0].column, 1);
+}
+
+#[test]
+fn test_fix_missing_space() {
+    let rule = MD015NoMissingSpaceAfterListMarker::default();
+    let content = "*Item 1\n*Item 2\n*Item 3";
+    let result = rule.fix(content).unwrap();
+    assert_eq!(result, "* Item 1\n* Item 2\n* Item 3");
+} 

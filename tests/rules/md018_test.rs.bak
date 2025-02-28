@@ -1,0 +1,60 @@
+use rustmark::rules::MD018NoMissingSpaceAtx;
+use rustmark::rule::Rule;
+
+#[test]
+fn test_valid_atx_headings() {
+    let rule = MD018NoMissingSpaceAtx::default();
+    let content = "# Heading 1\n## Heading 2\n### Heading 3";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_missing_space_after_hash() {
+    let rule = MD018NoMissingSpaceAtx::default();
+    let content = "#No space\n##Also no space";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].line, 1);
+    assert_eq!(result[1].line, 2);
+}
+
+#[test]
+fn test_fix_missing_spaces() {
+    let rule = MD018NoMissingSpaceAtx::default();
+    let content = "#Heading 1\n##Heading 2";
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "# Heading 1\n## Heading 2");
+}
+
+#[test]
+fn test_ignore_non_headings() {
+    let rule = MD018NoMissingSpaceAtx::default();
+    let content = "This # is not a heading\n###### Valid heading";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_ignore_more_than_six_hashes() {
+    let rule = MD018NoMissingSpaceAtx::default();
+    let content = "####### Not a heading";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_preserve_indentation() {
+    let rule = MD018NoMissingSpaceAtx::default();
+    let content = "   #No space";
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "   # No space");
+}
+
+#[test]
+fn test_ignore_just_hashes() {
+    let rule = MD018NoMissingSpaceAtx::default();
+    let content = "###\n####";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+} 

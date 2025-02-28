@@ -1,0 +1,100 @@
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+
+/// Rule MD048: Code fence style should be consistent
+pub struct MD048CodeFenceStyle {
+    style: CodeFenceStyle,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CodeFenceStyle {
+    Backtick,
+    Tilde,
+    Consistent,
+}
+
+impl MD048CodeFenceStyle {
+    pub fn new(style: CodeFenceStyle) -> Self {
+        Self { style }
+    }
+
+    fn detect_style(&self, content: &str) -> Option<CodeFenceStyle> {
+        for line in content.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") {
+                return Some(CodeFenceStyle::Backtick);
+            } else if trimmed.starts_with("~~~") {
+                return Some(CodeFenceStyle::Tilde);
+            }
+        }
+        None
+    }
+}
+
+impl Rule for MD048CodeFenceStyle {
+    fn name(&self) -> &'static str {
+        "MD048"
+    }
+
+    fn description(&self) -> &'static str {
+        "Code fence style should be consistent"
+    }
+
+    fn check(&self, content: &str) -> LintResult {
+        let mut warnings = Vec::new();
+        let target_style = match self.style {
+            CodeFenceStyle::Consistent => self.detect_style(content).unwrap_or(CodeFenceStyle::Backtick),
+            _ => self.style.clone(),
+        };
+
+        for (line_num, line) in content.lines().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
+                warnings.push(LintWarning {
+                    line: line_num + 1,
+                    column: line.len() - trimmed.len() + 1,
+                    message: "Code fence style should use tildes".to_string(),
+                    fix: Some(Fix {
+                        line: line_num + 1,
+                        column: line.len() - trimmed.len() + 1,
+                        replacement: line.replace("```", "~~~"),
+                    }),
+                });
+            } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
+                warnings.push(LintWarning {
+                    line: line_num + 1,
+                    column: line.len() - trimmed.len() + 1,
+                    message: "Code fence style should use backticks".to_string(),
+                    fix: Some(Fix {
+                        line: line_num + 1,
+                        column: line.len() - trimmed.len() + 1,
+                        replacement: line.replace("~~~", "```"),
+                    }),
+                });
+            }
+        }
+
+        Ok(warnings)
+    }
+
+    fn fix(&self, content: &str) -> Result<String, LintError> {
+        let target_style = match self.style {
+            CodeFenceStyle::Consistent => self.detect_style(content).unwrap_or(CodeFenceStyle::Backtick),
+            _ => self.style.clone(),
+        };
+
+        let mut result = String::new();
+        for line in content.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
+                result.push_str(&line.replace("```", "~~~"));
+            } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
+                result.push_str(&line.replace("~~~", "```"));
+            } else {
+                result.push_str(line);
+            }
+            result.push('\n');
+        }
+
+        Ok(result)
+    }
+} 

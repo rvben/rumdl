@@ -1,0 +1,98 @@
+use rustmark::rules::MD016NoMultipleSpaceAfterListMarker;
+use rustmark::rule::Rule;
+
+#[test]
+fn test_valid_list_markers() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "* Item 1\n- Item 2\n+ Item 3\n1. Item 4";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_multiple_spaces_after_unordered() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "*   Item 1\n-  Item 2\n+    Item 3";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 3);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "* Item 1\n- Item 2\n+ Item 3");
+}
+
+#[test]
+fn test_multiple_spaces_after_ordered() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "1.   Item 1\n2.  Item 2\n10.    Item 3";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 3);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "1. Item 1\n2. Item 2\n10. Item 3");
+}
+
+#[test]
+fn test_mixed_list_types() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "*  Item 1\n2. Item 2\n-   Item 3\n4.  Item 4";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 3);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "* Item 1\n2. Item 2\n- Item 3\n4. Item 4");
+}
+
+#[test]
+fn test_nested_lists() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "* Item 1\n  *  Nested 1\n  -   Nested 2\n* Item 2";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "* Item 1\n  * Nested 1\n  - Nested 2\n* Item 2");
+}
+
+#[test]
+fn test_in_code_block() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "```\n*   Not a list\n-  Also not a list\n```\n*  Real list item";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "```\n*   Not a list\n-  Also not a list\n```\n* Real list item");
+}
+
+#[test]
+fn test_with_other_content() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "# Heading\n*  Item 1\nParagraph\n-   Item 2";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "# Heading\n* Item 1\nParagraph\n- Item 2");
+}
+
+#[test]
+fn test_with_inline_code() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "*  Item with `code`\n-   Item with more `code`";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "* Item with `code`\n- Item with more `code`");
+}
+
+#[test]
+fn test_multiple_digits_ordered() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "9.  Item\n10.   Item\n11.    Item";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 3);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "9. Item\n10. Item\n11. Item");
+}
+
+#[test]
+fn test_not_list_markers() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "Text with *   not a list\nMore text with -  not a list";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+} 
