@@ -3,8 +3,15 @@ name = "rumdl"
 version = "0.1.0"
 edition = "2021"
 description = "A fast Markdown linter written in Rust (Ru(st) MarkDown Linter)"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Ruben J. Jongejan <ruben.jongejan@gmail.com>"]
 license = "MIT"
+repository = "https://github.com/rvben/rumdl"
+homepage = "https://github.com/rvben/rumdl"
+documentation = "https://github.com/rvben/rumdl/blob/main/docs"
+readme = "README.md"
+keywords = ["markdown", "linter", "markdown-linter", "static-analysis", "documentation"]
+categories = ["command-line-utilities", "development-tools", "text-processing"]
+exclude = [".github/", ".gitignore", "*.bak"]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
