@@ -15,7 +15,8 @@ use rumdl::rules::{
     MD040FencedCodeLanguage, MD041FirstLineHeading, MD042NoEmptyLinks, MD043RequiredHeadings,
     MD044ProperNames, MD045NoAltText, MD046CodeBlockStyle, MD047FileEndNewline,
     MD048CodeFenceStyle, MD049EmphasisStyle, MD050StrongStyle, MD051LinkFragments,
-    MD052ReferenceLinkImages, MD053LinkImageReferenceDefinitions,
+    MD052ReferenceLinkImages, MD053LinkImageReferenceDefinitions, MD054LinkImageStyle,
+    MD055TablePipeStyle, MD056TableColumnCount, MD058BlanksAroundTables,
 };
 use rumdl::md046_code_block_style::CodeBlockStyle;
 use rumdl::md048_code_fence_style::CodeFenceStyle;
@@ -116,6 +117,10 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     rules.push(Box::new(MD051LinkFragments::new()));
     rules.push(Box::new(MD052ReferenceLinkImages::new()));
     rules.push(Box::new(MD053LinkImageReferenceDefinitions::default()));
+    rules.push(Box::new(MD054LinkImageStyle::default()));
+    rules.push(Box::new(MD055TablePipeStyle::default()));
+    rules.push(Box::new(MD056TableColumnCount));
+    rules.push(Box::new(MD058BlanksAroundTables));
 
     // Filter rules based on enable/disable options
     if let Some(enable) = &opts.enable {

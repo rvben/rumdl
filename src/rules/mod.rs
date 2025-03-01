@@ -42,6 +42,10 @@ pub mod md050_strong_style;
 mod md051_link_fragments;
 mod md052_reference_links_images;
 mod md053_link_image_reference_definitions;
+mod md054_link_image_style;
+mod md055_table_pipe_style;
+mod md056_table_column_count;
+mod md058_blanks_around_tables;
 
 mod md006_start_bullets;
 pub use md006_start_bullets::MD006StartBullets;
@@ -88,6 +92,10 @@ pub use md050_strong_style::MD050StrongStyle;
 pub use md051_link_fragments::MD051LinkFragments;
 pub use md052_reference_links_images::MD052ReferenceLinkImages;
 pub use md053_link_image_reference_definitions::MD053LinkImageReferenceDefinitions;
+pub use md054_link_image_style::MD054LinkImageStyle;
+pub use md055_table_pipe_style::MD055TablePipeStyle;
+pub use md056_table_column_count::MD056TableColumnCount;
+pub use md058_blanks_around_tables::MD058BlanksAroundTables;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
