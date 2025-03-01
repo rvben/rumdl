@@ -141,7 +141,16 @@ impl MD054LinkImageStyle {
             
             // Check that it's not followed by an opening parenthesis or square bracket
             // Use a safe approach to check the next character
-            let next_char = line[match_end..].chars().next();
+            let next_char = if match_end < line.len() {
+                // Safely get the next character using char_indices
+                let char_indices: Vec<(usize, char)> = line.char_indices().collect();
+                char_indices.iter()
+                    .find(|(byte_idx, _)| *byte_idx >= match_end)
+                    .map(|(_, c)| *c)
+            } else {
+                None
+            };
+            
             if next_char.is_none() || (next_char.unwrap() != '(' && next_char.unwrap() != '[') {
                 return Some(("shortcut".to_string(), match_start, match_end));
             }
