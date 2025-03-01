@@ -24,6 +24,8 @@ use rumdl::md050_strong_style::StrongStyle;
 use std::fs;
 use std::path::Path;
 use std::process;
+use colored::Colorize;
+use walkdir;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -153,58 +155,121 @@ fn list_available_rules() {
     }
 }
 
-fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -> bool {
+fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -> (bool, usize, usize) {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(err) => {
-            eprintln!("Error reading file {}: {}", path, err);
-            return false;
+            eprintln!("{}: {}", "Error reading file".red().bold(), format!("{}: {}", path, err));
+            return (false, 0, 0);
         }
     };
     
     let mut has_warnings = false;
     let mut fixed_content = content.clone();
+    let mut total_warnings = 0;
+    let mut total_fixed = 0;
+    let mut all_warnings = Vec::new();
     
+    // Collect all warnings first
     for rule in rules {
         match rule.check(&content) {
             Ok(warnings) => {
                 if !warnings.is_empty() {
                     has_warnings = true;
-                    println!("File: {} - Rule: {}", path, rule.name());
+                    total_warnings += warnings.len();
                     
-                    for warning in &warnings {
-                        println!("  Line {}: {}", warning.line, warning.message);
+                    for warning in warnings {
+                        all_warnings.push((rule.name(), warning));
                     }
-                    
-                    if fix {
-                        match rule.fix(&fixed_content) {
-                            Ok(new_content) => {
-                                fixed_content = new_content;
-                                println!("  Fixed {} issues", warnings.len());
-                            }
-                            Err(err) => {
-                                eprintln!("  Error fixing issues: {}", err);
-                            }
-                        }
-                    }
-                } else if verbose {
-                    println!("File: {} - Rule: {} - No issues found", path, rule.name());
                 }
             }
             Err(err) => {
-                eprintln!("Error checking rule {} on file {}: {}", rule.name(), path, err);
+                eprintln!("{}: {} on file {}: {}", 
+                    "Error".red().bold(), 
+                    rule.name().yellow(), 
+                    path.blue().underline(), 
+                    err);
             }
         }
     }
     
-    if fix && has_warnings {
-        match fs::write(path, fixed_content) {
-            Ok(_) => println!("Fixed issues written to {}", path),
-            Err(err) => eprintln!("Error writing fixed content to {}: {}", path, err),
+    // Sort warnings by line and column
+    all_warnings.sort_by(|a, b| {
+        let line_cmp = a.1.line.cmp(&b.1.line);
+        if line_cmp == std::cmp::Ordering::Equal {
+            a.1.column.cmp(&b.1.column)
+        } else {
+            line_cmp
+        }
+    });
+    
+    // Display warnings in a clean format
+    if !all_warnings.is_empty() {
+        for (rule_name, warning) in &all_warnings {
+            let fixable = warning.fix.is_some();
+            let fix_indicator = if fixable && fix { "[fixed]".green() } else if fixable { "[*]".green() } else { "".normal() };
+            
+            println!("{}:{}:{}: {} {} {}", 
+                path.blue().underline(),
+                warning.line.to_string().cyan(),
+                warning.column.to_string().cyan(),
+                format!("[{}]", rule_name).yellow(),
+                warning.message,
+                fix_indicator);
+        }
+    } else {
+        if verbose {
+            println!("{} No issues found in {}", "✓".green(), path.blue().underline());
         }
     }
     
-    has_warnings
+    // Apply fixes if requested
+    if fix && has_warnings {
+        for rule in rules {
+            match rule.check(&fixed_content) {
+                Ok(warnings) => {
+                    if !warnings.is_empty() {
+                        match rule.fix(&fixed_content) {
+                            Ok(new_content) => {
+                                let fixed_count = warnings.len();
+                                total_fixed += fixed_count;
+                                fixed_content = new_content;
+                            }
+                            Err(err) => {
+                                eprintln!("  {} {}: {}", 
+                                    "Error fixing issues with".red().bold(), 
+                                    rule.name().yellow(), 
+                                    err);
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    eprintln!("{}: {} on file {}: {}", 
+                        "Error".red().bold(), 
+                        rule.name().yellow(), 
+                        path.blue().underline(), 
+                        err);
+                }
+            }
+        }
+        
+        // Write fixed content back to file
+        if total_fixed > 0 {
+            match fs::write(path, fixed_content) {
+                Ok(_) => {}
+                Err(err) => {
+                    eprintln!("{} {}: {}", 
+                        "Error writing fixed content to".red().bold(), 
+                        path.blue().underline(), 
+                        err);
+                }
+            }
+        }
+    }
+    
+    // Return whether there were warnings, total warnings, and total fixed
+    (has_warnings, total_warnings, total_fixed)
 }
 
 fn main() {
@@ -216,39 +281,86 @@ fn main() {
     }
     
     if cli.paths.is_empty() {
-        eprintln!("Error: No paths provided. Please specify at least one file or directory to lint.");
+        eprintln!("{}: No paths provided. Please specify at least one file or directory to lint.", "Error".red().bold());
         process::exit(1);
     }
     
     let rules = get_rules(&cli);
     if rules.is_empty() {
-        eprintln!("No rules selected to run.");
+        eprintln!("{}: No rules selected to run.", "Error".red().bold());
         process::exit(1);
     }
     
     let mut has_issues = false;
+    let mut files_with_issues = 0;
+    let mut total_files_processed = 0;
+    let mut total_issues_found = 0;
+    let mut total_issues_fixed = 0;
     
     for path_str in &cli.paths {
         let path = Path::new(path_str);
         
         if !path.exists() {
-            eprintln!("Path does not exist: {}", path_str);
+            eprintln!("{}: Path does not exist: {}", "Error".red().bold(), path_str);
             has_issues = true;
             continue;
         }
         
         if path.is_file() {
-            if process_file(path_str, &rules, cli.fix, cli.verbose) {
+            total_files_processed += 1;
+            let (file_has_issues, issues_found, issues_fixed) = process_file(path_str, &rules, cli.fix, cli.verbose);
+            if file_has_issues {
                 has_issues = true;
+                files_with_issues += 1;
+                total_issues_found += issues_found;
+                total_issues_fixed += issues_fixed;
             }
         } else if path.is_dir() {
-            // TODO: Process directories recursively
-            eprintln!("Directory processing not yet implemented: {}", path_str);
-            has_issues = true;
+            // Process directory recursively using walkdir
+            match walkdir::WalkDir::new(path)
+                .follow_links(true)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file() && e.path().extension().map_or(false, |ext| ext == "md"))
+            {
+                dir_iter => {
+                    for entry in dir_iter {
+                        total_files_processed += 1;
+                        let file_path = entry.path().to_string_lossy().to_string();
+                        let (file_has_issues, issues_found, issues_fixed) = process_file(&file_path, &rules, cli.fix, cli.verbose);
+                        if file_has_issues {
+                            has_issues = true;
+                            files_with_issues += 1;
+                            total_issues_found += issues_found;
+                            total_issues_fixed += issues_fixed;
+                        }
+                    }
+                }
+            }
         }
     }
     
+    // Print a single, concise Ruff-like summary
     if has_issues {
+        if cli.fix {
+            println!("\nFixed {} {} in {} {}", 
+                total_issues_fixed,
+                if total_issues_fixed == 1 { "issue" } else { "issues" },
+                files_with_issues, 
+                if files_with_issues == 1 { "file" } else { "files" });
+        } else {
+            println!("\nFound {} {} in {} {} ({} {} checked)", 
+                total_issues_found,
+                if total_issues_found == 1 { "issue" } else { "issues" },
+                files_with_issues, 
+                if files_with_issues == 1 { "file" } else { "files" },
+                total_files_processed,
+                if total_files_processed == 1 { "file" } else { "files" });
+                
+            println!("Run with {} to automatically fix issues", "`--fix`".green());
+        }
         process::exit(1);
+    } else if total_files_processed > 0 {
+        println!("{} No issues found", "✓".green().bold());
     }
 } 

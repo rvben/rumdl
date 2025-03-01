@@ -1,35 +1,123 @@
-# rumdl - A Markdown Linter written in Rust
+# rumdl - An extremely fast Markdown linter, written in Rust
 
-rumdl is a fast and efficient Markdown linter that helps ensure consistency and best practices in your Markdown files.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+rumdl is a fast Markdown linter and fixer that helps ensure consistency and best practices in your Markdown files. Built in Rust for performance, rumdl processes Markdown files efficiently.
 
 ## Features
 
-- 50+ rules for Markdown linting
-- Fast performance with Rust
-- Configurable rule settings
-- Detailed error reporting
+- **Fast**: Built with Rust for good performance
+- **50+ lint rules**: Comprehensive rule set covering common Markdown issues
+- **Automatic fixing**: Many rules support automatic fixing with `--fix`
+- **Highly configurable**: Customize rules to match your project's style
+- **Modern CLI**: User-friendly interface with detailed error reporting
 
 ## Installation 
 
-```
+With Cargo:
+
+```bash
 cargo install rumdl
 ```
 
 ## Usage
 
-```
-rumdl [options] <file>...
+Check Markdown files for issues:
+
+```bash
+# Check a single file
+rumdl README.md
+
+# Check multiple files
+rumdl doc1.md doc2.md
+
+# Check all Markdown files in a directory (recursive)
+rumdl .
+
+# Check and automatically fix issues
+rumdl --fix README.md
 ```
 
-### Options
+### Command-line Interface
+
+```bash
+rumdl [options] [file or directory...]
+```
+
+#### Options
 
 - `-c, --config <file>`: Use custom configuration file
 - `-f, --fix`: Automatically fix issues where possible
 - `-l, --list-rules`: List all available rules
 - `-d, --disable <rules>`: Disable specific rules (comma-separated)
+- `-e, --enable <rules>`: Enable only specific rules (comma-separated)
 - `-v, --verbose`: Show detailed output
 
+## Configuration
+
+rumdl can be configured through command-line options. Support for a `rumdl.toml` configuration file is planned but not currently implemented.
+
+**Current configuration options:**
+
+- `-f, --fix`: Automatically fix issues where possible
+- `-l, --list-rules`: List all available rules
+- `-d, --disable <rules>`: Disable specific rules (comma-separated)
+- `-e, --enable <rules>`: Enable only specific rules (comma-separated)
+- `-v, --verbose`: Show detailed output
+- `-c, --config <file>`: Reserved for future custom configuration file support
+
+## Output Style
+
+rumdl produces clean, colorized output similar to modern linting tools:
+
+```
+README.md:12:1: [MD022] Headings should be surrounded by blank lines [*]
+README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
+README.md:31:76: [MD013] Line length exceeds 80 characters
+README.md:42:3: [MD010] Hard tabs found, use spaces instead [*]
+```
+
+When running with `--fix`, rumdl shows which issues were fixed:
+
+```
+README.md:12:1: [MD022] Headings should be surrounded by blank lines [fixed]
+README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [fixed]
+README.md:42:3: [MD010] Hard tabs found, use spaces instead [fixed]
+
+Fixed 3 issues in 1 file
+```
+
+For a more detailed view, use the `--verbose` option:
+
+```
+✓ No issues found in CONTRIBUTING.md
+README.md:12:1: [MD022] Headings should be surrounded by blank lines [*]
+README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
+README.md:42:3: [MD010] Hard tabs found, use spaces instead [*]
+
+Found 3 issues in 1 file (2 files checked)
+Run with `--fix` to automatically fix issues
+```
+
+### Output Format
+
+rumdl uses a consistent output format for all issues:
+
+```
+{file}:{line}:{column}: [{rule_id}] {message} [{fix_indicator}]
+```
+
+The output is colorized by default:
+- Filenames appear in blue and underlined
+- Line and column numbers appear in cyan
+- Rule IDs appear in yellow
+- Error messages appear in white
+- Fixable issues are marked with `[*]` in green
+- Fixed issues are marked with `[fixed]` in green
+
 ## Rules
+
+rumdl implements over 50 lint rules for Markdown files. By default, all rules are enabled except those specifically disabled in your configuration.
 
 For a complete list of rules and their descriptions, run `rumdl --list-rules` or visit our [documentation](docs/RULES.md).
 
@@ -102,13 +190,13 @@ The following table provides an overview of all supported rules and indicates wh
 
 ### Building
 
-```
+```bash
 make build
 ```
 
 ### Testing
 
-```
+```bash
 make test
 ```
 
