@@ -23,7 +23,8 @@ impl MD009TrailingSpaces {
     fn is_in_code_block(lines: &[&str], current_line: usize) -> bool {
         let mut fence_count = 0;
         for (i, line) in lines.iter().take(current_line + 1).enumerate() {
-            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 fence_count += 1;
             }
             if i == current_line && fence_count % 2 == 1 {
@@ -31,6 +32,15 @@ impl MD009TrailingSpaces {
             }
         }
         false
+    }
+
+    fn is_blockquote_line(line: &str) -> bool {
+        line.trim_start().starts_with('>')
+    }
+
+    fn is_empty_blockquote_line(line: &str) -> bool {
+        let trimmed = line.trim_start();
+        trimmed.starts_with('>') && trimmed.trim_end() == ">"
     }
 
     fn count_trailing_spaces(line: &str) -> usize {
@@ -94,6 +104,22 @@ impl Rule for MD009TrailingSpaces {
                 continue;
             }
 
+            // Special handling for empty blockquote lines
+            if Self::is_empty_blockquote_line(line) {
+                let trimmed = line.trim_end();
+                warnings.push(LintWarning {
+                    line: line_num + 1,
+                    column: trimmed.len() + 1,
+                    message: "Empty blockquote line should have a space after >".to_string(),
+                    fix: Some(Fix {
+                        line: line_num + 1,
+                        column: trimmed.len() + 1,
+                        replacement: format!("{} ", trimmed),
+                    }),
+                });
+                continue;
+            }
+
             let trimmed = line.trim_end();
             warnings.push(LintWarning {
                 line: line_num + 1,
@@ -138,16 +164,27 @@ impl Rule for MD009TrailingSpaces {
                 continue;
             }
 
-            // Add appropriate line ending
+            // Special handling for empty blockquote lines
+            if Self::is_empty_blockquote_line(line) {
+                result.push_str(trimmed);
+                result.push(' '); // Add a space after the blockquote marker
+                result.push('\n');
+                continue;
+            }
+
+            // Handle lines with trailing spaces
             if !self.strict && i < lines.len() - 1 && Self::count_trailing_spaces(line) >= 1 {
+                // This is a line break (intentional trailing spaces)
                 result.push_str(trimmed);
                 result.push_str(&" ".repeat(self.br_spaces));
             } else {
+                // Normal line, just use trimmed content
                 result.push_str(trimmed);
             }
             result.push('\n');
         }
 
+        // Preserve original ending (with or without final newline)
         if !content.ends_with('\n') {
             result.pop();
         }

@@ -16,18 +16,25 @@ impl MD028NoBlanksBlockquote {
             return false;
         }
         
-        // Count consecutive '>' characters
-        let blockquote_level = Self::get_blockquote_level(line);
+        // Find the content after the last '>' character
+        let mut chars = trimmed.chars().peekable();
+        let mut seen_gt = false;
         
-        // Check if there's only whitespace after the blockquote markers
-        let content_start_index = trimmed.find('>').unwrap() + blockquote_level;
-        let content = if content_start_index < trimmed.len() {
-            trimmed[content_start_index..].trim()
-        } else {
-            ""
-        };
+        while let Some(&c) = chars.peek() {
+            if c == '>' {
+                seen_gt = true;
+                chars.next();
+            } else if seen_gt && c.is_whitespace() {
+                // Skip a single whitespace after '>'
+                chars.next();
+                seen_gt = false;
+            } else {
+                break;
+            }
+        }
         
-        content.is_empty()
+        // If we've consumed the entire string or the rest is just whitespace, it's an empty blockquote
+        chars.collect::<String>().trim().is_empty()
     }
 
     /// Checks if a line is completely empty (just whitespace)
@@ -45,18 +52,38 @@ impl MD028NoBlanksBlockquote {
     /// Gets the blockquote level (number of '>' characters)
     fn get_blockquote_level(line: &str) -> usize {
         let trimmed = line.trim_start();
-        trimmed.chars()
-            .take_while(|&c| c == '>')
-            .count()
+        let mut count = 0;
+        let mut chars = trimmed.chars().peekable();
+        
+        while let Some(&c) = chars.peek() {
+            if c == '>' {
+                count += 1;
+                chars.next();
+                // Skip a single space after '>' if present
+                if chars.peek().map_or(false, |&c| c.is_whitespace()) {
+                    chars.next();
+                }
+            } else if c.is_whitespace() {
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        
+        count
     }
     
     /// Generates the replacement for a blank blockquote line
     fn get_replacement(indent: &str, level: usize) -> String {
-        if level == 1 {
-            format!("{}> ", indent)
-        } else {
-            format!("{}{} ", indent, ">".repeat(level))
+        let mut result = indent.to_string();
+        for i in 0..level {
+            result.push('>');
+            if i < level - 1 {
+                result.push(' ');
+            }
         }
+        result.push(' '); // Ensure a space after the last '>'
+        result
     }
 }
 

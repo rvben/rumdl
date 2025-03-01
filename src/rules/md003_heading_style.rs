@@ -109,63 +109,74 @@ impl Rule for MD003HeadingStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = String::new();
+        let mut fixed_lines = Vec::new();
         let target_style = self.style;
         let lines: Vec<&str> = content.lines().collect();
         let mut i = 0;
 
         while i < lines.len() {
-            let remaining = &lines[i..].join("\n");
-            if let Some(heading) = HeadingUtils::parse_heading(remaining, 0) {
+            let current_and_next = if i + 1 < lines.len() {
+                &lines[i..=i+1].join("\n")
+            } else {
+                lines[i]
+            };
+            
+            if let Some(heading) = HeadingUtils::parse_heading(current_and_next, 0) {
                 let indentation = HeadingUtils::get_indentation(lines[i]);
                 
                 // Convert heading while preserving formatting
-                let replacement = if matches!(target_style, HeadingStyle::Setext1 | HeadingStyle::Setext2) 
+                if matches!(target_style, HeadingStyle::Setext1 | HeadingStyle::Setext2) 
                     && heading.level <= 2 {
-                    let text = heading.text.clone();
-                    let underline = if heading.level == 1 { "=" } else { "-" }
-                        .repeat(text.trim().chars().count().max(3));
-                    format!("{}\n{}", text, underline)
+                    // For setext headings
+                    let text = heading.text.trim();
+                    let underline_char = if heading.level == 1 { '=' } else { '-' };
+                    let underline = underline_char.to_string().repeat(text.chars().count().max(3));
+                    
+                    // Add the heading text with indentation
+                    fixed_lines.push(format!("{}{}", " ".repeat(indentation), text));
+                    
+                    // Add the underline with same indentation
+                    fixed_lines.push(format!("{}{}", " ".repeat(indentation), underline));
+                    
+                    // Skip the underline for source setext headings
+                    if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
+                        i += 1;
+                    }
                 } else if matches!(target_style, HeadingStyle::AtxClosed) {
+                    // For closed ATX headings
                     let hashes = "#".repeat(heading.level);
-                    format!("{} {} {}", hashes, heading.text.trim(), hashes)
+                    fixed_lines.push(format!("{}{} {} {}", 
+                        " ".repeat(indentation), 
+                        hashes, 
+                        heading.text.trim(), 
+                        hashes
+                    ));
+                    
+                    // Skip the underline for source setext headings
+                    if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
+                        i += 1;
+                    }
                 } else {
-                    format!("{} {}", "#".repeat(heading.level), heading.text.trim())
-                };
-
-                // Add indentation and handle newlines
-                let replacement_lines: Vec<&str> = replacement.lines().collect();
-                for (j, line) in replacement_lines.iter().enumerate() {
-                    if j > 0 {
-                        result.push('\n');
+                    // For regular ATX headings
+                    fixed_lines.push(format!("{}{} {}", 
+                        " ".repeat(indentation), 
+                        "#".repeat(heading.level), 
+                        heading.text.trim()
+                    ));
+                    
+                    // Skip the underline for source setext headings
+                    if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
+                        i += 1;
                     }
-                    result.push_str(&format!("{}{}", " ".repeat(indentation), line));
-                }
-
-                // Handle spacing between headings
-                if i + 1 < lines.len() {
-                    if matches!(target_style, HeadingStyle::Setext1 | HeadingStyle::Setext2) 
-                        && heading.level <= 2 
-                        && !matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
-                        result.push_str("\n\n");
-                    } else {
-                        result.push('\n');
-                    }
-                }
-
-                // Skip the underline for setext headings
-                if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
-                    i += 1;
                 }
             } else {
-                if !result.is_empty() {
-                    result.push('\n');
-                }
-                result.push_str(lines[i]);
+                // Not a heading, keep the line as is
+                fixed_lines.push(lines[i].to_string());
             }
             i += 1;
         }
 
-        Ok(result)
+        // Preserve trailing newline if original content had one
+        Ok(fixed_lines.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
     }
 } 
