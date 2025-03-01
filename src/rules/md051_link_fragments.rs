@@ -1,6 +1,12 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use regex::Regex;
 use std::collections::HashSet;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref HEADING_REGEX: Regex = Regex::new(r"^#+\s+(.+)$|^(.+)\n[=-]+$").unwrap();
+    static ref LINK_REGEX: Regex = Regex::new(r"\[([^\]]*)\]\(([^)]+)#([^)]+)\)").unwrap();
+}
 
 /// Rule MD051: Link fragments should exist
 ///
@@ -14,12 +20,30 @@ impl MD051LinkFragments {
 
     fn extract_headings(&self, content: &str) -> HashSet<String> {
         let mut headings = HashSet::new();
-        let heading_regex = Regex::new(r"^#+\s+(.+)$|^(.+)\n[=-]+$").unwrap();
-
-        for line in content.lines() {
-            if let Some(cap) = heading_regex.captures(line) {
-                let heading = cap.get(1).or_else(|| cap.get(2)).unwrap().as_str();
-                headings.insert(self.heading_to_fragment(heading));
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Process ATX headings (# Heading)
+        for line in &lines {
+            if line.starts_with('#') {
+                if let Some(cap) = HEADING_REGEX.captures(line) {
+                    if let Some(m) = cap.get(1) {
+                        headings.insert(self.heading_to_fragment(m.as_str()));
+                    }
+                }
+            }
+        }
+        
+        // Process Setext headings (Heading\n===== or Heading\n-----)
+        for i in 0..lines.len().saturating_sub(1) {
+            let line = lines[i];
+            let next_line = lines[i + 1];
+            
+            if !line.is_empty() && !next_line.is_empty() {
+                let trimmed_next = next_line.trim();
+                if (trimmed_next.starts_with('=') && trimmed_next.chars().all(|c| c == '=')) ||
+                   (trimmed_next.starts_with('-') && trimmed_next.chars().all(|c| c == '-')) {
+                    headings.insert(self.heading_to_fragment(line.trim()));
+                }
             }
         }
 
@@ -51,10 +75,9 @@ impl Rule for MD051LinkFragments {
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
         let headings = self.extract_headings(content);
-        let link_regex = Regex::new(r"\[([^\]]*)\]\(([^)]+)#([^)]+)\)").unwrap();
 
         for (line_num, line) in content.lines().enumerate() {
-            for cap in link_regex.captures_iter(line) {
+            for cap in LINK_REGEX.captures_iter(line) {
                 let fragment = &cap[3];
                 if !headings.contains(fragment) {
                     let full_match = cap.get(0).unwrap();
@@ -77,9 +100,8 @@ impl Rule for MD051LinkFragments {
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
         let headings = self.extract_headings(content);
-        let link_regex = Regex::new(r"\[([^\]]*)\]\(([^)]+)#([^)]+)\)").unwrap();
 
-        let result = link_regex.replace_all(content, |caps: &regex::Captures| {
+        let result = LINK_REGEX.replace_all(content, |caps: &regex::Captures| {
             let fragment = &caps[3];
             if !headings.contains(fragment) {
                 format!("[{}]({})", &caps[1], &caps[2])

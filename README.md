@@ -1,18 +1,18 @@
 # rumdl - An extremely fast Markdown linter, written in Rust
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](<https://opensource.org/licenses/MIT>)
 
-rumdl is a fast Markdown linter and fixer that helps ensure consistency and best practices in your Markdown files. Built in Rust for performance, rumdl processes Markdown files efficiently.
+rumdl is a fast Markdown linter and fixer that helps ensure consistency and best practices in your Markdown files. Built in Rust for exceptional performance.
 
 ## Features
 
-- **Fast**: Built with Rust for good performance
+- **Lightning Fast**: Built with Rust for exceptional performance
 - **50+ lint rules**: Comprehensive rule set covering common Markdown issues
 - **Automatic fixing**: Many rules support automatic fixing with `--fix`
 - **Highly configurable**: Customize rules to match your project's style
 - **Modern CLI**: User-friendly interface with detailed error reporting
 
-## Installation 
+## Installation
 
 With Cargo:
 
@@ -38,13 +38,13 @@ rumdl .
 rumdl --fix README.md
 ```
 
-### Command-line Interface
+## Command-line Interface
 
 ```bash
 rumdl [options] [file or directory...]
 ```
 
-#### Options
+### Options
 
 - `-c, --config <file>`: Use custom configuration file
 - `-f, --fix`: Automatically fix issues where possible
@@ -70,7 +70,7 @@ rumdl can be configured through command-line options. Support for a `rumdl.toml`
 
 rumdl produces clean, colorized output similar to modern linting tools:
 
-```
+```text
 README.md:12:1: [MD022] Headings should be surrounded by blank lines [*]
 README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
 README.md:31:76: [MD013] Line length exceeds 80 characters
@@ -79,7 +79,7 @@ README.md:42:3: [MD010] Hard tabs found, use spaces instead [*]
 
 When running with `--fix`, rumdl shows which issues were fixed:
 
-```
+```text
 README.md:12:1: [MD022] Headings should be surrounded by blank lines [fixed]
 README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [fixed]
 README.md:42:3: [MD010] Hard tabs found, use spaces instead [fixed]
@@ -89,7 +89,7 @@ Fixed 3 issues in 1 file
 
 For a more detailed view, use the `--verbose` option:
 
-```
+```text
 ✓ No issues found in CONTRIBUTING.md
 README.md:12:1: [MD022] Headings should be surrounded by blank lines [*]
 README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
@@ -103,17 +103,18 @@ Run with `--fix` to automatically fix issues
 
 rumdl uses a consistent output format for all issues:
 
-```
-{file}:{line}:{column}: [{rule_id}] {message} [{fix_indicator}]
+```text
+{file}:{line}:{column}: [{rule*id}] {message} [{fix*indicator}]
 ```
 
 The output is colorized by default:
-- Filenames appear in blue and underlined
-- Line and column numbers appear in cyan
-- Rule IDs appear in yellow
-- Error messages appear in white
-- Fixable issues are marked with `[*]` in green
-- Fixed issues are marked with `[fixed]` in green
+
+* Filenames appear in blue and underlined
+* Line and column numbers appear in cyan
+* Rule IDs appear in yellow
+* Error messages appear in white
+* Fixable issues are marked with `[*]` in green
+* Fixed issues are marked with `[fixed]` in green
 
 ## Rules
 
@@ -180,13 +181,17 @@ The following table provides an overview of all supported rules and indicates wh
 | MD051   | Link fragments should exist | ✅ | ❌ |
 | MD052   | Reference links and images should use a reference that exists | ✅ | ❌ |
 | MD053   | Link and image reference definitions should be needed | ✅ | ✅ |
+| MD054   | Link and image style | ✅ | ❌ |
+| MD055   | Table pipe style | ✅ | ✅ |
+| MD056   | Table column count | ✅ | ✅ |
+| MD058   | Tables should be surrounded by blank lines | ✅ | ✅ |
 
 ## Development
 
 ### Prerequisites
 
-- Rust 1.70 or higher
-- Make (for development commands)
+* Rust 1.70 or higher
+* Make (for development commands)
 
 ### Building
 

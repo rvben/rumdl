@@ -1,6 +1,13 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use regex::Regex;
 use std::collections::HashSet;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref REF_REGEX: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*\S+").unwrap();
+    static ref IMAGE_REGEX: Regex = Regex::new(r"!\[([^\]]+)\]\[([^\]]*)\]").unwrap();
+    static ref LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\](?:\[([^\]]*)\]|\[\])").unwrap();
+}
 
 /// Rule MD053: Link and image reference definitions should be needed
 ///
@@ -27,10 +34,9 @@ impl MD053LinkImageReferenceDefinitions {
 
     fn extract_references(&self, content: &str) -> Vec<(usize, usize, String)> {
         let mut references = Vec::new();
-        let ref_regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*\S+").unwrap();
 
         for (line_num, line) in content.lines().enumerate() {
-            if let Some(cap) = ref_regex.captures(line) {
+            if let Some(cap) = REF_REGEX.captures(line) {
                 let reference = cap[1].to_string();
                 if !self.ignored_definitions.contains(&reference) {
                     references.push((line_num + 1, cap.get(0).unwrap().start(), reference));
@@ -44,14 +50,9 @@ impl MD053LinkImageReferenceDefinitions {
     fn find_reference_usages(&self, content: &str) -> HashSet<String> {
         let mut used_refs = HashSet::new();
         
-        // Match image references: ![alt][ref] or ![alt][]
-        let image_regex = Regex::new(r"!\[([^\]]+)\]\[([^\]]*)\]").unwrap();
-        // Match link references: [text][ref] or [text][] or [text][text]
-        let link_regex = Regex::new(r"\[([^\]]+)\](?:\[([^\]]*)\]|\[\])").unwrap();
-
         for line in content.lines() {
-            // Check image references
-            for cap in image_regex.captures_iter(line) {
+            // Check image references: ![alt][ref] or ![alt][]
+            for cap in IMAGE_REGEX.captures_iter(line) {
                 let reference = if let Some(m) = cap.get(2) {
                     if m.as_str().is_empty() {
                         cap.get(1).map(|m| m.as_str())
@@ -67,8 +68,8 @@ impl MD053LinkImageReferenceDefinitions {
                 }
             }
 
-            // Check link references
-            for cap in link_regex.captures_iter(line) {
+            // Check link references: [text][ref] or [text][] or [text][text]
+            for cap in LINK_REGEX.captures_iter(line) {
                 let reference = if let Some(m) = cap.get(2) {
                     if m.as_str().is_empty() {
                         cap.get(1).map(|m| m.as_str())

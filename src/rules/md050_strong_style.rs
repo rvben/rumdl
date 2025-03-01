@@ -1,5 +1,11 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use regex::Regex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"__[^_\\]+__").unwrap();
+    static ref ASTERISK_PATTERN: Regex = Regex::new(r"\*\*[^*\\]+\*\*").unwrap();
+}
 
 /// Rule MD050: Strong emphasis style should be consistent
 pub struct MD050StrongStyle {
@@ -64,8 +70,8 @@ impl Rule for MD050StrongStyle {
         };
 
         let strong_regex = match target_style {
-            StrongStyle::Asterisk => Regex::new(r"__[^_\\]+__").unwrap(),
-            StrongStyle::Underscore => Regex::new(r"\*\*[^*\\]+\*\*").unwrap(),
+            StrongStyle::Asterisk => &*UNDERSCORE_PATTERN,
+            StrongStyle::Underscore => &*ASTERISK_PATTERN,
             StrongStyle::Consistent => unreachable!(),
         };
 
@@ -106,20 +112,20 @@ impl Rule for MD050StrongStyle {
             _ => self.style.clone(),
         };
 
-        let mut result = content.to_string();
         let strong_regex = match target_style {
-            StrongStyle::Asterisk => Regex::new(r"__[^_\\]+__").unwrap(),
-            StrongStyle::Underscore => Regex::new(r"\*\*[^*\\]+\*\*").unwrap(),
+            StrongStyle::Asterisk => &*UNDERSCORE_PATTERN,
+            StrongStyle::Underscore => &*ASTERISK_PATTERN,
             StrongStyle::Consistent => unreachable!(),
         };
 
         // Store matches with their positions
-        let matches: Vec<(usize, usize)> = strong_regex.find_iter(&result)
-            .filter(|m| !self.is_escaped(&result, m.start()))
+        let matches: Vec<(usize, usize)> = strong_regex.find_iter(content)
+            .filter(|m| !self.is_escaped(content, m.start()))
             .map(|m| (m.start(), m.end()))
             .collect();
 
         // Process matches in reverse order to maintain correct indices
+        let mut result = content.to_string();
         for (start, end) in matches.into_iter().rev() {
             let text = &result[start+2..end-2];
             let replacement = match target_style {

@@ -1,6 +1,13 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule};
 use regex::Regex;
 use std::collections::HashSet;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref REF_REGEX: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*\S+").unwrap();
+    static ref LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\](?:\[([^\]]*)\])?|\!\[([^\]]+)\](?:\[([^\]]*)\])?").unwrap();
+    static ref REF_DEF_PATTERN: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*\S+").unwrap();
+}
 
 /// Rule MD052: Reference links and images should use a reference that exists
 ///
@@ -14,10 +21,9 @@ impl MD052ReferenceLinkImages {
 
     fn extract_references(&self, content: &str) -> HashSet<String> {
         let mut references = HashSet::new();
-        let ref_regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*\S+").unwrap();
 
         for line in content.lines() {
-            if let Some(cap) = ref_regex.captures(line) {
+            if let Some(cap) = REF_REGEX.captures(line) {
                 // Store references in lowercase for case-insensitive comparison
                 references.insert(cap[1].to_lowercase());
             }
@@ -28,20 +34,15 @@ impl MD052ReferenceLinkImages {
 
     fn find_undefined_references<'a>(&self, content: &'a str, references: &HashSet<String>) -> Vec<(usize, usize, &'a str)> {
         let mut undefined = Vec::new();
-        // Use a regex that doesn't require negative lookaheads
-        let link_regex = Regex::new(r"\[([^\]]+)\](?:\[([^\]]*)\])?|\!\[([^\]]+)\](?:\[([^\]]*)\])?").unwrap();
         
-        // Replace the shortcut regex that was using negative lookahead
-        let ref_def_pattern = Regex::new(r"^\s*\[([^\]]+)\]:\s*\S+").unwrap();
-
         for (line_num, line) in content.lines().enumerate() {
             // Skip reference definitions to avoid false positives
-            if ref_def_pattern.is_match(line) {
+            if REF_DEF_PATTERN.is_match(line) {
                 continue;
             }
 
             // Handle regular reference links/images with [text][id] format
-            for cap in link_regex.captures_iter(line) {
+            for cap in LINK_REGEX.captures_iter(line) {
                 let reference = if let Some(m) = cap.get(2) {
                     // [text][id] format
                     if m.as_str().is_empty() {
