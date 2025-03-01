@@ -1,19 +1,20 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use regex::Regex;
+use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub struct MD005ListIndent;
 
 impl MD005ListIndent {
-    fn get_list_marker_info(line: &str) -> Option<(usize, char)> {
+    fn get_list_marker_info(line: &str) -> Option<(usize, char, usize)> {
         let indentation = line.len() - line.trim_start().len();
         let trimmed = line.trim_start();
         
         // Check for unordered list markers
         if let Some(c) = trimmed.chars().next() {
             if c == '*' || c == '-' || c == '+' {
-                if trimmed.len() == 1 || trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace()) {
-                    return Some((indentation, c));
+                if trimmed.len() > 1 && trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace()) {
+                    return Some((indentation, c, 1)); // 1 char marker
                 }
             }
         }
@@ -23,28 +24,84 @@ impl MD005ListIndent {
         if re.is_match(trimmed) {
             let marker_match = re.find(trimmed).unwrap();
             let marker_char = trimmed.chars().nth(marker_match.end() - 1).unwrap();
-            if marker_match.end() == trimmed.len() || trimmed.chars().nth(marker_match.end()).map_or(false, |c| c.is_whitespace()) {
-                return Some((indentation, marker_char));
+            if trimmed.len() > marker_match.end() && 
+               trimmed.chars().nth(marker_match.end()).map_or(false, |c| c.is_whitespace()) {
+                return Some((indentation, marker_char, marker_match.end()));
             }
         }
         
         None
     }
-
-    fn get_expected_indent(level: usize) -> usize {
-        level * 2 // 2 spaces per level for all list types
+    
+    fn is_blank_line(line: &str) -> bool {
+        line.trim().is_empty()
     }
-
-    fn get_level_for_indent(indent: usize, prev_level: usize, prev_indent: usize) -> usize {
-        if indent == 0 {
-            0
-        } else if indent > prev_indent {
-            prev_level + 1
-        } else if indent < prev_indent {
-            (indent + 1) / 2
-        } else {
-            prev_level
+    
+    fn is_in_code_block(lines: &[&str], current_line: usize) -> bool {
+        let mut in_code_block = false;
+        
+        for (i, line) in lines.iter().take(current_line + 1).enumerate() {
+            if line.trim().starts_with("```") || line.trim().starts_with("~~~") {
+                in_code_block = !in_code_block;
+            }
+            
+            if i == current_line {
+                return in_code_block;
+            }
         }
+        
+        false
+    }
+    
+    // Determine the expected indentation for a list item at a specific level
+    fn get_expected_indent(level: usize) -> usize {
+        if level == 1 {
+            0 // Top level items should be at the start of the line
+        } else {
+            2 * (level - 1) // Nested items should be indented by 2 spaces per level
+        }
+    }
+    
+    // Determine if a line is a continuation of a list item
+    fn is_list_continuation(prev_line: &str, current_line: &str) -> bool {
+        // If the previous line is a list item and the current line has more indentation
+        // but is not a list item itself, it's a continuation
+        if let Some((prev_indent, _, _)) = Self::get_list_marker_info(prev_line) {
+            let current_indent = current_line.len() - current_line.trim_start().len();
+            return current_indent > prev_indent && Self::get_list_marker_info(current_line).is_none();
+        }
+        false
+    }
+    
+    // Detects if this is a nested list item and returns previous level
+    fn is_nested_list_item(lines: &[&str], line_num: usize) -> Option<usize> {
+        if line_num == 0 {
+            return None; // First line can't be nested
+        }
+        
+        // Find the previous list item (skipping blank lines and continuations)
+        let mut prev_line_num = line_num - 1;
+        while prev_line_num > 0 {
+            if Self::is_blank_line(lines[prev_line_num]) {
+                prev_line_num -= 1;
+                continue;
+            }
+            
+            // Found previous content
+            break;
+        }
+        
+        // Check if current line is a list item and has more indentation than previous
+        if let Some((curr_indent, _, _)) = Self::get_list_marker_info(lines[line_num]) {
+            if let Some((prev_indent, _, _)) = Self::get_list_marker_info(lines[prev_line_num]) {
+                if curr_indent > prev_indent {
+                    // This is a nested item, return prev level
+                    return Some(prev_line_num);
+                }
+            }
+        }
+        
+        None
     }
 }
 
@@ -58,249 +115,276 @@ impl Rule for MD005ListIndent {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let lines: Vec<&str> = content.lines().collect();
         let mut warnings = Vec::new();
-        let mut prev_level = 0;
-        let mut prev_indent = 0;
+        
+        // Maps to store indentation by level for each list
+        let mut current_list_id = 0;
         let mut in_list = false;
-
-        for (line_num, line) in content.lines().enumerate() {
-            if let Some((indent, _)) = Self::get_list_marker_info(line) {
-                if !in_list {
-                    in_list = true;
-                    prev_level = 0;
-                    prev_indent = 0;
-                }
-
-                let level = Self::get_level_for_indent(indent, prev_level, prev_indent);
-                let expected = Self::get_expected_indent(level);
-                
-                if indent != expected {
-                    warnings.push(LintWarning {
-                        line: line_num + 1,
-                        column: 1,
-                        message: format!("Inconsistent indentation: expected {} spaces", expected),
-                        fix: Some(Fix {
-                            line: line_num + 1,
-                            column: 1,
-                            replacement: format!("{}{}", " ".repeat(expected), line.trim_start()),
-                        }),
-                    });
-                }
-
-                prev_level = level;
-                prev_indent = expected;
-            } else if line.trim().is_empty() {
-                // Keep list context for empty lines
+        
+        // First pass: collect all list items and their indentation
+        let mut list_items = Vec::new();
+        for (line_num, line) in lines.iter().enumerate() {
+            // Skip blank lines and code blocks
+            if Self::is_blank_line(line) || Self::is_in_code_block(&lines, line_num) {
                 continue;
+            }
+            
+            // Check if this is a list item
+            if let Some((indent, _marker, _)) = Self::get_list_marker_info(line) {
+                // If the indent is 0, or this is the first list item, or much less indented
+                // than the previous list item, consider it the start of a new list
+                let is_new_list = !in_list || indent == 0 || 
+                                 (list_items.last().map_or(false, |(_, prev_indent, _)| 
+                                    prev_indent > &0 && indent < prev_indent / 2));
+                
+                if is_new_list {
+                    current_list_id += 1;
+                    in_list = true;
+                }
+                
+                list_items.push((line_num, indent, current_list_id));
             } else {
-                // Reset list context for non-list content
-                in_list = false;
-                prev_level = 0;
-                prev_indent = 0;
+                // Not a list item - check if it's a continuation or something else
+                if list_items.is_empty() || !in_list {
+                    continue;
+                }
+                
+                let (prev_line_num, _, _) = list_items.last().unwrap();
+                if !Self::is_list_continuation(lines[*prev_line_num], line) {
+                    in_list = false;
+                }
             }
         }
-
-        // Special case handling for test patterns that expect specific warning counts
-        // This is necessary to maintain test compatibility
-        if content.contains("* Item 1\n * Item 2\n   * Nested 1") && warnings.len() < 3 {
-            warnings = generate_test_warnings_unordered();
-        } else if content.contains("1. Item 1\n 2. Item 2\n    1. Nested 1") && warnings.len() < 3 {
-            warnings = generate_test_warnings_ordered();
-        } else if content.contains("* Level 1\n   * Level 2\n     * Level 3\n   * Back to 2\n      1. Ordered 3\n     2. Still 3\n* Back to 1") && warnings.len() != 5 {
-            warnings = generate_test_warnings_complex();
+        
+        // Second pass: determine levels for each list
+        let mut list_level_map: HashMap<usize, HashMap<usize, usize>> = HashMap::new(); // list_id -> { indent -> level }
+        let mut list_item_levels: Vec<(usize, usize, usize)> = Vec::new(); // (line_num, indent, level)
+        
+        for (line_num, indent, list_id) in &list_items {
+            // Skip items in code blocks
+            if Self::is_in_code_block(&lines, *line_num) {
+                continue;
+            }
+            
+            // Get or create the indent->level map for this list
+            let level_map = list_level_map.entry(*list_id).or_insert_with(HashMap::new);
+            
+            // If it's the first item in this list, it's level 1
+            if level_map.is_empty() {
+                level_map.insert(*indent, 1);
+                list_item_levels.push((*line_num, *indent, 1));
+                continue;
+            }
+            
+            // Find the deepest previous level with an indentation less than this item
+            let mut level = 1; // Default to top level
+            let mut parent_indent = 0;
+            
+            for (prev_indent, prev_level) in level_map.iter() {
+                if prev_indent < indent && (*prev_level >= level || *prev_indent > parent_indent) {
+                    level = *prev_level + 1;
+                    parent_indent = *prev_indent;
+                } else if prev_indent == indent {
+                    // Same indentation means same level
+                    level = *prev_level;
+                    break;
+                }
+            }
+            
+            level_map.insert(*indent, level);
+            list_item_levels.push((*line_num, *indent, level));
         }
-
+        
+        // Third pass: check if indentation matches the expected level for each item
+        for (line_num, indent, _list_id) in &list_items {
+            // Skip items in code blocks
+            if Self::is_in_code_block(&lines, *line_num) {
+                continue;
+            }
+            
+            // Find level for this item
+            let level = list_item_levels.iter()
+                .find(|(ln, _, _)| ln == line_num)
+                .map(|(_, _, lvl)| *lvl)
+                .unwrap_or(1);
+            
+            let expected_indent = Self::get_expected_indent(level);
+            
+            if *indent != expected_indent {
+                let inconsistent_message = format!(
+                    "List item indentation is {} {}, expected {} for level {}",
+                    indent,
+                    if *indent == 1 { "space" } else { "spaces" },
+                    expected_indent,
+                    level
+                );
+                
+                // Create a fixed version of the line with proper indentation
+                let line = lines[*line_num];
+                let trimmed = line.trim_start();
+                let replacement = format!("{}{}", " ".repeat(expected_indent), trimmed);
+                
+                warnings.push(LintWarning {
+                    line: line_num + 1,
+                    column: 1,
+                    message: inconsistent_message,
+                    fix: Some(Fix {
+                        line: line_num + 1,
+                        column: 1,
+                        replacement,
+                    }),
+                });
+            }
+        }
+        
+        // Check for consistency among items in the same level of the same list
+        // This ensures that list items at the same level have consistent indentation
+        let mut level_groups: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::new(); // (list_id, level) -> [(line_num, indent)]
+        
+        // Group list items by list_id and level
+        for (line_num, indent, level) in &list_item_levels {
+            let list_id = list_items.iter()
+                .find(|(ln, _, _)| ln == line_num)
+                .map(|(_, _, id)| *id)
+                .unwrap_or(1);
+                
+            level_groups.entry((list_id, *level))
+                .or_insert_with(Vec::new)
+                .push((*line_num, *indent));
+        }
+        
+        // For each group, check for indentation consistency
+        for ((_list_id, _level), items) in &level_groups {
+            if items.len() <= 1 {
+                continue; // Need at least 2 items to check consistency
+            }
+            
+            // Get first item's indentation as the reference
+            let reference_indent = items[0].1;
+            
+            // Check that all other items match this indentation
+            for &(line_num, indent) in &items[1..] {
+                if indent != reference_indent {
+                    // Found inconsistent indentation
+                    let inconsistent_message = format!(
+                        "List item indentation is inconsistent with other items at the same level (found: {}, expected: {})",
+                        indent, reference_indent
+                    );
+                    
+                    // Create a fixed version
+                    let line = lines[line_num];
+                    let trimmed = line.trim_start();
+                    let replacement = format!("{}{}", " ".repeat(reference_indent), trimmed);
+                    
+                    // Only add if we don't already have a warning for this line
+                    if !warnings.iter().any(|w| w.line == line_num + 1) {
+                        warnings.push(LintWarning {
+                            line: line_num + 1,
+                            column: 1,
+                            message: inconsistent_message,
+                            fix: Some(Fix {
+                                line: line_num + 1,
+                                column: 1,
+                                replacement,
+                            }),
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Check for nested items with insufficient indentation
+        for (line_num, indent, level) in &list_item_levels {
+            if *level <= 1 {
+                continue; // Not nested
+            }
+            
+            // Find parent level items
+            let list_id = list_items.iter()
+                .find(|(ln, _, _)| ln == line_num)
+                .map(|(_, _, id)| *id)
+                .unwrap_or(1);
+                
+            // Get items at the parent level
+            let parent_items = level_groups.get(&(list_id, level - 1));
+            
+            if let Some(parent_items) = parent_items {
+                if parent_items.is_empty() {
+                    continue;
+                }
+                
+                // Find parent indentation
+                let parent_indent = parent_items[0].1;
+                
+                // Child should be more indented
+                if *indent <= parent_indent {
+                    let message = format!(
+                        "Nested list item should be more indented than parent (parent: {}, child: {})",
+                        parent_indent, indent
+                    );
+                    
+                    // Create fix
+                    let line = lines[*line_num];
+                    let trimmed = line.trim_start();
+                    let expected_indent = parent_indent + 2;
+                    let replacement = format!("{}{}", " ".repeat(expected_indent), trimmed);
+                    
+                    // Only add if we don't already have a warning
+                    if !warnings.iter().any(|w| w.line == line_num + 1) {
+                        warnings.push(LintWarning {
+                            line: line_num + 1,
+                            column: 1,
+                            message,
+                            fix: Some(Fix {
+                                line: line_num + 1,
+                                column: 1,
+                                replacement,
+                            }),
+                        });
+                    }
+                }
+            }
+        }
+        
         Ok(warnings)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        // Special cases for specific test content to match expected outputs precisely
-        // This ensures backward compatibility with existing tests
-        if content.contains("* Item 1\n * Item 2\n   * Nested 1") {
-            return Ok("* Item 1\n* Item 2\n  * Nested 1".to_string());
-        } else if content.contains("1. Item 1\n 2. Item 2\n    1. Nested 1") {
-            return Ok("1. Item 1\n2. Item 2\n  1. Nested 1".to_string());
-        } else if content.contains("* Level 1\n   * Level 2\n     * Level 3\n   * Back to 2\n      1. Ordered 3\n     2. Still 3\n* Back to 1") {
-            return Ok("* Level 1\n  * Level 2\n    * Level 3\n  * Back to 2\n    1. Ordered 3\n    2. Still 3\n* Back to 1".to_string());
-        } else if content.contains("* Level 1\n   * Level 2\n      * Level 3") {
-            return Ok("* Level 1\n  * Level 2\n    * Level 3".to_string());
-        } else if content.contains("  * Item 1\n  * Item 2\n    * Nested item\n  * Item 3") {
-            return Ok("* Item 1\n* Item 2\n  * Nested item\n* Item 3".to_string());
+        // Get warnings from the check method
+        let warnings = self.check(content)?;
+        
+        if warnings.is_empty() {
+            return Ok(content.to_string());
         }
-
-        // General case for other content
-        let mut result = String::new();
-        let mut prev_level = 0;
-        let mut prev_indent = 0;
-        let mut in_list = false;
-
-        for line in content.lines() {
-            if let Some((indent, _)) = Self::get_list_marker_info(line) {
-                if !in_list || indent == 0 {
-                    in_list = true;
-                    prev_level = 0;
-                    prev_indent = 0;
-                    
-                    // Zero-indent list items are always kept as-is
-                    if indent == 0 {
-                        result.push_str(line);
-                    } else {
-                        // Calculate level and expected indent for non-zero indents
-                        let level = Self::get_level_for_indent(indent, prev_level, prev_indent);
-                        let expected = Self::get_expected_indent(level);
-                        result.push_str(&format!("{}{}", " ".repeat(expected), line.trim_start()));
-                        prev_level = level; 
-                        prev_indent = expected;
-                    }
-                } else {
-                    let level = Self::get_level_for_indent(indent, prev_level, prev_indent);
-                    let expected = Self::get_expected_indent(level);
-                    result.push_str(&format!("{}{}", " ".repeat(expected), line.trim_start()));
-                    prev_level = level;
-                    prev_indent = expected;
-                }
-            } else {
-                result.push_str(line);
-                if !line.trim().is_empty() {
-                    // Reset list context for non-list content
-                    in_list = false;
-                    prev_level = 0;
-                    prev_indent = 0;
-                }
+        
+        // Create a map of line numbers to fixes
+        let mut fix_map: HashMap<usize, &Fix> = HashMap::new();
+        for warning in &warnings {
+            if let Some(fix) = &warning.fix {
+                fix_map.insert(fix.line, fix);
             }
-            result.push('\n');
         }
-
-        if !content.ends_with('\n') {
-            result.pop();
+        
+        // Apply fixes line by line
+        let mut fixed_content = String::new();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        for (i, line) in lines.iter().enumerate() {
+            let line_num = i + 1;
+            
+            if let Some(fix) = fix_map.get(&line_num) {
+                fixed_content.push_str(&fix.replacement);
+            } else {
+                fixed_content.push_str(line);
+            }
+            
+            // Preserve trailing newlines
+            if i < lines.len() - 1 || content.ends_with('\n') {
+                fixed_content.push('\n');
+            }
         }
-
-        Ok(result)
+        
+        Ok(fixed_content)
     }
-}
-
-// Helper functions to generate specific test warnings
-fn generate_test_warnings_unordered() -> Vec<LintWarning> {
-    vec![
-        LintWarning {
-            line: 2,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 0),
-            fix: Some(Fix {
-                line: 2,
-                column: 1,
-                replacement: format!("{}{}", "", "* Item 2"),
-            }),
-        },
-        LintWarning {
-            line: 3,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 2),
-            fix: Some(Fix {
-                line: 3,
-                column: 1,
-                replacement: format!("{}{}", " ".repeat(2), "* Nested 1"),
-            }),
-        },
-        LintWarning {
-            line: 3,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 2),
-            fix: Some(Fix {
-                line: 3,
-                column: 1,
-                replacement: format!("{}{}", " ".repeat(2), "* Nested 1"),
-            }),
-        }
-    ]
-}
-
-fn generate_test_warnings_ordered() -> Vec<LintWarning> {
-    vec![
-        LintWarning {
-            line: 2,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 0),
-            fix: Some(Fix {
-                line: 2,
-                column: 1,
-                replacement: format!("{}{}", "", "2. Item 2"),
-            }),
-        },
-        LintWarning {
-            line: 3,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 2),
-            fix: Some(Fix {
-                line: 3,
-                column: 1,
-                replacement: format!("{}{}", " ".repeat(2), "1. Nested 1"),
-            }),
-        },
-        LintWarning {
-            line: 3,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 2),
-            fix: Some(Fix {
-                line: 3,
-                column: 1,
-                replacement: format!("{}{}", " ".repeat(2), "1. Nested 1"),
-            }),
-        }
-    ]
-}
-
-fn generate_test_warnings_complex() -> Vec<LintWarning> {
-    vec![
-        LintWarning {
-            line: 2,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 2),
-            fix: Some(Fix {
-                line: 2,
-                column: 1,
-                replacement: format!("{}{}", " ".repeat(2), "* Level 2"),
-            }),
-        },
-        LintWarning {
-            line: 3,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 4),
-            fix: Some(Fix {
-                line: 3,
-                column: 1,
-                replacement: format!("{}{}", " ".repeat(4), "* Level 3"),
-            }),
-        },
-        LintWarning {
-            line: 4,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 2),
-            fix: Some(Fix {
-                line: 4,
-                column: 1,
-                replacement: format!("{}{}", " ".repeat(2), "* Back to 2"),
-            }),
-        },
-        LintWarning {
-            line: 5,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 4),
-            fix: Some(Fix {
-                line: 5,
-                column: 1,
-                replacement: format!("{}{}", " ".repeat(4), "1. Ordered 3"),
-            }),
-        },
-        LintWarning {
-            line: 6,
-            column: 1,
-            message: format!("Inconsistent indentation: expected {} spaces", 4),
-            fix: Some(Fix {
-                line: 6,
-                column: 1,
-                replacement: format!("{}{}", " ".repeat(4), "2. Still 3"),
-            }),
-        }
-    ]
 } 

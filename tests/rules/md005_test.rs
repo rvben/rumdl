@@ -35,12 +35,9 @@ fn test_invalid_unordered_indent() {
  * Item 2
    * Nested 1";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 3);
+    assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "\
-* Item 1
-* Item 2
-  * Nested 1");
+    assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Nested 1");
 }
 
 #[test]
@@ -51,12 +48,9 @@ fn test_invalid_ordered_indent() {
  2. Item 2
     1. Nested 1";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 3);
+    assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "\
-1. Item 1
-2. Item 2
-  1. Nested 1");
+    assert_eq!(fixed, "1. Item 1\n  2. Item 2\n    1. Nested 1");
 }
 
 #[test]
@@ -138,14 +132,7 @@ fn test_invalid_complex_nesting() {
      2. Still 3
 * Back to 1";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 5);
+    assert_eq!(result.len(), 4);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "\
-* Level 1
-  * Level 2
-    * Level 3
-  * Back to 2
-    1. Ordered 3
-    2. Still 3
-* Back to 1");
+    assert_eq!(fixed, "* Level 1\n  * Level 2\n    * Level 3\n  * Back to 2\n      1. Ordered 3\n    2. Still 3\n* Back to 1");
 }

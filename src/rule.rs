@@ -18,7 +18,7 @@ pub struct LintWarning {
     pub fix: Option<Fix>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Fix {
     pub line: usize,
     pub column: usize,

@@ -1,57 +1,116 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use regex::Regex;
+use lazy_static::lazy_static;
+use crate::rule::{Rule, LintWarning, LintResult, LintError, Fix};
 
-#[derive(Debug, Default)]
+/// Rule that ensures bullet lists start at the beginning of the line
+/// 
+/// In standard Markdown:
+/// - Top-level bullet items should start at column 0 (no indentation)
+/// - Nested bullet items should be indented under their parent
+/// - A bullet item following non-list content should start a new list at column 0
+#[derive(Default)]
 pub struct MD006StartBullets;
 
+lazy_static! {
+    // Pattern to match bullet list items: captures indentation, marker, and space after marker
+    static ref BULLET_PATTERN: Regex = Regex::new(r"^(\s*)([*+-])(\s+)").unwrap();
+    
+    // Pattern to match code fence markers
+    static ref CODE_FENCE_PATTERN: Regex = Regex::new(r"^(\s*)(```|~~~)").unwrap();
+}
+
 impl MD006StartBullets {
-    /// Checks if a line contains a bullet list marker (*, -, or +)
-    fn is_bullet_list_marker(line: &str) -> bool {
-        let trimmed = line.trim_start();
-        if let Some(c) = trimmed.chars().next() {
-            if c == '*' || c == '-' || c == '+' {
-                return trimmed.len() == 1 || trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace());
+    /// Checks if a line is a bullet list item and returns its indentation level
+    fn is_bullet_list_item(line: &str) -> Option<usize> {
+        if let Some(captures) = BULLET_PATTERN.captures(line) {
+            if let Some(indent) = captures.get(1) {
+                return Some(indent.as_str().len());
             }
         }
+        None
+    }
+
+    /// Determines if a line is inside a code block
+    /// Code blocks are ignored by this rule
+    fn is_in_code_block(&self, lines: &[&str], line_idx: usize) -> bool {
+        let mut in_code_block = false;
+        
+        for (i, line) in lines.iter().enumerate().take(line_idx + 1) {
+            if CODE_FENCE_PATTERN.is_match(line) {
+                in_code_block = !in_code_block;
+            }
+            
+            if i == line_idx {
+                return in_code_block;
+            }
+        }
+        
         false
     }
-
-    /// Gets the indentation level (number of spaces) at the start of a line
-    fn get_indent_level(line: &str) -> usize {
-        line.len() - line.trim_start().len()
-    }
-
-    /// Determines if a line is a blank line
+    
+    /// Checks if a line is blank (empty or whitespace only)
     fn is_blank_line(line: &str) -> bool {
         line.trim().is_empty()
     }
-
-    /// Determines if a line is likely a continuation of a list item
-    fn is_list_continuation(line: &str, prev_indent: usize) -> bool {
-        let indent = Self::get_indent_level(line);
-        !Self::is_bullet_list_marker(line) && indent >= prev_indent && !Self::is_blank_line(line)
-    }
     
-    /// Checks if the content matches a specific test pattern
-    fn is_test_invalid_indented_list(content: &str) -> bool {
-        content.contains("* Item 1") && 
-        content.contains("  * Item 2") && 
-        content.contains("    * Nested item") && 
-        content.contains("  * Item 3")
-    }
-    
-    /// Checks if the content matches the multiple lists test pattern
-    fn is_test_multiple_lists(content: &str) -> bool {
-        content.contains("* First list item") && 
-        content.contains("* Second list item") && 
-        content.contains("Some text here") && 
-        content.contains("  * Indented list 1") && 
-        content.contains("  * Indented list 2")
+    /// According to Markdown standards, determines if a bullet item is properly nested
+    /// A properly nested item:
+    /// 1. Has indentation greater than its parent
+    /// 2. Follows (directly or after blank lines) a parent bullet item with less indentation
+    fn is_properly_nested(&self, lines: &[&str], line_idx: usize) -> bool {
+        // Get current item's indentation
+        let current_indent = match Self::is_bullet_list_item(lines[line_idx]) {
+            Some(indent) => indent,
+            None => return false, // Not a bullet item
+        };
+        
+        // If not indented, it's automatically a top-level item (not nested)
+        if current_indent == 0 {
+            return false;
+        }
+        
+        // Look backwards to find a parent item or non-list content
+        let mut i = line_idx;
+        while i > 0 {
+            i -= 1;
+            
+            // Skip blank lines (empty lines don't break nesting)
+            if Self::is_blank_line(lines[i]) {
+                continue;
+            }
+            
+            // Found a list item, check its indentation
+            if let Some(prev_indent) = Self::is_bullet_list_item(lines[i]) {
+                // If previous item has less indentation, it's a parent of this item
+                // In standard Markdown, any item with greater indentation than a previous item
+                // is considered properly nested
+                if prev_indent < current_indent {
+                    return true;
+                }
+                
+                // If same indentation, items are siblings; keep looking for parent
+                if prev_indent == current_indent {
+                    continue;
+                }
+                
+                // In rare edge cases where previous item has more indentation than current
+                // (usually indicates a formatting issue), continue looking for parent
+                continue;
+            }
+            
+            // If we hit non-list content, this is a new list that should start at col 0
+            return false;
+        }
+        
+        // If we reach the start of the document without finding a parent, this item
+        // should not be indented (should be a top-level item)
+        false
     }
 }
 
 impl Rule for MD006StartBullets {
     fn name(&self) -> &'static str {
-        "MD006"
+        "MD006StartBullets"
     }
 
     fn description(&self) -> &'static str {
@@ -59,243 +118,93 @@ impl Rule for MD006StartBullets {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        // Special test case handling for test_invalid_indented_list
-        if Self::is_test_invalid_indented_list(content) {
-            return Ok(vec![
-                LintWarning {
-                    line: 2,
-                    column: 1,
-                    message: "Consider starting bulleted lists at the beginning of the line".to_string(),
-                    fix: Some(Fix {
-                        line: 2,
-                        column: 1,
-                        replacement: "* Item 2".to_string(),
-                    }),
-                },
-                LintWarning {
-                    line: 4,
-                    column: 1,
-                    message: "Consider starting bulleted lists at the beginning of the line".to_string(),
-                    fix: Some(Fix {
-                        line: 4,
-                        column: 1,
-                        replacement: "* Item 3".to_string(),
-                    }),
-                },
-                // Third warning to match test expectations
-                LintWarning {
-                    line: 3,
-                    column: 1,
-                    message: "Consider starting bulleted lists at the beginning of the line".to_string(),
-                    fix: Some(Fix {
-                        line: 3,
-                        column: 1,
-                        replacement: "* Nested item".to_string(),
-                    }),
-                }
-            ]);
-        }
-        
-        // Special test case handling for test_multiple_lists
-        if Self::is_test_multiple_lists(content) {
-            return Ok(vec![
-                LintWarning {
-                    line: 6,
-                    column: 1,
-                    message: "Consider starting bulleted lists at the beginning of the line".to_string(),
-                    fix: Some(Fix {
-                        line: 6,
-                        column: 1,
-                        replacement: "* Indented list 1".to_string(),
-                    }),
-                },
-                LintWarning {
-                    line: 7,
-                    column: 1,
-                    message: "Consider starting bulleted lists at the beginning of the line".to_string(),
-                    fix: Some(Fix {
-                        line: 7,
-                        column: 1,
-                        replacement: "* Indented list 2".to_string(),
-                    }),
-                }
-            ]);
-        }
-        
-        // Test cases that expect no warnings
-        if content.trim() == "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item\n* Item 3" ||
-           content.trim() == "* Item 1\n  * Nested item\n* Item 2\n\n- Another item\n  - Nested item\n- Final item" ||
-           content.trim() == "* Item 1\n\n  * Nested item\n\n* Item 2" ||
-           content.trim() == "Just some text\nMore text\nEven more text" {
-            return Ok(Vec::new());
-        }
-        
-        // Generic implementation for non-test cases
-        let mut warnings = Vec::new();
+        let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         
-        // Track list state
-        let mut in_list = false;
-        let mut prev_indent = 0;
-        let mut list_items = Vec::new();
+        // Track if we're in a code block
+        let mut in_code_block = false;
         
-        for (line_num, line) in lines.iter().enumerate() {
-            // Reset list context on blank lines that aren't within a list continuation
-            if Self::is_blank_line(line) {
-                if !in_list || line_num > 0 && !Self::is_list_continuation(lines[line_num - 1], prev_indent) {
-                    in_list = false;
-                }
+        for (line_idx, line) in lines.iter().enumerate() {
+            // Toggle code block state
+            if CODE_FENCE_PATTERN.is_match(line) {
+                in_code_block = !in_code_block;
                 continue;
             }
             
-            if Self::is_bullet_list_marker(line) {
-                let indent = Self::get_indent_level(line);
-                
-                // Start of a new list or a new list item
-                if !in_list {
-                    in_list = true;
-                    list_items.clear();
-                    
-                    // Top-level list should start at column 1 (no indentation)
-                    if indent > 0 {
-                        list_items.push((line_num, indent));
-                    }
-                } else {
-                    // If we're in a list and find a new list item
-                    if indent == 0 {
-                        // This is a top-level item, which is correct
-                        // Reset the list context for a new potential sublist
-                        list_items.clear();
-                    } else if indent > 0 && indent < 2 {
-                        // If indentation is less than 2 spaces but not 0, it's likely
-                        // intended to be a top-level item but incorrectly indented
-                        list_items.push((line_num, indent));
-                    }
-                    // Items indented 2 or more spaces are considered nested items
-                    // and are not flagged by this rule
-                }
-                
-                prev_indent = indent;
-            } else if in_list {
-                // Non-list marker line, but we're in a list context
-                // This could be a continuation of a list item or non-list content
-                if !Self::is_list_continuation(line, prev_indent) {
-                    // If it's not a continuation, we're out of the list context
-                    in_list = false;
-                    
-                    // Process any collected list items before leaving the list context
-                    for (item_line, _) in &list_items {
-                        warnings.push(LintWarning {
-                            line: item_line + 1,
-                            column: 1,
-                            message: "Consider starting bulleted lists at the beginning of the line".to_string(),
-                            fix: Some(Fix {
-                                line: item_line + 1,
-                                column: 1,
-                                replacement: lines[*item_line].trim_start().to_string(),
-                            }),
-                        });
-                    }
-                    list_items.clear();
-                }
-            }
-        }
-        
-        // Process any remaining list items at the end of the document
-        for (item_line, _) in &list_items {
-            warnings.push(LintWarning {
-                line: item_line + 1,
-                column: 1,
-                message: "Consider starting bulleted lists at the beginning of the line".to_string(),
-                fix: Some(Fix {
-                    line: item_line + 1,
-                    column: 1,
-                    replacement: lines[*item_line].trim_start().to_string(),
-                }),
-            });
-        }
-        
-        Ok(warnings)
-    }
-
-    fn fix(&self, content: &str) -> Result<String, LintError> {
-        // Special test case handling for test_invalid_indented_list
-        if Self::is_test_invalid_indented_list(content) {
-            return Ok("* Item 1\n* Item 2\n    * Nested item\n* Item 3".to_string());
-        }
-        
-        // Special test case handling for test_multiple_lists
-        if Self::is_test_multiple_lists(content) {
-            return Ok("* First list item\n* Second list item\n\nSome text here\n\n* Indented list 1\n* Indented list 2".to_string());
-        }
-        
-        // Generic implementation for non-test cases
-        let mut result = String::new();
-        let lines: Vec<&str> = content.lines().collect();
-        
-        // Track list state
-        let mut in_list = false;
-        let mut prev_indent = 0;
-        
-        for (line_num, line) in lines.iter().enumerate() {
-            // Reset list context on blank lines that aren't within a list continuation
-            if Self::is_blank_line(line) {
-                if !in_list || line_num > 0 && !Self::is_list_continuation(lines[line_num - 1], prev_indent) {
-                    in_list = false;
-                }
-                result.push_str(line);
-                result.push('\n');
+            // Skip lines in code blocks
+            if in_code_block {
                 continue;
             }
             
-            if Self::is_bullet_list_marker(line) {
-                let indent = Self::get_indent_level(line);
-                
-                // Start of a new list or a new list item
-                if !in_list {
-                    in_list = true;
-                    
-                    // Top-level list should start at column 1 (no indentation)
-                    if indent > 0 {
-                        result.push_str(line.trim_start());
-                    } else {
-                        result.push_str(line);
-                    }
-                } else {
-                    // If we're in a list and find a new list item
-                    if indent == 0 || indent >= 2 {
-                        // This is either a correct top-level item (indent=0)
-                        // or a nested item (indent>=2), keep as is
-                        result.push_str(line);
-                    } else if indent > 0 && indent < 2 {
-                        // If indentation is less than 2 spaces but not 0, it's likely
-                        // intended to be a top-level item but incorrectly indented
-                        result.push_str(line.trim_start());
-                    }
+            // Check if this line is a bullet list item
+            if let Some(indent) = Self::is_bullet_list_item(line) {
+                // Skip items with no indentation (already at the beginning of the line)
+                if indent == 0 {
+                    continue;
                 }
                 
-                prev_indent = indent;
-            } else if in_list {
-                // Non-list marker line, but we're in a list context
-                // This could be a continuation of a list item or non-list content
-                if !Self::is_list_continuation(line, prev_indent) {
-                    // If it's not a continuation, we're out of the list context
-                    in_list = false;
+                // Skip properly nested items according to Markdown standards
+                // A nested item should have a parent item with less indentation
+                if self.is_properly_nested(&lines, line_idx) {
+                    continue;
                 }
-                result.push_str(line);
-            } else {
-                // Regular non-list content
-                result.push_str(line);
+                
+                // If we get here, we have an improperly indented bullet item:
+                // Either it's indented but has no parent, or it follows non-list content
+                let fixed_line = line.trim_start();
+                result.push(LintWarning {
+                    line: line_idx + 1, // 1-indexed line number
+                    column: 1,
+                    message: "Consider starting bulleted lists at the beginning of the line".to_string(),
+                    fix: Some(Fix {
+                        line: line_idx + 1,
+                        column: 1,
+                        replacement: fixed_line.to_string(),
+                    }),
+                });
             }
-            
-            result.push('\n');
-        }
-        
-        // Remove trailing newline if original content didn't have one
-        if !content.ends_with('\n') {
-            result.pop();
         }
         
         Ok(result)
     }
+
+    fn fix(&self, content: &str) -> Result<String, LintError> {
+        let warnings = self.check(content)?;
+        if warnings.is_empty() {
+            return Ok(content.to_string());
+        }
+        
+        let mut fixed_content = String::new();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Create a map of fixes by line number
+        let mut fix_map = std::collections::HashMap::new();
+        for warning in warnings {
+            if let Some(fix) = warning.fix {
+                fix_map.insert(fix.line, fix.replacement);
+            }
+        }
+        
+        // Apply fixes line by line
+        for (i, line) in lines.iter().enumerate() {
+            let line_num = i + 1;
+            
+            if let Some(replacement) = fix_map.get(&line_num) {
+                fixed_content.push_str(replacement);
+            } else {
+                fixed_content.push_str(line);
+            }
+            
+            // Add newline unless it's the last line and the original doesn't end with newline
+            if i < lines.len() - 1 || content.ends_with('\n') {
+                fixed_content.push('\n');
+            }
+        }
+        
+        Ok(fixed_content)
+    }
 }
+
+
+
+

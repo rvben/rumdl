@@ -15,21 +15,35 @@ fn test_valid_unordered_list() {
 }
 
 #[test]
-fn test_invalid_indented_list() {
+fn test_valid_nested_list() {
     let rule = MD006StartBullets::default();
     let content = "\
 * Item 1
   * Item 2
-    * Nested item
+    * Deeply nested item
   * Item 3";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_invalid_indented_list() {
+    let rule = MD006StartBullets::default();
+    let content = "\
+Some text here.
+
+  * First item should not be indented
+  * Second item should not be indented
+  * Third item should not be indented";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "\
-* Item 1
-* Item 2
-    * Nested item
-* Item 3");
+Some text here.
+
+* First item should not be indented
+* Second item should not be indented
+* Third item should not be indented");
 }
 
 #[test]
@@ -91,6 +105,20 @@ fn test_no_lists() {
 Just some text
 More text
 Even more text";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_code_blocks_ignored() {
+    let rule = MD006StartBullets::default();
+    let content = "\
+```markdown
+  * This indented item is inside a code block
+  * These should be ignored
+```
+
+* Regular item outside code block";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
 } 

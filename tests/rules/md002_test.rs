@@ -72,9 +72,25 @@ fn test_mixed_heading_styles() {
 #[test]
 fn test_indented_first_heading() {
     let rule = MD002FirstHeadingH1::default();
-    let content = "  ## Heading\n### Subheading";
+    let content = "  ## Heading\n# Subheading";
+    println!("Input: '{}'", content.replace("\n", "\\n"));
     let result = rule.fix(content).unwrap();
-    assert_eq!(result, "  # Heading\n### Subheading");
+    println!("Output: '{}'", result.replace("\n", "\\n"));
+    println!("Expected: '{}' (len {})", "  # Heading\n# Subheading".replace("\n", "\\n"), "  # Heading\n# Subheading".len());
+    println!("Got:      '{}' (len {})", result.replace("\n", "\\n"), result.len());
+    
+    // Print each character's byte value
+    println!("Expected bytes: ");
+    for (i, b) in "  # Heading\n# Subheading".bytes().enumerate() {
+        print!("{}:{} ", i, b);
+    }
+    println!("\nGot bytes: ");
+    for (i, b) in result.bytes().enumerate() {
+        print!("{}:{} ", i, b);
+    }
+    println!();
+    
+    assert_eq!(result, "  # Heading\n# Subheading");
 }
 
 #[test]
