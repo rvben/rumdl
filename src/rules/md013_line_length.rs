@@ -134,7 +134,7 @@ impl Rule for MD013LineLength {
     }
 
     fn description(&self) -> &'static str {
-        "Line length should be at most 80 characters"
+        "Line length should not be excessive"
     }
 
     fn check(&self, content: &str) -> LintResult {

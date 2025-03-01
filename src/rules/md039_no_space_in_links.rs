@@ -38,16 +38,15 @@ impl MD039NoSpaceInLinks {
     fn check_line(&self, line: &str) -> Vec<(usize, String, String)> {
         let mut issues = Vec::new();
         
-        // Find all link patterns and check for spaces
         let chars: Vec<char> = line.chars().collect();
         let mut i = 0;
         
         while i < chars.len() {
             if chars[i] == '[' {
-                let text_start = i + 1;
-                let mut text_end = None;
-                let mut link_start = None;
-                let mut link_end = None;
+                let text_start_idx = i + 1;
+                let mut text_end_idx = None;
+                let mut link_start_idx = None;
+                let mut link_end_idx = None;
                 let mut bracket_depth = 1;
                 let mut j = i + 1;
                 
@@ -58,10 +57,10 @@ impl MD039NoSpaceInLinks {
                         ']' => {
                             bracket_depth -= 1;
                             if bracket_depth == 0 {
-                                text_end = Some(j);
+                                text_end_idx = Some(j);
                                 // Look for opening parenthesis
                                 if j + 1 < chars.len() && chars[j + 1] == '(' {
-                                    link_start = Some(j + 2);
+                                    link_start_idx = Some(j + 2);
                                     // Find closing parenthesis
                                     let mut paren_depth = 1;
                                     let mut k = j + 2;
@@ -71,7 +70,7 @@ impl MD039NoSpaceInLinks {
                                             ')' => {
                                                 paren_depth -= 1;
                                                 if paren_depth == 0 {
-                                                    link_end = Some(k);
+                                                    link_end_idx = Some(k);
                                                     break;
                                                 }
                                             }
@@ -89,21 +88,28 @@ impl MD039NoSpaceInLinks {
                 }
                 
                 // If we found a complete link pattern
-                if let (Some(text_end), Some(link_start), Some(link_end)) = (text_end, link_start, link_end) {
-                    let text = &line[text_start..text_end];
-                    let link = &line[link_start..link_end];
+                if let (Some(text_end_idx), Some(link_start_idx), Some(link_end_idx)) = (text_end_idx, link_start_idx, link_end_idx) {
+                    // Extract text and link using safe char-based operations
+                    let text: String = chars[text_start_idx..text_end_idx].iter().collect();
+                    let link: String = chars[link_start_idx..link_end_idx].iter().collect();
                     
                     // Check for spaces at start or end of text
                     if text.starts_with(' ') || text.ends_with(' ') {
                         let trimmed_text = text.trim();
                         if !trimmed_text.is_empty() {
-                            let original = &line[i..=link_end];
+                            // Safely reconstruct the original text using char indices
+                            let original: String = chars[i..=link_end_idx].iter().collect();
                             let fixed = format!("[{}]({})", trimmed_text, link);
-                            issues.push((i + 1, original.to_string(), fixed));
+                            
+                            // Calculate the byte position for the column
+                            // This is the byte offset of the start of the link
+                            let byte_position = chars[..i].iter().collect::<String>().len() + 1;
+                            
+                            issues.push((byte_position, original, fixed));
                         }
                     }
                     
-                    i = link_end + 1;
+                    i = link_end_idx + 1;
                     continue;
                 }
             }
@@ -154,6 +160,7 @@ impl Rule for MD039NoSpaceInLinks {
             let mut line = lines[i].to_string();
             if !self.is_in_code_block(content, i + 1) {
                 for (_, original, fixed) in self.check_line(lines[i]) {
+                    // Use a safe replacement method
                     line = line.replace(&original, &fixed);
                 }
             }

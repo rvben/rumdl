@@ -1,0 +1,28 @@
+# rumdl configuration file
+
+[global]
+# Globally disable specific rules
+disable = []
+
+[MD013]
+# Custom line length settings
+line_length = 100
+code_blocks = true
+tables = false
+headings = true
+
+[MD046]
+# Code block style
+style = "fenced"
+
+[MD048]
+# Code fence style
+style = "backtick"
+
+[MD049]
+# Emphasis style (* or _)
+style = "asterisk"
+
+[MD050]
+# Strong emphasis style (** or __)
+style = "asterisk"

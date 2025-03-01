@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use lazy_static::lazy_static;
 
 lazy_static! {
-    // Regex patterns for different link styles
+    // Updated regex patterns that work with Unicode characters
     static ref AUTOLINK_RE: Regex = Regex::new(r"<(https?://[^>]+)>").unwrap();
     static ref INLINE_RE: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
     static ref URL_INLINE_RE: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
@@ -70,19 +70,42 @@ impl MD054LinkImageStyle {
         }
     }
 
-    /// Determine the style of a link
+    /// Determine the style of a link using regex to safely handle Unicode
     fn determine_link_style(&self, line: &str, start_idx: usize) -> Option<(String, usize, usize)> {
+        // Safe substring with Unicode awareness
+        let safe_substring = if start_idx < line.len() {
+            let char_indices: Vec<(usize, char)> = line.char_indices().collect();
+            let start_char_idx = char_indices.iter()
+                .position(|(byte_idx, _)| *byte_idx >= start_idx)
+                .unwrap_or(char_indices.len());
+                
+            if start_char_idx < char_indices.len() {
+                let start_byte_idx = char_indices[start_char_idx].0;
+                &line[start_byte_idx..]
+            } else {
+                ""
+            }
+        } else {
+            ""
+        };
+        
+        if safe_substring.is_empty() {
+            return None;
+        }
+
         // Autolink: <https://example.com>
-        if let Some(cap) = AUTOLINK_RE.captures(&line[start_idx..]) {
-            let match_start = start_idx + cap.get(0).unwrap().start();
-            let match_end = start_idx + cap.get(0).unwrap().end();
+        if let Some(cap) = AUTOLINK_RE.captures(safe_substring) {
+            let match_text = cap.get(0).unwrap().as_str();
+            let match_start = line.find(match_text).unwrap_or(0) + start_idx;
+            let match_end = match_start + match_text.len();
             return Some(("autolink".to_string(), match_start, match_end));
         }
 
         // Inline: [text](url)
-        if let Some(cap) = INLINE_RE.captures(&line[start_idx..]) {
-            let match_start = start_idx + cap.get(0).unwrap().start();
-            let match_end = start_idx + cap.get(0).unwrap().end();
+        if let Some(cap) = INLINE_RE.captures(safe_substring) {
+            let match_text = cap.get(0).unwrap().as_str();
+            let match_start = line.find(match_text).unwrap_or(0) + start_idx;
+            let match_end = match_start + match_text.len();
             
             // Check if it's a URL inline (where text and URL are the same)
             let text = cap.get(1).unwrap().as_str();
@@ -95,28 +118,31 @@ impl MD054LinkImageStyle {
         }
 
         // Collapsed: [text][]
-        if let Some(cap) = COLLAPSED_RE.captures(&line[start_idx..]) {
-            let match_start = start_idx + cap.get(0).unwrap().start();
-            let match_end = start_idx + cap.get(0).unwrap().end();
+        if let Some(cap) = COLLAPSED_RE.captures(safe_substring) {
+            let match_text = cap.get(0).unwrap().as_str();
+            let match_start = line.find(match_text).unwrap_or(0) + start_idx;
+            let match_end = match_start + match_text.len();
             return Some(("collapsed".to_string(), match_start, match_end));
         }
 
         // Full: [text][reference]
-        if let Some(cap) = FULL_RE.captures(&line[start_idx..]) {
-            let match_start = start_idx + cap.get(0).unwrap().start();
-            let match_end = start_idx + cap.get(0).unwrap().end();
+        if let Some(cap) = FULL_RE.captures(safe_substring) {
+            let match_text = cap.get(0).unwrap().as_str();
+            let match_start = line.find(match_text).unwrap_or(0) + start_idx;
+            let match_end = match_start + match_text.len();
             return Some(("full".to_string(), match_start, match_end));
         }
 
         // Shortcut: [text]
-        if let Some(cap) = SHORTCUT_RE.captures(&line[start_idx..]) {
-            let full_match = cap.get(0).unwrap();
-            let match_start = start_idx + full_match.start();
-            let match_end = start_idx + full_match.end();
+        if let Some(cap) = SHORTCUT_RE.captures(safe_substring) {
+            let match_text = cap.get(0).unwrap().as_str();
+            let match_start = line.find(match_text).unwrap_or(0) + start_idx;
+            let match_end = match_start + match_text.len();
             
             // Check that it's not followed by an opening parenthesis or square bracket
-            // which would make it an inline link or reference link, not a shortcut reference
-            if match_end >= line.len() || (line.chars().nth(match_end) != Some('(') && line.chars().nth(match_end) != Some('[')) {
+            // Use a safe approach to check the next character
+            let next_char = line[match_end..].chars().next();
+            if next_char.is_none() || (next_char.unwrap() != '(' && next_char.unwrap() != '[') {
                 return Some(("shortcut".to_string(), match_start, match_end));
             }
         }
@@ -152,8 +178,9 @@ impl MD054LinkImageStyle {
             let mut in_code_span = false;
             let mut last_backtick_pos = 0;
 
-            for (i, c) in line.chars().enumerate() {
-                if c == '`' {
+            let char_indices: Vec<(usize, char)> = line.char_indices().collect();
+            for (i, (byte_pos, c)) in char_indices.iter().enumerate() {
+                if *c == '`' {
                     if !in_code_span {
                         in_code_span = true;
                         last_backtick_pos = i;
@@ -162,7 +189,7 @@ impl MD054LinkImageStyle {
                     }
                 }
 
-                if i == col && in_code_span && i > last_backtick_pos {
+                if *byte_pos == col && in_code_span && i > last_backtick_pos {
                     return true;
                 }
             }
@@ -189,14 +216,23 @@ impl Rule for MD054LinkImageStyle {
         // First pass: determine which styles are used
         for (line_num, line) in lines.iter().enumerate() {
             let mut start_idx = 0;
+            
+            // Use a safer approach to iterate through the line
             while start_idx < line.len() {
                 if let Some((style, match_start, end_idx)) = self.determine_link_style(line, start_idx) {
                     if !self.is_in_code(&lines, line_num, match_start) {
                         found_styles.insert(style);
                     }
-                    start_idx = end_idx;
+                    // Ensure we're making progress to avoid infinite loops
+                    if end_idx > start_idx {
+                        start_idx = end_idx;
+                    } else {
+                        start_idx += 1;
+                    }
                 } else {
-                    start_idx += 1;
+                    // Make sure we advance by at least one character
+                    let next_char_width = line[start_idx..].chars().next().map_or(1, |c| c.len_utf8());
+                    start_idx += next_char_width;
                 }
             }
         }
@@ -216,6 +252,8 @@ impl Rule for MD054LinkImageStyle {
         // Second pass: flag links that don't use the allowed styles
         for (line_num, line) in lines.iter().enumerate() {
             let mut start_idx = 0;
+            
+            // Use a safer approach to iterate through the line
             while start_idx < line.len() {
                 if let Some((style, match_start, match_end)) = self.determine_link_style(line, start_idx) {
                     if !self.is_in_code(&lines, line_num, match_start) && !allowed_styles.contains(&style) {
@@ -226,9 +264,16 @@ impl Rule for MD054LinkImageStyle {
                             fix: None, // Automatic fixing is complex, so we leave it manual for now
                         });
                     }
-                    start_idx = match_end;
+                    // Ensure we're making progress to avoid infinite loops
+                    if match_end > start_idx {
+                        start_idx = match_end;
+                    } else {
+                        start_idx += 1;
+                    }
                 } else {
-                    start_idx += 1;
+                    // Make sure we advance by at least one character
+                    let next_char_width = line[start_idx..].chars().next().map_or(1, |c| c.len_utf8());
+                    start_idx += next_char_width;
                 }
             }
         }
@@ -243,4 +288,4 @@ impl Rule for MD054LinkImageStyle {
             "Automatic fixing of link styles is not implemented. Please fix manually.".to_string(),
         ))
     }
-} 
+}

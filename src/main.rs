@@ -28,6 +28,8 @@ use std::process;
 use colored::Colorize;
 use walkdir;
 
+mod config;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -63,6 +65,21 @@ struct Cli {
 fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     let mut rules: Vec<Box<dyn Rule>> = Vec::new();
 
+    // Load configuration file if provided
+    let config_result = match &opts.config {
+        Some(path) => config::load_config(Some(path)),
+        None => config::load_config(None),
+    };
+
+    // Log any configuration errors but continue with defaults
+    let config = match config_result {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!("{}: {}", "Configuration error".yellow().bold(), err);
+            config::Config::default()
+        }
+    };
+
     // Add implemented rules
     rules.push(Box::new(MD001HeadingIncrement::default()));
     rules.push(Box::new(MD002FirstHeadingH1::default()));
@@ -71,12 +88,37 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     rules.push(Box::new(MD005ListIndent::default()));
     rules.push(Box::new(MD006StartBullets::default()));
     rules.push(Box::new(MD007ULIndent::default()));
-    rules.push(Box::new(MD008ULStyle::default()));
+    
+    // Configure MD008 from config if available
+    let md008 = if let Some(style) = config::get_rule_config_value::<char>(&config, "MD008", "style") {
+        Box::new(MD008ULStyle::new(style))
+    } else {
+        Box::new(MD008ULStyle::default())
+    };
+    rules.push(md008);
+    
     rules.push(Box::new(MD009TrailingSpaces::default()));
     rules.push(Box::new(MD010NoHardTabs::default()));
     rules.push(Box::new(MD011ReversedLink::default()));
     rules.push(Box::new(MD012NoMultipleBlanks::default()));
-    rules.push(Box::new(MD013LineLength::default()));
+    
+    // Configure MD013 from config if available
+    let md013 = {
+        let line_length = config::get_rule_config_value::<usize>(&config, "MD013", "line_length")
+            .unwrap_or(80);
+        let code_blocks = config::get_rule_config_value::<bool>(&config, "MD013", "code_blocks")
+            .unwrap_or(true);
+        let tables = config::get_rule_config_value::<bool>(&config, "MD013", "tables")
+            .unwrap_or(false);
+        let headings = config::get_rule_config_value::<bool>(&config, "MD013", "headings")
+            .unwrap_or(true);
+        let strict = config::get_rule_config_value::<bool>(&config, "MD013", "strict")
+            .unwrap_or(false);
+        
+        Box::new(MD013LineLength::new(line_length, code_blocks, tables, headings, strict))
+    };
+    rules.push(md013);
+    
     rules.push(Box::new(MD014CommandsShowOutput::default()));
     rules.push(Box::new(MD015NoMissingSpaceAfterListMarker::default()));
     rules.push(Box::new(MD016NoMultipleSpaceAfterListMarker::default()));
@@ -109,26 +151,97 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     rules.push(Box::new(MD043RequiredHeadings::new(Vec::new())));
     rules.push(Box::new(MD044ProperNames::new(Vec::new(), true)));
     rules.push(Box::new(MD045NoAltText::new()));
-    rules.push(Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)));
+    
+    // Configure MD046 from config if available
+    let md046 = {
+        let style_str = config::get_rule_config_value::<String>(&config, "MD046", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        
+        let style = match style_str.to_lowercase().as_str() {
+            "fenced" => CodeBlockStyle::Fenced,
+            "indented" => CodeBlockStyle::Indented,
+            _ => CodeBlockStyle::Consistent,
+        };
+        
+        Box::new(MD046CodeBlockStyle::new(style))
+    };
+    rules.push(md046);
+    
     rules.push(Box::new(MD047FileEndNewline::default()));
-    rules.push(Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)));
-    rules.push(Box::new(MD049EmphasisStyle::new(EmphasisStyle::Consistent)));
-    rules.push(Box::new(MD050StrongStyle::new(StrongStyle::Consistent)));
+    
+    // Configure MD048 from config if available
+    let md048 = {
+        let style_str = config::get_rule_config_value::<String>(&config, "MD048", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        
+        let style = match style_str.to_lowercase().as_str() {
+            "backtick" => CodeFenceStyle::Backtick,
+            "tilde" => CodeFenceStyle::Tilde,
+            _ => CodeFenceStyle::Consistent,
+        };
+        
+        Box::new(MD048CodeFenceStyle::new(style))
+    };
+    rules.push(md048);
+    
+    // Configure MD049 from config if available
+    let md049 = {
+        let style_str = config::get_rule_config_value::<String>(&config, "MD049", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        
+        let style = match style_str.to_lowercase().as_str() {
+            "asterisk" => EmphasisStyle::Asterisk,
+            "underscore" => EmphasisStyle::Underscore,
+            _ => EmphasisStyle::Consistent,
+        };
+        
+        Box::new(MD049EmphasisStyle::new(style))
+    };
+    rules.push(md049);
+    
+    // Configure MD050 from config if available
+    let md050 = {
+        let style_str = config::get_rule_config_value::<String>(&config, "MD050", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        
+        let style = match style_str.to_lowercase().as_str() {
+            "asterisk" => StrongStyle::Asterisk,
+            "underscore" => StrongStyle::Underscore,
+            _ => StrongStyle::Consistent,
+        };
+        
+        Box::new(MD050StrongStyle::new(style))
+    };
+    rules.push(md050);
+    
     rules.push(Box::new(MD051LinkFragments::new()));
     rules.push(Box::new(MD052ReferenceLinkImages::new()));
     rules.push(Box::new(MD053LinkImageReferenceDefinitions::default()));
+    
+    // Use default implementation for MD054
     rules.push(Box::new(MD054LinkImageStyle::default()));
+    
     rules.push(Box::new(MD055TablePipeStyle::default()));
     rules.push(Box::new(MD056TableColumnCount));
     rules.push(Box::new(MD058BlanksAroundTables));
 
-    // Filter rules based on enable/disable options
-    if let Some(enable) = &opts.enable {
-        let enabled_rules: Vec<&str> = enable.split(',').collect();
-        rules.retain(|rule| enabled_rules.contains(&rule.name()));
-    } else if let Some(disable) = &opts.disable {
-        let disabled_rules: Vec<&str> = disable.split(',').collect();
-        rules.retain(|rule| !disabled_rules.contains(&rule.name()));
+    // Filter rules based on configuration and command-line options
+    // Priority: command-line options override config file settings
+    let disable_rules: Vec<String> = match &opts.disable {
+        Some(disable_str) => disable_str.split(',').map(String::from).collect(),
+        None => config.global.disable.clone(),
+    };
+
+    let enable_rules: Vec<String> = match &opts.enable {
+        Some(enable_str) => enable_str.split(',').map(String::from).collect(),
+        None => config.global.enable.clone(),
+    };
+
+    // Apply the filters
+    if !enable_rules.is_empty() {
+        rules.retain(|rule| enable_rules.iter().any(|r| r == rule.name()));
+    } else if !disable_rules.is_empty() {
+        rules.retain(|rule| !disable_rules.iter().any(|r| r == rule.name()));
     }
 
     rules

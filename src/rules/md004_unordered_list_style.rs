@@ -132,7 +132,7 @@ impl Rule for MD004UnorderedListStyle {
         let target_style = match self.style {
             UnorderedListStyle::Consistent => {
                 self.detect_first_marker_style(content)
-                    .unwrap_or(UnorderedListStyle::Asterisk)
+                    .unwrap_or(UnorderedListStyle::Dash)
             }
             style => style,
         };
@@ -204,7 +204,7 @@ impl Rule for MD004UnorderedListStyle {
         let target_style = match self.style {
             UnorderedListStyle::Consistent => {
                 self.detect_first_marker_style(content)
-                    .unwrap_or(UnorderedListStyle::Asterisk)
+                    .unwrap_or(UnorderedListStyle::Dash)
             }
             style => style,
         };
