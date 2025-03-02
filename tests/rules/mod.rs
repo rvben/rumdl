@@ -41,4 +41,9 @@ mod md052_test;
 mod md054_test;
 mod md055_test;
 mod md056_test;
-mod md058_test; 
+mod md058_test;
+
+// Unicode-specific test modules
+mod md001_unicode_test;
+mod md006_unicode_test;
+mod md054_unicode_test; 

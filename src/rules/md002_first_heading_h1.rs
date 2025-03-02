@@ -51,7 +51,6 @@ impl MD002FirstHeadingH1 {
                         } else {
                             HeadingStyle::Atx
                         };
-                        let indentation = line.len() - line.trim_start().len();
                         return Some((Heading { level: hash_count, text, style }, line_num));
                     }
                 }

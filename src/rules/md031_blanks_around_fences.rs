@@ -11,14 +11,6 @@ impl MD031BlanksAroundFences {
     fn is_empty_line(line: &str) -> bool {
         line.trim().is_empty()
     }
-
-    fn get_indentation(line: &str) -> String {
-        let chars: Vec<char> = line.chars().collect();
-        let indent_len = chars.iter()
-            .take_while(|&&c| c.is_whitespace())
-            .count();
-        chars[..indent_len].iter().collect()
-    }
 }
 
 impl Rule for MD031BlanksAroundFences {

@@ -103,19 +103,6 @@ impl MD004UnorderedListStyle {
             UnorderedListStyle::Consistent => unreachable!(),
         }
     }
-
-    fn is_list_continuation(line: &str) -> bool {
-        let trimmed = line.trim_start();
-        !trimmed.is_empty() && !trimmed.starts_with(['+', '-', '*']) && !trimmed.starts_with(|c: char| c.is_ascii_digit())
-    }
-
-    fn get_list_level(indent: usize) -> usize {
-        indent / 2
-    }
-
-    fn get_indent_level(line: &str) -> usize {
-        line.chars().take_while(|c| c.is_whitespace()).count()
-    }
 }
 
 impl Rule for MD004UnorderedListStyle {

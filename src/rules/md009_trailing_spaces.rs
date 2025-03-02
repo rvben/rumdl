@@ -34,9 +34,6 @@ impl MD009TrailingSpaces {
         false
     }
 
-    fn is_blockquote_line(line: &str) -> bool {
-        line.trim_start().starts_with('>')
-    }
 
     fn is_empty_blockquote_line(line: &str) -> bool {
         let trimmed = line.trim_start();

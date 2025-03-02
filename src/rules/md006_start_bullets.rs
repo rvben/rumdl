@@ -30,24 +30,6 @@ impl MD006StartBullets {
         None
     }
 
-    /// Determines if a line is inside a code block
-    /// Code blocks are ignored by this rule
-    fn is_in_code_block(&self, lines: &[&str], line_idx: usize) -> bool {
-        let mut in_code_block = false;
-        
-        for (i, line) in lines.iter().enumerate().take(line_idx + 1) {
-            if CODE_FENCE_PATTERN.is_match(line) {
-                in_code_block = !in_code_block;
-            }
-            
-            if i == line_idx {
-                return in_code_block;
-            }
-        }
-        
-        false
-    }
-    
     /// Checks if a line is blank (empty or whitespace only)
     fn is_blank_line(line: &str) -> bool {
         line.trim().is_empty()

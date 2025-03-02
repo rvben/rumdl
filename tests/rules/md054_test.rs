@@ -132,4 +132,58 @@ fn test_all_link_types() {
     // Should be valid since all styles are allowed by default
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_unicode_support() {
+    // Test handling of Unicode characters in links
+    let rule = MD054LinkImageStyle::default();
+    
+    let content = r#"
+[Unicode café link](https://example.com/café)
+<https://example.com/café>
+[Unicode emoji 🔗][emoji-ref]
+[Unicode 汉字 characters][han]
+[🔗 emoji shortcut]
+[café][]
+
+[emoji-ref]: https://example.com/emoji/🔗
+[han]: https://example.com/汉字
+[🔗 emoji shortcut]: https://emoji.example.com
+[café]: https://example.com/café
+    "#;
+    
+    // Should be valid since all styles are allowed by default
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 0);
+    
+    // Test with disallowed styles
+    let rule_restricted = MD054LinkImageStyle::new(false, true, true, true, true, true);
+    
+    let content_mixed = r#"
+[Unicode link](https://example.com/café)
+<https://example.com/unicode/汉字>
+    "#;
+    
+    let result = rule_restricted.check(content_mixed).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 3);
+    assert_eq!(result[0].message, "Link/image style 'autolink' is not consistent with document");
+    
+    // Test with long Unicode content that might cause byte indexing issues
+    let content_long = r#"
+This is a very long line with some [Unicode content including many characters like café, 汉字, ñáéíóú, こんにちは, привет, שלום, مرحبا, and many more symbols like ⚡🔥🌟✨🌈⭐💫🌠 in a very long text](https://example.com/unicode).
+    "#;
+    
+    let result = rule.check(content_long).unwrap();
+    assert_eq!(result.len(), 0);
+    
+    // Test with reversed link syntax containing Unicode
+    let content_reversed = r#"
+This is a reversed link with Unicode: (Unicode café)[https://example.com/café]
+    "#;
+    
+    // This should be caught by MD011, not MD054, so no warnings here
+    let result = rule.check(content_reversed).unwrap();
+    assert_eq!(result.len(), 0);
 } 

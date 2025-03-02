@@ -1,5 +1,4 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
-use regex::Regex;
 
 /// Ensures tables have blank lines before and after them
 #[derive(Debug)]

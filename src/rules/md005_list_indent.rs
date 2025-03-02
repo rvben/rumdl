@@ -72,37 +72,6 @@ impl MD005ListIndent {
         }
         false
     }
-    
-    // Detects if this is a nested list item and returns previous level
-    fn is_nested_list_item(lines: &[&str], line_num: usize) -> Option<usize> {
-        if line_num == 0 {
-            return None; // First line can't be nested
-        }
-        
-        // Find the previous list item (skipping blank lines and continuations)
-        let mut prev_line_num = line_num - 1;
-        while prev_line_num > 0 {
-            if Self::is_blank_line(lines[prev_line_num]) {
-                prev_line_num -= 1;
-                continue;
-            }
-            
-            // Found previous content
-            break;
-        }
-        
-        // Check if current line is a list item and has more indentation than previous
-        if let Some((curr_indent, _, _)) = Self::get_list_marker_info(lines[line_num]) {
-            if let Some((prev_indent, _, _)) = Self::get_list_marker_info(lines[prev_line_num]) {
-                if curr_indent > prev_indent {
-                    // This is a nested item, return prev level
-                    return Some(prev_line_num);
-                }
-            }
-        }
-        
-        None
-    }
 }
 
 impl Rule for MD005ListIndent {

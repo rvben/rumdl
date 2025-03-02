@@ -76,13 +76,20 @@ impl MD028NoBlanksBlockquote {
     /// Generates the replacement for a blank blockquote line
     fn get_replacement(indent: &str, level: usize) -> String {
         let mut result = indent.to_string();
-        for i in 0..level {
+        
+        if level == 1 {
+            // For single level blockquotes: "> "
             result.push('>');
-            if i < level - 1 {
-                result.push(' ');
+            result.push(' ');
+        } else {
+            // For nested blockquotes: ">>" (no space between '>' characters)
+            for _ in 0..level {
+                result.push('>');
             }
+            // Add a single space after the last '>'
+            result.push(' ');
         }
-        result.push(' '); // Ensure a space after the last '>'
+        
         result
     }
 }

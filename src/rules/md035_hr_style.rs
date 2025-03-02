@@ -40,12 +40,6 @@ impl MD035HRStyle {
         HR_SPACED_ASTERISK.is_match(line) || 
         HR_SPACED_UNDERSCORE.is_match(line)
     }
-    
-    /// Gets the indentation of a line as a string
-    fn get_indentation(line: &str) -> String {
-        let indent_length = line.len() - line.trim_start().len();
-        " ".repeat(indent_length)
-    }
 }
 
 impl Rule for MD035HRStyle {

@@ -1,5 +1,4 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
-use regex::Regex;
 
 /// Ensures all rows in a table have the same number of cells
 #[derive(Debug)]
@@ -9,29 +8,28 @@ impl MD056TableColumnCount {
     /// Check if a line is in a code block
     fn is_in_code_block(&self, lines: &[&str], line_index: usize) -> bool {
         let mut in_code_block = false;
-        let mut code_fence = "";
-
-        for (i, line) in lines.iter().enumerate() {
-            if i > line_index {
-                break;
-            }
-
+        let mut code_fence = None;
+        
+        for (_i, line) in lines.iter().enumerate().take(line_index + 1) {
             let trimmed = line.trim();
+            
+            // Check for code fence markers
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 if !in_code_block {
+                    // Start of a code block
                     in_code_block = true;
-                    code_fence = if trimmed.starts_with("```") { "```" } else { "~~~" };
-                } else if trimmed.starts_with(code_fence) {
-                    in_code_block = false;
+                    code_fence = Some(if trimmed.starts_with("```") { "```" } else { "~~~" });
+                } else if let Some(fence) = code_fence {
+                    // End of a code block if the fence type matches
+                    if trimmed.starts_with(fence) {
+                        in_code_block = false;
+                        code_fence = None;
+                    }
                 }
             }
-
-            if i == line_index && in_code_block {
-                return true;
-            }
         }
-
-        false
+        
+        in_code_block
     }
 
     /// Count cells in a table row
@@ -68,20 +66,22 @@ impl MD056TableColumnCount {
     fn identify_tables(&self, lines: &[&str]) -> Vec<(usize, usize)> {
         let mut tables = Vec::new();
         let mut current_table_start: Option<usize> = None;
-        let mut is_delimiter_row = false;
 
         for (i, line) in lines.iter().enumerate() {
             if self.is_in_code_block(lines, i) {
+                // If we were tracking a table, end it
+                if let Some(start) = current_table_start {
+                    if i - start >= 2 { // At least header + delimiter rows
+                        tables.push((start, i - 1));
+                    }
+                    current_table_start = None;
+                }
                 continue;
             }
 
             let trimmed = line.trim();
             let is_table_row = trimmed.contains('|');
             
-            // Check for delimiter row (row with only pipes, hyphens, and colons)
-            is_delimiter_row = trimmed.contains('|') && 
-                               trimmed.chars().all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace());
-
             // Possible table row
             if is_table_row {
                 if current_table_start.is_none() {
@@ -181,6 +181,10 @@ impl Rule for MD056TableColumnCount {
             let mut found_header = false;
 
             for i in table_start..=table_end {
+                if self.is_in_code_block(&lines, i) {
+                    continue;
+                }
+                
                 let count = self.count_cells(lines[i]);
                 if count > 0 {
                     if !found_header {
@@ -234,6 +238,11 @@ impl Rule for MD056TableColumnCount {
             }
         }
 
-        Ok(result.join("\n"))
+        // Preserve the original line endings
+        if content.ends_with('\n') {
+            Ok(result.join("\n") + "\n")
+        } else {
+            Ok(result.join("\n"))
+        }
     }
 } 
