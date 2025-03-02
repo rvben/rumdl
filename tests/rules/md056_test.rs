@@ -1,4 +1,4 @@
-use rumdl::rule::{Fix, LintWarning, Rule};
+use rumdl::rule::Rule;
 use rumdl::rules::MD056TableColumnCount;
 
 #[test]

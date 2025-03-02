@@ -1,18 +1,8 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
-use std::collections::HashSet;
 
 /// Enforces consistent use of leading and trailing pipe characters in tables
-#[derive(Debug)]
 pub struct MD055TablePipeStyle {
     pub style: String,
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-enum PipeStyle {
-    LeadingAndTrailing,
-    LeadingOnly,
-    TrailingOnly,
-    NoLeadingOrTrailing,
 }
 
 impl Default for MD055TablePipeStyle {
