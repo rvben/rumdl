@@ -40,14 +40,15 @@ impl Rule for MD047FileEndNewline {
     fn fix(&self, content: &str) -> Result<String, LintError> {
         let mut result = content.to_string();
 
-        // Remove all trailing newlines
-        while result.ends_with("\n\n") {
-            result.pop();
-        }
-
-        // Ensure exactly one trailing newline
+        // If the content doesn't end with a newline, add one
         if !result.ends_with('\n') {
             result.push('\n');
+            return Ok(result);
+        }
+
+        // If the content has multiple trailing newlines, remove extras
+        while result.ends_with("\n\n") {
+            result.pop();
         }
 
         Ok(result)

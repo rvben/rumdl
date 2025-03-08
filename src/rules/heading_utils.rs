@@ -1,4 +1,17 @@
 use regex::Regex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    // Code block detection patterns
+    static ref FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)```(?:[^`\r\n]*)$").unwrap();
+    static ref FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)```\s*$").unwrap();
+    static ref ALTERNATE_FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)~~~(?:[^~\r\n]*)$").unwrap();
+    static ref ALTERNATE_FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)~~~\s*$").unwrap();
+    static ref INDENTED_CODE_BLOCK: Regex = Regex::new(r"^(\s{4,})").unwrap();
+    
+    // Valid emphasis patterns at start of line that should not be confused with headings or lists
+    static ref VALID_START_EMPHASIS: Regex = Regex::new(r"^(\s*)(\*\*[^*\s]|\*[^*\s]|__[^_\s]|_[^_\s])").unwrap();
+}
 
 /// Represents different styles of Markdown headings
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -28,11 +41,56 @@ impl HeadingUtils {
         let re = Regex::new(r"^#{1,6}(?:\s+.+|\s*$)").unwrap();
         re.is_match(line)
     }
+    
+    /// Check if a line is inside a code block
+    pub fn is_in_code_block(content: &str, line_num: usize) -> bool {
+        let lines: Vec<&str> = content.lines().collect();
+        if line_num >= lines.len() {
+            return false;
+        }
+        
+        let mut in_code_block = false;
+        let mut in_alternate_code_block = false;
+        
+        for (i, line) in lines.iter().enumerate() {
+            if i > line_num {
+                break;
+            }
+            
+            if FENCED_CODE_BLOCK_START.is_match(line) {
+                in_code_block = true;
+            } else if FENCED_CODE_BLOCK_END.is_match(line) && in_code_block {
+                in_code_block = false;
+            } else if ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line) {
+                in_alternate_code_block = true;
+            } else if ALTERNATE_FENCED_CODE_BLOCK_END.is_match(line) && in_alternate_code_block {
+                in_alternate_code_block = false;
+            }
+        }
+        
+        // Check if the current line is indented as code block
+        if line_num < lines.len() && INDENTED_CODE_BLOCK.is_match(lines[line_num]) {
+            return true;
+        }
+        
+        // Return true if we're in any type of code block
+        in_code_block || in_alternate_code_block
+    }
+    
+    /// Check if a line starts with valid emphasis markers rather than list markers
+    pub fn is_start_emphasis(line: &str) -> bool {
+        VALID_START_EMPHASIS.is_match(line)
+    }
 
     /// Parse a line into a Heading struct if it's a valid heading
     pub fn parse_heading(content: &str, line_num: usize) -> Option<Heading> {
         let lines: Vec<&str> = content.lines().collect();
         if line_num >= lines.len() {
+            return None;
+        }
+
+        // Skip processing if we're in a code block
+        if Self::is_in_code_block(content, line_num) {
             return None;
         }
 

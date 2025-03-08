@@ -57,7 +57,7 @@ rumdl [options] [file or directory...]
 
 rumdl can be configured through command-line options. Support for a `rumdl.toml` configuration file is planned but not currently implemented.
 
-**Current configuration options:**
+### Current configuration options
 
 - `-f, --fix`: Automatically fix issues where possible
 - `-l, --list-rules`: List all available rules
@@ -109,12 +109,12 @@ rumdl uses a consistent output format for all issues:
 
 The output is colorized by default:
 
-* Filenames appear in blue and underlined
-* Line and column numbers appear in cyan
-* Rule IDs appear in yellow
-* Error messages appear in white
-* Fixable issues are marked with `[*]` in green
-* Fixed issues are marked with `[fixed]` in green
+- Filenames appear in blue and underlined
+- Line and column numbers appear in cyan
+- Rule IDs appear in yellow
+- Error messages appear in white
+- Fixable issues are marked with `[*]` in green
+- Fixed issues are marked with `[fixed]` in green
 
 ## Rules
 
@@ -190,8 +190,8 @@ The following table provides an overview of all supported rules and indicates wh
 
 ### Prerequisites
 
-* Rust 1.70 or higher
-* Make (for development commands)
+- Rust 1.70 or higher
+- Make (for development commands)
 
 ### Building
 

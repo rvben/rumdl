@@ -1,5 +1,5 @@
 use clap::Parser;
-use rumdl::rule::Rule;
+use rumdl::rule::{Rule, LintWarning};
 use rumdl::rules::{
     MD001HeadingIncrement, MD002FirstHeadingH1, MD003HeadingStyle, MD004UnorderedListStyle,
     MD005ListIndent, MD006StartBullets, MD007ULIndent, MD008ULStyle,
@@ -283,7 +283,6 @@ fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -
     };
     
     let mut has_warnings = false;
-    let mut fixed_content = content.clone();
     let mut total_warnings = 0;
     let mut total_fixed = 0;
     let mut all_warnings = Vec::new();
@@ -297,7 +296,7 @@ fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -
                     total_warnings += warnings.len();
                     
                     for warning in warnings {
-                        all_warnings.push((rule.name(), warning));
+                        all_warnings.push((rule.name(), rule, warning));
                     }
                 }
             }
@@ -313,9 +312,9 @@ fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -
     
     // Sort warnings by line and column
     all_warnings.sort_by(|a, b| {
-        let line_cmp = a.1.line.cmp(&b.1.line);
+        let line_cmp = a.2.line.cmp(&b.2.line);
         if line_cmp == std::cmp::Ordering::Equal {
-            a.1.column.cmp(&b.1.column)
+            a.2.column.cmp(&b.2.column)
         } else {
             line_cmp
         }
@@ -323,7 +322,7 @@ fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -
     
     // Display warnings in a clean format
     if !all_warnings.is_empty() {
-        for (rule_name, warning) in &all_warnings {
+        for (rule_name, _, warning) in &all_warnings {
             let fixable = warning.fix.is_some();
             let fix_indicator = if fixable && fix { "[fixed]".green() } else if fixable { "[*]".green() } else { "".normal() };
             
@@ -341,39 +340,42 @@ fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -
         }
     }
     
-    // Apply fixes if requested
+    // Apply fixes in a single pass if requested
     if fix && has_warnings {
-        for rule in rules {
-            match rule.check(&fixed_content) {
-                Ok(warnings) => {
-                    if !warnings.is_empty() {
-                        match rule.fix(&fixed_content) {
-                            Ok(new_content) => {
-                                let fixed_count = warnings.len();
-                                total_fixed += fixed_count;
-                                fixed_content = new_content;
-                            }
-                            Err(err) => {
-                                eprintln!("  {} {}: {}", 
-                                    "Error fixing issues with".red().bold(), 
-                                    rule.name().yellow(), 
-                                    err);
-                            }
-                        }
+        let mut fixed_content = content.clone();
+        let mut fixed_warnings = 0;
+        
+        // Group all warnings by rule, then apply each rule's fixes in a single operation
+        let mut rule_to_warnings: std::collections::HashMap<&'static str, Vec<&LintWarning>> = std::collections::HashMap::new();
+        
+        for (rule_name, _, warning) in &all_warnings {
+            if warning.fix.is_some() {
+                rule_to_warnings.entry(rule_name).or_insert_with(Vec::new).push(warning);
+            }
+        }
+        
+        // Apply fixes for each rule
+        for (rule_name, warnings) in rule_to_warnings {
+            // Find the rule by name
+            if let Some(rule) = rules.iter().find(|r| r.name() == rule_name) {
+                match rule.fix(&fixed_content) {
+                    Ok(new_content) => {
+                        fixed_warnings += warnings.len();
+                        fixed_content = new_content;
                     }
-                }
-                Err(err) => {
-                    eprintln!("{}: {} on file {}: {}", 
-                        "Error".red().bold(), 
-                        rule.name().yellow(), 
-                        path.blue().underline(), 
-                        err);
+                    Err(err) => {
+                        eprintln!("  {} {}: {}", 
+                            "Error fixing issues with".red().bold(), 
+                            rule_name.yellow(), 
+                            err);
+                    }
                 }
             }
         }
         
         // Write fixed content back to file
-        if total_fixed > 0 {
+        if fixed_warnings > 0 {
+            total_fixed = fixed_warnings;
             match fs::write(path, fixed_content) {
                 Ok(_) => {}
                 Err(err) => {

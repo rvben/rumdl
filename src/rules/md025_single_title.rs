@@ -1,4 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::rules::heading_utils::HeadingUtils;
 
 #[derive(Debug)]
 pub struct MD025SingleTitle {
@@ -51,8 +52,14 @@ impl Rule for MD025SingleTitle {
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
         let mut found_title = self.has_front_matter_title(content);
+        let lines: Vec<&str> = content.lines().collect();
 
-        for (i, line) in content.lines().enumerate() {
+        for (i, line) in lines.iter().enumerate() {
+            // Skip processing if line is in a code block
+            if HeadingUtils::is_in_code_block(content, i) {
+                continue;
+            }
+            
             let trimmed = line.trim_start();
             if trimmed.starts_with('#') {
                 let level = trimmed.chars().take_while(|&c| c == '#').count();
@@ -65,7 +72,7 @@ impl Rule for MD025SingleTitle {
                             fix: Some(Fix {
                                 line: i + 1,
                                 column: line.find('#').unwrap_or(0) + 1,
-                                replacement: format!("{} {}", "#".repeat(level + 1), &line[level..]),
+                                replacement: format!("{} {}", "#".repeat(level + 1), &line[level + line.find('#').unwrap_or(0)..]),
                             }),
                         });
                     }
@@ -83,23 +90,28 @@ impl Rule for MD025SingleTitle {
         let lines: Vec<&str> = content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with('#') {
-                let level = trimmed.chars().take_while(|&c| c == '#').count();
-                if level == self.level && found_title {
-                    // Increase heading level by 1
-                    let spaces = line.chars().take_while(|&c| c.is_whitespace()).count();
-                    result.push_str(&" ".repeat(spaces));
-                    result.push_str(&"#".repeat(level + 1));
-                    result.push_str(&line[spaces + level..]);
+            // Skip processing if line is in a code block
+            if HeadingUtils::is_in_code_block(content, i) {
+                result.push_str(line);
+            } else {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with('#') {
+                    let level = trimmed.chars().take_while(|&c| c == '#').count();
+                    if level == self.level && found_title {
+                        // Increase heading level by 1
+                        let spaces = line.chars().take_while(|&c| c.is_whitespace()).count();
+                        result.push_str(&" ".repeat(spaces));
+                        result.push_str(&"#".repeat(level + 1));
+                        result.push_str(&line[spaces + level..]);
+                    } else {
+                        result.push_str(line);
+                    }
+                    if level == self.level {
+                        found_title = true;
+                    }
                 } else {
                     result.push_str(line);
                 }
-                if level == self.level {
-                    found_title = true;
-                }
-            } else {
-                result.push_str(line);
             }
             if i < lines.len() - 1 {
                 result.push('\n');

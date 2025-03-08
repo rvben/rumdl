@@ -1,10 +1,10 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::rules::heading_utils::HeadingUtils;
 use regex::Regex;
 use lazy_static::lazy_static;
 
 lazy_static! {
     static ref ATX_NO_SPACE_PATTERN: Regex = Regex::new(r"^(#+)([^#\s])").unwrap();
-    static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s*)```").unwrap();
 }
 
 #[derive(Debug, Default)]
@@ -38,15 +38,15 @@ impl Rule for MD018NoMissingSpaceAtx {
 
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
-        let mut in_code_block = false;
+        let lines: Vec<&str> = content.lines().collect();
 
-        for (line_num, line) in content.lines().enumerate() {
-            if CODE_BLOCK_PATTERN.is_match(line) {
-                in_code_block = !in_code_block;
+        for (line_num, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks
+            if HeadingUtils::is_in_code_block(content, line_num) {
                 continue;
             }
-
-            if !in_code_block && self.is_atx_heading_without_space(line) {
+            
+            if self.is_atx_heading_without_space(line) {
                 let hashes = ATX_NO_SPACE_PATTERN.captures(line).unwrap().get(1).unwrap();
                 warnings.push(LintWarning {
                     message: format!(
@@ -69,23 +69,26 @@ impl Rule for MD018NoMissingSpaceAtx {
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
         let mut result = String::new();
-        let mut in_code_block = false;
+        let lines: Vec<&str> = content.lines().collect();
 
-        for line in content.lines() {
-            if CODE_BLOCK_PATTERN.is_match(line) {
-                in_code_block = !in_code_block;
+        for (i, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks
+            if HeadingUtils::is_in_code_block(content, i) {
                 result.push_str(line);
-            } else if !in_code_block && self.is_atx_heading_without_space(line) {
+            } else if self.is_atx_heading_without_space(line) {
                 result.push_str(&self.fix_atx_heading(line));
             } else {
                 result.push_str(line);
             }
-            result.push('\n');
+            
+            if i < lines.len() - 1 {
+                result.push('\n');
+            }
         }
 
-        // Remove trailing newline if the original content didn't have one
-        if !content.ends_with('\n') {
-            result.pop();
+        // Preserve trailing newline if original had it
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
         }
 
         Ok(result)
