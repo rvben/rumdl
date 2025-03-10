@@ -1,12 +1,25 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule};
 use regex::Regex;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use lazy_static::lazy_static;
 
 lazy_static! {
+    // Pattern to match reference definitions [ref]: url
     static ref REF_REGEX: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*\S+").unwrap();
-    static ref LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\](?:\[([^\]]*)\])?|\!\[([^\]]+)\](?:\[([^\]]*)\])?").unwrap();
+    
+    // Pattern to match reference links and images ONLY: [text][reference] or ![text][reference]
+    static ref REF_LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\[([^\]]*)\]").unwrap();
+    static ref REF_IMAGE_REGEX: Regex = Regex::new(r"!\[([^\]]+)\]\[([^\]]*)\]").unwrap();
+    
+    // Pattern to match inline links and images (to exclude them)
+    static ref INLINE_LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
+    static ref INLINE_IMAGE_REGEX: Regex = Regex::new(r"!\[([^\]]+)\]\(([^)]+)\)").unwrap();
+    
+    // Pattern for reference definitions (same as REF_REGEX)
     static ref REF_DEF_PATTERN: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*\S+").unwrap();
+    
+    // Patterns for code blocks
+    static ref FENCED_CODE_START: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
 }
 
 /// Rule MD052: Reference links and images should use a reference that exists
@@ -34,55 +47,163 @@ impl MD052ReferenceLinkImages {
 
     fn find_undefined_references<'a>(&self, content: &'a str, references: &HashSet<String>) -> Vec<(usize, usize, &'a str)> {
         let mut undefined = Vec::new();
+        // Use a HashMap to track references already reported to avoid duplicates
+        let mut reported_refs = HashMap::new();
+        
+        // Track if we're inside a code block
+        let mut in_code_block = false;
+        let mut code_fence_marker: Option<&str> = None;
         
         for (line_num, line) in content.lines().enumerate() {
             // Skip reference definitions to avoid false positives
             if REF_DEF_PATTERN.is_match(line) {
                 continue;
             }
+            
+            // Handle code blocks
+            if FENCED_CODE_START.is_match(line) && !in_code_block {
+                if let Some(marker) = FENCED_CODE_START.captures(line).and_then(|c| c.get(1)).map(|m| m.as_str()) {
+                    // We've entered a code block
+                    in_code_block = true;
+                    code_fence_marker = Some(marker);
+                    continue;
+                }
+            }
+            
+            // Check if we're exiting a code block
+            if in_code_block {
+                if let Some(marker) = code_fence_marker {
+                    if line.starts_with(marker) {
+                        in_code_block = false;
+                        code_fence_marker = None;
+                    }
+                    // Skip this line and all lines in the code block
+                    continue;
+                }
+            }
+            
+            // Skip checking lines in code blocks
+            if in_code_block {
+                continue;
+            }
 
-            // Handle regular reference links/images with [text][id] format
-            for cap in LINK_REGEX.captures_iter(line) {
-                let reference = if let Some(m) = cap.get(2) {
-                    // [text][id] format
-                    if m.as_str().is_empty() {
+            // First, identify all inline links/images with their positions
+            let mut inline_elements = Vec::new();
+            
+            // Capture all inline link positions
+            for cap in INLINE_LINK_REGEX.captures_iter(line) {
+                if let Some(m) = cap.get(0) {
+                    inline_elements.push((m.start(), m.end()));
+                    
+                    // Also check if there are any references inside this inline link
+                    let link_text = cap.get(1).map_or("", |m| m.as_str());
+                    let inside_refs = self.extract_references_inside_text(link_text);
+                    for &(ref_start, ref_end) in &inside_refs {
+                        // Adjust the positions to be relative to the line
+                        inline_elements.push((m.start() + 1 + ref_start, m.start() + 1 + ref_end));
+                    }
+                }
+            }
+            
+            // Capture all inline image positions
+            for cap in INLINE_IMAGE_REGEX.captures_iter(line) {
+                if let Some(m) = cap.get(0) {
+                    inline_elements.push((m.start(), m.end()));
+                    
+                    // Also check if there are any references inside this inline image
+                    let img_text = cap.get(1).map_or("", |m| m.as_str());
+                    let inside_refs = self.extract_references_inside_text(img_text);
+                    for &(ref_start, ref_end) in &inside_refs {
+                        // Adjust the positions to be relative to the line
+                        inline_elements.push((m.start() + 2 + ref_start, m.start() + 2 + ref_end));
+                    }
+                }
+            }
+            
+            // Then check for reference links
+            for cap in REF_LINK_REGEX.captures_iter(line) {
+                let full_match = cap.get(0).unwrap();
+                let match_start = full_match.start();
+                let match_end = full_match.end();
+                
+                // Skip if this match overlaps with an inline element
+                if is_position_overlapping(match_start, match_end, &inline_elements) {
+                    continue;
+                }
+                
+                // Extract the reference
+                if let Some(ref_match) = cap.get(2) {
+                    let ref_text = ref_match.as_str();
+                    
+                    if ref_text.is_empty() {
                         // [text][] format - use text as reference
-                        cap.get(1).map(|m| m.as_str())
+                        if let Some(text_match) = cap.get(1) {
+                            let text = text_match.as_str();
+                            let lowercase_text = text.to_lowercase();
+                            if !references.contains(&lowercase_text) {
+                                // Check if we've already reported this reference on this line
+                                let key = format!("{}:{}", line_num + 1, lowercase_text);
+                                if !reported_refs.contains_key(&key) {
+                                    undefined.push((line_num + 1, match_start, text));
+                                    reported_refs.insert(key, true);
+                                }
+                            }
+                        }
                     } else {
-                        Some(m.as_str())
+                        // [text][reference] format
+                        let lowercase_ref = ref_text.to_lowercase();
+                        if !references.contains(&lowercase_ref) {
+                            // Check if we've already reported this reference on this line
+                            let key = format!("{}:{}", line_num + 1, lowercase_ref);
+                            if !reported_refs.contains_key(&key) {
+                                undefined.push((line_num + 1, match_start, ref_text));
+                                reported_refs.insert(key, true);
+                            }
+                        }
                     }
-                } else if let Some(m) = cap.get(4) {
-                    // ![text][id] format
-                    if m.as_str().is_empty() {
+                }
+            }
+            
+            // Finally check for reference images
+            for cap in REF_IMAGE_REGEX.captures_iter(line) {
+                let full_match = cap.get(0).unwrap();
+                let match_start = full_match.start();
+                let match_end = full_match.end();
+                
+                // Skip if this match overlaps with an inline element
+                if is_position_overlapping(match_start, match_end, &inline_elements) {
+                    continue;
+                }
+                
+                // Extract the reference
+                if let Some(ref_match) = cap.get(2) {
+                    let ref_text = ref_match.as_str();
+                    
+                    if ref_text.is_empty() {
                         // ![text][] format - use text as reference
-                        cap.get(3).map(|m| m.as_str())
+                        if let Some(text_match) = cap.get(1) {
+                            let text = text_match.as_str();
+                            let lowercase_text = text.to_lowercase();
+                            if !references.contains(&lowercase_text) {
+                                // Check if we've already reported this reference on this line
+                                let key = format!("{}:{}", line_num + 1, lowercase_text);
+                                if !reported_refs.contains_key(&key) {
+                                    undefined.push((line_num + 1, match_start, text));
+                                    reported_refs.insert(key, true);
+                                }
+                            }
+                        }
                     } else {
-                        Some(m.as_str())
-                    }
-                } else if let Some(m1) = cap.get(1) {
-                    let text = m1.as_str();
-                    // Handle [text] shortcut reference format - check that it's not part of [text][id] or [text]: definition
-                    if !line.contains(&format!("[{}][", text)) && !line.contains(&format!("[{}]:", text)) {
-                        Some(text)
-                    } else {
-                        None
-                    }
-                } else if let Some(m3) = cap.get(3) {
-                    let text = m3.as_str();
-                    // Handle ![text] shortcut reference format
-                    if !line.contains(&format!("![{}][", text)) {
-                        Some(text)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                if let Some(ref_text) = reference {
-                    // Compare in lowercase for case-insensitive matching
-                    if !references.contains(&ref_text.to_lowercase()) {
-                        undefined.push((line_num + 1, cap.get(0).unwrap().start(), ref_text));
+                        // ![text][reference] format
+                        let lowercase_ref = ref_text.to_lowercase();
+                        if !references.contains(&lowercase_ref) {
+                            // Check if we've already reported this reference on this line
+                            let key = format!("{}:{}", line_num + 1, lowercase_ref);
+                            if !reported_refs.contains_key(&key) {
+                                undefined.push((line_num + 1, match_start, ref_text));
+                                reported_refs.insert(key, true);
+                            }
+                        }
                     }
                 }
             }
@@ -90,6 +211,38 @@ impl MD052ReferenceLinkImages {
 
         undefined
     }
+    
+    // Helper method to extract reference positions inside text (for nested references)
+    fn extract_references_inside_text(&self, text: &str) -> Vec<(usize, usize)> {
+        let mut positions = Vec::new();
+        
+        // Find reference links inside the text
+        for cap in REF_LINK_REGEX.captures_iter(text) {
+            if let Some(m) = cap.get(0) {
+                positions.push((m.start(), m.end()));
+            }
+        }
+        
+        // Find reference images inside the text
+        for cap in REF_IMAGE_REGEX.captures_iter(text) {
+            if let Some(m) = cap.get(0) {
+                positions.push((m.start(), m.end()));
+            }
+        }
+        
+        positions
+    }
+}
+
+// Helper function to check if a position overlaps with any of the excluded positions
+fn is_position_overlapping(start: usize, end: usize, excluded_positions: &[(usize, usize)]) -> bool {
+    for &(excl_start, excl_end) in excluded_positions {
+        // Check for any overlap between positions
+        if start <= excl_end && end >= excl_start {
+            return true;
+        }
+    }
+    false
 }
 
 impl Rule for MD052ReferenceLinkImages {
