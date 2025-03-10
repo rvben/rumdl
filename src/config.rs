@@ -34,6 +34,14 @@ pub struct GlobalConfig {
     /// List of rules to enable exclusively (if provided, only these rules will run)
     #[serde(default)]
     pub enable: Vec<String>,
+    
+    /// List of file/directory patterns to exclude from linting
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    
+    /// Whether to respect .gitignore files
+    #[serde(default)]
+    pub respect_gitignore: bool,
 }
 
 /// Load configuration from the specified file or search for a default config file

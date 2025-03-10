@@ -27,6 +27,8 @@ use std::path::Path;
 use std::process;
 use colored::Colorize;
 use walkdir;
+use ignore;
+use glob;
 
 mod config;
 
@@ -56,6 +58,18 @@ struct Cli {
     /// Enable only specific rules (comma-separated)
     #[arg(short, long)]
     enable: Option<String>,
+    
+    /// Exclude specific files or directories (comma-separated glob patterns)
+    #[arg(long)]
+    exclude: Option<String>,
+
+    /// Respect .gitignore files when scanning directories
+    #[arg(long)]
+    respect_gitignore: bool,
+
+    /// Debug gitignore patterns for a specific file
+    #[arg(long)]
+    debug_gitignore: bool,
 
     /// Show detailed output
     #[arg(short, long)]
@@ -258,6 +272,9 @@ fn list_available_rules() {
         list_rules: true,
         disable: None,
         enable: None,
+        exclude: None,
+        respect_gitignore: false,
+        debug_gitignore: false,
         verbose: false,
     });
     
@@ -392,6 +409,113 @@ fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -
     (has_warnings, total_warnings, total_fixed)
 }
 
+// Helper function to test if a file would be ignored by .gitignore
+fn debug_gitignore_test(path: &str, verbose: bool) {
+    use ignore::WalkBuilder;
+    use std::path::Path;
+    use std::fs;
+
+    let file_path = Path::new(path);
+    
+    println!("Testing gitignore patterns for: {}", path);
+    
+    // First, check if the file exists
+    if !file_path.exists() {
+        println!("File does not exist: {}", path);
+        return;
+    }
+    
+    // Read the .gitignore file if it exists
+    let mut gitignore_patterns = Vec::new();
+    if let Ok(content) = fs::read_to_string(".gitignore") {
+        println!("\nFound .gitignore file with the following patterns:");
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                println!("  - {}", trimmed);
+                gitignore_patterns.push(trimmed.to_string());
+            }
+        }
+    } else {
+        println!("No .gitignore file found in the current directory.");
+    }
+    
+    // Create a walker that respects .gitignore files
+    let walker = WalkBuilder::new(".")
+        .hidden(true)
+        .git_global(true)
+        .git_ignore(true)
+        .git_exclude(true)
+        .add_custom_ignore_filename(".gitignore")
+        .build();
+    
+    // Check if the file is in the walker's output
+    let mut found_in_walker = false;
+    let canonical_path = file_path.canonicalize().unwrap_or_else(|_| file_path.to_path_buf());
+    
+    for entry_result in walker {
+        if let Ok(entry) = entry_result {
+            let entry_canonical = entry.path().canonicalize().unwrap_or_else(|_| entry.path().to_path_buf());
+            if entry_canonical == canonical_path {
+                found_in_walker = true;
+                break;
+            }
+        }
+    }
+    
+    if found_in_walker {
+        println!("\nFile would NOT be ignored by gitignore");
+    } else {
+        println!("\nFile would be IGNORED by gitignore");
+        
+        // Try to determine which pattern is causing the file to be ignored
+        for pattern in &gitignore_patterns {
+            if pattern.contains('*') {
+                // For glob patterns, use the glob crate
+                if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
+                    if glob_pattern.matches(path) {
+                        println!("  - Matched by pattern: {}", pattern);
+                    }
+                }
+            } else {
+                // For simple patterns, check if the path contains the pattern
+                if path.contains(pattern) {
+                    println!("  - Matched by pattern: {}", pattern);
+                }
+            }
+        }
+    }
+    
+    if verbose {
+        println!("\nSample of files that would be processed (not ignored):");
+        
+        // Create a new walker to list some files that would be processed
+        let walker = WalkBuilder::new(".")
+            .hidden(true)
+            .git_global(true)
+            .git_ignore(true)
+            .git_exclude(true)
+            .add_custom_ignore_filename(".gitignore")
+            .build();
+            
+        let mut count = 0;
+        for entry_result in walker {
+            if let Ok(entry) = entry_result {
+                if entry.file_type().map_or(false, |ft| ft.is_file()) {
+                    println!("  - {}", entry.path().display());
+                    count += 1;
+                    if count >= 10 {
+                        println!("  ... and more");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    println!();
+}
+
 fn main() {
     let cli = Cli::parse();
     
@@ -403,6 +527,14 @@ fn main() {
     if cli.paths.is_empty() {
         eprintln!("{}: No paths provided. Please specify at least one file or directory to lint.", "Error".red().bold());
         process::exit(1);
+    }
+    
+    // If debug_gitignore is enabled, test gitignore patterns for the specified files
+    if cli.debug_gitignore {
+        for path in &cli.paths {
+            debug_gitignore_test(path, cli.verbose);
+        }
+        return;
     }
     
     let rules = get_rules(&cli);
@@ -417,6 +549,37 @@ fn main() {
     let mut total_issues_found = 0;
     let mut total_issues_fixed = 0;
     
+    // Process exclude patterns from CLI and config
+    let mut exclude_patterns = Vec::new();
+    let mut respect_gitignore = cli.respect_gitignore;
+    
+    // Add exclude patterns from config
+    if let Ok(config) = config::load_config(cli.config.as_deref()) {
+        exclude_patterns.extend(config.global.exclude.clone());
+        
+        // Check if respect_gitignore is set in config (and not overridden in CLI)
+        if config.global.respect_gitignore && !cli.respect_gitignore {
+            respect_gitignore = true;
+        }
+    }
+    
+    // Add exclude patterns from CLI (overrides config)
+    if let Some(exclude_str) = &cli.exclude {
+        exclude_patterns.extend(exclude_str.split(',').map(|s| s.trim().to_string()));
+    }
+    
+    // Remove duplicates from exclude_patterns
+    exclude_patterns.sort();
+    exclude_patterns.dedup();
+    
+    if cli.verbose && !exclude_patterns.is_empty() {
+        println!("Excluding the following patterns:");
+        for pattern in &exclude_patterns {
+            println!("  - {}", pattern);
+        }
+        println!();
+    }
+    
     for path_str in &cli.paths {
         let path = Path::new(path_str);
         
@@ -427,6 +590,53 @@ fn main() {
         }
         
         if path.is_file() {
+            // Check if file is excluded based on patterns
+            let excluded = rumdl::should_exclude(path_str, &exclude_patterns);
+            
+            if excluded {
+                if cli.verbose {
+                    println!("Skipping excluded file: {}", path_str);
+                }
+                continue;
+            }
+            
+            // Check if file should be ignored by gitignore when respect_gitignore is enabled
+            if respect_gitignore {
+                use ignore::WalkBuilder;
+                
+                let file_path = Path::new(path_str);
+                let canonical_path = file_path.canonicalize().unwrap_or_else(|_| file_path.to_path_buf());
+                
+                // Create a walker that respects .gitignore files
+                let walker = WalkBuilder::new(".")
+                    .hidden(true)
+                    .git_global(true)
+                    .git_ignore(true)
+                    .git_exclude(true)
+                    .add_custom_ignore_filename(".gitignore")
+                    .build();
+                
+                // Check if the file is in the walker's output
+                let mut found_in_walker = false;
+                
+                for entry_result in walker {
+                    if let Ok(entry) = entry_result {
+                        let entry_canonical = entry.path().canonicalize().unwrap_or_else(|_| entry.path().to_path_buf());
+                        if entry_canonical == canonical_path {
+                            found_in_walker = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if !found_in_walker {
+                    if cli.verbose {
+                        println!("Skipping file ignored by gitignore: {}", path_str);
+                    }
+                    continue;
+                }
+            }
+            
             total_files_processed += 1;
             let (file_has_issues, issues_found, issues_fixed) = process_file(path_str, &rules, cli.fix, cli.verbose);
             if file_has_issues {
@@ -436,23 +646,79 @@ fn main() {
                 total_issues_fixed += issues_fixed;
             }
         } else if path.is_dir() {
-            // Process directory recursively using walkdir
-            match walkdir::WalkDir::new(path)
-                .follow_links(true)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file() && e.path().extension().map_or(false, |ext| ext == "md"))
-            {
-                dir_iter => {
-                    for entry in dir_iter {
-                        total_files_processed += 1;
-                        let file_path = entry.path().to_string_lossy().to_string();
-                        let (file_has_issues, issues_found, issues_fixed) = process_file(&file_path, &rules, cli.fix, cli.verbose);
-                        if file_has_issues {
-                            has_issues = true;
-                            files_with_issues += 1;
-                            total_issues_found += issues_found;
-                            total_issues_fixed += issues_fixed;
+            // Process directory recursively
+            // If respect_gitignore is enabled, use the ignore crate's WalkBuilder
+            if respect_gitignore {
+                use ignore::WalkBuilder;
+                
+                // Create a walker that respects .gitignore files
+                let walker = WalkBuilder::new(path)
+                    .hidden(true)
+                    .git_global(true)
+                    .git_ignore(true)
+                    .git_exclude(true)
+                    .add_custom_ignore_filename(".gitignore")
+                    .build();
+                
+                for entry_result in walker {
+                    if let Ok(entry) = entry_result {
+                        // Only process Markdown files
+                        if entry.file_type().map_or(false, |ft| ft.is_file()) 
+                            && entry.path().extension().map_or(false, |ext| ext == "md") {
+                            
+                            let file_path = entry.path().to_string_lossy().to_string();
+                            
+                            // Check if file is excluded based on patterns
+                            let excluded = rumdl::should_exclude(&file_path, &exclude_patterns);
+                            
+                            if excluded {
+                                if cli.verbose {
+                                    println!("Skipping excluded file: {}", file_path);
+                                }
+                                continue;
+                            }
+                            
+                            total_files_processed += 1;
+                            let (file_has_issues, issues_found, issues_fixed) = process_file(&file_path, &rules, cli.fix, cli.verbose);
+                            if file_has_issues {
+                                has_issues = true;
+                                files_with_issues += 1;
+                                total_issues_found += issues_found;
+                                total_issues_fixed += issues_fixed;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Use walkdir if respect_gitignore is disabled
+                match walkdir::WalkDir::new(path)
+                    .follow_links(true)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().is_file() && e.path().extension().map_or(false, |ext| ext == "md"))
+                {
+                    dir_iter => {
+                        for entry in dir_iter {
+                            let file_path = entry.path().to_string_lossy().to_string();
+                            
+                            // Check if file is excluded based on patterns
+                            let excluded = rumdl::should_exclude(&file_path, &exclude_patterns);
+                            
+                            if excluded {
+                                if cli.verbose {
+                                    println!("Skipping excluded file: {}", file_path);
+                                }
+                                continue;
+                            }
+                            
+                            total_files_processed += 1;
+                            let (file_has_issues, issues_found, issues_fixed) = process_file(&file_path, &rules, cli.fix, cli.verbose);
+                            if file_has_issues {
+                                has_issues = true;
+                                files_with_issues += 1;
+                                total_issues_found += issues_found;
+                                total_issues_fixed += issues_fixed;
+                            }
                         }
                     }
                 }
@@ -476,11 +742,11 @@ fn main() {
                 if files_with_issues == 1 { "file" } else { "files" },
                 total_files_processed,
                 if total_files_processed == 1 { "file" } else { "files" });
-                
-            println!("Run with {} to automatically fix issues", "`--fix`".green());
+            println!("Run with `--fix` to automatically fix issues");
         }
+        
         process::exit(1);
-    } else if total_files_processed > 0 {
+    } else {
         println!("{} No issues found", "✓".green().bold());
     }
 } 

@@ -51,20 +51,52 @@ rumdl [options] [file or directory...]
 - `-l, --list-rules`: List all available rules
 - `-d, --disable <rules>`: Disable specific rules (comma-separated)
 - `-e, --enable <rules>`: Enable only specific rules (comma-separated)
+- `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
+- `--respect-gitignore`: Respect .gitignore files when scanning directories
 - `-v, --verbose`: Show detailed output
 
 ## Configuration
 
-rumdl can be configured through command-line options. Support for a `rumdl.toml` configuration file is planned but not currently implemented.
+rumdl can be configured using a TOML configuration file. By default, it looks for `rumdl.toml` or `.rumdl.toml` in the current directory.
 
-### Current configuration options
+Example configuration file:
 
-- `-f, --fix`: Automatically fix issues where possible
-- `-l, --list-rules`: List all available rules
-- `-d, --disable <rules>`: Disable specific rules (comma-separated)
-- `-e, --enable <rules>`: Enable only specific rules (comma-separated)
-- `-v, --verbose`: Show detailed output
-- `-c, --config <file>`: Reserved for future custom configuration file support
+```toml
+# Global configuration options
+[global]
+# List of rules to disable
+disable = ["MD013", "MD033"]
+
+# List of rules to enable exclusively (if provided, only these rules will run)
+# enable = ["MD001", "MD003", "MD004"]
+
+# List of file/directory patterns to exclude from linting
+exclude = [
+    # Common directories to exclude
+    ".git",
+    ".github",
+    "node_modules",
+    "vendor",
+    "dist",
+    "build",
+    
+    # Specific files or patterns
+    "CHANGELOG.md",
+    "LICENSE.md",
+    "generated/*.md",
+    "**/temp_*.md",
+]
+
+# Whether to respect .gitignore files when scanning directories
+respect_gitignore = false
+
+# Rule-specific configurations
+[MD002]
+level = 1  # Expected level for first heading
+
+[MD003]
+style = "atx"  # Heading style (atx, atx_closed, setext)
+```
 
 ## Output Style
 
