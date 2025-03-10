@@ -1,4 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::rules::front_matter_utils::FrontMatterUtils;
 use regex::Regex;
 
 #[derive(Debug)]
@@ -29,18 +30,7 @@ impl MD041FirstLineHeading {
             return false;
         }
 
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.len() >= 3 && lines[0] == "---" {
-            let end_index = lines.iter().skip(1).position(|&line| line == "---");
-            if let Some(end_index) = end_index {
-                for i in 1..=end_index {
-                    if lines[i].trim().starts_with("title:") {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
+        FrontMatterUtils::has_front_matter_field(content, "title:")
     }
     
     fn is_heading_line(&self, line: &str) -> Option<usize> {
@@ -150,40 +140,46 @@ impl Rule for MD041FirstLineHeading {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        if content.trim().is_empty() || self.has_front_matter_title(content) {
-            return Ok(content.to_string());
+        // Apply front matter fixes first if needed
+        let content = FrontMatterUtils::fix_malformed_front_matter(content);
+        
+        if content.trim().is_empty() || self.has_front_matter_title(&content) {
+            return Ok(content);
         }
 
         let mut result = String::new();
         let lines: Vec<&str> = content.lines().collect();
 
-        match self.find_first_heading(content) {
+        match self.find_first_heading(&content) {
             None => {
                 // Add a new title at the beginning
                 result.push_str(&format!("{} Title\n\n", "#".repeat(self.level)));
-                result.push_str(content);
+                result.push_str(&content);
             }
             Some((line_num, level)) => {
                 if level != self.level {
                     // Fix the existing heading level
                     for (i, line) in lines.iter().enumerate() {
                         if i + 1 == line_num {
-                            result.push_str(&format!("{} {}\n", "#".repeat(self.level), line.trim_start().trim_start_matches('#').trim_start()));
+                            result.push_str(&format!("{} {}", "#".repeat(self.level), line.trim_start().trim_start_matches('#').trim_start()));
                         } else {
                             result.push_str(line);
+                        }
+                        
+                        if i < lines.len() - 1 {
                             result.push('\n');
                         }
                     }
                 } else {
                     // Heading is already at the correct level
-                    return Ok(content.to_string());
+                    return Ok(content);
                 }
             }
         }
 
-        // Remove trailing newline if the original content didn't have one
-        if !content.ends_with('\n') {
-            result.pop();
+        // Preserve the original trailing newline state
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
         }
 
         Ok(result)

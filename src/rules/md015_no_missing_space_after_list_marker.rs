@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use crate::rules::heading_utils::HeadingUtils;
+use crate::rules::front_matter_utils::FrontMatterUtils;
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -29,6 +30,22 @@ impl MD015NoMissingSpaceAfterListMarker {
     }
 
     fn is_unordered_list_without_space(&self, line: &str) -> bool {
+        // Skip bold text patterns
+        if line.trim_start().starts_with("**") {
+            return false;
+        }
+        
+        // Skip documentation metadata patterns
+        if line.trim_start().starts_with("**") && line.contains("**:") {
+            return false;
+        }
+        
+        // Skip potential Setext heading underlines
+        let trimmed = line.trim();
+        if !trimmed.is_empty() && (trimmed.chars().all(|c| c == '-') || trimmed.chars().all(|c| c == '=')) {
+            return false;
+        }
+        
         if line.trim_start().starts_with("*") && line.trim_start().contains(" ") {
             let content_after_marker = line.trim_start()[1..].trim_start();
             if content_after_marker.contains('*') && !content_after_marker.starts_with("*") {
@@ -102,7 +119,8 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, line) in lines.iter().enumerate() {
-            if HeadingUtils::is_in_code_block(content, line_num) {
+            // Skip processing if line is in a code block or front matter
+            if HeadingUtils::is_in_code_block(content, line_num) || FrontMatterUtils::is_in_front_matter(content, line_num) {
                 continue;
             }
 
@@ -139,8 +157,10 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
             return Ok(content.to_string());
         }
 
+        // Don't modify front matter
         let mut result = String::new();
         let lines: Vec<&str> = content.lines().collect();
+        let mut in_front_matter = false;
 
         // Special case for the test_preserve_indentation test
         if content == "  *Item 1\n    *Item 2\n      *Item 3" {
@@ -148,7 +168,25 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
         }
 
         for (i, line) in lines.iter().enumerate() {
-            if HeadingUtils::is_in_code_block(content, i) {
+            // Handle front matter
+            if i == 0 && line.trim() == "---" {
+                in_front_matter = true;
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+            
+            if in_front_matter {
+                if line.trim() == "---" {
+                    in_front_matter = false;
+                }
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+            
+            // Skip processing if line is in a code block
+            if HeadingUtils::is_in_code_block(&content, i) {
                 result.push_str(line);
             } else if self.is_unordered_list_without_space(line) {
                 result.push_str(&self.fix_unordered_list(line));
@@ -163,8 +201,9 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
             }
         }
 
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
+        // Remove trailing newline if original didn't have one
+        if !content.ends_with('\n') && result.ends_with('\n') {
+            result.pop();
         }
 
         Ok(result)

@@ -1,4 +1,5 @@
 pub mod heading_utils;
+pub mod front_matter_utils;
 
 mod md001_heading_increment;
 mod md002_first_heading_h1;

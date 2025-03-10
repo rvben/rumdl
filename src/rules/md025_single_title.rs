@@ -1,42 +1,25 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use crate::rules::heading_utils::HeadingUtils;
+use crate::rules::front_matter_utils::FrontMatterUtils;
 
 #[derive(Debug)]
 pub struct MD025SingleTitle {
     level: usize,
-    front_matter_title: String,
 }
 
 impl Default for MD025SingleTitle {
     fn default() -> Self {
         Self {
             level: 1,
-            front_matter_title: "title:".to_string(),
         }
     }
 }
 
 impl MD025SingleTitle {
-    pub fn new(level: usize, front_matter_title: &str) -> Self {
+    pub fn new(level: usize, _front_matter_title: &str) -> Self {
         Self {
             level,
-            front_matter_title: front_matter_title.to_string(),
         }
-    }
-
-    fn has_front_matter_title(&self, content: &str) -> bool {
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.len() >= 3 && lines[0] == "---" {
-            let end_index = lines.iter().skip(1).position(|&line| line == "---");
-            if let Some(end_index) = end_index {
-                for i in 1..=end_index {
-                    if lines[i].trim().starts_with(&self.front_matter_title) {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
     }
 }
 
@@ -51,12 +34,12 @@ impl Rule for MD025SingleTitle {
 
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
-        let mut found_title = self.has_front_matter_title(content);
+        let mut found_title = false;
         let lines: Vec<&str> = content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
-            // Skip processing if line is in a code block
-            if HeadingUtils::is_in_code_block(content, i) {
+            // Skip processing if line is in a code block or front matter
+            if HeadingUtils::is_in_code_block(content, i) || FrontMatterUtils::is_in_front_matter(content, i) {
                 continue;
             }
             
@@ -86,12 +69,12 @@ impl Rule for MD025SingleTitle {
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
         let mut result = String::new();
-        let mut found_title = self.has_front_matter_title(content);
+        let mut found_title = false;
         let lines: Vec<&str> = content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
-            // Skip processing if line is in a code block
-            if HeadingUtils::is_in_code_block(content, i) {
+            // Skip processing if line is in a code block or front matter
+            if HeadingUtils::is_in_code_block(&content, i) || FrontMatterUtils::is_in_front_matter(&content, i) {
                 result.push_str(line);
             } else {
                 let trimmed = line.trim_start();
@@ -116,6 +99,11 @@ impl Rule for MD025SingleTitle {
             if i < lines.len() - 1 {
                 result.push('\n');
             }
+        }
+
+        // Preserve trailing newline if original had it
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
         }
 
         Ok(result)

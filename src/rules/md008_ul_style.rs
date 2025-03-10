@@ -1,4 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::rules::front_matter_utils::FrontMatterUtils;
+use crate::rules::heading_utils::HeadingUtils;
 
 #[derive(Debug)]
 pub struct MD008ULStyle {
@@ -25,6 +27,22 @@ impl MD008ULStyle {
 
     fn get_list_marker(line: &str) -> Option<char> {
         let trimmed = line.trim_start();
+        
+        // Check for bold text markers (**) or emphasis markers (*) that aren't list markers
+        if trimmed.starts_with("**") || 
+           (trimmed.starts_with('*') && trimmed.len() > 1 && !trimmed.starts_with("* ")) {
+            return None;
+        }
+        
+        // Check for documentation style patterns like "* *Rule Type**:" that aren't list markers
+        if trimmed.starts_with("* *") || trimmed.starts_with("* **") {
+            // Check if this is a documentation metadata pattern
+            if trimmed.contains("**:") || trimmed.contains("*:") {
+                return None;
+            }
+        }
+        
+        // Check for actual list markers
         if trimmed.starts_with(['*', '+', '-']) && 
            (trimmed.len() == 1 || trimmed.chars().nth(1) == Some(' ')) {
             Some(trimmed.chars().next().unwrap())
@@ -34,17 +52,9 @@ impl MD008ULStyle {
     }
     
     fn detect_first_marker_style(&self, content: &str) -> Option<char> {
-        let mut in_code_block = false;
-        
-        for line in content.lines() {
-            let trimmed = line.trim_start();
-            
-            // Skip code blocks
-            if trimmed.starts_with("```") {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if in_code_block {
+        for (i, line) in content.lines().enumerate() {
+            // Skip front matter and code blocks
+            if FrontMatterUtils::is_in_front_matter(content, i) || HeadingUtils::is_in_code_block(content, i) {
                 continue;
             }
             
@@ -76,17 +86,9 @@ impl Rule for MD008ULStyle {
             self.style
         };
 
-        let mut in_code_block = false;
-
         for (line_num, line) in content.lines().enumerate() {
-            let trimmed = line.trim_start();
-            
-            // Skip code blocks
-            if trimmed.starts_with("```") {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if in_code_block {
+            // Skip front matter and code blocks
+            if FrontMatterUtils::is_in_front_matter(content, line_num) || HeadingUtils::is_in_code_block(content, line_num) {
                 continue;
             }
             
@@ -122,33 +124,23 @@ impl Rule for MD008ULStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        // Apply front matter fixes first if needed
+        let content = FrontMatterUtils::fix_malformed_front_matter(content);
+        
         // Determine the target style - use the first marker found or fall back to default
         let target_style = if self.use_consistent {
-            self.detect_first_marker_style(content).unwrap_or(self.style)
+            self.detect_first_marker_style(&content).unwrap_or(self.style)
         } else {
             self.style
         };
         
         let mut result = String::new();
-        let mut in_code_block = false;
 
-        for line in content.lines() {
-            let trimmed = line.trim_start();
-            
-            // Handle code blocks
-            if trimmed.starts_with("```") {
-                in_code_block = !in_code_block;
+        for (i, line) in content.lines().enumerate() {
+            // Skip modifying front matter and code blocks
+            if FrontMatterUtils::is_in_front_matter(&content, i) || HeadingUtils::is_in_code_block(&content, i) {
                 result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-            if in_code_block {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-
-            if let Some(marker) = Self::get_list_marker(line) {
+            } else if let Some(marker) = Self::get_list_marker(line) {
                 if marker != target_style {
                     result.push_str(&line.replacen(marker, &target_style.to_string(), 1));
                 } else {
@@ -157,12 +149,15 @@ impl Rule for MD008ULStyle {
             } else {
                 result.push_str(line);
             }
-            result.push('\n');
+            
+            if i < content.lines().count() - 1 {
+                result.push('\n');
+            }
         }
 
-        // Remove the final newline if the original content didn't end with one
-        if !content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
+        // Preserve the original trailing newline state
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
         }
 
         Ok(result)

@@ -1,5 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule};
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
+use crate::rules::front_matter_utils::FrontMatterUtils;
 
 #[derive(Debug)]
 pub struct MD003HeadingStyle {
@@ -35,6 +36,12 @@ impl Rule for MD003HeadingStyle {
         let mut i = 0;
 
         while i < lines.len() {
+            // Skip if we're in front matter
+            if FrontMatterUtils::is_in_front_matter(content, i) {
+                i += 1;
+                continue;
+            }
+            
             let remaining = &lines[i..].join("\n");
             if let Some(heading) = HeadingUtils::parse_heading(remaining, 0) {
                 // For setext style, only check headings that could be setext (level 1-2)
@@ -76,19 +83,33 @@ impl Rule for MD003HeadingStyle {
             return Ok(content.to_string());
         }
 
-        // Special case handling for specific test
-        if content == "Heading 1\n=========\n\n## Heading 2\n### Heading 3" {
-            return Ok("Heading 1\n=========\n\nHeading 2\n---------\n\n### Heading 3".to_string());
-        }
-
         let lines: Vec<&str> = content.lines().collect();
         let mut fixed_lines: Vec<String> = Vec::new();
         let target_style = self.style;
         let mut i = 0;
+        let mut in_front_matter = false;
 
         // Process each line
         while i < lines.len() {
             let line = lines[i];
+            
+            // Handle front matter
+            if i == 0 && line.trim() == "---" {
+                in_front_matter = true;
+                fixed_lines.push(line.to_string());
+                i += 1;
+                continue;
+            }
+            
+            if in_front_matter {
+                fixed_lines.push(line.to_string());
+                if line.trim() == "---" {
+                    in_front_matter = false;
+                }
+                i += 1;
+                continue;
+            }
+            
             let indentation = HeadingUtils::get_indentation(line);
 
             // Check if current line is a heading

@@ -40,6 +40,27 @@ impl MD035HRStyle {
         HR_SPACED_ASTERISK.is_match(line) || 
         HR_SPACED_UNDERSCORE.is_match(line)
     }
+    
+    /// Check if a line might be a Setext heading underline
+    fn is_potential_setext_heading(lines: &[&str], i: usize) -> bool {
+        if i == 0 {
+            return false; // First line can't be a Setext heading underline
+        }
+        
+        let line = lines[i].trim();
+        let prev_line = lines[i - 1].trim();
+        
+        // Check if the current line is all dashes or equals signs
+        let is_dash_line = !line.is_empty() && line.chars().all(|c| c == '-');
+        let is_equals_line = !line.is_empty() && line.chars().all(|c| c == '=');
+        
+        // Check if the previous line is not empty and not a horizontal rule
+        let prev_line_has_content = !prev_line.is_empty() && !Self::is_horizontal_rule(prev_line);
+        
+        // If the current line is all dashes or equals signs and the previous line has content,
+        // it's likely a Setext heading
+        (is_dash_line || is_equals_line) && prev_line_has_content
+    }
 }
 
 impl Rule for MD035HRStyle {
@@ -59,8 +80,8 @@ impl Rule for MD035HRStyle {
         let expected_style = if self.style.is_empty() {
             // Find the first HR in the document
             let mut first_style = "---".to_string(); // Default if none found
-            for line in &lines {
-                if Self::is_horizontal_rule(line) {
+            for (i, line) in lines.iter().enumerate() {
+                if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(&lines, i) {
                     first_style = line.trim().to_string();
                     break;
                 }
@@ -71,6 +92,11 @@ impl Rule for MD035HRStyle {
         };
         
         for (i, line) in lines.iter().enumerate() {
+            // Skip if this is a potential Setext heading underline
+            if Self::is_potential_setext_heading(&lines, i) {
+                continue;
+            }
+            
             if Self::is_horizontal_rule(line) {
                 // Check if this HR matches the expected style
                 let has_indentation = line.len() > line.trim_start().len();
@@ -106,8 +132,8 @@ impl Rule for MD035HRStyle {
         let expected_style = if self.style.is_empty() {
             // Find the first HR in the document
             let mut first_style = "---".to_string(); // Default if none found
-            for line in &lines {
-                if Self::is_horizontal_rule(line) {
+            for (i, line) in lines.iter().enumerate() {
+                if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(&lines, i) {
                     first_style = line.trim().to_string();
                     break;
                 }
@@ -117,7 +143,13 @@ impl Rule for MD035HRStyle {
             self.style.clone()
         };
         
-        for line in lines {
+        for (i, line) in lines.iter().enumerate() {
+            // Skip if this is a potential Setext heading underline
+            if Self::is_potential_setext_heading(&lines, i) {
+                result.push(line.to_string());
+                continue;
+            }
+            
             if Self::is_horizontal_rule(line) {
                 // Replace with the correct style and remove indentation
                 result.push(expected_style.clone());

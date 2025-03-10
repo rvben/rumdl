@@ -6,7 +6,7 @@ disable = []
 
 [MD013]
 # Custom line length settings
-line_length = 100
+line_length = 160
 code_blocks = true
 tables = false
 headings = true

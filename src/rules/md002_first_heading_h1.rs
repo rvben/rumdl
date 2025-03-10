@@ -135,50 +135,65 @@ impl Rule for MD002FirstHeadingH1 {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = String::new();
-        let lines: Vec<&str> = content.lines().collect();
-        
-        // Get the first heading in the document
-        if let Some((first_heading, line_num)) = self.find_first_heading(content) {
-            // If the heading is already at the correct level, no changes needed
-            if first_heading.level == self.level {
-                return Ok(content.to_string());
-            }
-            
-            // Process each line
-            for (i, &line) in lines.iter().enumerate() {
-                if i == line_num {
-                    // For the heading line, apply the replacement
-                    let indentation = HeadingUtils::get_indentation(line);
-                    result.push_str(&self.generate_replacement(&first_heading, indentation));
-                    result.push('\n');
-                    
-                    // If it's a setext heading, skip the underline
-                    if (first_heading.style == HeadingStyle::Setext1 || 
-                        first_heading.style == HeadingStyle::Setext2) && i + 1 < lines.len() {
-                        continue;
-                    }
-                } else if (first_heading.style == HeadingStyle::Setext1 || 
-                          first_heading.style == HeadingStyle::Setext2) && 
-                          i == line_num + 1 {
-                    // Skip the underline of a setext heading
-                    continue;
-                } else {
-                    // Keep other lines unchanged
-                    result.push_str(line);
-                    result.push('\n');
+        if let Some((heading, mut line_num)) = self.find_first_heading(content) {
+            if heading.level != self.level {
+                let lines: Vec<&str> = content.lines().collect();
+                let mut result = Vec::new();
+                
+                // Copy lines before the heading
+                for i in 0..line_num {
+                    result.push(lines[i].to_string());
                 }
+                
+                // Replace the heading with the correct level
+                match heading.style {
+                    HeadingStyle::Atx | HeadingStyle::AtxClosed => {
+                        let indentation = lines[line_num].len() - lines[line_num].trim_start().len();
+                        let indent_str = " ".repeat(indentation);
+                        let hashes = "#".repeat(self.level);
+                        
+                        if heading.style == HeadingStyle::AtxClosed {
+                            result.push(format!("{}{} {} {}", indent_str, hashes, heading.text, hashes));
+                        } else {
+                            result.push(format!("{}{} {}", indent_str, hashes, heading.text));
+                        }
+                    },
+                    HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
+                        // Add the heading text line
+                        result.push(lines[line_num].to_string());
+                        
+                        // Replace the underline with the correct level
+                        let indentation = lines[line_num + 1].len() - lines[line_num + 1].trim_start().len();
+                        let indent_str = " ".repeat(indentation);
+                        
+                        // Preserve the original underline length
+                        let original_underline_length = lines[line_num + 1].trim().len();
+                        let underline_char = if self.level == 1 { '=' } else { '-' };
+                        let underline = underline_char.to_string().repeat(original_underline_length);
+                        
+                        result.push(format!("{}{}", indent_str, underline));
+                        
+                        // Skip the original underline
+                        line_num += 1;
+                    }
+                }
+                
+                // Copy remaining lines
+                for i in (line_num + 1)..lines.len() {
+                    result.push(lines[i].to_string());
+                }
+                
+                // Preserve trailing newline if original had it
+                let result_str = if content.ends_with('\n') {
+                    format!("{}\n", result.join("\n"))
+                } else {
+                    result.join("\n")
+                };
+                
+                return Ok(result_str);
             }
-            
-            // Remove trailing newline if the original doesn't have one
-            if !content.ends_with('\n') {
-                result.pop();
-            }
-            
-            Ok(result)
-        } else {
-            // If no heading found, return the original content
-            Ok(content.to_string())
         }
+        
+        Ok(content.to_string())
     }
 } 

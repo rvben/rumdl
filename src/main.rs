@@ -1,23 +1,7 @@
 use clap::Parser;
+use colored::*;
 use rumdl::rule::{Rule, LintWarning};
-use rumdl::rules::{
-    MD001HeadingIncrement, MD002FirstHeadingH1, MD003HeadingStyle, MD004UnorderedListStyle,
-    MD005ListIndent, MD006StartBullets, MD007ULIndent, MD008ULStyle,
-    MD009TrailingSpaces, MD010NoHardTabs, MD011ReversedLink, MD012NoMultipleBlanks,
-    MD013LineLength, MD014CommandsShowOutput, MD015NoMissingSpaceAfterListMarker,
-    MD016NoMultipleSpaceAfterListMarker, MD017NoEmphasisAsHeading, MD018NoMissingSpaceAtx,
-    MD019NoMultipleSpaceAtx, MD020NoMissingSpaceClosedAtx, MD021NoMultipleSpaceClosedAtx,
-    MD022BlanksAroundHeadings, MD023HeadingStartLeft, MD024MultipleHeadings, MD025SingleTitle,
-    MD026NoTrailingPunctuation, MD027MultipleSpacesBlockquote, MD028NoBlanksBlockquote,
-    MD029OrderedListPrefix, MD030ListMarkerSpace, MD031BlanksAroundFences, MD032BlanksAroundLists,
-    MD033NoInlineHtml, MD034NoBareUrls, MD035HRStyle, MD036NoEmphasisOnlyFirst,
-    MD037SpacesAroundEmphasis, MD038NoSpaceInCode, MD039NoSpaceInLinks,
-    MD040FencedCodeLanguage, MD041FirstLineHeading, MD042NoEmptyLinks, MD043RequiredHeadings,
-    MD044ProperNames, MD045NoAltText, MD046CodeBlockStyle, MD047FileEndNewline,
-    MD048CodeFenceStyle, MD049EmphasisStyle, MD050StrongStyle, MD051LinkFragments,
-    MD052ReferenceLinkImages, MD053LinkImageReferenceDefinitions, MD054LinkImageStyle,
-    MD055TablePipeStyle, MD056TableColumnCount, MD058BlanksAroundTables,
-};
+use rumdl::rules::*;
 use rumdl::md046_code_block_style::CodeBlockStyle;
 use rumdl::md048_code_fence_style::CodeFenceStyle;
 use rumdl::md049_emphasis_style::EmphasisStyle;
@@ -25,8 +9,7 @@ use rumdl::md050_strong_style::StrongStyle;
 use std::fs;
 use std::path::Path;
 use std::process;
-use colored::Colorize;
-use walkdir;
+use walkdir::WalkDir;
 use ignore;
 use glob;
 
@@ -309,11 +292,18 @@ fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -
         match rule.check(&content) {
             Ok(warnings) => {
                 if !warnings.is_empty() {
-                    has_warnings = true;
-                    total_warnings += warnings.len();
+                    // Filter out warnings for lines where the rule is disabled
+                    let filtered_warnings: Vec<LintWarning> = warnings.into_iter()
+                        .filter(|warning| !rumdl::rule::is_rule_disabled_at_line(&content, rule.name(), warning.line - 1))
+                        .collect();
                     
-                    for warning in warnings {
-                        all_warnings.push((rule.name(), rule, warning));
+                    if !filtered_warnings.is_empty() {
+                        has_warnings = true;
+                        total_warnings += filtered_warnings.len();
+                        
+                        for warning in filtered_warnings {
+                            all_warnings.push((rule.name(), rule, warning));
+                        }
                     }
                 }
             }
@@ -691,7 +681,7 @@ fn main() {
                 }
             } else {
                 // Use walkdir if respect_gitignore is disabled
-                match walkdir::WalkDir::new(path)
+                match WalkDir::new(path)
                     .follow_links(true)
                     .into_iter()
                     .filter_map(|e| e.ok())
