@@ -36,13 +36,21 @@ rumdl .
 
 # Check and automatically fix issues
 rumdl --fix README.md
+
+# Create a default configuration file
+rumdl init
 ```
 
 ## Command-line Interface
 
 ```bash
 rumdl [options] [file or directory...]
+rumdl <command> [options]
 ```
+
+### Commands
+
+- `init`: Create a default `.rumdl.toml` configuration file in the current directory
 
 ### Options
 
@@ -58,6 +66,14 @@ rumdl [options] [file or directory...]
 ## Configuration
 
 rumdl can be configured using a TOML configuration file. By default, it looks for `rumdl.toml` or `.rumdl.toml` in the current directory.
+
+You can create a default configuration file using the `init` command:
+
+```bash
+rumdl init
+```
+
+This will create a `.rumdl.toml` file in the current directory with default settings that you can customize.
 
 Example configuration file:
 

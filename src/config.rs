@@ -74,6 +74,71 @@ fn load_config_from_file(path: &str) -> Result<Config, ConfigError> {
     }
 }
 
+/// Create a default configuration file at the specified path
+pub fn create_default_config(path: &str) -> Result<(), ConfigError> {
+    // Check if file already exists
+    if Path::new(path).exists() {
+        return Err(ConfigError::FileExists { path: path.to_string() });
+    }
+    
+    // Default configuration content
+    let default_config = r#"# rumdl configuration file
+
+# Global configuration options
+[global]
+# List of rules to disable (uncomment and modify as needed)
+# disable = ["MD013", "MD033"]
+
+# List of rules to enable exclusively (if provided, only these rules will run)
+# enable = ["MD001", "MD003", "MD004"]
+
+# List of file/directory patterns to exclude from linting
+exclude = [
+    # Common directories to exclude
+    ".git",
+    ".github",
+    "node_modules",
+    "vendor",
+    "dist",
+    "build",
+    
+    # Specific files or patterns
+    "CHANGELOG.md",
+    "LICENSE.md",
+]
+
+# Respect .gitignore files when scanning directories
+respect_gitignore = true
+
+# Rule-specific configurations (uncomment and modify as needed)
+
+# [MD003]
+# style = "atx"  # Heading style (atx, atx_closed, setext)
+
+# [MD004]
+# style = "asterisk"  # Unordered list style (asterisk, plus, dash, consistent)
+
+# [MD007]
+# indent = 4  # Unordered list indentation
+
+# [MD013]
+# line_length = 100  # Line length
+# code_blocks = false  # Exclude code blocks from line length check
+# tables = false  # Exclude tables from line length check
+# headings = true  # Include headings in line length check
+
+# [MD044]
+# names = ["rumdl", "Markdown", "GitHub"]  # Proper names that should be capitalized correctly
+# code_blocks_excluded = true  # Exclude code blocks from proper name check
+"#;
+
+    // Write the default configuration to the file
+    match fs::write(path, default_config) {
+        Ok(_) => Ok(()),
+        Err(err) => Err(ConfigError::IoError { source: err, path: path.to_string() }),
+    }
+}
+
 /// Errors that can occur when loading configuration
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -87,6 +152,12 @@ pub enum ConfigError {
     /// Failed to parse the TOML content
     #[error("Failed to parse TOML: {0}")]
     ParseError(#[from] toml::de::Error),
+    
+    /// Configuration file already exists
+    #[error("Configuration file already exists at {path}")]
+    FileExists {
+        path: String,
+    },
 }
 
 /// Get a rule-specific configuration value

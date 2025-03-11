@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use colored::*;
 use rumdl::rule::{Rule, LintWarning};
 use rumdl::rules::*;
@@ -57,6 +57,16 @@ struct Cli {
     /// Show detailed output
     #[arg(short, long)]
     verbose: bool,
+    
+    /// Command to run
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Initialize a new configuration file
+    Init,
 }
 
 fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
@@ -259,6 +269,7 @@ fn list_available_rules() {
         respect_gitignore: false,
         debug_gitignore: false,
         verbose: false,
+        command: None,
     });
     
     // Sort rules by name
@@ -514,7 +525,24 @@ fn main() {
         return;
     }
     
-    if cli.paths.is_empty() {
+    // Handle init command to create a default configuration file
+    if let Some(Commands::Init) = cli.command {
+        let config_path = ".rumdl.toml";
+        match config::create_default_config(config_path) {
+            Ok(_) => {
+                println!("{}: Created default configuration file at {}", "Success".green().bold(), config_path);
+                println!("You can now customize the configuration to suit your needs.");
+                return;
+            }
+            Err(err) => {
+                eprintln!("{}: Failed to create configuration file: {}", "Error".red().bold(), err);
+                process::exit(1);
+            }
+        }
+    }
+    
+    // Only require paths if we're not running a subcommand
+    if cli.paths.is_empty() && cli.command.is_none() {
         eprintln!("{}: No paths provided. Please specify at least one file or directory to lint.", "Error".red().bold());
         process::exit(1);
     }
