@@ -116,8 +116,20 @@ fn test_list_marker_variations() {
 #[test]
 fn test_preserve_indentation() {
     let rule = MD015NoMissingSpaceAfterListMarker::new();
-    let content = "  *Item 1\n    *Item 2\n      *Item 3";
-    let result = rule.fix(content).unwrap();
+    
+    // Test with a single line to verify indentation preservation
+    let single_line = "  *Item 1";
+    let result = rule.fix(single_line).unwrap();
+    assert_eq!(result, "  * Item 1");
+    
+    // Test with multiple lines to verify each line is fixed properly
+    let multi_line = "  *Item 1\n  *Item 2\n  *Item 3";
+    let result = rule.fix(multi_line).unwrap();
+    assert_eq!(result, "  * Item 1\n  * Item 2\n  * Item 3");
+    
+    // Test with increasing indentation
+    let indented = "  *Item 1\n    *Item 2\n      *Item 3";
+    let result = rule.fix(indented).unwrap();
     assert_eq!(result, "  * Item 1\n    * Item 2\n      * Item 3");
 }
 

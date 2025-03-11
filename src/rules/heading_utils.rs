@@ -193,4 +193,26 @@ impl HeadingUtils {
             None
         }
     }
+
+    /// Convert a heading text to a valid ID for fragment links
+    pub fn heading_to_fragment(text: &str) -> String {
+        // Remove any HTML tags
+        let text = text.replace("<[^>]*>", "");
+        
+        // Convert to lowercase
+        let text = text.to_lowercase();
+        
+        // Replace spaces with hyphens
+        let text = text.replace(" ", "-");
+        
+        // Remove any non-alphanumeric characters except hyphens
+        let text = text.chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-')
+            .collect::<String>();
+        
+        // Remove leading and trailing hyphens
+        let text = text.trim_matches('-').to_string();
+        
+        text
+    }
 } 

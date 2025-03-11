@@ -1,12 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
-use regex::Regex;
-use lazy_static::lazy_static;
-
-lazy_static! {
-    static ref UNORDERED_LIST_PATTERN: Regex = Regex::new(r"^(\s*)[*+-]\s{2,}").unwrap();
-    static ref ORDERED_LIST_PATTERN: Regex = Regex::new(r"^(\s*)\d+\.\s{2,}").unwrap();
-    static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s*)```").unwrap();
-}
+use crate::rules::code_block_utils::CodeBlockUtils;
+use crate::rules::list_utils::ListUtils;
 
 #[derive(Debug)]
 pub struct MD016NoMultipleSpaceAfterListMarker {
@@ -27,31 +21,6 @@ impl MD016NoMultipleSpaceAfterListMarker {
     pub fn with_allow_multiple_spaces(allow_multiple_spaces: bool) -> Self {
         Self { allow_multiple_spaces }
     }
-
-    fn is_unordered_list_with_multiple_spaces(&self, line: &str) -> bool {
-        UNORDERED_LIST_PATTERN.is_match(line)
-    }
-
-    fn is_ordered_list_with_multiple_spaces(&self, line: &str) -> bool {
-        ORDERED_LIST_PATTERN.is_match(line)
-    }
-
-    fn fix_unordered_list(&self, line: &str) -> String {
-        let captures = UNORDERED_LIST_PATTERN.captures(line).unwrap();
-        let indentation = &captures[1];
-        let marker = &line[indentation.len()..indentation.len() + 1];
-        let content = line[indentation.len() + 1..].trim_start();
-        format!("{}{} {}", indentation, marker, content)
-    }
-
-    fn fix_ordered_list(&self, line: &str) -> String {
-        let captures = ORDERED_LIST_PATTERN.captures(line).unwrap();
-        let indentation = &captures[1];
-        let marker_end = line[indentation.len()..].find('.').unwrap() + indentation.len() + 1;
-        let marker = &line[indentation.len()..marker_end];
-        let content = line[marker_end..].trim_start();
-        format!("{}{} {}", indentation, marker, content)
-    }
 }
 
 impl Rule for MD016NoMultipleSpaceAfterListMarker {
@@ -69,38 +38,29 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
         }
 
         let mut warnings = Vec::new();
-        let mut in_code_block = false;
+        let lines: Vec<&str> = content.lines().collect();
 
-        for (line_num, line) in content.lines().enumerate() {
-            if CODE_BLOCK_PATTERN.is_match(line) {
-                in_code_block = !in_code_block;
+        for (line_num, line) in lines.iter().enumerate() {
+            // Skip processing if line is in a code block
+            if CodeBlockUtils::is_in_code_block(content, line_num) {
                 continue;
             }
 
-            if !in_code_block {
-                if self.is_unordered_list_with_multiple_spaces(line) {
-                    warnings.push(LintWarning {
+            if ListUtils::is_list_item_with_multiple_spaces(line) {
+                warnings.push(LintWarning {
+                    line: line_num + 1,
+                    column: 1,
+                    message: if line.trim_start().starts_with(|c| c == '*' || c == '+' || c == '-') {
+                        "Multiple spaces after unordered list marker".to_string()
+                    } else {
+                        "Multiple spaces after ordered list marker".to_string()
+                    },
+                    fix: Some(Fix {
                         line: line_num + 1,
                         column: 1,
-                        message: "Multiple spaces after unordered list marker".to_string(),
-                        fix: Some(Fix {
-                            line: line_num + 1,
-                            column: 1,
-                            replacement: self.fix_unordered_list(line),
-                        }),
-                    });
-                } else if self.is_ordered_list_with_multiple_spaces(line) {
-                    warnings.push(LintWarning {
-                        line: line_num + 1,
-                        column: 1,
-                        message: "Multiple spaces after ordered list marker".to_string(),
-                        fix: Some(Fix {
-                            line: line_num + 1,
-                            column: 1,
-                            replacement: self.fix_ordered_list(line),
-                        }),
-                    });
-                }
+                        replacement: ListUtils::fix_list_item_with_multiple_spaces(line),
+                    }),
+                });
             }
         }
 
@@ -113,28 +73,39 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
         }
 
         let mut result = String::new();
+        let lines: Vec<&str> = content.lines().collect();
         let mut in_code_block = false;
 
-        for line in content.lines() {
-            if CODE_BLOCK_PATTERN.is_match(line) {
+        for (i, line) in lines.iter().enumerate() {
+            // Track code blocks
+            if CodeBlockUtils::is_code_block_delimiter(line) {
                 in_code_block = !in_code_block;
                 result.push_str(line);
-            } else if !in_code_block {
-                if self.is_unordered_list_with_multiple_spaces(line) {
-                    result.push_str(&self.fix_unordered_list(line));
-                } else if self.is_ordered_list_with_multiple_spaces(line) {
-                    result.push_str(&self.fix_ordered_list(line));
+                if i < lines.len() - 1 {
+                    result.push('\n');
+                }
+                continue;
+            }
+            
+            // Skip processing if line is in a code block
+            if in_code_block {
+                result.push_str(line);
+            } else {
+                // Check for list items with multiple spaces
+                if ListUtils::is_list_item_with_multiple_spaces(line) {
+                    result.push_str(&ListUtils::fix_list_item_with_multiple_spaces(line));
                 } else {
                     result.push_str(line);
                 }
-            } else {
-                result.push_str(line);
             }
-            result.push('\n');
+            
+            if i < lines.len() - 1 {
+                result.push('\n');
+            }
         }
 
-        // Remove trailing newline if the original content didn't have one
-        if !content.ends_with('\n') {
+        // Remove trailing newline if original didn't have one
+        if !content.ends_with('\n') && result.ends_with('\n') {
             result.pop();
         }
 

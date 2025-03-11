@@ -190,37 +190,6 @@ impl Rule for MD037SpacesAroundEmphasis {
     }
 }
 
-// Helper function to check if a character is part of a valid emphasis marker
-fn is_part_of_valid_emphasis(line: &str, pos: usize) -> bool {
-    // Check if the position is within bounds
-    if pos >= line.len() {
-        return false;
-    }
-    
-    // Check if the character at this position is an emphasis marker
-    let ch = line.chars().nth(pos).unwrap();
-    if ch != '*' && ch != '_' {
-        return false;
-    }
-    
-    // Check for double marker
-    let is_double = pos + 1 < line.len() && 
-                    line.chars().nth(pos + 1).unwrap() == ch;
-    
-    // Check if there's a matching closing marker
-    let marker = if is_double { 
-        format!("{}{}", ch, ch) 
-    } else { 
-        ch.to_string() 
-    };
-    
-    let marker_len = marker.len();
-    let text_after = &line[pos + marker_len..];
-    
-    // Look for the closing marker
-    text_after.contains(&marker)
-}
-
 // Check for spaces inside emphasis markers with enhanced handling
 fn check_emphasis_patterns(line: &str, line_num: usize, original_line: &str, warnings: &mut Vec<LintWarning>) {
     // Skip if this is a list marker rather than emphasis
@@ -248,9 +217,6 @@ fn check_emphasis_patterns(line: &str, line_num: usize, original_line: &str, war
         return;
     }
     
-    // Check for unbalanced emphasis markers first (potential errors)
-    check_unbalanced_emphasis(line, line_num, warnings);
-    
     // Skip valid emphasis at the start of a line
     if VALID_START_EMPHASIS.is_match(line) {
         // Still check the rest of the line for emphasis issues
@@ -269,61 +235,6 @@ fn check_emphasis_patterns(line: &str, line_num: usize, original_line: &str, war
     check_emphasis_with_pattern(line, &DOUBLE_ASTERISK_EMPHASIS, "**", line_num, original_line, warnings);
     check_emphasis_with_pattern(line, &UNDERSCORE_EMPHASIS, "_", line_num, original_line, warnings);
     check_emphasis_with_pattern(line, &DOUBLE_UNDERSCORE_EMPHASIS, "__", line_num, original_line, warnings);
-}
-
-// Check for potentially unbalanced emphasis markers
-fn check_unbalanced_emphasis(line: &str, line_num: usize, warnings: &mut Vec<LintWarning>) {
-    // Check if this is a list item (skip analysis for list markers)
-    if LIST_MARKER.is_match(line) {
-        return;
-    }
-    
-    // Skip lines where markers are inside backticks, indicating code
-    if line.contains("`*`") || line.contains("`_`") || line.contains("`**`") || line.contains("`__`") {
-        return;
-    }
-    
-    // Helper function to check a specific pattern for unbalanced markers
-    fn check_pattern(line: &str, line_num: usize, pattern: &Regex, markers: &str, warnings: &mut Vec<LintWarning>) {
-        for cap in pattern.captures_iter(line) {
-            if let Some(m) = cap.get(0) {
-                // Skip if this is part of a valid emphasis construction
-                if is_part_of_valid_emphasis(line, m.start()) {
-                    continue;
-                }
-                
-                // Check for the special case in documentation files
-                if line.starts_with('*') && line.trim_start().starts_with('*') && markers == "*" {
-                    // This might be a list item with emphasis
-                    if line.contains("**") {
-                        // Check for "* *Item**: `value`" pattern
-                        if line.contains("`: ") || line.contains("`:") {
-                            warnings.push(LintWarning {
-                                line: line_num,
-                                column: m.start() + 1,
-                                message: format!("Potentially malformed emphasis in documentation: {}", m.as_str()),
-                                fix: None, // No automatic fix for this complex case
-                            });
-                        }
-                    }
-                    continue;
-                }
-                
-                warnings.push(LintWarning {
-                    line: line_num,
-                    column: m.start() + 1,
-                    message: format!("Potentially unbalanced {} markers", markers),
-                    fix: None, // No automatic fix for unbalanced markers
-                });
-            }
-        }
-    }
-    
-    // Check for unbalanced markers of different types
-    check_pattern(line, line_num, &UNBALANCED_ASTERISK, "*", warnings);
-    check_pattern(line, line_num, &UNBALANCED_DOUBLE_ASTERISK, "**", warnings);
-    check_pattern(line, line_num, &UNBALANCED_UNDERSCORE, "_", warnings);
-    check_pattern(line, line_num, &UNBALANCED_DOUBLE_UNDERSCORE, "__", warnings);
 }
 
 // Check a specific emphasis pattern and add warnings

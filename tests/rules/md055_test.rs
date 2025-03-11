@@ -145,7 +145,7 @@ Header 1 | Header 2
     "#;
     
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 2);  // Two rows need fixes
+    assert_eq!(result.len(), 3);  // Three rows need fixes
 }
 
 #[test]

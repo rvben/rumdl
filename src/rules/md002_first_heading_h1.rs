@@ -159,19 +159,12 @@ impl Rule for MD002FirstHeadingH1 {
                         }
                     },
                     HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
-                        // Add the heading text line
-                        result.push(lines[line_num].to_string());
-                        
-                        // Replace the underline with the correct level
-                        let indentation = lines[line_num + 1].len() - lines[line_num + 1].trim_start().len();
+                        // For Setext headings, convert to ATX style with the correct level
+                        let indentation = lines[line_num].len() - lines[line_num].trim_start().len();
                         let indent_str = " ".repeat(indentation);
+                        let hashes = "#".repeat(self.level);
                         
-                        // Preserve the original underline length
-                        let original_underline_length = lines[line_num + 1].trim().len();
-                        let underline_char = if self.level == 1 { '=' } else { '-' };
-                        let underline = underline_char.to_string().repeat(original_underline_length);
-                        
-                        result.push(format!("{}{}", indent_str, underline));
+                        result.push(format!("{}{} {}", indent_str, hashes, heading.text));
                         
                         // Skip the original underline
                         line_num += 1;

@@ -28,18 +28,9 @@ impl MD008ULStyle {
     fn get_list_marker(line: &str) -> Option<char> {
         let trimmed = line.trim_start();
         
-        // Check for bold text markers (**) or emphasis markers (*) that aren't list markers
-        if trimmed.starts_with("**") || 
-           (trimmed.starts_with('*') && trimmed.len() > 1 && !trimmed.starts_with("* ")) {
+        // Skip empty lines
+        if trimmed.is_empty() {
             return None;
-        }
-        
-        // Check for documentation style patterns like "* *Rule Type**:" that aren't list markers
-        if trimmed.starts_with("* *") || trimmed.starts_with("* **") {
-            // Check if this is a documentation metadata pattern
-            if trimmed.contains("**:") || trimmed.contains("*:") {
-                return None;
-            }
         }
         
         // Check for actual list markers
@@ -92,28 +83,28 @@ impl Rule for MD008ULStyle {
                 continue;
             }
             
-            if let Some(marker) = Self::get_list_marker(line) {
-                if marker != target_style {
+            if let Some(_marker) = Self::get_list_marker(line) {
+                if _marker != target_style {
                     let message = if self.use_consistent {
                         format!(
                             "Unordered list item marker '{}' should be '{}' to match first marker style",
-                            marker, target_style
+                            _marker, target_style
                         )
                     } else {
                         format!(
                             "Unordered list item marker '{}' should be '{}' (configured style)",
-                            marker, target_style
+                            _marker, target_style
                         )
                     };
                     
                     warnings.push(LintWarning {
                         message,
                         line: line_num + 1,
-                        column: line.find(marker).unwrap() + 1,
+                        column: line.find(_marker).unwrap() + 1,
                         fix: Some(Fix {
                             line: line_num + 1,
-                            column: line.find(marker).unwrap() + 1,
-                            replacement: line.replacen(marker, &target_style.to_string(), 1),
+                            column: line.find(_marker).unwrap() + 1,
+                            replacement: line.replacen(_marker, &target_style.to_string(), 1),
                         }),
                     });
                 }
@@ -140,9 +131,9 @@ impl Rule for MD008ULStyle {
             // Skip modifying front matter and code blocks
             if FrontMatterUtils::is_in_front_matter(&content, i) || HeadingUtils::is_in_code_block(&content, i) {
                 result.push_str(line);
-            } else if let Some(marker) = Self::get_list_marker(line) {
-                if marker != target_style {
-                    result.push_str(&line.replacen(marker, &target_style.to_string(), 1));
+            } else if let Some(_marker) = Self::get_list_marker(line) {
+                if _marker != target_style {
+                    result.push_str(&line.replacen(_marker, &target_style.to_string(), 1));
                 } else {
                     result.push_str(line);
                 }

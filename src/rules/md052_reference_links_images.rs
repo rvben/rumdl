@@ -11,6 +11,9 @@ lazy_static! {
     static ref REF_LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\[([^\]]*)\]").unwrap();
     static ref REF_IMAGE_REGEX: Regex = Regex::new(r"!\[([^\]]+)\]\[([^\]]*)\]").unwrap();
     
+    // Pattern for shortcut reference links [reference]
+    static ref SHORTCUT_REF_REGEX: Regex = Regex::new(r"\[([^\]]+)\]").unwrap();
+    
     // Pattern to match inline links and images (to exclude them)
     static ref INLINE_LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
     static ref INLINE_IMAGE_REGEX: Regex = Regex::new(r"!\[([^\]]+)\]\(([^)]+)\)").unwrap();
@@ -159,6 +162,53 @@ impl MD052ReferenceLinkImages {
                                 undefined.push((line_num + 1, match_start, ref_text));
                                 reported_refs.insert(key, true);
                             }
+                        }
+                    }
+                }
+            }
+            
+            // Check for shortcut reference links [reference]
+            for cap in SHORTCUT_REF_REGEX.captures_iter(line) {
+                let full_match = cap.get(0).unwrap();
+                let match_start = full_match.start();
+                let match_end = full_match.end();
+                
+                // Skip if this match overlaps with an inline element
+                if is_position_overlapping(match_start, match_end, &inline_elements) {
+                    continue;
+                }
+                
+                // Check if this is followed by a [ or ( which would make it part of a reference or inline link
+                if match_end < line.len() {
+                    let next_char = line[match_end..].chars().next();
+                    if let Some(c) = next_char {
+                        if c == '[' || c == '(' {
+                            continue;
+                        }
+                    }
+                }
+                
+                // Check if this is preceded by a ! which would make it an image
+                if match_start > 0 {
+                    let prev_char = line[..match_start].chars().last();
+                    if let Some(c) = prev_char {
+                        if c == '!' {
+                            continue;
+                        }
+                    }
+                }
+                
+                // Extract the reference
+                if let Some(ref_match) = cap.get(1) {
+                    let ref_text = ref_match.as_str();
+                    let lowercase_ref = ref_text.to_lowercase();
+                    
+                    if !references.contains(&lowercase_ref) {
+                        // Check if we've already reported this reference on this line
+                        let key = format!("{}:{}", line_num + 1, lowercase_ref);
+                        if !reported_refs.contains_key(&key) {
+                            undefined.push((line_num + 1, match_start, ref_text));
+                            reported_refs.insert(key, true);
                         }
                     }
                 }

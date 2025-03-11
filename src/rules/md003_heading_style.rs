@@ -1,6 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule};
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
-use crate::rules::front_matter_utils::FrontMatterUtils;
 
 #[derive(Debug)]
 pub struct MD003HeadingStyle {
@@ -36,12 +35,6 @@ impl Rule for MD003HeadingStyle {
         let mut i = 0;
 
         while i < lines.len() {
-            // Skip if we're in front matter
-            if FrontMatterUtils::is_in_front_matter(content, i) {
-                i += 1;
-                continue;
-            }
-            
             let remaining = &lines[i..].join("\n");
             if let Some(heading) = HeadingUtils::parse_heading(remaining, 0) {
                 // For setext style, only check headings that could be setext (level 1-2)
@@ -110,6 +103,13 @@ impl Rule for MD003HeadingStyle {
                 continue;
             }
             
+            // Preserve blank lines
+            if line.trim().is_empty() {
+                fixed_lines.push(line.to_string());
+                i += 1;
+                continue;
+            }
+            
             let indentation = HeadingUtils::get_indentation(line);
 
             // Check if current line is a heading
@@ -121,22 +121,11 @@ impl Rule for MD003HeadingStyle {
                     let underline_char = if heading.level == 1 { '=' } else { '-' };
                     let underline = underline_char.to_string().repeat(text.chars().count().max(3));
                     
-                    // Add blank line before heading if needed (except for first heading)
-                    if fixed_lines.len() > 0 && !fixed_lines.last().unwrap().is_empty() {
-                        fixed_lines.push("".to_string());
-                    }
-                    
                     // Add the heading text with indentation
                     fixed_lines.push(format!("{}{}", " ".repeat(indentation), text));
                     
                     // Add the underline with same indentation
                     fixed_lines.push(format!("{}{}", " ".repeat(indentation), underline));
-                    
-                    // Add blank line after heading if the next line is not empty
-                    // and not the end of the content
-                    if i + 1 < lines.len() && !lines[i+1].trim().is_empty() {
-                        fixed_lines.push("".to_string());
-                    }
                     
                     // Skip the underline for source setext headings
                     if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {

@@ -1,13 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
-use crate::rules::heading_utils::HeadingUtils;
 use crate::rules::front_matter_utils::FrontMatterUtils;
-use regex::Regex;
-use lazy_static::lazy_static;
-
-lazy_static! {
-    static ref UNORDERED_LIST_PATTERN: Regex = Regex::new(r"^(\s*)([*+-])([^\s])").unwrap();
-    static ref ORDERED_LIST_PATTERN: Regex = Regex::new(r"^(\s*)(\d+\.)([^\s])").unwrap();
-}
+use crate::rules::code_block_utils::CodeBlockUtils;
+use crate::rules::list_utils::ListUtils;
 
 #[derive(Debug)]
 pub struct MD015NoMissingSpaceAfterListMarker {
@@ -27,77 +21,6 @@ impl MD015NoMissingSpaceAfterListMarker {
 
     pub fn with_require_space(require_space: bool) -> Self {
         Self { require_space }
-    }
-
-    fn is_unordered_list_without_space(&self, line: &str) -> bool {
-        // Skip bold text patterns
-        if line.trim_start().starts_with("**") {
-            return false;
-        }
-        
-        // Skip documentation metadata patterns
-        if line.trim_start().starts_with("**") && line.contains("**:") {
-            return false;
-        }
-        
-        // Skip potential Setext heading underlines
-        let trimmed = line.trim();
-        if !trimmed.is_empty() && (trimmed.chars().all(|c| c == '-') || trimmed.chars().all(|c| c == '=')) {
-            return false;
-        }
-        
-        if line.trim_start().starts_with("*") && line.trim_start().contains(" ") {
-            let content_after_marker = line.trim_start()[1..].trim_start();
-            if content_after_marker.contains('*') && !content_after_marker.starts_with("*") {
-                return false;
-            }
-        }
-        
-        UNORDERED_LIST_PATTERN.is_match(line)
-    }
-
-    fn is_ordered_list_without_space(&self, line: &str) -> bool {
-        ORDERED_LIST_PATTERN.is_match(line)
-    }
-
-    fn fix_unordered_list(&self, line: &str) -> String {
-        if let Some(captures) = UNORDERED_LIST_PATTERN.captures(line) {
-            let indentation = &captures[1];
-            let marker = &captures[2];
-            let first_char = &captures[3];
-            
-            // Get the rest of the content after the first character
-            let content_start_pos = indentation.len() + marker.len() + 1;
-            let rest_of_content = if content_start_pos < line.len() {
-                &line[content_start_pos..]
-            } else {
-                ""
-            };
-            
-            format!("{}{} {}{}", indentation, marker, first_char, rest_of_content)
-        } else {
-            line.to_string()
-        }
-    }
-
-    fn fix_ordered_list(&self, line: &str) -> String {
-        if let Some(captures) = ORDERED_LIST_PATTERN.captures(line) {
-            let indentation = &captures[1];
-            let marker = &captures[2];
-            let first_char = &captures[3];
-            
-            // Get the rest of the content after the first character
-            let content_start_pos = indentation.len() + marker.len() + 1;
-            let rest_of_content = if content_start_pos < line.len() {
-                &line[content_start_pos..]
-            } else {
-                ""
-            };
-            
-            format!("{}{} {}{}", indentation, marker, first_char, rest_of_content)
-        } else {
-            line.to_string()
-        }
     }
 }
 
@@ -120,30 +43,23 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
         for (line_num, line) in lines.iter().enumerate() {
             // Skip processing if line is in a code block or front matter
-            if HeadingUtils::is_in_code_block(content, line_num) || FrontMatterUtils::is_in_front_matter(content, line_num) {
+            if CodeBlockUtils::is_in_code_block(content, line_num) || FrontMatterUtils::is_in_front_matter(content, line_num) {
                 continue;
             }
 
-            if self.is_unordered_list_without_space(line) {
+            if ListUtils::is_list_item_without_space(line) {
                 warnings.push(LintWarning {
                     line: line_num + 1,
                     column: 1,
-                    message: "Missing space after unordered list marker".to_string(),
+                    message: if line.trim_start().starts_with(|c| c == '*' || c == '+' || c == '-') {
+                        "Missing space after unordered list marker".to_string()
+                    } else {
+                        "Missing space after ordered list marker".to_string()
+                    },
                     fix: Some(Fix {
                         line: line_num + 1,
                         column: 1,
-                        replacement: self.fix_unordered_list(line),
-                    }),
-                });
-            } else if self.is_ordered_list_without_space(line) {
-                warnings.push(LintWarning {
-                    line: line_num + 1,
-                    column: 1,
-                    message: "Missing space after ordered list marker".to_string(),
-                    fix: Some(Fix {
-                        line: line_num + 1,
-                        column: 1,
-                        replacement: self.fix_ordered_list(line),
+                        replacement: ListUtils::fix_list_item_without_space(line),
                     }),
                 });
             }
@@ -161,11 +77,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
         let mut result = String::new();
         let lines: Vec<&str> = content.lines().collect();
         let mut in_front_matter = false;
-
-        // Special case for the test_preserve_indentation test
-        if content == "  *Item 1\n    *Item 2\n      *Item 3" {
-            return Ok("  * Item 1\n    * Item 2\n      * Item 3".to_string());
-        }
+        let mut in_code_block = false;
 
         for (i, line) in lines.iter().enumerate() {
             // Handle front matter
@@ -185,15 +97,26 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
                 continue;
             }
             
+            // Track code blocks
+            if CodeBlockUtils::is_code_block_delimiter(line) {
+                in_code_block = !in_code_block;
+                result.push_str(line);
+                if i < lines.len() - 1 {
+                    result.push('\n');
+                }
+                continue;
+            }
+            
             // Skip processing if line is in a code block
-            if HeadingUtils::is_in_code_block(&content, i) {
+            if in_code_block {
                 result.push_str(line);
-            } else if self.is_unordered_list_without_space(line) {
-                result.push_str(&self.fix_unordered_list(line));
-            } else if self.is_ordered_list_without_space(line) {
-                result.push_str(&self.fix_ordered_list(line));
             } else {
-                result.push_str(line);
+                // Check for list items without space
+                if ListUtils::is_list_item_without_space(line) {
+                    result.push_str(&ListUtils::fix_list_item_without_space(line));
+                } else {
+                    result.push_str(line);
+                }
             }
             
             if i < lines.len() - 1 {

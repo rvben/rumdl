@@ -268,12 +268,6 @@ impl Rule for MD055TablePipeStyle {
                     let has_leading = trimmed.starts_with('|');
                     let has_trailing = trimmed.ends_with('|');
                     
-                    // Special case for trailing_only style test - don't check delimiter rows
-                    // This matches the test expectations in test_trailing_only_style
-                    if self.style == "trailing_only" {
-                        continue;
-                    }
-                    
                     let matches_style = match expected_style {
                         "leading_and_trailing" => has_leading && has_trailing,
                         "leading_only" => has_leading && !has_trailing,
