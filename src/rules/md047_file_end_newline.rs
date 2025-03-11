@@ -21,14 +21,23 @@ impl Rule for MD047FileEndNewline {
             let has_multiple_newlines = content.ends_with("\n\n");
 
             if !has_trailing_newline || has_multiple_newlines {
+                let last_line = lines.len();
+                let last_column = lines.last().map_or(1, |line| line.len() + 1);
+                
                 warnings.push(LintWarning {
                     message: "File should end with a single newline character".to_string(),
-                    line: lines.len(),
-                    column: lines.last().map_or(1, |line| line.len() + 1),
+                    line: last_line,
+                    column: last_column,
                     fix: Some(Fix {
-                        line: lines.len(),
-                        column: lines.last().map_or(1, |line| line.len() + 1),
-                        replacement: "\n".to_string(),
+                        line: last_line,
+                        column: last_column,
+                        replacement: if has_trailing_newline {
+                            // If there are multiple newlines, trim them and add a single one
+                            content.trim_end().to_string() + "\n"
+                        } else {
+                            // If there's no newline, add one to the last line
+                            lines.last().unwrap_or(&"").to_string() + "\n"
+                        },
                     }),
                 });
             }

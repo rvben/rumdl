@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 
 #[derive(Debug, Default)]
 pub struct MD031BlanksAroundFences;
@@ -35,7 +35,11 @@ impl Rule for MD031BlanksAroundFences {
                         line: i + 1,
                         column: 1,
                         message: "No blank line before fenced code block".to_string(),
-                        fix: None,
+                        fix: Some(Fix {
+                            line: i + 1,
+                            column: 1,
+                            replacement: format!("\n{}", lines[i]),
+                        }),
                     });
                 }
                 
@@ -54,7 +58,11 @@ impl Rule for MD031BlanksAroundFences {
                             line: i + 1,
                             column: 1,
                             message: "No blank line after fenced code block".to_string(),
-                            fix: None,
+                            fix: Some(Fix {
+                                line: i + 1,
+                                column: lines[i].len() + 1,
+                                replacement: format!("{}\n", lines[i]),
+                            }),
                         });
                     }
                 }

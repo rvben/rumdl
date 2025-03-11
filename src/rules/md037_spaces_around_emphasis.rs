@@ -278,6 +278,11 @@ fn check_unbalanced_emphasis(line: &str, line_num: usize, warnings: &mut Vec<Lin
         return;
     }
     
+    // Skip lines where markers are inside backticks, indicating code
+    if line.contains("`*`") || line.contains("`_`") || line.contains("`**`") || line.contains("`__`") {
+        return;
+    }
+    
     // Helper function to check a specific pattern for unbalanced markers
     fn check_pattern(line: &str, line_num: usize, pattern: &Regex, markers: &str, warnings: &mut Vec<LintWarning>) {
         for cap in pattern.captures_iter(line) {
