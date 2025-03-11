@@ -4,6 +4,9 @@ pub mod front_matter_utils;
 pub mod code_block_utils;
 pub mod list_utils;
 
+// Add the new module
+pub mod blockquote_utils;
+
 mod md001_heading_increment;
 mod md002_first_heading_h1;
 mod md003_heading_style;

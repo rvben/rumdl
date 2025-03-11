@@ -1,10 +1,19 @@
 use regex::Regex;
 use lazy_static::lazy_static;
+use std::collections::HashMap;
 
 lazy_static! {
     // Standard front matter delimiter (three dashes)
     static ref STANDARD_FRONT_MATTER_START: Regex = Regex::new(r"^---\s*$").unwrap();
     static ref STANDARD_FRONT_MATTER_END: Regex = Regex::new(r"^---\s*$").unwrap();
+    
+    // TOML front matter delimiter (three plus signs)
+    static ref TOML_FRONT_MATTER_START: Regex = Regex::new(r"^\+\+\+\s*$").unwrap();
+    static ref TOML_FRONT_MATTER_END: Regex = Regex::new(r"^\+\+\+\s*$").unwrap();
+    
+    // JSON front matter delimiter (curly braces)
+    static ref JSON_FRONT_MATTER_START: Regex = Regex::new(r"^\{\s*$").unwrap();
+    static ref JSON_FRONT_MATTER_END: Regex = Regex::new(r"^\}\s*$").unwrap();
     
     // Common malformed front matter (dash space dash dash)
     static ref MALFORMED_FRONT_MATTER_START1: Regex = Regex::new(r"^- --\s*$").unwrap();
@@ -13,6 +22,24 @@ lazy_static! {
     // Alternate malformed front matter (dash dash space dash)
     static ref MALFORMED_FRONT_MATTER_START2: Regex = Regex::new(r"^-- -\s*$").unwrap();
     static ref MALFORMED_FRONT_MATTER_END2: Regex = Regex::new(r"^-- -\s*$").unwrap();
+    
+    // Front matter field pattern
+    static ref FRONT_MATTER_FIELD: Regex = Regex::new(r"^([^:]+):\s*(.*)$").unwrap();
+}
+
+/// Represents the type of front matter found in a document
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum FrontMatterType {
+    /// YAML front matter (---) 
+    Yaml,
+    /// TOML front matter (+++)
+    Toml,
+    /// JSON front matter ({})
+    Json,
+    /// Malformed front matter
+    Malformed,
+    /// No front matter
+    None,
 }
 
 /// Utility functions for detecting and handling front matter in Markdown documents
@@ -27,6 +54,8 @@ impl FrontMatterUtils {
         }
         
         let mut in_standard_front_matter = false;
+        let mut in_toml_front_matter = false;
+        let mut in_json_front_matter = false;
         let mut in_malformed_front_matter1 = false;
         let mut in_malformed_front_matter2 = false;
         
@@ -35,11 +64,25 @@ impl FrontMatterUtils {
                 break;
             }
             
-            // Standard front matter handling
+            // Standard YAML front matter handling
             if i == 0 && STANDARD_FRONT_MATTER_START.is_match(line) {
                 in_standard_front_matter = true;
             } else if STANDARD_FRONT_MATTER_END.is_match(line) && in_standard_front_matter && i > 0 {
                 in_standard_front_matter = false;
+            }
+            
+            // TOML front matter handling
+            else if i == 0 && TOML_FRONT_MATTER_START.is_match(line) {
+                in_toml_front_matter = true;
+            } else if TOML_FRONT_MATTER_END.is_match(line) && in_toml_front_matter && i > 0 {
+                in_toml_front_matter = false;
+            }
+            
+            // JSON front matter handling
+            else if i == 0 && JSON_FRONT_MATTER_START.is_match(line) {
+                in_json_front_matter = true;
+            } else if JSON_FRONT_MATTER_END.is_match(line) && in_json_front_matter && i > 0 {
+                in_json_front_matter = false;
             }
             
             // Malformed front matter type 1 (- --)
@@ -58,7 +101,8 @@ impl FrontMatterUtils {
         }
         
         // Return true if we're in any type of front matter
-        in_standard_front_matter || in_malformed_front_matter1 || in_malformed_front_matter2
+        in_standard_front_matter || in_toml_front_matter || in_json_front_matter || 
+        in_malformed_front_matter1 || in_malformed_front_matter2
     }
     
     /// Check if a content contains front matter with a specific field
@@ -68,70 +112,218 @@ impl FrontMatterUtils {
             return false;
         }
         
-        // Check for standard front matter
-        if STANDARD_FRONT_MATTER_START.is_match(lines[0]) {
-            let mut found_end = false;
-            
-            for i in 1..lines.len() {
-                if STANDARD_FRONT_MATTER_END.is_match(lines[i]) {
-                    found_end = true;
-                    break;
-                }
-                
-                if lines[i].trim().starts_with(field_prefix) {
-                    return true;
-                }
-            }
-            
-            // Only count as front matter if it has both start and end markers
-            if !found_end {
-                return false;
-            }
+        let front_matter_type = Self::detect_front_matter_type(content);
+        if front_matter_type == FrontMatterType::None {
+            return false;
         }
         
-        // Check for malformed front matter type 1 (- --)
-        else if MALFORMED_FRONT_MATTER_START1.is_match(lines[0]) {
-            let mut found_end = false;
-            
-            for i in 1..lines.len() {
-                if MALFORMED_FRONT_MATTER_END1.is_match(lines[i]) {
-                    found_end = true;
-                    break;
-                }
-                
-                if lines[i].trim().starts_with(field_prefix) {
-                    return true;
-                }
-            }
-            
-            // Only count as front matter if it has both start and end markers
-            if !found_end {
-                return false;
-            }
-        }
-        
-        // Check for malformed front matter type 2 (-- -)
-        else if MALFORMED_FRONT_MATTER_START2.is_match(lines[0]) {
-            let mut found_end = false;
-            
-            for i in 1..lines.len() {
-                if MALFORMED_FRONT_MATTER_END2.is_match(lines[i]) {
-                    found_end = true;
-                    break;
-                }
-                
-                if lines[i].trim().starts_with(field_prefix) {
-                    return true;
-                }
-            }
-            
-            // Only count as front matter if it has both start and end markers
-            if !found_end {
-                return false;
+        let front_matter = Self::extract_front_matter(content);
+        for line in front_matter {
+            if line.trim().starts_with(field_prefix) {
+                return true;
             }
         }
         
         false
+    }
+    
+    /// Get the value of a specific front matter field
+    pub fn get_front_matter_field_value<'a>(content: &'a str, field_name: &str) -> Option<&'a str> {
+        let lines: Vec<&'a str> = content.lines().collect();
+        if lines.len() < 3 {
+            return None;
+        }
+        
+        let front_matter_type = Self::detect_front_matter_type(content);
+        if front_matter_type == FrontMatterType::None {
+            return None;
+        }
+        
+        let front_matter = Self::extract_front_matter(content);
+        for line in front_matter {
+            if let Some(captures) = FRONT_MATTER_FIELD.captures(line) {
+                let key = captures.get(1).unwrap().as_str().trim();
+                if key == field_name {
+                    return Some(captures.get(2).unwrap().as_str().trim());
+                }
+            }
+        }
+        
+        None
+    }
+    
+    /// Extract all front matter fields as a HashMap
+    pub fn extract_front_matter_fields(content: &str) -> HashMap<String, String> {
+        let mut fields = HashMap::new();
+        
+        let front_matter_type = Self::detect_front_matter_type(content);
+        if front_matter_type == FrontMatterType::None {
+            return fields;
+        }
+        
+        let front_matter = Self::extract_front_matter(content);
+        for line in front_matter {
+            if let Some(captures) = FRONT_MATTER_FIELD.captures(line) {
+                let key = captures.get(1).unwrap().as_str().trim().to_string();
+                let value = captures.get(2).unwrap().as_str().trim().to_string();
+                fields.insert(key, value);
+            }
+        }
+        
+        fields
+    }
+    
+    /// Extract the front matter content as a vector of lines
+    pub fn extract_front_matter<'a>(content: &'a str) -> Vec<&'a str> {
+        let lines: Vec<&'a str> = content.lines().collect();
+        if lines.len() < 3 {
+            return Vec::new();
+        }
+        
+        let front_matter_type = Self::detect_front_matter_type(content);
+        if front_matter_type == FrontMatterType::None {
+            return Vec::new();
+        }
+        
+        let mut front_matter = Vec::new();
+        let mut in_front_matter = false;
+        
+        for (i, line) in lines.iter().enumerate() {
+            match front_matter_type {
+                FrontMatterType::Yaml => {
+                    if i == 0 && STANDARD_FRONT_MATTER_START.is_match(line) {
+                        in_front_matter = true;
+                        continue;
+                    } else if STANDARD_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
+                        break;
+                    }
+                },
+                FrontMatterType::Toml => {
+                    if i == 0 && TOML_FRONT_MATTER_START.is_match(line) {
+                        in_front_matter = true;
+                        continue;
+                    } else if TOML_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
+                        break;
+                    }
+                },
+                FrontMatterType::Json => {
+                    if i == 0 && JSON_FRONT_MATTER_START.is_match(line) {
+                        in_front_matter = true;
+                        continue;
+                    } else if JSON_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
+                        break;
+                    }
+                },
+                FrontMatterType::Malformed => {
+                    if i == 0 && (MALFORMED_FRONT_MATTER_START1.is_match(line) || MALFORMED_FRONT_MATTER_START2.is_match(line)) {
+                        in_front_matter = true;
+                        continue;
+                    } else if (MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line)) && in_front_matter && i > 0 {
+                        break;
+                    }
+                },
+                FrontMatterType::None => break,
+            }
+            
+            if in_front_matter {
+                front_matter.push(*line);
+            }
+        }
+        
+        front_matter
+    }
+    
+    /// Detect the type of front matter in the content
+    pub fn detect_front_matter_type(content: &str) -> FrontMatterType {
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() {
+            return FrontMatterType::None;
+        }
+        
+        let first_line = lines[0];
+        
+        if STANDARD_FRONT_MATTER_START.is_match(first_line) {
+            // Check if there's a closing marker
+            for line in lines.iter().skip(1) {
+                if STANDARD_FRONT_MATTER_END.is_match(line) {
+                    return FrontMatterType::Yaml;
+                }
+            }
+        } else if TOML_FRONT_MATTER_START.is_match(first_line) {
+            // Check if there's a closing marker
+            for line in lines.iter().skip(1) {
+                if TOML_FRONT_MATTER_END.is_match(line) {
+                    return FrontMatterType::Toml;
+                }
+            }
+        } else if JSON_FRONT_MATTER_START.is_match(first_line) {
+            // Check if there's a closing marker
+            for line in lines.iter().skip(1) {
+                if JSON_FRONT_MATTER_END.is_match(line) {
+                    return FrontMatterType::Json;
+                }
+            }
+        } else if MALFORMED_FRONT_MATTER_START1.is_match(first_line) || MALFORMED_FRONT_MATTER_START2.is_match(first_line) {
+            // Check if there's a closing marker
+            for line in lines.iter().skip(1) {
+                if MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line) {
+                    return FrontMatterType::Malformed;
+                }
+            }
+        }
+        
+        FrontMatterType::None
+    }
+    
+    /// Get the line number where front matter ends (or 0 if no front matter)
+    pub fn get_front_matter_end_line(content: &str) -> usize {
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.len() < 3 {
+            return 0;
+        }
+        
+        let front_matter_type = Self::detect_front_matter_type(content);
+        if front_matter_type == FrontMatterType::None {
+            return 0;
+        }
+        
+        let mut in_front_matter = false;
+        
+        for (i, line) in lines.iter().enumerate() {
+            match front_matter_type {
+                FrontMatterType::Yaml => {
+                    if i == 0 && STANDARD_FRONT_MATTER_START.is_match(line) {
+                        in_front_matter = true;
+                    } else if STANDARD_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
+                        return i + 1;
+                    }
+                },
+                FrontMatterType::Toml => {
+                    if i == 0 && TOML_FRONT_MATTER_START.is_match(line) {
+                        in_front_matter = true;
+                    } else if TOML_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
+                        return i + 1;
+                    }
+                },
+                FrontMatterType::Json => {
+                    if i == 0 && JSON_FRONT_MATTER_START.is_match(line) {
+                        in_front_matter = true;
+                    } else if JSON_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
+                        return i + 1;
+                    }
+                },
+                FrontMatterType::Malformed => {
+                    if i == 0 && (MALFORMED_FRONT_MATTER_START1.is_match(line) || MALFORMED_FRONT_MATTER_START2.is_match(line)) {
+                        in_front_matter = true;
+                    } else if (MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line)) && in_front_matter && i > 0 {
+                        return i + 1;
+                    }
+                },
+                FrontMatterType::None => return 0,
+            }
+        }
+        
+        0
     }
     
     /// Fix malformed front matter

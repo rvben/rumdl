@@ -1,5 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
-use regex::Regex;
+use crate::rules::blockquote_utils::BlockquoteUtils;
 
 #[derive(Debug, Default)]
 pub struct MD027MultipleSpacesBlockquote;
@@ -10,54 +10,44 @@ impl Rule for MD027MultipleSpacesBlockquote {
     }
 
     fn description(&self) -> &'static str {
-        "Multiple spaces after blockquote symbol should be removed"
+        "Multiple spaces after blockquote symbol"
     }
 
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
-        let re = Regex::new(r"^(\s*>\s{2,})(.*)$").unwrap();
-
-        for (line_num, line) in content.lines().enumerate() {
-            if let Some(cap) = re.captures(line) {
-                let start = cap.get(1).unwrap().start();
-                let prefix = line[..start].to_string() + ">";
-                let text = cap[2].to_string();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        for (i, &line) in lines.iter().enumerate() {
+            if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::has_multiple_spaces_after_marker(line) {
                 warnings.push(LintWarning {
-                    line: line_num + 1,
-                    column: start + 1,
-                    message: "Multiple spaces found after blockquote symbol".to_string(),
+                    message: "Multiple spaces after blockquote symbol".to_string(),
+                    line: i + 1,
+                    column: 1,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: start + 1,
-                        replacement: format!("{} {}", prefix, text.trim_start()),
+                        line: i + 1,
+                        column: 1,
+                        replacement: BlockquoteUtils::fix_blockquote_spacing(line),
                     }),
                 });
             }
         }
-
+        
         Ok(warnings)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = String::new();
-        let re = Regex::new(r"^(\s*>\s{2,})(.*)$").unwrap();
-
-        for line in content.lines() {
-            if let Some(cap) = re.captures(line) {
-                let start = cap.get(1).unwrap().start();
-                let prefix = line[..start].to_string() + ">";
-                let text = cap[2].to_string();
-                result.push_str(&format!("{} {}\n", prefix, text.trim_start()));
+        let lines: Vec<&str> = content.lines().collect();
+        let mut result = Vec::with_capacity(lines.len());
+        
+        for line in lines {
+            if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::has_multiple_spaces_after_marker(line) {
+                result.push(BlockquoteUtils::fix_blockquote_spacing(line));
             } else {
-                result.push_str(line);
-                result.push('\n');
+                result.push(line.to_string());
             }
         }
-
-        if !content.ends_with('\n') {
-            result.pop();
-        }
-
-        Ok(result)
+        
+        // Preserve trailing newline if original content had one
+        Ok(result.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
     }
 } 
