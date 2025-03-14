@@ -450,29 +450,3 @@ fn restore_code_spans(mut content: String, code_spans: Vec<(String, String)>) ->
     }
     content
 }
-
-// Check all emphasis patterns for a line
-fn _check_all_emphasis_patterns(line: &str, line_num: usize, original_line: &str, warnings: &mut Vec<LintWarning>) {
-    // Check each type of emphasis pattern
-    if line.contains('*') {
-        let _timer = crate::profiling::ScopedTimer::new("MD037_check_asterisk");
-        _check_asterisk_emphasis(line, line_num, original_line, warnings);
-    }
-    
-    if line.contains('_') {
-        let _timer = crate::profiling::ScopedTimer::new("MD037_check_underscore");
-        _check_underscore_emphasis(line, line_num, original_line, warnings);
-    }
-}
-
-// Check asterisk emphasis patterns
-fn _check_asterisk_emphasis(line: &str, line_num: usize, original_line: &str, warnings: &mut Vec<LintWarning>) {
-    check_emphasis_with_pattern(line, &ASTERISK_EMPHASIS, "*", line_num, original_line, warnings);
-    check_emphasis_with_pattern(line, &DOUBLE_ASTERISK_EMPHASIS, "**", line_num, original_line, warnings);
-}
-
-// Check underscore emphasis patterns
-fn _check_underscore_emphasis(line: &str, line_num: usize, original_line: &str, warnings: &mut Vec<LintWarning>) {
-    check_emphasis_with_pattern(line, &UNDERSCORE_EMPHASIS, "_", line_num, original_line, warnings);
-    check_emphasis_with_pattern(line, &DOUBLE_UNDERSCORE_EMPHASIS, "__", line_num, original_line, warnings);
-}

@@ -1,6 +1,15 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
 use regex::Regex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    // Optimized regex patterns for heading detection
+    static ref ATX_HEADING_DETAILED: Regex = Regex::new(r"^(\s*)(#{1,6})(\s+)(.+?)(\s*)(#*)(\s*)$").unwrap();
+    static ref ATX_HEADING_SIMPLE: Regex = Regex::new(r"^\s*#{1,6}\s+.+$").unwrap();
+    static ref SETEXT_HEADING_UNDERLINE1: Regex = Regex::new(r"^=+\s*$").unwrap();
+    static ref SETEXT_HEADING_UNDERLINE2: Regex = Regex::new(r"^-+\s*$").unwrap();
+}
 
 #[derive(Debug)]
 pub struct MD026NoTrailingPunctuation {
@@ -20,6 +29,7 @@ impl MD026NoTrailingPunctuation {
         Self { punctuation }
     }
 
+    #[inline]
     fn has_trailing_punctuation(&self, text: &str) -> bool {
         if let Some(last_char) = text.trim_end().chars().last() {
             self.punctuation.contains(last_char)
@@ -28,6 +38,7 @@ impl MD026NoTrailingPunctuation {
         }
     }
 
+    #[inline]
     fn remove_trailing_punctuation(&self, text: &str) -> String {
         let mut result = text.trim_end().to_string();
         while let Some(last_char) = result.chars().last() {
@@ -42,9 +53,8 @@ impl MD026NoTrailingPunctuation {
     
     // Parse ATX style headings directly for trailing punctuation check
     fn parse_atx_heading(&self, line: &str) -> Option<(usize, String, HeadingStyle)> {
-        let re = Regex::new(r"^(\s*)(#{1,6})(\s+)(.+?)(\s*)(#*)(\s*)$").unwrap();
-        
-        if let Some(caps) = re.captures(line) {
+        // Try detailed pattern first
+        if let Some(caps) = ATX_HEADING_DETAILED.captures(line) {
             let _indent = caps.get(1).map_or("", |m| m.as_str()).len();
             let level = caps.get(2).map_or("", |m| m.as_str()).len();
             let text = caps.get(4).map_or("", |m| m.as_str()).to_string();
@@ -59,9 +69,8 @@ impl MD026NoTrailingPunctuation {
             return Some((level, text, style));
         }
         
-        // Simpler regex for basic headings without capturing groups
-        let simple_re = Regex::new(r"^\s*#{1,6}\s+.+$").unwrap();
-        if simple_re.is_match(line) {
+        // Fall back to simpler pattern if needed
+        if ATX_HEADING_SIMPLE.is_match(line) {
             let _indent = line.len() - line.trim_start().len();
             let trimmed = line.trim_start();
             let level = trimmed.chars().take_while(|c| *c == '#').count();
@@ -79,9 +88,9 @@ impl MD026NoTrailingPunctuation {
         if let Some(next) = next_line {
             let next_trimmed = next.trim();
             if !next_trimmed.is_empty() {
-                if next_trimmed.chars().all(|c| c == '=') {
+                if SETEXT_HEADING_UNDERLINE1.is_match(next_trimmed) {
                     return Some((1, line.trim().to_string(), HeadingStyle::Setext1));
-                } else if next_trimmed.chars().all(|c| c == '-') {
+                } else if SETEXT_HEADING_UNDERLINE2.is_match(next_trimmed) {
                     return Some((2, line.trim().to_string(), HeadingStyle::Setext2));
                 }
             }
@@ -100,51 +109,80 @@ impl Rule for MD026NoTrailingPunctuation {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _timer = crate::profiling::ScopedTimer::new("MD026_check");
+        
+        // Early returns for empty content
+        if content.is_empty() {
+            return Ok(vec![]);
+        }
+        
+        // Early return if no headings or punctuation characters exist
+        if !content.contains('#') && 
+           !content.contains('=') && 
+           !content.contains('-') && 
+           !self.punctuation.chars().any(|c| content.contains(c)) {
+            return Ok(vec![]);
+        }
+        
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         
         for (line_num, line) in lines.iter().enumerate() {
+            // Skip lines that definitely aren't headings
+            if !line.contains('#') && 
+               (line_num + 1 >= lines.len() || (!lines[line_num + 1].contains('=') && !lines[line_num + 1].contains('-'))) {
+                continue;
+            }
+            
             // Check for ATX headings
-            if let Some((level, text, style)) = self.parse_atx_heading(line) {
-                if self.has_trailing_punctuation(&text) {
-                    let indentation = HeadingUtils::get_indentation(line);
-                    let fixed_text = self.remove_trailing_punctuation(&text);
-                    let replacement = match style {
-                        HeadingStyle::AtxClosed => {
-                            // Preserve the trailing hashes
-                            let trailing_hashes = "#".repeat(level);
-                            format!("{}{} {} {}", 
+            if line.contains('#') {
+                if let Some((level, text, style)) = self.parse_atx_heading(line) {
+                    if self.has_trailing_punctuation(&text) {
+                        let indentation = HeadingUtils::get_indentation(line);
+                        let fixed_text = self.remove_trailing_punctuation(&text);
+                        let replacement = match style {
+                            HeadingStyle::AtxClosed => {
+                                // Preserve the trailing hashes
+                                let trailing_hashes = "#".repeat(level);
+                                format!("{}{} {} {}", 
+                                    " ".repeat(indentation),
+                                    "#".repeat(level),
+                                    fixed_text,
+                                    trailing_hashes
+                                )
+                            },
+                            _ => format!("{}{} {}", 
                                 " ".repeat(indentation),
                                 "#".repeat(level),
-                                fixed_text,
-                                trailing_hashes
-                            )
-                        },
-                        _ => format!("{}{} {}", 
-                            " ".repeat(indentation),
-                            "#".repeat(level),
-                            fixed_text
-                        ),
-                    };
-                    
-                    warnings.push(LintWarning {
-                        line: line_num + 1,
-                        column: indentation + 1,
-                        message: format!("Trailing punctuation in heading '{}'", text),
-                        fix: Some(Fix {
+                                fixed_text
+                            ),
+                        };
+                        
+                        warnings.push(LintWarning {
                             line: line_num + 1,
                             column: indentation + 1,
-                            replacement,
-                        }),
-                    });
+                            message: format!("Trailing punctuation in heading '{}'", text),
+                            fix: Some(Fix {
+                                line: line_num + 1,
+                                column: indentation + 1,
+                                replacement,
+                            }),
+                        });
+                    }
+                    continue;
                 }
-                continue;
             }
             
             // Check for setext headings
             if line_num + 1 < lines.len() {
-                let next_line = Some(lines[line_num + 1]);
-                if let Some((_level, text, _)) = self.is_setext_heading(line, next_line) {
+                let next_line = lines[line_num + 1];
+                
+                // Quick check for setext underline characters
+                if !next_line.contains('=') && !next_line.contains('-') {
+                    continue;
+                }
+                
+                if let Some((_level, text, _)) = self.is_setext_heading(line, Some(next_line)) {
                     if self.has_trailing_punctuation(&text) {
                         let indentation = HeadingUtils::get_indentation(line);
                         let fixed_text = self.remove_trailing_punctuation(&text);
@@ -168,6 +206,8 @@ impl Rule for MD026NoTrailingPunctuation {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _timer = crate::profiling::ScopedTimer::new("MD026_fix");
+        
         // Early return for empty content
         if content.is_empty() {
             return Ok(String::new());
@@ -192,35 +232,44 @@ impl Rule for MD026NoTrailingPunctuation {
                 continue;
             }
             
-            // Check for ATX headings and fix them
-            if let Some((level, text, style)) = self.parse_atx_heading(line) {
-                if self.has_trailing_punctuation(&text) {
-                    let indentation = HeadingUtils::get_indentation(line);
-                    let fixed_text = self.remove_trailing_punctuation(&text);
-                    
-                    match style {
-                        HeadingStyle::AtxClosed => {
-                            // Preserve the trailing hashes
-                            let trailing_hashes = "#".repeat(level);
-                            output_lines.push(format!("{}{} {} {}", 
-                                " ".repeat(indentation),
-                                "#".repeat(level),
-                                fixed_text,
-                                trailing_hashes
-                            ));
-                        },
-                        _ => {
-                            output_lines.push(format!("{}{} {}", 
-                                " ".repeat(indentation),
-                                "#".repeat(level),
-                                fixed_text
-                            ));
-                        }
-                    }
-                } else {
-                    output_lines.push(line.to_string());
-                }
+            // Skip lines that definitely aren't headings
+            if !line.contains('#') && 
+               (i + 1 >= lines.len() || (!lines[i + 1].contains('=') && !lines[i + 1].contains('-'))) {
+                output_lines.push(line.to_string());
                 continue;
+            }
+            
+            // Check for ATX headings and fix them
+            if line.contains('#') {
+                if let Some((level, text, style)) = self.parse_atx_heading(line) {
+                    if self.has_trailing_punctuation(&text) {
+                        let indentation = HeadingUtils::get_indentation(line);
+                        let fixed_text = self.remove_trailing_punctuation(&text);
+                        
+                        match style {
+                            HeadingStyle::AtxClosed => {
+                                // Preserve the trailing hashes
+                                let trailing_hashes = "#".repeat(level);
+                                output_lines.push(format!("{}{} {} {}", 
+                                    " ".repeat(indentation),
+                                    "#".repeat(level),
+                                    fixed_text,
+                                    trailing_hashes
+                                ));
+                            },
+                            _ => {
+                                output_lines.push(format!("{}{} {}", 
+                                    " ".repeat(indentation),
+                                    "#".repeat(level),
+                                    fixed_text
+                                ));
+                            }
+                        }
+                    } else {
+                        output_lines.push(line.to_string());
+                    }
+                    continue;
+                }
             }
             
             // Check and fix setext headings
