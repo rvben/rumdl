@@ -37,7 +37,8 @@ ignore = "0.4"
 pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py37"], optional = true }
 
 [features]
-default = []
+default = ["profiling"]
+profiling = []
 python = ["pyo3"]
 
 [dev-dependencies]

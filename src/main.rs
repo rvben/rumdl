@@ -285,6 +285,8 @@ fn list_available_rules() {
 }
 
 fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -> (bool, usize, usize) {
+    let _timer = rumdl::profiling::ScopedTimer::new(&format!("process_file:{}", path));
+    
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(err) => {
@@ -298,32 +300,38 @@ fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -
     let mut total_fixed = 0;
     let mut all_warnings = Vec::new();
     
-    // Collect all warnings first
-    for rule in rules {
-        match rule.check(&content) {
-            Ok(warnings) => {
-                if !warnings.is_empty() {
-                    // Filter out warnings for lines where the rule is disabled
-                    let filtered_warnings: Vec<LintWarning> = warnings.into_iter()
-                        .filter(|warning| !rumdl::rule::is_rule_disabled_at_line(&content, rule.name(), warning.line - 1))
-                        .collect();
-                    
-                    if !filtered_warnings.is_empty() {
-                        has_warnings = true;
-                        total_warnings += filtered_warnings.len();
+    {
+        let _timer = rumdl::profiling::ScopedTimer::new(&format!("check_rules:{}", path));
+        
+        // Collect all warnings first
+        for rule in rules {
+            let _rule_timer = rumdl::profiling::ScopedTimer::new(&format!("rule:{}:{}", rule.name(), path));
+            
+            match rule.check(&content) {
+                Ok(warnings) => {
+                    if !warnings.is_empty() {
+                        // Filter out warnings for lines where the rule is disabled
+                        let filtered_warnings: Vec<LintWarning> = warnings.into_iter()
+                            .filter(|warning| !rumdl::rule::is_rule_disabled_at_line(&content, rule.name(), warning.line - 1))
+                            .collect();
                         
-                        for warning in filtered_warnings {
-                            all_warnings.push((rule.name(), rule, warning));
+                        if !filtered_warnings.is_empty() {
+                            has_warnings = true;
+                            total_warnings += filtered_warnings.len();
+                            
+                            for warning in filtered_warnings {
+                                all_warnings.push((rule.name(), rule, warning));
+                            }
                         }
                     }
                 }
-            }
-            Err(err) => {
-                eprintln!("{}: {} on file {}: {}", 
-                    "Error".red().bold(), 
-                    rule.name().yellow(), 
-                    path.blue().underline(), 
-                    err);
+                Err(err) => {
+                    eprintln!("{}: {} on file {}: {}", 
+                        "Error".red().bold(), 
+                        rule.name().yellow(), 
+                        path.blue().underline(), 
+                        err);
+                }
             }
         }
     }
@@ -360,6 +368,8 @@ fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -
     
     // Apply fixes in a single pass if requested
     if fix && has_warnings {
+        let _timer = rumdl::profiling::ScopedTimer::new(&format!("fix_file:{}", path));
+        
         let mut fixed_content = content.clone();
         let mut fixed_warnings = 0;
         
@@ -376,6 +386,8 @@ fn process_file(path: &str, rules: &[Box<dyn Rule>], fix: bool, verbose: bool) -
         for (rule_name, warnings) in rule_to_warnings {
             // Find the rule by name
             if let Some(rule) = rules.iter().find(|r| r.name() == rule_name) {
+                let _fix_timer = rumdl::profiling::ScopedTimer::new(&format!("fix_rule:{}:{}", rule_name, path));
+                
                 match rule.fix(&fixed_content) {
                     Ok(new_content) => {
                         fixed_warnings += warnings.len();
@@ -517,12 +529,14 @@ fn debug_gitignore_test(path: &str, verbose: bool) {
     println!();
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _timer = rumdl::profiling::ScopedTimer::new("main");
+    
     let cli = Cli::parse();
     
     if cli.list_rules {
         list_available_rules();
-        return;
+        return Ok(());
     }
     
     // Handle init command to create a default configuration file
@@ -532,7 +546,7 @@ fn main() {
             Ok(_) => {
                 println!("{}: Created default configuration file at {}", "Success".green().bold(), config_path);
                 println!("You can now customize the configuration to suit your needs.");
-                return;
+                return Ok(());
             }
             Err(err) => {
                 eprintln!("{}: Failed to create configuration file: {}", "Error".red().bold(), err);
@@ -552,7 +566,7 @@ fn main() {
         for path in &cli.paths {
             debug_gitignore_test(path, cli.verbose);
         }
-        return;
+        return Ok(());
     }
     
     let rules = get_rules(&cli);
@@ -763,8 +777,20 @@ fn main() {
             println!("Run with `--fix` to automatically fix issues");
         }
         
+        // Print profiling information if verbose or debug mode
+        if cli.verbose {
+            println!("\n{}", rumdl::get_profiling_report());
+        }
+        
         process::exit(1);
     } else {
         println!("{} No issues found", "✓".green().bold());
+        
+        // Print profiling information if verbose or debug mode
+        if cli.verbose {
+            println!("\n{}", rumdl::get_profiling_report());
+        }
     }
+    
+    Ok(())
 } 

@@ -2,6 +2,7 @@ pub mod rule;
 pub mod rules;
 pub mod config;
 pub mod init;
+pub mod profiling;
 
 #[cfg(feature = "python")]
 pub mod python;
@@ -9,6 +10,7 @@ pub mod python;
 // Re-export commonly used types
 pub use rules::heading_utils::{HeadingStyle, Heading};
 pub use rules::*;
+
 
 /// Collect patterns from .gitignore files
 /// 
@@ -138,74 +140,43 @@ fn normalize_gitignore_pattern(pattern: &str) -> String {
     }
 }
 
-// Function to check if a file path should be excluded
-/// Check if a file path should be excluded based on the exclude patterns
+/// Should exclude a file based on patterns
+///
+/// This function checks if a file should be excluded based on a list of glob patterns.
 pub fn should_exclude(file_path: &str, exclude_patterns: &[String]) -> bool {
-    use glob::Pattern;
-    
-    // Normalize path by removing leading ./ if present
+    // Normalize the file path by removing leading ./ if present
     let normalized_path = if file_path.starts_with("./") {
         &file_path[2..]
     } else {
         file_path
     };
-    
+
     for pattern in exclude_patterns {
+        // Normalize the pattern by removing leading ./ if present
+        let normalized_pattern = if pattern.starts_with("./") {
+            &pattern[2..]
+        } else {
+            pattern
+        };
+
         // Handle directory patterns (ending with /)
-        if pattern.ends_with('/') {
-            let dir_prefix = &pattern[..pattern.len() - 1];
-            if normalized_path == dir_prefix || normalized_path.starts_with(&format!("{}/", dir_prefix)) {
+        if normalized_pattern.ends_with('/') {
+            if normalized_path.starts_with(normalized_pattern) {
                 return true;
             }
             continue;
         }
-        
-        // Try to compile the glob pattern
-        match Pattern::new(pattern) {
-            Ok(glob_pattern) => {
-                // First, check direct match against normalized path
-                if glob_pattern.matches(normalized_path) {
+
+        // Handle glob patterns
+        match glob::Pattern::new(normalized_pattern) {
+            Ok(glob) => {
+                if glob.matches(normalized_path) {
                     return true;
                 }
-                
-                // Check if it's a directory pattern without wildcards
-                if !pattern.contains('*') && normalized_path.starts_with(&format!("{}/", pattern)) {
-                    return true;
-                }
-                
-                // For single-star patterns (no **), we need to handle directory structure
-                if pattern.contains('*') && !pattern.contains("**") {
-                    let pattern_parts: Vec<&str> = pattern.split('/').collect();
-                    let path_parts: Vec<&str> = normalized_path.split('/').collect();
-                    
-                    // Only match if the pattern and path have the same number of segments
-                    if pattern_parts.len() == path_parts.len() {
-                        let mut all_match = true;
-                        for (i, pattern_part) in pattern_parts.iter().enumerate() {
-                            // Create a pattern for this segment and check if it matches
-                            if let Ok(part_pattern) = Pattern::new(pattern_part) {
-                                if !part_pattern.matches(path_parts[i]) {
-                                    all_match = false;
-                                    break;
-                                }
-                            } else if pattern_part != &path_parts[i] {
-                                all_match = false;
-                                break;
-                            }
-                        }
-                        
-                        if all_match {
-                            return true;
-                        }
-                    }
-                }
-                
-                // For double-star patterns, match at any depth
-                // This is already handled by the direct glob_pattern.matches() check
             },
             Err(_) => {
-                // If pattern is invalid, just check for direct substring match
-                if normalized_path.contains(pattern) {
+                // For invalid glob patterns, fall back to simple substring matching
+                if normalized_path.contains(normalized_pattern) {
                     return true;
                 }
             }
@@ -213,4 +184,44 @@ pub fn should_exclude(file_path: &str, exclude_patterns: &[String]) -> bool {
     }
     
     false
+}
+
+/// Lint a Markdown file
+pub fn lint(content: &str, rules: &[Box<dyn rule::Rule>]) -> rule::LintResult {
+    let _timer = profiling::ScopedTimer::new("lint_total");
+    
+    let mut warnings = Vec::new();
+    
+    for rule in rules {
+        let _rule_timer = profiling::ScopedTimer::new(&format!("rule:{}", rule.name()));
+        
+        match rule.check(content) {
+            Ok(rule_warnings) => {
+                warnings.extend(rule_warnings);
+            }
+            Err(e) => {
+                eprintln!("Error checking rule {}: {}", rule.name(), e);
+            }
+        }
+    }
+    
+    // Force profiling to be enabled in debug mode
+    #[cfg(debug_assertions)]
+    {
+        if !warnings.is_empty() {
+            eprintln!("Found {} warnings", warnings.len());
+        }
+    }
+    
+    Ok(warnings)
+}
+
+/// Get the profiling report
+pub fn get_profiling_report() -> String {
+    profiling::get_report()
+}
+
+/// Reset the profiling data
+pub fn reset_profiling() {
+    profiling::reset()
 } 

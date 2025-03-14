@@ -1,3 +1,5 @@
 target/
 **/__pycache__
 **/*.egg-info
+*.md
+**/*.md

@@ -1,5 +1,13 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use lazy_static::lazy_static;
 use regex::Regex;
+
+lazy_static! {
+    // Optimized regex patterns
+    static ref HTML_TAG_PATTERN: Regex = Regex::new(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)(?:\s+[^>]*)?(/?)>").unwrap();
+    static ref CODE_FENCE_PATTERN: Regex = Regex::new(r"^```|^~~~").unwrap();
+    static ref BACKTICK_PATTERN: Regex = Regex::new(r"(`+)(.+?)(`+)").unwrap();
+}
 
 #[derive(Debug)]
 pub struct MD033NoInlineHtml {
@@ -19,12 +27,16 @@ impl MD033NoInlineHtml {
         Self { allowed_elements }
     }
 
+    // Optimized HTML tag finding using cached regex
     fn find_html_tags(&self, line: &str) -> Vec<(String, usize)> {
-        let mut tags = Vec::new();
-        // Match both opening and closing tags
-        let re = Regex::new(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)(?:\s+[^>]*)?(/?)>").unwrap();
+        // Skip processing if no '<' character in line (quick check)
+        if !line.contains('<') {
+            return Vec::new();
+        }
         
-        for cap in re.captures_iter(line) {
+        let mut tags = Vec::new();
+        
+        for cap in HTML_TAG_PATTERN.captures_iter(line) {
             let tag_name = cap[2].to_string().to_lowercase();
             let position = cap.get(0).unwrap().start();
             
@@ -36,76 +48,91 @@ impl MD033NoInlineHtml {
         tags
     }
     
-    fn is_in_code_block(&self, lines: &[&str], current_line: usize) -> bool {
+    // Pre-compute code block regions to avoid repetitive processing
+    fn precompute_code_blocks(&self, lines: &[&str]) -> Vec<bool> {
         let mut in_code_block = false;
-        let code_fence_re = Regex::new(r"^```|^~~~").unwrap();
+        let mut code_block_map = vec![false; lines.len()];
         
-        for i in 0..=current_line {
-            if code_fence_re.is_match(lines[i].trim()) {
+        for (i, line) in lines.iter().enumerate() {
+            // Check for code fence markers
+            if CODE_FENCE_PATTERN.is_match(line.trim()) {
                 in_code_block = !in_code_block;
             }
+            
+            code_block_map[i] = in_code_block;
         }
         
-        in_code_block
+        code_block_map
     }
     
-    fn is_in_code_span(&self, line: &str, position: usize) -> bool {
-        let mut code_span_starts = Vec::new();
-        let mut code_span_ends = Vec::new();
+    // Optimized code span detection using cached ranges
+    fn compute_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
+        // Skip processing if no backtick character (quick check)
+        if !line.contains('`') {
+            return Vec::new();
+        }
         
-        // First, identify all code spans in the line
-        let chars: Vec<char> = line.chars().collect();
-        let mut i = 0;
+        let mut spans = Vec::new();
         
-        while i < chars.len() {
-            if chars[i] == '`' {
-                let start_pos = i;
-                i += 1;
-                
-                // Handle cases with multiple backticks
-                while i < chars.len() && chars[i] == '`' {
+        // First try using regex for simple code spans
+        for cap in BACKTICK_PATTERN.captures_iter(line) {
+            if let (Some(start), Some(end)) = (cap.get(0).map(|m| m.start()), cap.get(0).map(|m| m.end())) {
+                spans.push((start, end));
+            }
+        }
+        
+        // If no spans found with regex (could be complex or unmatched), fallback to manual parsing
+        if spans.is_empty() {
+            let chars: Vec<char> = line.chars().collect();
+            let mut i = 0;
+            
+            while i < chars.len() {
+                if chars[i] == '`' {
+                    let start_pos = i;
                     i += 1;
-                }
-                
-                // Find the closing backticks
-                let backtick_count = i - start_pos;
-                let mut j = i;
-                
-                while j < chars.len() {
-                    if chars[j] == '`' {
-                        // Count consecutive backticks
-                        let _end_start = j;
-                        let mut end_count = 1;
-                        j += 1;
-                        
-                        while j < chars.len() && chars[j] == '`' {
-                            end_count += 1;
+                    
+                    // Handle cases with multiple backticks
+                    while i < chars.len() && chars[i] == '`' {
+                        i += 1;
+                    }
+                    
+                    // Find the closing backticks
+                    let backtick_count = i - start_pos;
+                    let mut j = i;
+                    
+                    while j < chars.len() {
+                        if chars[j] == '`' {
+                            // Count consecutive backticks
+                            let _end_start = j;
+                            let mut end_count = 1;
+                            j += 1;
+                            
+                            while j < chars.len() && chars[j] == '`' {
+                                end_count += 1;
+                                j += 1;
+                            }
+                            
+                            // If we found matching backticks, record the code span
+                            if end_count == backtick_count {
+                                spans.push((start_pos, j));
+                                break;
+                            }
+                        } else {
                             j += 1;
                         }
-                        
-                        // If we found matching backticks, record the code span
-                        if end_count == backtick_count {
-                            code_span_starts.push(start_pos);
-                            code_span_ends.push(j - 1);
-                            break;
-                        }
-                    } else {
-                        j += 1;
                     }
+                } else {
+                    i += 1;
                 }
-            } else {
-                i += 1;
             }
         }
         
-        // Now check if the position is inside any code span
-        for (start, end) in code_span_starts.iter().zip(code_span_ends.iter()) {
-            if position > *start && position < *end {
-                return true;
-            }
-        }
-        
-        false
+        spans
+    }
+    
+    // Check if position is inside any code span
+    fn is_in_code_span(&self, code_spans: &[(usize, usize)], position: usize) -> bool {
+        code_spans.iter().any(|(start, end)| position > *start && position < *end)
     }
 }
 
@@ -119,19 +146,35 @@ impl Rule for MD033NoInlineHtml {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        // Early return for empty content or content without HTML tags
+        if content.is_empty() || !content.contains('<') {
+            return Ok(vec![]);
+        }
+        
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-
+        
+        // Pre-compute code block regions (more efficient than checking for each line)
+        let code_block_map = self.precompute_code_blocks(&lines);
+        
         for (line_num, line) in lines.iter().enumerate() {
+            // Skip empty lines or lines without < (quick check)
+            if line.trim().is_empty() || !line.contains('<') {
+                continue;
+            }
+            
             // Skip checking inside code blocks
-            if self.is_in_code_block(&lines, line_num) {
+            if code_block_map[line_num] {
                 continue;
             }
 
+            // Pre-compute code spans in the line
+            let code_spans = self.compute_code_spans(line);
+            
             // Check for HTML tags in the line
             for (tag, position) in self.find_html_tags(line) {
                 // Skip if inside a code span
-                if self.is_in_code_span(line, position) {
+                if !code_spans.is_empty() && self.is_in_code_span(&code_spans, position) {
                     continue;
                 }
                 
@@ -148,11 +191,13 @@ impl Rule for MD033NoInlineHtml {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = content.to_string();
-        let html_tag_re = Regex::new(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)(?:\s+[^>]*)?(/?)>").unwrap();
+        // Early return if no HTML tags
+        if !content.contains('<') {
+            return Ok(content.to_string());
+        }
         
         // Replace HTML tags with empty strings, preserving content
-        result = html_tag_re.replace_all(&result, "").to_string();
+        let result = HTML_TAG_PATTERN.replace_all(content, "").to_string();
         
         Ok(result)
     }

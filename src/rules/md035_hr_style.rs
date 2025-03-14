@@ -150,7 +150,7 @@ impl Rule for MD035HRStyle {
                 continue;
             }
             
-            let trimmed = line.trim();
+            let _trimmed = line.trim();
             
             // Simplify the horizontal rule detection and replacement
             if Self::is_horizontal_rule(line) {

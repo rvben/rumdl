@@ -46,6 +46,7 @@ lazy_static! {
 }
 
 /// Structure to track code block state
+#[derive(Default)]
 struct CodeBlockState {
     in_fenced_code: bool,
     in_alternate_fenced: bool,
@@ -132,33 +133,70 @@ impl Rule for MD037SpacesAroundEmphasis {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _timer = crate::profiling::ScopedTimer::new("MD037_check");
+        
+        // Optimize for empty content
+        if content.is_empty() {
+            return Ok(vec![]);
+        }
+        
+        // Early check if any emphasis markers exist at all
+        if !content.contains('*') && !content.contains('_') {
+            return Ok(vec![]);
+        }
+        
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        let mut code_block_state = CodeBlockState::new();
+        let mut code_block_state = CodeBlockState::default();
         
-        for (_i, line) in lines.iter().enumerate() {
+        for (i, line) in lines.iter().enumerate() {
             // Update code block state
-            code_block_state.update(line);
+            {
+                let _timer = crate::profiling::ScopedTimer::new("MD037_update_code_block");
+                code_block_state.update(line);
+            }
             
             // Skip processing if we're in a code block
             if code_block_state.is_in_code_block(line) {
                 continue;
             }
             
+            // Skip if the line doesn't contain any emphasis markers
+            if !line.contains('*') && !line.contains('_') {
+                continue;
+            }
+            
             // Process the line for emphasis patterns
-            let line_no_code = replace_inline_code(line);
-            check_emphasis_patterns(&line_no_code, _i + 1, line, &mut warnings);
+            let line_no_code = {
+                let _timer = crate::profiling::ScopedTimer::new("MD037_replace_inline_code");
+                replace_inline_code(line)
+            };
+            
+            {
+                let _timer = crate::profiling::ScopedTimer::new("MD037_check_patterns");
+                check_emphasis_patterns(&line_no_code, i + 1, line, &mut warnings);
+            }
         }
 
         Ok(warnings)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _timer = crate::profiling::ScopedTimer::new("MD037_fix");
+        
         let lines: Vec<&str> = content.lines().collect();
         let mut fixed_lines = Vec::new();
         let mut code_block_state = CodeBlockState::new();
         
         for (_i, line) in lines.iter().enumerate() {
+            // Track code blocks
+            if FENCED_CODE_BLOCK_START.is_match(line) {
+                code_block_state.in_fenced_code = true;
+                fixed_lines.push(line.to_string());
+                fixed_lines.push('\n'.to_string());
+                continue;
+            }
+            
             // Update code block state
             code_block_state.update(line);
             
@@ -197,44 +235,42 @@ fn check_emphasis_patterns(line: &str, line_num: usize, original_line: &str, war
         return;
     }
     
-    // Skip documentation-style patterns like "* *Rule Type*: `warning`"
-    if line.trim_start().starts_with("* *") && line.contains("*:") {
-        return;
-    }
-    
-    // Skip documentation-style patterns like "* **Default Level**: `1`"
-    if line.trim_start().starts_with("* **") && line.contains("**:") {
-        return;
-    }
-    
-    // Skip documentation metadata patterns like "**Rule Type**: `warning`"
-    if DOC_METADATA_PATTERN.is_match(line) {
-        return;
-    }
-    
-    // Skip lines with bold text (common in documentation)
-    if BOLD_TEXT_PATTERN.is_match(line) {
+    // Skip documentation patterns
+    let trimmed = line.trim_start();
+    if (trimmed.starts_with("* *") && line.contains("*:")) ||
+       (trimmed.starts_with("* **") && line.contains("**:")) ||
+       DOC_METADATA_PATTERN.is_match(line) ||
+       BOLD_TEXT_PATTERN.is_match(line) {
         return;
     }
     
     // Skip valid emphasis at the start of a line
     if VALID_START_EMPHASIS.is_match(line) {
         // Still check the rest of the line for emphasis issues
-        let emphasis_start = line.find(' ').unwrap_or(line.len());
-        if emphasis_start < line.len() {
+        if let Some(emphasis_start) = line.find(' ') {
             let rest_of_line = &line[emphasis_start..];
-            check_emphasis_with_pattern(rest_of_line, &ASTERISK_EMPHASIS, "*", line_num, original_line, warnings);
-            check_emphasis_with_pattern(rest_of_line, &DOUBLE_ASTERISK_EMPHASIS, "**", line_num, original_line, warnings);
-            check_emphasis_with_pattern(rest_of_line, &UNDERSCORE_EMPHASIS, "_", line_num, original_line, warnings);
-            check_emphasis_with_pattern(rest_of_line, &DOUBLE_UNDERSCORE_EMPHASIS, "__", line_num, original_line, warnings);
+            if rest_of_line.contains('*') {
+                check_emphasis_with_pattern(rest_of_line, &ASTERISK_EMPHASIS, "*", line_num, original_line, warnings);
+                check_emphasis_with_pattern(rest_of_line, &DOUBLE_ASTERISK_EMPHASIS, "**", line_num, original_line, warnings);
+            }
+            if rest_of_line.contains('_') {
+                check_emphasis_with_pattern(rest_of_line, &UNDERSCORE_EMPHASIS, "_", line_num, original_line, warnings);
+                check_emphasis_with_pattern(rest_of_line, &DOUBLE_UNDERSCORE_EMPHASIS, "__", line_num, original_line, warnings);
+            }
         }
         return;
     }
     
-    check_emphasis_with_pattern(line, &ASTERISK_EMPHASIS, "*", line_num, original_line, warnings);
-    check_emphasis_with_pattern(line, &DOUBLE_ASTERISK_EMPHASIS, "**", line_num, original_line, warnings);
-    check_emphasis_with_pattern(line, &UNDERSCORE_EMPHASIS, "_", line_num, original_line, warnings);
-    check_emphasis_with_pattern(line, &DOUBLE_UNDERSCORE_EMPHASIS, "__", line_num, original_line, warnings);
+    // Check emphasis patterns based on marker type
+    if line.contains('*') {
+        check_emphasis_with_pattern(line, &ASTERISK_EMPHASIS, "*", line_num, original_line, warnings);
+        check_emphasis_with_pattern(line, &DOUBLE_ASTERISK_EMPHASIS, "**", line_num, original_line, warnings);
+    }
+    
+    if line.contains('_') {
+        check_emphasis_with_pattern(line, &UNDERSCORE_EMPHASIS, "_", line_num, original_line, warnings);
+        check_emphasis_with_pattern(line, &DOUBLE_UNDERSCORE_EMPHASIS, "__", line_num, original_line, warnings);
+    }
 }
 
 // Check a specific emphasis pattern and add warnings
@@ -413,4 +449,30 @@ fn restore_code_spans(mut content: String, code_spans: Vec<(String, String)>) ->
         content = content.replace(&placeholder, &code_span);
     }
     content
-} 
+}
+
+// Check all emphasis patterns for a line
+fn _check_all_emphasis_patterns(line: &str, line_num: usize, original_line: &str, warnings: &mut Vec<LintWarning>) {
+    // Check each type of emphasis pattern
+    if line.contains('*') {
+        let _timer = crate::profiling::ScopedTimer::new("MD037_check_asterisk");
+        _check_asterisk_emphasis(line, line_num, original_line, warnings);
+    }
+    
+    if line.contains('_') {
+        let _timer = crate::profiling::ScopedTimer::new("MD037_check_underscore");
+        _check_underscore_emphasis(line, line_num, original_line, warnings);
+    }
+}
+
+// Check asterisk emphasis patterns
+fn _check_asterisk_emphasis(line: &str, line_num: usize, original_line: &str, warnings: &mut Vec<LintWarning>) {
+    check_emphasis_with_pattern(line, &ASTERISK_EMPHASIS, "*", line_num, original_line, warnings);
+    check_emphasis_with_pattern(line, &DOUBLE_ASTERISK_EMPHASIS, "**", line_num, original_line, warnings);
+}
+
+// Check underscore emphasis patterns
+fn _check_underscore_emphasis(line: &str, line_num: usize, original_line: &str, warnings: &mut Vec<LintWarning>) {
+    check_emphasis_with_pattern(line, &UNDERSCORE_EMPHASIS, "_", line_num, original_line, warnings);
+    check_emphasis_with_pattern(line, &DOUBLE_UNDERSCORE_EMPHASIS, "__", line_num, original_line, warnings);
+}

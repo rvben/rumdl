@@ -168,20 +168,41 @@ impl Rule for MD026NoTrailingPunctuation {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = String::new();
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(String::new());
+        }
+        
+        // Early return if no headings or punctuation characters exist
+        if !content.contains('#') && 
+           !content.contains('=') && 
+           !content.contains('-') && 
+           !self.punctuation.chars().any(|c| content.contains(c)) {
+            return Ok(content.to_string());
+        }
+        
         let lines: Vec<&str> = content.lines().collect();
-
-        for (line_num, line) in lines.iter().enumerate() {
-            // Handle ATX headings
+        let mut output_lines: Vec<String> = Vec::with_capacity(lines.len());
+        
+        let mut skip_next = false;
+        for (i, line) in lines.iter().enumerate() {
+            if skip_next {
+                skip_next = false;
+                output_lines.push(line.to_string());
+                continue;
+            }
+            
+            // Check for ATX headings and fix them
             if let Some((level, text, style)) = self.parse_atx_heading(line) {
                 if self.has_trailing_punctuation(&text) {
                     let indentation = HeadingUtils::get_indentation(line);
                     let fixed_text = self.remove_trailing_punctuation(&text);
+                    
                     match style {
                         HeadingStyle::AtxClosed => {
                             // Preserve the trailing hashes
                             let trailing_hashes = "#".repeat(level);
-                            result.push_str(&format!("{}{} {} {}\n", 
+                            output_lines.push(format!("{}{} {} {}", 
                                 " ".repeat(indentation),
                                 "#".repeat(level),
                                 fixed_text,
@@ -189,42 +210,52 @@ impl Rule for MD026NoTrailingPunctuation {
                             ));
                         },
                         _ => {
-                            result.push_str(&format!("{}{} {}\n", 
+                            output_lines.push(format!("{}{} {}", 
                                 " ".repeat(indentation),
                                 "#".repeat(level),
                                 fixed_text
                             ));
-                        },
+                        }
                     }
                 } else {
-                    result.push_str(line);
-                    result.push('\n');
+                    output_lines.push(line.to_string());
                 }
                 continue;
             }
             
-            // Handle setext headings
-            if line_num + 1 < lines.len() {
-                let next_line = Some(lines[line_num + 1]);
-                if let Some((_, text, _)) = self.is_setext_heading(line, next_line) {
+            // Check and fix setext headings
+            if i + 1 < lines.len() {
+                let next_line = lines[i + 1];
+                
+                // Skip if next line clearly isn't a setext underline
+                if !next_line.contains('=') && !next_line.contains('-') {
+                    output_lines.push(line.to_string());
+                    continue;
+                }
+                
+                if let Some((_level, text, _)) = self.is_setext_heading(line, Some(next_line)) {
                     if self.has_trailing_punctuation(&text) {
                         let indentation = HeadingUtils::get_indentation(line);
                         let fixed_text = self.remove_trailing_punctuation(&text);
-                        result.push_str(&format!("{}{}\n", " ".repeat(indentation), fixed_text));
-                        continue;
+                        output_lines.push(format!("{}{}", " ".repeat(indentation), fixed_text));
+                        skip_next = true;
+                        output_lines.push(next_line.to_string());
+                    } else {
+                        output_lines.push(line.to_string());
                     }
+                } else {
+                    output_lines.push(line.to_string());
                 }
+            } else {
+                output_lines.push(line.to_string());
             }
-            
-            // Just copy other lines
-            result.push_str(line);
-            result.push('\n');
         }
-
-        if !content.ends_with('\n') {
-            result.pop();
+        
+        // Join lines and preserve trailing newline
+        if content.ends_with('\n') {
+            Ok(format!("{}\n", output_lines.join("\n")))
+        } else {
+            Ok(output_lines.join("\n"))
         }
-
-        Ok(result)
     }
 } 

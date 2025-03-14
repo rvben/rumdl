@@ -1,5 +1,13 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use regex::Regex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    // Optimize regex patterns with compilation once at startup
+    static ref LIST_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)(\s+)").unwrap();
+    static ref LIST_FIX_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)(\s+)").unwrap();
+    static ref CODE_BLOCK_REGEX: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
+}
 
 #[derive(Debug)]
 pub struct MD030ListMarkerSpace {
@@ -31,24 +39,23 @@ impl MD030ListMarkerSpace {
     }
 
     fn is_list_item(line: &str) -> Option<(ListType, String, usize)> {
-        let ul_re = Regex::new(r"^(\s*)[-*+](\s+)").unwrap();
-        let ol_re = Regex::new(r"^(\s*)\d+\.(\s+)").unwrap();
-
-        if let Some(cap) = ul_re.captures(line) {
-            Some((
-                ListType::Unordered,
-                cap[0].to_string(),
-                cap[2].len(),
-            ))
-        } else if let Some(cap) = ol_re.captures(line) {
-            Some((
-                ListType::Ordered,
-                cap[0].to_string(),
-                cap[2].len(),
-            ))
-        } else {
-            None
+        // Fast path for non-list lines
+        if line.trim().is_empty() {
+            return None;
         }
+
+        if let Some(cap) = LIST_REGEX.captures(line) {
+            let marker = &cap[2];
+            let spaces = cap[3].len();
+            let list_type = if marker.chars().next().unwrap().is_ascii_digit() {
+                ListType::Ordered
+            } else {
+                ListType::Unordered
+            };
+            return Some((list_type, cap[0].to_string(), spaces));
+        }
+        
+        None
     }
 
     fn is_multi_line_item(&self, lines: &[&str], current_idx: usize) -> bool {
@@ -57,8 +64,18 @@ impl MD030ListMarkerSpace {
         }
 
         let next_line = lines[current_idx + 1].trim();
-        !next_line.is_empty() && !next_line.starts_with('-') && !next_line.starts_with('*') && 
-        !next_line.starts_with('+') && !next_line.chars().next().map_or(false, |c| c.is_ascii_digit())
+        
+        // Fast path for empty lines
+        if next_line.is_empty() {
+            return false;
+        }
+        
+        // Check if next line is a new list item
+        if let Some((_, _, _)) = Self::is_list_item(lines[current_idx + 1]) {
+            return false;
+        }
+        
+        true
     }
 
     fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
@@ -72,18 +89,31 @@ impl MD030ListMarkerSpace {
 
     fn fix_line(&self, line: &str, list_type: ListType, is_multi: bool) -> String {
         let expected_spaces = self.get_expected_spaces(list_type, is_multi);
-        match list_type {
-            ListType::Unordered => {
-                let re = Regex::new(r"^(\s*[-*+])(\s+)").unwrap();
-                re.replace(line, format!("$1{}", " ".repeat(expected_spaces)))
-                    .to_string()
+        LIST_FIX_REGEX.replace(line, format!("$1$2{}", " ".repeat(expected_spaces)))
+            .to_string()
+    }
+
+    fn precompute_states(&self, lines: &[&str]) -> (Vec<bool>, Vec<Option<bool>>) {
+        let mut code_block_state = vec![false; lines.len()];
+        let mut multi_line_state = vec![None; lines.len()];
+        let mut in_code_block = false;
+
+        // First pass: mark code blocks
+        for (i, &line) in lines.iter().enumerate() {
+            if CODE_BLOCK_REGEX.is_match(line) {
+                in_code_block = !in_code_block;
             }
-            ListType::Ordered => {
-                let re = Regex::new(r"^(\s*\d+\.)(\s+)").unwrap();
-                re.replace(line, format!("$1{}", " ".repeat(expected_spaces)))
-                    .to_string()
+            code_block_state[i] = in_code_block;
+        }
+
+        // Second pass: compute multi-line states
+        for i in 0..lines.len() {
+            if !code_block_state[i] {
+                multi_line_state[i] = Some(self.is_multi_line_item(lines, i));
             }
         }
+
+        (code_block_state, multi_line_state)
     }
 }
 
@@ -103,22 +133,25 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        // Fast path for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+        
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        let mut in_code_block = false;
-
+        
+        // Pre-compute states
+        let (code_block_state, multi_line_state) = self.precompute_states(&lines);
+        
+        // Check list items
         for (i, &line) in lines.iter().enumerate() {
-            if line.trim().starts_with("```") {
-                in_code_block = !in_code_block;
-                continue;
-            }
-
-            if in_code_block {
+            if code_block_state[i] {
                 continue;
             }
 
             if let Some((list_type, _, spaces)) = Self::is_list_item(line) {
-                let is_multi = self.is_multi_line_item(&lines, i);
+                let is_multi = multi_line_state[i].unwrap_or_else(|| self.is_multi_line_item(&lines, i));
                 let expected_spaces = self.get_expected_spaces(list_type, is_multi);
 
                 if spaces != expected_spaces {
@@ -145,36 +178,46 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = String::new();
+        // Fast path for empty content
+        if content.is_empty() {
+            return Ok(String::new());
+        }
+        
         let lines: Vec<&str> = content.lines().collect();
-        let mut in_code_block = false;
+        let mut result = String::with_capacity(content.len());
+        
+        // Pre-compute states
+        let (code_block_state, multi_line_state) = self.precompute_states(&lines);
 
         for (i, &line) in lines.iter().enumerate() {
-            if line.trim().starts_with("```") {
-                in_code_block = !in_code_block;
+            if code_block_state[i] {
                 result.push_str(line);
-                result.push('\n');
+                if i < lines.len() - 1 {
+                    result.push('\n');
+                }
                 continue;
             }
 
-            if in_code_block {
+            // Fast path for non-list items
+            if line.trim().is_empty() || !line.contains('-') && !line.contains('*') && 
+               !line.contains('+') && !line.contains('.') {
                 result.push_str(line);
-                result.push('\n');
+                if i < lines.len() - 1 {
+                    result.push('\n');
+                }
                 continue;
             }
 
             if let Some((list_type, _, _)) = Self::is_list_item(line) {
-                let is_multi = self.is_multi_line_item(&lines, i);
+                let is_multi = multi_line_state[i].unwrap_or_else(|| self.is_multi_line_item(&lines, i));
                 result.push_str(&self.fix_line(line, list_type, is_multi));
             } else {
                 result.push_str(line);
             }
-            result.push('\n');
-        }
-
-        // Remove trailing newline if the original content didn't have one
-        if !content.ends_with('\n') {
-            result.pop();
+            
+            if i < lines.len() - 1 {
+                result.push('\n');
+            }
         }
 
         Ok(result)

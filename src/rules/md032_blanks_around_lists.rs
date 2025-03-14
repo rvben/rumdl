@@ -1,15 +1,37 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule};
 use crate::rules::front_matter_utils::FrontMatterUtils;
-use crate::rules::heading_utils::HeadingUtils;
+use crate::rules::code_block_utils::CodeBlockUtils;
 use regex::Regex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)\s").unwrap();
+    static ref LIST_CONTENT_REGEX: Regex = Regex::new(r"^\s{2,}").unwrap();
+}
 
 #[derive(Debug, Default)]
 pub struct MD032BlanksAroundLists;
 
 impl MD032BlanksAroundLists {
     fn is_list_item(line: &str) -> bool {
-        let list_re = Regex::new(r"^(\s*)([-*+]|\d+\.)\s").unwrap();
-        list_re.is_match(line)
+        // Fast path for empty lines
+        if line.trim().is_empty() {
+            return false;
+        }
+        
+        // Quick literal check before regex
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() {
+            return false;
+        }
+        
+        let first_char = trimmed.chars().next().unwrap();
+        if first_char == '-' || first_char == '*' || first_char == '+' || first_char.is_ascii_digit() {
+            // Use regex for complete validation
+            return LIST_ITEM_REGEX.is_match(line);
+        }
+        
+        false
     }
 
     fn is_empty_line(line: &str) -> bool {
@@ -17,8 +39,18 @@ impl MD032BlanksAroundLists {
     }
     
     fn is_list_content(line: &str) -> bool {
-        let content_re = Regex::new(r"^\s{2,}").unwrap();
-        content_re.is_match(line) && !Self::is_empty_line(line)
+        if Self::is_empty_line(line) {
+            return false;
+        }
+        
+        // Fast path - check if line starts with at least 2 spaces
+        if let Some(idx) = line.find(|c: char| !c.is_whitespace()) {
+            if idx >= 2 {
+                return true;
+            }
+        }
+        
+        false
     }
 }
 
@@ -32,23 +64,49 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+        
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        let mut in_list = false;
-        let mut _list_start_index = 0;
-        let mut list_end_index = 0;
-
-        // First pass: Find list boundaries and check for blank lines around lists
+        
+        // Pre-compute which lines are in code blocks or front matter
+        let mut excluded_lines = vec![false; lines.len()];
         for i in 0..lines.len() {
-            // Skip processing if line is in front matter or code block
-            if FrontMatterUtils::is_in_front_matter(content, i) || HeadingUtils::is_in_code_block(content, i) {
+            excluded_lines[i] = FrontMatterUtils::is_in_front_matter(content, i) || 
+                               CodeBlockUtils::is_in_code_block(content, i);
+        }
+        
+        // Pre-compute list items and content lines
+        let mut is_list_item_vec = vec![false; lines.len()];
+        let mut is_list_content_vec = vec![false; lines.len()];
+        let mut is_empty_vec = vec![false; lines.len()];
+        
+        for i in 0..lines.len() {
+            if excluded_lines[i] {
                 continue;
             }
             
             let line = lines[i];
-            let is_list_item = Self::is_list_item(line);
-            let is_list_content = Self::is_list_content(line);
-            let is_empty = Self::is_empty_line(line);
+            is_list_item_vec[i] = Self::is_list_item(line);
+            is_list_content_vec[i] = Self::is_list_content(line);
+            is_empty_vec[i] = Self::is_empty_line(line);
+        }
+        
+        let mut in_list = false;
+        let mut _list_start_index = 0;
+        let mut _list_end_index = 0;
+
+        // First pass: Find list boundaries and check for blank lines around lists
+        for i in 0..lines.len() {
+            if excluded_lines[i] {
+                continue;
+            }
+            
+            let is_list_item = is_list_item_vec[i];
+            let is_list_content = is_list_content_vec[i];
+            let is_empty = is_empty_vec[i];
 
             if is_list_item {
                 if !in_list {
@@ -57,8 +115,7 @@ impl Rule for MD032BlanksAroundLists {
                     _list_start_index = i;
 
                     // Check if there's no blank line before the list (unless it's at the start of the document)
-                    if i > 0 && !Self::is_empty_line(lines[i - 1]) && 
-                       !FrontMatterUtils::is_in_front_matter(content, i - 1) {
+                    if i > 0 && !is_empty_vec[i - 1] && !excluded_lines[i - 1] {
                         warnings.push(LintWarning {
                             message: "List should be preceded by a blank line".to_string(),
                             line: i + 1,
@@ -67,10 +124,10 @@ impl Rule for MD032BlanksAroundLists {
                         });
                     }
                 }
-                list_end_index = i;
+                _list_end_index = i;
             } else if is_list_content && in_list {
                 // This is content belonging to a list item
-                list_end_index = i;
+                _list_end_index = i;
             } else if !is_empty {
                 // Regular content line
                 if in_list {
@@ -89,26 +146,36 @@ impl Rule for MD032BlanksAroundLists {
             }
         }
 
-        // Check for list at the end of document
-        if in_list && list_end_index == lines.len() - 1 {
-            // The list ends at the end of the document
-            // We don't need a blank line after the list if it's at the end of the document
-        }
+        // No need to check for list at the end of document - it doesn't need a blank line after
 
         Ok(warnings)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        if content.is_empty() {
+            return Ok(String::new());
+        }
+        
         // Apply front matter fixes first if needed
         let content = FrontMatterUtils::fix_malformed_front_matter(content);
         
         let lines: Vec<&str> = content.lines().collect();
-        let mut result = Vec::new();
-        let mut in_list = false;
+        let mut result = Vec::with_capacity(lines.len() + 10);  // Add some extra capacity for blank lines
         
+        // Pre-compute which lines are in code blocks or front matter
+        let mut excluded_lines = vec![false; lines.len()];
+        for i in 0..lines.len() {
+            excluded_lines[i] = FrontMatterUtils::is_in_front_matter(&content, i) || 
+                               CodeBlockUtils::is_in_code_block(&content, i);
+        }
+        
+        let mut in_list = false;
+        let mut _list_start_index = 0;
+        let mut _list_end_index = 0;
+
         for (i, line) in lines.iter().enumerate() {
             // If this line is in front matter or code block, keep it as is
-            if FrontMatterUtils::is_in_front_matter(&content, i) || HeadingUtils::is_in_code_block(&content, i) {
+            if excluded_lines[i] {
                 result.push(line.to_string());
                 continue;
             }
@@ -118,11 +185,11 @@ impl Rule for MD032BlanksAroundLists {
                     // Starting a new list
                     // Add blank line before list if needed (unless it's the start of the document)
                     if i > 0 && !Self::is_empty_line(lines[i - 1]) && 
-                       !FrontMatterUtils::is_in_front_matter(&content, i - 1) && 
-                       !result.is_empty() {
+                       !excluded_lines[i - 1] && !result.is_empty() {
                         result.push("".to_string());
                     }
                     in_list = true;
+                    _list_start_index = i;
                 }
                 result.push(line.to_string());
             } else if Self::is_list_content(line) {
