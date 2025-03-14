@@ -13,16 +13,28 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         include:
+          # Linux x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             compatibility: manylinux2014
-            wheel_name: linux
+            wheel_name: linux-x86_64
+          # Linux aarch64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            compatibility: manylinux2014
+            wheel_name: linux-aarch64
+          # Windows x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            wheel_name: windows
+            wheel_name: windows-x86_64
+          # macOS x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
-            wheel_name: macos
+            wheel_name: macos-x86_64
+          # macOS aarch64 (M1/M2)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            wheel_name: macos-aarch64
 
     steps:
       - uses: actions/checkout@v4
@@ -42,14 +54,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install maturin[zig]
 
-      - name: Build wheel (Linux/macOS)
-        if: matrix.os != 'windows-latest'
-        run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            maturin build --release --target ${{ matrix.target }} --compatibility ${{ matrix.compatibility }} --zig
-          else
-            maturin build --release --target ${{ matrix.target }}
-          fi
+      - name: Build wheel (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: maturin build --release --target ${{ matrix.target }} --compatibility ${{ matrix.compatibility }} --zig
+
+      - name: Build wheel (macOS)
+        if: matrix.os == 'macos-latest'
+        run: maturin build --release --target ${{ matrix.target }}
 
       - name: Build wheel (Windows)
         if: matrix.os == 'windows-latest'
@@ -62,24 +73,61 @@ jobs:
           path: target/wheels/*.whl
           name: wheel-${{ matrix.wheel_name }}
 
+  # Build source distribution
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install maturin[zig]
+
+      - name: Build source distribution
+        run: maturin sdist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          path: target/wheels/*.tar.gz
+          name: sdist
+
   upload:
-    needs: build
+    needs: [build, sdist]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/tags/*')
 
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: wheel-linux
-          path: target/wheels/linux
+          name: wheel-linux-x86_64
+          path: target/wheels/linux-x86_64
       - uses: actions/download-artifact@v4
         with:
-          name: wheel-windows
-          path: target/wheels/windows
+          name: wheel-linux-aarch64
+          path: target/wheels/linux-aarch64
       - uses: actions/download-artifact@v4
         with:
-          name: wheel-macos
-          path: target/wheels/macos
+          name: wheel-windows-x86_64
+          path: target/wheels/windows-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-macos-x86_64
+          path: target/wheels/macos-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-macos-aarch64
+          path: target/wheels/macos-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: target/wheels/sdist
 
       - name: Upload to TestPyPI
         env:
@@ -88,4 +136,4 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install twine
-          python -m twine upload --repository testpypi target/wheels/*/*.whl 
+          python -m twine upload --repository testpypi target/wheels/*/*.whl target/wheels/*/*.tar.gz 
