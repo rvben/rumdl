@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc version-major version-minor version-patch
+.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install
 
 build:
 	cargo build --release
@@ -23,6 +23,16 @@ watch-test:
 	cargo watch -x test
 
 all: fmt check test build
+
+# Python-specific targets
+build-python:
+	maturin build --release
+
+build-wheel:
+	maturin build --release --strip --interpreter python3
+
+dev-install:
+	maturin develop --release
 
 # Version tagging targets
 version-get:

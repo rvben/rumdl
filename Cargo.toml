@@ -13,6 +13,14 @@ keywords = ["markdown", "linter", "markdown-linter", "static-analysis", "documen
 categories = ["command-line-utilities", "development-tools", "text-processing"]
 exclude = [".github/", ".gitignore", "*.bak"]
 
+[lib]
+name = "rumdl"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "rumdl"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
 regex = "1.10.2"
@@ -26,6 +34,11 @@ fancy-regex = "0.13.0"
 toml = "0.8.10"
 glob = "0.3.1"
 ignore = "0.4"
+pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py37"], optional = true }
+
+[features]
+default = []
+python = ["pyo3"]
 
 [dev-dependencies]
 assert_cmd = "2.0"

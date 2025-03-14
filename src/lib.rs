@@ -1,6 +1,10 @@
 pub mod rule;
 pub mod rules;
 pub mod config;
+pub mod init;
+
+#[cfg(feature = "python")]
+pub mod python;
 
 // Re-export commonly used types
 pub use rules::heading_utils::{HeadingStyle, Heading};
