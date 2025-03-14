@@ -42,7 +42,7 @@ jobs:
       - name: Build wheel
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            maturin build --release --target ${{ matrix.target }} --compatibility ${{ matrix.compatibility }}
+            maturin build --release --target ${{ matrix.target }} --compatibility ${{ matrix.compatibility }} --zig
           else
             maturin build --release --target ${{ matrix.target }}
           fi
