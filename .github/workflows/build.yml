@@ -42,13 +42,19 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install maturin[zig]
 
-      - name: Build wheel
+      - name: Build wheel (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             maturin build --release --target ${{ matrix.target }} --compatibility ${{ matrix.compatibility }} --zig
           else
             maturin build --release --target ${{ matrix.target }}
           fi
+
+      - name: Build wheel (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: maturin build --release --target ${{ matrix.target }}
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
