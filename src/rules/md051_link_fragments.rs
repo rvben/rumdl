@@ -6,11 +6,13 @@ use lazy_static::lazy_static;
 lazy_static! {
     static ref HEADING_REGEX: Regex = Regex::new(r"^#+\s+(.+)$|^(.+)\n[=-]+$").unwrap();
     static ref LINK_REGEX: Regex = Regex::new(r"\[([^\]]*)\]\(([^)]+)#([^)]+)\)").unwrap();
+    static ref EXTERNAL_URL_REGEX: Regex = Regex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap();
 }
 
 /// Rule MD051: Link fragments should exist
 ///
 /// This rule is triggered when a link fragment (the part after #) doesn't exist in the document.
+/// This only applies to internal document links, not to external URLs.
 pub struct MD051LinkFragments;
 
 impl MD051LinkFragments {
@@ -61,6 +63,11 @@ impl MD051LinkFragments {
             })
             .collect()
     }
+
+    /// Check if a URL is external (has a protocol or domain)
+    fn is_external_url(&self, url: &str) -> bool {
+        EXTERNAL_URL_REGEX.is_match(url)
+    }
 }
 
 impl Rule for MD051LinkFragments {
@@ -78,7 +85,14 @@ impl Rule for MD051LinkFragments {
 
         for (line_num, line) in content.lines().enumerate() {
             for cap in LINK_REGEX.captures_iter(line) {
+                let url = &cap[2];
                 let fragment = &cap[3];
+
+                // Skip validation for external URLs
+                if self.is_external_url(url) {
+                    continue;
+                }
+
                 if !headings.contains(fragment) {
                     let full_match = cap.get(0).unwrap();
                     warnings.push(LintWarning {
@@ -102,7 +116,14 @@ impl Rule for MD051LinkFragments {
         let headings = self.extract_headings(content);
 
         let result = LINK_REGEX.replace_all(content, |caps: &regex::Captures| {
+            let url = &caps[2];
             let fragment = &caps[3];
+            
+            // Skip validation for external URLs
+            if self.is_external_url(url) {
+                return caps[0].to_string();
+            }
+
             if !headings.contains(fragment) {
                 format!("[{}]({})", &caps[1], &caps[2])
             } else {

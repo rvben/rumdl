@@ -150,10 +150,14 @@ impl Rule for MD035HRStyle {
                 continue;
             }
             
+            let trimmed = line.trim();
+            
+            // Simplify the horizontal rule detection and replacement
             if Self::is_horizontal_rule(line) {
-                // Replace with the correct style and remove indentation
+                // Here we have a proper horizontal rule - replace it with the expected style
                 result.push(expected_style.clone());
             } else {
+                // Not a horizontal rule, keep the original line
                 result.push(line.to_string());
             }
         }

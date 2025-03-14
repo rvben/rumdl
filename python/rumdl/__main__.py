@@ -35,13 +35,16 @@ def main() -> int:
         # Find the native binary
         native_binary = find_native_binary()
         
-        # Run it with all arguments
+        # Simply forward all arguments to the Rust binary
+        args = [native_binary] + sys.argv[1:]
+        
+        # Run the binary
         if sys.platform == "win32":
-            completed_process = subprocess.run([native_binary] + sys.argv[1:])
+            completed_process = subprocess.run(args)
             return completed_process.returncode
         else:
             # On Unix-like systems, directly execute the binary for better signal handling
-            os.execv(native_binary, [native_binary] + sys.argv[1:])
+            os.execv(native_binary, args)
             return 0  # This line will never be reached on non-Windows platforms
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)

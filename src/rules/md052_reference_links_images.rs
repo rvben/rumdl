@@ -23,6 +23,9 @@ lazy_static! {
     
     // Patterns for code blocks
     static ref FENCED_CODE_START: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
+    
+    // Pattern to match task list items/checklists
+    static ref TASK_LIST_REGEX: Regex = Regex::new(r"^\s*[-*+]\s+\[[xX\s]\]\s+").unwrap();
 }
 
 /// Rule MD052: Reference links and images should use a reference that exists
@@ -175,6 +178,11 @@ impl MD052ReferenceLinkImages {
                 
                 // Skip if this match overlaps with an inline element
                 if is_position_overlapping(match_start, match_end, &inline_elements) {
+                    continue;
+                }
+                
+                // Skip checklist/task list items: '- [ ] Task description'
+                if TASK_LIST_REGEX.is_match(line) && (match_start > 0 && match_start <= 5) {
                     continue;
                 }
                 

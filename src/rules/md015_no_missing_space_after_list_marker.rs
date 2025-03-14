@@ -2,6 +2,9 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::code_block_utils::CodeBlockUtils;
 use crate::rules::list_utils::ListUtils;
+use crate::rules::md035_hr_style::MD035HRStyle;
+use regex::Regex;
+use lazy_static::lazy_static;
 
 #[derive(Debug)]
 pub struct MD015NoMissingSpaceAfterListMarker {
@@ -22,6 +25,18 @@ impl MD015NoMissingSpaceAfterListMarker {
     pub fn with_require_space(require_space: bool) -> Self {
         Self { require_space }
     }
+
+    /// Check if a line is a horizontal rule
+    fn is_horizontal_rule(line: &str) -> bool {
+        let trimmed = line.trim();
+        HR_DASH.is_match(trimmed) || HR_ASTERISK.is_match(trimmed) || HR_UNDERSCORE.is_match(trimmed)
+    }
+}
+
+lazy_static! {
+    static ref HR_DASH: Regex = Regex::new(r"^\-{3,}\s*$").unwrap();
+    static ref HR_ASTERISK: Regex = Regex::new(r"^\*{3,}\s*$").unwrap();
+    static ref HR_UNDERSCORE: Regex = Regex::new(r"^_{3,}\s*$").unwrap();
 }
 
 impl Rule for MD015NoMissingSpaceAfterListMarker {
@@ -44,6 +59,11 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
         for (line_num, line) in lines.iter().enumerate() {
             // Skip processing if line is in a code block or front matter
             if CodeBlockUtils::is_in_code_block(content, line_num) || FrontMatterUtils::is_in_front_matter(content, line_num) {
+                continue;
+            }
+
+            // Skip if this is a horizontal rule
+            if Self::is_horizontal_rule(line) {
                 continue;
             }
 
@@ -111,8 +131,12 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
             if in_code_block {
                 result.push_str(line);
             } else {
+                // Skip if this is a horizontal rule
+                if Self::is_horizontal_rule(line) {
+                    result.push_str(line);
+                }
                 // Check for list items without space
-                if ListUtils::is_list_item_without_space(line) {
+                else if ListUtils::is_list_item_without_space(line) {
                     result.push_str(&ListUtils::fix_list_item_without_space(line));
                 } else {
                     result.push_str(line);

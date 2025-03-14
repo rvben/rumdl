@@ -5,6 +5,8 @@ use lazy_static::lazy_static;
 lazy_static! {
     static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"_[^_\\]+_").unwrap();
     static ref ASTERISK_PATTERN: Regex = Regex::new(r"\*[^*\\]+\*").unwrap();
+    static ref URL_PATTERN: Regex = Regex::new(r"https?://[^\s)]+").unwrap();
+    static ref INLINE_CODE_PATTERN: Regex = Regex::new(r"`[^`]+`").unwrap();
 }
 
 /// Rule MD049: Emphasis style should be consistent
@@ -25,13 +27,37 @@ impl MD049EmphasisStyle {
     }
 
     fn detect_style(&self, content: &str) -> Option<EmphasisStyle> {
-        let asterisk_count = content.matches("*").count();
-        let underscore_count = content.matches("_").count();
+        // Instead of trying to modify the content, count only valid emphasis markers
+        let mut asterisk_count = 0;
+        let mut underscore_count = 0;
+        
+        // Process content line by line
+        for line in content.lines() {
+            // Count valid asterisk emphasis
+            for m in ASTERISK_PATTERN.find_iter(line) {
+                if !self.is_escaped(line, m.start()) && 
+                   !self.is_in_url(line, m.start()) && 
+                   !self.is_in_inline_code(line, m.start()) {
+                    asterisk_count += 1;
+                }
+            }
+            
+            // Count valid underscore emphasis
+            for m in UNDERSCORE_PATTERN.find_iter(line) {
+                if !self.is_escaped(line, m.start()) && 
+                   !self.is_in_url(line, m.start()) && 
+                   !self.is_in_inline_code(line, m.start()) {
+                    underscore_count += 1;
+                }
+            }
+        }
 
         if asterisk_count > underscore_count {
             Some(EmphasisStyle::Asterisk)
         } else if underscore_count > asterisk_count {
             Some(EmphasisStyle::Underscore)
+        } else if asterisk_count > 0 {
+            Some(EmphasisStyle::Asterisk) // Default to asterisk if both are equal but present
         } else {
             None
         }
@@ -50,6 +76,24 @@ impl MD049EmphasisStyle {
             }
         }
         backslash_count % 2 == 1
+    }
+
+    fn is_in_url(&self, text: &str, pos: usize) -> bool {
+        for url_match in URL_PATTERN.find_iter(text) {
+            if pos >= url_match.start() && pos < url_match.end() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn is_in_inline_code(&self, text: &str, pos: usize) -> bool {
+        for code_match in INLINE_CODE_PATTERN.find_iter(text) {
+            if pos >= code_match.start() && pos < code_match.end() {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -77,29 +121,34 @@ impl Rule for MD049EmphasisStyle {
 
         for (line_num, line) in content.lines().enumerate() {
             for m in emphasis_regex.find_iter(line) {
-                if !self.is_escaped(line, m.start()) {
-                    let text = &line[m.start()+1..m.end()-1];
-                    let message = match target_style {
-                        EmphasisStyle::Asterisk => "Emphasis should use asterisks",
-                        EmphasisStyle::Underscore => "Emphasis should use underscores",
-                        EmphasisStyle::Consistent => unreachable!(),
-                    };
+                // Skip this match if it's escaped or within a URL/code
+                if self.is_escaped(line, m.start()) ||
+                   self.is_in_url(line, m.start()) ||
+                   self.is_in_inline_code(line, m.start()) {
+                    continue;
+                }
+                
+                let text = &line[m.start()+1..m.end()-1];
+                let message = match target_style {
+                    EmphasisStyle::Asterisk => "Emphasis should use asterisks",
+                    EmphasisStyle::Underscore => "Emphasis should use underscores",
+                    EmphasisStyle::Consistent => unreachable!(),
+                };
 
-                    warnings.push(LintWarning {
+                warnings.push(LintWarning {
+                    line: line_num + 1,
+                    column: m.start() + 1,
+                    message: message.to_string(),
+                    fix: Some(Fix {
                         line: line_num + 1,
                         column: m.start() + 1,
-                        message: message.to_string(),
-                        fix: Some(Fix {
-                            line: line_num + 1,
-                            column: m.start() + 1,
-                            replacement: match target_style {
-                                EmphasisStyle::Asterisk => format!("*{}*", text),
-                                EmphasisStyle::Underscore => format!("_{}_", text),
-                                EmphasisStyle::Consistent => unreachable!(),
-                            },
-                        }),
-                    });
-                }
+                        replacement: match target_style {
+                            EmphasisStyle::Asterisk => format!("*{}*", text),
+                            EmphasisStyle::Underscore => format!("_{}_", text),
+                            EmphasisStyle::Consistent => unreachable!(),
+                        },
+                    }),
+                });
             }
         }
 
@@ -118,9 +167,13 @@ impl Rule for MD049EmphasisStyle {
             EmphasisStyle::Consistent => unreachable!(),
         };
 
-        // Store matches with their positions
+        // Store matches with their positions, filtering out URLs and code
         let matches: Vec<(usize, usize)> = emphasis_regex.find_iter(content)
-            .filter(|m| !self.is_escaped(content, m.start()))
+            .filter(|m| 
+                !self.is_escaped(content, m.start()) && 
+                !self.is_in_url(content, m.start()) && 
+                !self.is_in_inline_code(content, m.start())
+            )
             .map(|m| (m.start(), m.end()))
             .collect();
 
