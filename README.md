@@ -95,7 +95,7 @@ exclude = [
     "vendor",
     "dist",
     "build",
-    
+
     # Specific files or patterns
     "CHANGELOG.md",
     "LICENSE.md",
