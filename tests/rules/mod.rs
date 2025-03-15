@@ -48,6 +48,7 @@ mod md049_test;
 mod md050_test;
 mod md051_test;
 mod md052_test;
+mod md053_test;
 mod md054_test;
 mod md055_test;
 mod md056_test;
