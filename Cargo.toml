@@ -22,19 +22,19 @@ name = "rumdl"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.4", features = ["derive"] }
-regex = "1.10.2"
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
-thiserror = "1.0"
-walkdir = "2.4"
-colored = "2.0"
+clap = { version = "4.5", features = ["derive"] }
+regex = "1.10.3"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_yaml = "0.9.32"
+thiserror = "2.0.12"
+walkdir = "2.5.0"
+colored = "3.0.0"
 lazy_static = "1.4.0"
 fancy-regex = "0.14.0"
-toml = "0.8.10"
-glob = "0.3.1"
-ignore = "0.4"
-pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py37"], optional = true }
+toml = "0.8.20"
+glob = "0.3.2"
+ignore = "0.4.23"
+pyo3 = { version = "0.24.0", features = ["extension-module", "abi3-py37"], optional = true }
 
 [features]
 default = ["profiling"]
@@ -42,9 +42,9 @@ profiling = []
 python = ["pyo3"]
 
 [dev-dependencies]
-assert_cmd = "2.0"
-predicates = "3.0"
-tempfile = "3.8"
-ignore = "0.4"
-walkdir = "2.3"
-glob = "0.3" 
+assert_cmd = "2.0.13"
+predicates = "3.1.0"
+tempfile = "3.10.1"
+ignore = "0.4.23"
+walkdir = "2.5.0"
+glob = "0.3.2" 
