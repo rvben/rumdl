@@ -105,4 +105,74 @@ fn test_ignore_code_spans() {
     let content = "Use `<div>` for a block element";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
+}
+
+#[test]
+fn test_complex_code_block_patterns() {
+    let rule = MD033NoInlineHtml::default();
+    
+    // Test with mixed fence styles
+    let content = "Text\n```\n<div>Code block 1</div>\n```\nMore text\n~~~\n<span>Code block 2</span>\n~~~\nEnd text";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+    
+    // Test with code block at start of document
+    let content = "```\n<div>Starts with code</div>\n```\nText with <b>bold</b>";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2); // Only the <b> tags outside the code block
+    
+    // Test with code block at end of document
+    let content = "Text with <i>italic</i>\n```\n<div>Ends with code</div>\n```";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2); // Only the <i> tags outside the code block
+    
+    // Test adjacent code blocks
+    let content = "```\n<div>Block 1</div>\n```\n```\n<span>Block 2</span>\n```";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_code_span_binary_search() {
+    let rule = MD033NoInlineHtml::default();
+    
+    // Test HTML tag immediately before a code span
+    let content = "<span>`code`</span>";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2); // Both span tags should be detected
+    
+    // Test HTML tag immediately after a code span
+    let content = "`code`<div>text</div>";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2); // Both div tags should be detected
+    
+    // Test HTML tag exactly at position boundaries
+    let content = "Text `<div>` more text";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+    
+    // Test many code spans to trigger binary search optimization
+    let content = "`1` `2` `3` `4` `5` `6` `7` `8` `9` `10` `11` `12` <span>text</span>";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2); // Both span tags should be detected
+}
+
+#[test]
+fn test_fix_preserves_structure_html() {
+    let rule = MD033NoInlineHtml::default();
+    
+    // Verify HTML fix preserves code blocks
+    let content = "Normal <b>bold</b>\n```\n<div>Code block</div>\n```\nMore <i>italic</i>";
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "Normal bold\n```\n<div>Code block</div>\n```\nMore italic");
+    
+    // Verify HTML fix preserves code spans
+    let content = "Text with `<span>` and <div>block</div>";
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "Text with `<span>` and block</div>");
+    
+    // Verify HTML fix handles adjacent tags
+    let content = "<div><p>Nested content</p></div>";
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "Nested content");
 } 
