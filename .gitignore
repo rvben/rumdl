@@ -3,3 +3,4 @@ target/
 **/*.egg-info
 *.md
 **/*.md
+cov-report

@@ -27,9 +27,131 @@ fn test_md025_no_title() {
 }
 
 #[test]
+fn test_md025_with_front_matter() {
+    let rule = MD025SingleTitle::default();
+    let content = "---\ntitle: Document Title\n---\n# Title\n## Heading 2\n";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty(), "Should not flag a single title after front matter");
+}
+
+#[test]
+fn test_md025_multiple_with_front_matter() {
+    let rule = MD025SingleTitle::default();
+    let content = "---\ntitle: Document Title\n---\n# Title 1\n## Heading 2\n# Title 2\n";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 6);
+}
+
+#[test]
+fn test_md025_with_code_blocks() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Title\n\n```markdown\n# This is not a real title\n```\n\n## Heading\n";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty(), "Should ignore titles in code blocks");
+}
+
+#[test]
+fn test_md025_with_custom_level() {
+    let rule = MD025SingleTitle::new(2, "");
+    let content = "# Heading 1\n## Heading 2.1\n## Heading 2.2\n### Heading 3\n";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 3);
+}
+
+#[test]
+fn test_md025_indented_headings() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Title 1\n\n  # Title 2\n";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 3);
+}
+
+#[test]
+fn test_md025_with_multiple_violations() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Title 1\n\n# Title 2\n\n# Title 3\n";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].line, 3);
+    assert_eq!(result[1].line, 5);
+}
+
+#[test]
+fn test_md025_empty_document() {
+    let rule = MD025SingleTitle::default();
+    let content = "";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_md025_closing_hashes() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Title 1 #\n\n# Title 2 #\n";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 3);
+}
+
+#[test]
+fn test_md025_setext_headings() {
+    let rule = MD025SingleTitle::default();
+    // Setext headings (using === or ---) aren't detected by this rule
+    // since it only looks for # style headings
+    let content = "Title 1\n=======\n\nTitle 2\n=======\n";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_md025_performance() {
+    let rule = MD025SingleTitle::default();
+    
+    // Generate a large document with many headings
+    let mut content = String::new();
+    content.push_str("# Main Title\n\n");
+    
+    for i in 1..=100 {
+        content.push_str(&format!("## Heading {}\n\nSome text here.\n\n", i));
+    }
+    
+    let start = std::time::Instant::now();
+    let result = rule.check(&content).unwrap();
+    let duration = start.elapsed();
+    
+    assert!(result.is_empty());
+    assert!(duration.as_millis() < 500, "Processing large document should take less than 500ms");
+}
+
+#[test]
 fn test_md025_fix() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n# Title 2\n## Heading\n";
     let result = rule.fix(content).unwrap();
     assert_eq!(result, "# Title 1\n## Title 2\n## Heading\n");
-} 
+}
+
+#[test]
+fn test_md025_fix_multiple() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Title 1\n# Title 2\n# Title 3\n## Heading\n";
+    let result = rule.fix(content).unwrap();
+    assert_eq!(result, "# Title 1\n## Title 2\n## Title 3\n## Heading\n");
+}
+
+#[test]
+fn test_md025_fix_with_indentation() {
+    let rule = MD025SingleTitle::default();
+    // In Markdown, content indented with 4+ spaces is considered a code block
+    // so the heavily indented heading is not processed as a heading
+    let content = "# Title 1\n  # Title 2\n    # Title 3\n";
+    let fixed = rule.fix(content).unwrap();
+    
+    // Expected behavior: only the first two headings are processed,
+    // the third one is preserved as is since it's detected as a code block
+    assert_eq!(fixed, "# Title 1\n  ## Title 2\n    # Title 3\n", 
+        "Only moderately indented headings should be upgraded; heavily indented ones are treated as code blocks");
+}

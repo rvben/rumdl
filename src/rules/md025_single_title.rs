@@ -69,33 +69,40 @@ impl Rule for MD025SingleTitle {
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
         let mut result = String::new();
-        let mut found_title = false;
+        let mut found_first_title = false;
         let lines: Vec<&str> = content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
-            // Skip processing if line is in a code block or front matter
+            // Don't modify lines in code blocks or front matter
             if HeadingUtils::is_in_code_block(&content, i) || FrontMatterUtils::is_in_front_matter(&content, i) {
                 result.push_str(line);
             } else {
                 let trimmed = line.trim_start();
                 if trimmed.starts_with('#') {
                     let level = trimmed.chars().take_while(|&c| c == '#').count();
-                    if level == self.level && found_title {
-                        // Increase heading level by 1
-                        let spaces = line.chars().take_while(|&c| c.is_whitespace()).count();
-                        result.push_str(&" ".repeat(spaces));
-                        result.push_str(&"#".repeat(level + 1));
-                        result.push_str(&line[spaces + level..]);
+                    let indent = line.len() - trimmed.len();
+                    
+                    if level == self.level {
+                        if found_first_title {
+                            // This is a duplicate level-n heading - add one more # to increase level
+                            let modified = format!("{}{}{}", " ".repeat(indent), "#".repeat(level + 1), &trimmed[level..]);
+                            result.push_str(&modified);
+                        } else {
+                            // This is the first level-n heading - keep it as is
+                            result.push_str(line);
+                            found_first_title = true;
+                        }
                     } else {
+                        // Not a level-n heading, keep it as is
                         result.push_str(line);
                     }
-                    if level == self.level {
-                        found_title = true;
-                    }
                 } else {
+                    // Not a heading, keep it as is
                     result.push_str(line);
                 }
             }
+            
+            // Add newline between lines (except after the last line)
             if i < lines.len() - 1 {
                 result.push('\n');
             }

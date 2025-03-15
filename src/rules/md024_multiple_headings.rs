@@ -104,12 +104,19 @@ impl MD024MultipleHeadings {
     
     /// Get the heading signature based on configuration
     fn get_heading_signature(&self, text: &str, level: usize) -> String {
+        // Convert text to lowercase for case-insensitive comparison
+        let normalized_text = text.trim().to_lowercase();
+        
         if self.allow_different_nesting {
-            // If different nesting levels are allowed, only track by text
-            text.to_string()
+            // When allow_different_nesting is true, we only compare by text content
+            // This means headings with the same text will be flagged as duplicates
+            // regardless of their level
+            normalized_text
         } else {
-            // Otherwise track by text AND level
-            format!("{}:{}", level, text)
+            // When allow_different_nesting is false, we consider both text AND level
+            // This means headings are only considered duplicates if they have the same
+            // content AND the same level
+            format!("{}:{}", level, normalized_text)
         }
     }
 }
