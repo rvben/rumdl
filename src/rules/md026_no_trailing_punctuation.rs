@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
+use crate::rules::front_matter_utils::FrontMatterUtils;
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -128,6 +129,11 @@ impl Rule for MD026NoTrailingPunctuation {
         let lines: Vec<&str> = content.lines().collect();
         
         for (line_num, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks or front matter
+            if HeadingUtils::is_in_code_block(&content, line_num) || FrontMatterUtils::is_in_front_matter(&content, line_num) {
+                continue;
+            }
+            
             // Skip lines that definitely aren't headings
             if !line.contains('#') && 
                (line_num + 1 >= lines.len() || (!lines[line_num + 1].contains('=') && !lines[line_num + 1].contains('-'))) {
@@ -232,6 +238,12 @@ impl Rule for MD026NoTrailingPunctuation {
                 continue;
             }
             
+            // Skip lines in code blocks or front matter
+            if HeadingUtils::is_in_code_block(&content, i) || FrontMatterUtils::is_in_front_matter(&content, i) {
+                output_lines.push(line.to_string());
+                continue;
+            }
+            
             // Skip lines that definitely aren't headings
             if !line.contains('#') && 
                (i + 1 >= lines.len() || (!lines[i + 1].contains('=') && !lines[i + 1].contains('-'))) {
@@ -287,11 +299,16 @@ impl Rule for MD026NoTrailingPunctuation {
                         let indentation = HeadingUtils::get_indentation(line);
                         let fixed_text = self.remove_trailing_punctuation(&text);
                         output_lines.push(format!("{}{}", " ".repeat(indentation), fixed_text));
+                        
+                        // Mark next line (underline) to be skipped in next iteration
                         skip_next = true;
+                        
+                        // Add the underline to output (don't duplicate it)
                         output_lines.push(next_line.to_string());
                     } else {
                         output_lines.push(line.to_string());
                     }
+                    continue;
                 } else {
                     output_lines.push(line.to_string());
                 }
