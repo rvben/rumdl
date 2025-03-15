@@ -179,3 +179,18 @@ fn test_horizontal_rule() {
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "# Heading\n\n***\n\nParagraph after rule.", "Horizontal rule in content should not be modified");
 }
+
+#[test]
+fn test_fixes_missing_space() {
+    let rule = MD015NoMissingSpaceAfterListMarker::new();
+    let content = "-Item 1\n*Item 2\n+ Item 3";
+    let expected = "- Item 1\n* Item 2\n+ Item 3";
+    assert_eq!(rule.fix(content).unwrap(), expected);
+}
+
+#[test]
+fn test_preserves_valid_items() {
+    let rule = MD015NoMissingSpaceAfterListMarker::new();
+    let content = "- Valid item\n*  Properly spaced\n+   Correct";
+    assert_eq!(rule.fix(content).unwrap(), content);
+}

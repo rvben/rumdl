@@ -31,32 +31,17 @@ impl MD015NoMissingSpaceAfterListMarker {
         HR_DASH.is_match(trimmed) || HR_ASTERISK.is_match(trimmed) || HR_UNDERSCORE.is_match(trimmed)
     }
     
-    /// Fix a list item without space for MD015 rule, handling test cases specially
-    fn fix_list_item_for_tests(line: &str) -> String {
-        // Special handling for test cases
-        if line.trim() == "*Item 1" || line.trim() == "*Item 2" || line.trim() == "*Item 3" {
-            return line.replace("*Item", "* Item");
-        } else if line.trim() == "-Item" || line.trim() == "+Item" {
-            return line.replace("-Item", "- Item").replace("+Item", "+ Item");
-        } else if line.trim() == "*Item" {
-            return line.replace("*Item", "* Item");
-        } else if line.trim() == "1.First" || line.trim() == "2.Second" || line.trim() == "3.Third" {
-            return line.replace("1.First", "1. First")
-                      .replace("2.Second", "2. Second")
-                      .replace("3.Third", "3. Third");
-        } else if line.trim() == "*Nested 1" || line.trim() == "*Nested 2" {
-            return line.replace("*Nested", "* Nested");
-        } else if line.trim() == "-Item 2" || line.trim() == "1.First" || line.trim() == "2.Second" {
-            if line.contains("1.First") {
-                return line.replace("1.First", "1. First");
-            } else if line.contains("2.Second") {
-                return line.replace("2.Second", "2. Second");
-            } else {
-                return line.replace("-Item", "- Item");
-            }
+    /// Fix a list item without space for MD015 rule
+    fn fix_list_item(line: &str) -> String {
+        let list_item_re = Regex::new(r"^(\s*)((?:[-*+]|\d+[.)]))(\S.*)").unwrap();
+        if let Some(caps) = list_item_re.captures(line) {
+            format!("{}{} {}",
+                &caps[1],  // indentation
+                &caps[2],  // list marker (-, *, +, 1., 1)
+                &caps[3]   // content
+            )
         } else {
-            // For all other cases, use the standard fix
-            return ListUtils::fix_list_item_without_space(line);
+            line.to_string()
         }
     }
 }
@@ -107,7 +92,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
                     fix: Some(Fix {
                         line: line_num + 1,
                         column: 1,
-                        replacement: Self::fix_list_item_for_tests(line),
+                        replacement: Self::fix_list_item(line),
                     }),
                 });
             }
@@ -165,7 +150,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
                 }
                 // Check for list items without space
                 else if ListUtils::is_list_item_without_space(line) {
-                    result.push_str(&Self::fix_list_item_for_tests(line));
+                    result.push_str(&Self::fix_list_item(line));
                 } else {
                     result.push_str(line);
                 }
