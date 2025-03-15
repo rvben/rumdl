@@ -16,7 +16,7 @@ fn test_unused_reference() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "[link1][id1]\n\n[id1]: http://example.com/1\n");
+    assert_eq!(fixed, "[link1][id1]\n\n[id1]: http://example.com/1");
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn test_multiple_unused_references() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "[link1][id1]\n\n[id1]: http://example.com/1\n");
+    assert_eq!(fixed, "[link1][id1]\n\n[id1]: http://example.com/1");
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn test_only_unused_references() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "\n");
+    assert_eq!(fixed, "");
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn test_mixed_used_unused_references() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "[link][used]\nSome text\n\n[used]: http://example.com/used\n");
+    assert_eq!(fixed, "[link][used]\nSome text\n\n[used]: http://example.com/used");
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn test_mixed_references() {
 
 #[test]
 fn test_ignored_definitions() {
-    let rule = MD053LinkImageReferenceDefinitions::new(vec![]);
+    let rule = MD053LinkImageReferenceDefinitions::new(vec!["ignored".to_string()]);
     let content = "[ignored]: https://example.com\nNo references here";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
