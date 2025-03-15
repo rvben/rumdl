@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug, Default)]
 pub struct MD047FileEndNewline;
@@ -25,12 +26,12 @@ impl Rule for MD047FileEndNewline {
                 let last_column = lines.last().map_or(1, |line| line.len() + 1);
                 
                 warnings.push(LintWarning {
-                    message: "File should end with a single newline character".to_string(),
-                    line: last_line,
+                    message: String::from("File should end with a single newline character"),
+                    line: last_line + 1,
                     column: last_column,
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: last_line,
-                        column: last_column,
+                        range: line_col_to_byte_range(content, last_line + 1, last_column),
                         replacement: if has_trailing_newline {
                             // If there are multiple newlines, trim them and add a single one
                             content.trim_end().to_string() + "\n"

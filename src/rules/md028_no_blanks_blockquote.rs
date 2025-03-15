@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::blockquote_utils::BlockquoteUtils;
 
 #[derive(Debug, Default)]
@@ -62,9 +63,9 @@ impl Rule for MD028NoBlanksBlockquote {
                         message: "Blank line inside blockquote".to_string(),
                         line: i + 1,
                         column: 1,
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: i + 1,
-                            column: 1,
+                            range: line_col_to_byte_range(content, i + 1, 1),
                             replacement: Self::get_replacement(&indent, level),
                         }),
                     });

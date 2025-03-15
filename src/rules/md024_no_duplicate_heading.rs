@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
 use std::collections::HashSet;
 
@@ -65,9 +66,9 @@ impl Rule for MD024NoDuplicateHeading {
                             line: line_num + 1,
                             column: indentation + 1,
                             message: "Multiple headings with the same content at the same nesting level".to_string(),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_num + 1,
-                                column: indentation + 1,
+                                range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
                                 replacement: format!("{}{} {} ({})",
                                     " ".repeat(indentation),
                                     "#".repeat(heading.level),
@@ -84,9 +85,9 @@ impl Rule for MD024NoDuplicateHeading {
                             line: line_num + 1,
                             column: indentation + 1,
                             message: "Multiple headings with the same content".to_string(),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_num + 1,
-                                column: indentation + 1,
+                                range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
                                 replacement: format!("{}{} {} ({})",
                                     " ".repeat(indentation),
                                     "#".repeat(heading.level),

@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils_new::HeadingUtilsNew;
 use crate::rules::code_block_utils::CodeBlockUtils;
 use regex::Regex;
@@ -74,11 +75,11 @@ impl Rule for MD023HeadingStartLeft {
                         
                         warnings.push(LintWarning {
                             line: i + 1,
-                            column: 1,
+                            column: 1, 
+                            severity: Severity::Warning,
                             message: format!("Heading should not be indented by {} spaces", heading.indentation),
                             fix: Some(Fix {
-                                line: i + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, i + 1, 1),
                                 replacement: fixed_heading,
                             }),
                         });
@@ -101,10 +102,10 @@ impl Rule for MD023HeadingStartLeft {
                         warnings.push(LintWarning {
                             line: i,
                             column: 1,
+                            severity: Severity::Warning,
                             message: format!("Setext heading should not be indented by {} spaces", heading.indentation),
                             fix: Some(Fix {
-                                line: i,
-                                column: 1,
+                                range: line_col_to_byte_range(content, i, 1),
                                 replacement: fixed_text,
                             }),
                         });
@@ -113,10 +114,10 @@ impl Rule for MD023HeadingStartLeft {
                         warnings.push(LintWarning {
                             line: i + 1,
                             column: 1,
+                            severity: Severity::Warning,
                             message: format!("Setext heading underline should not be indented"),
                             fix: Some(Fix {
-                                line: i + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, i + 1, 1),
                                 replacement: fixed_underline,
                             }),
                         });

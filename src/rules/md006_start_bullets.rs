@@ -1,6 +1,7 @@
+use crate::utils::range_utils::line_col_to_byte_range;
 use regex::Regex;
 use lazy_static::lazy_static;
-use crate::rule::{Rule, LintWarning, LintResult, LintError, Fix};
+use crate::rule::{Rule, LintWarning, LintResult, LintError, Fix, Severity};
 
 /// Rule that ensures bullet lists start at the beginning of the line
 /// 
@@ -134,14 +135,26 @@ impl Rule for MD006StartBullets {
                 // If we get here, we have an improperly indented bullet item:
                 // Either it's indented but has no parent, or it follows non-list content
                 let fixed_line = line.trim_start();
+                
+                // Check if this should have a blank line before it
+                let needs_blank_line = line_idx > 0 && 
+                    !Self::is_blank_line(lines[line_idx - 1]) &&
+                    Self::is_bullet_list_item(lines[line_idx - 1]).is_none();
+                
+                let replacement = if needs_blank_line {
+                    format!("\n{}", fixed_line)
+                } else {
+                    fixed_line.to_string()
+                };
+                
                 result.push(LintWarning {
+                    severity: Severity::Warning,
                     line: line_idx + 1, // 1-indexed line number
                     column: 1,
                     message: "Consider starting bulleted lists at the beginning of the line".to_string(),
                     fix: Some(Fix {
-                        line: line_idx + 1,
-                        column: 1,
-                        replacement: fixed_line.to_string(),
+                        range: line_col_to_byte_range(content, line_idx + 1, 1),
+                        replacement,
                     }),
                 });
             }
@@ -156,37 +169,45 @@ impl Rule for MD006StartBullets {
             return Ok(content.to_string());
         }
         
-        let mut fixed_content = String::new();
         let lines: Vec<&str> = content.lines().collect();
+        let mut fixed_lines: Vec<String> = Vec::with_capacity(lines.len());
         
-        // Create a map of fixes by line number
-        let mut fix_map = std::collections::HashMap::new();
+        // Create a map of line numbers to replacements
+        let mut line_replacements = std::collections::HashMap::new();
         for warning in warnings {
             if let Some(fix) = warning.fix {
-                fix_map.insert(fix.line, fix.replacement);
+                // Line number is 1-based in warnings but we need 0-based for indexing
+                let line_idx = warning.line - 1;
+                line_replacements.insert(line_idx, fix.replacement);
             }
         }
         
-        // Apply fixes line by line
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
-            
-            if let Some(replacement) = fix_map.get(&line_num) {
-                fixed_content.push_str(replacement);
+        // Apply replacements line by line
+        let mut i = 0;
+        while i < lines.len() {
+            if let Some(replacement) = line_replacements.get(&i) {
+                // Check if this replacement includes a blank line
+                if replacement.starts_with('\n') {
+                    // Add a blank line
+                    fixed_lines.push(String::new());
+                    // Then add the actual content (without the leading newline)
+                    fixed_lines.push(replacement[1..].to_string());
+                } else {
+                    fixed_lines.push(replacement.clone());
+                }
             } else {
-                fixed_content.push_str(line);
+                fixed_lines.push(lines[i].to_string());
             }
             
-            // Add newline unless it's the last line and the original doesn't end with newline
-            if i < lines.len() - 1 || content.ends_with('\n') {
-                fixed_content.push('\n');
-            }
+            i += 1;
         }
         
-        Ok(fixed_content)
+        // Join the lines with newlines
+        let result = fixed_lines.join("\n");
+        if content.ends_with('\n') {
+            Ok(result + "\n")
+        } else {
+            Ok(result)
+        }
     }
 }
-
-
-
-

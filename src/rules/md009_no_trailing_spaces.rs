@@ -1,4 +1,7 @@
+use crate::utils::range_utils::line_col_to_byte_range;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use once_cell::sync::Lazy;
+use regex::Regex;
 
 #[derive(Debug, Default)]
 pub struct MD009NoTrailingSpaces;
@@ -12,11 +15,19 @@ impl Rule for MD009NoTrailingSpaces {
         "Trailing spaces are not allowed"
     }
 
+    static TRAILING_SPACE_RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r" +$").unwrap()
+    });
+
+    fn fix_trailing_spaces(line: &str) -> String {
+        Self::TRAILING_SPACE_RE.replace(line, "").to_string()
+    }
+
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
 
         for (line_num, line) in content.lines().enumerate() {
-            let trailing_spaces = line.len() - line.trim_end().len();
+            let trailing_spaces = line.len() - Self::fix_trailing_spaces(line).len();
             if trailing_spaces > 0 {
                 warnings.push(LintWarning {
                     message: format!("Found {} trailing space(s)", trailing_spaces),
@@ -42,10 +53,10 @@ impl Rule for MD009NoTrailingSpaces {
             if line_num > last_line {
                 result.push('\n');
             }
-            result.push_str(line.trim_end());
+            result.push_str(&Self::fix_trailing_spaces(line));
             last_line = line_num;
         }
 
         Ok(result)
     }
-} 
+}

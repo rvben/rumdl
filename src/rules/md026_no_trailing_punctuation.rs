@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use regex::Regex;
@@ -168,9 +169,9 @@ impl Rule for MD026NoTrailingPunctuation {
                             line: line_num + 1,
                             column: indentation + 1,
                             message: format!("Trailing punctuation in heading '{}'", text),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_num + 1,
-                                column: indentation + 1,
+                                range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
                                 replacement,
                             }),
                         });
@@ -197,9 +198,9 @@ impl Rule for MD026NoTrailingPunctuation {
                             line: line_num + 1,
                             column: indentation + 1,
                             message: format!("Trailing punctuation in heading '{}'", text),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_num + 1,
-                                column: indentation + 1,
+                                range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
                                 replacement: format!("{}{}", " ".repeat(indentation), fixed_text),
                             }),
                         });

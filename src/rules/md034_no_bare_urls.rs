@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -128,14 +129,14 @@ impl Rule for MD034NoBareUrls {
         // Pre-compute code block regions
         let code_block_map = self.precompute_code_blocks(content);
 
-        for (line_num, line) in lines.iter().enumerate() {
+        for (i, line) in lines.iter().enumerate() {
             // Skip lines without URLs
             if !line.contains("http") && !line.contains("ftp") {
                 continue;
             }
             
             // Skip code blocks
-            if code_block_map[line_num] {
+            if code_block_map[i] {
                 continue;
             }
             
@@ -146,12 +147,12 @@ impl Rule for MD034NoBareUrls {
             // Find bare URLs
             for (col, url) in self.find_bare_urls(line, &code_spans, &link_spans) {
                 warnings.push(LintWarning {
+                    line: i + 1,
+                    column: col,
                     message: format!("Bare URL should be enclosed in angle brackets or as a proper Markdown link: {}", url),
-                    line: line_num + 1,
-                    column: col + 1,
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: col + 1,
+                        range: line_col_to_byte_range(content, i + 1, col),
                         replacement: format!("<{}>", url),
                     }),
                 });

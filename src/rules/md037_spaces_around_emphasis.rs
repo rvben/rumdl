@@ -1,6 +1,7 @@
+use crate::utils::range_utils::line_col_to_byte_range;
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::rule::{LintResult, LintWarning, Rule, LintError, Fix};
+use crate::rule::{LintResult, LintWarning, Rule, LintError, Fix, Severity};
 
 lazy_static! {
     // Improved code block detection patterns
@@ -277,7 +278,7 @@ fn check_emphasis_patterns(line: &str, line_num: usize, original_line: &str, war
 fn check_emphasis_with_pattern(
     line: &str, 
     pattern: &Regex, 
-    marker_type: &str,
+    _marker_type: &str,
     line_num: usize, 
     original_line: &str,
     warnings: &mut Vec<LintWarning>
@@ -292,14 +293,16 @@ fn check_emphasis_with_pattern(
             // Compute the actual position in the original line
             let actual_start = find_actual_position(original_line, m.start());
             
+            let fixed = fix_specific_emphasis_section(original_line, m.start(), m.end());
+            let md_text = &original_line[m.start()..m.end()];
             warnings.push(LintWarning {
                 line: line_num,
                 column: actual_start + 1,
-                message: format!("Spaces inside {} emphasis markers", marker_type),
+                message: format!("Spaces inside emphasis markers: '{}'", md_text),
+                severity: Severity::Warning,
                 fix: Some(Fix {
-                    line: line_num,
-                    column: actual_start + 1,
-                    replacement: fix_specific_emphasis_section(original_line, m.start(), m.end()),
+                    range: line_col_to_byte_range(original_line, line_num, actual_start + 1),
+                    replacement: fixed,
                 }),
             });
         }

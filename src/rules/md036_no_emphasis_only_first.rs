@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -111,13 +112,13 @@ impl Rule for MD036NoEmphasisOnlyFirst {
             
             if let Some((level, text)) = Self::is_entire_line_emphasized(line) {
                 warnings.push(LintWarning {
-                    message: "Emphasis should not be used instead of a heading".to_string(),
                     line: i + 1,
                     column: 1,
+                    message: format!("Emphasis used instead of a heading: '{}'", text),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: i + 1,
-                        column: 1,
-                        replacement: Self::get_heading_for_emphasis(level, &text),
+                        range: line_col_to_byte_range(content, i + 1, 1),
+                        replacement: Self::get_heading_for_emphasis(level, &text.replace("*", "").replace("_", "")),
                     }),
                 });
             }

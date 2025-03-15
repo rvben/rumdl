@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -198,9 +199,9 @@ impl Rule for MD005ListIndent {
                     line: line_num + 1,
                     column: 1,
                     message: inconsistent_message,
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: 1,
+                        range: line_col_to_byte_range(content, line_num + 1, 1),
                         replacement,
                     }),
                 });
@@ -252,9 +253,9 @@ impl Rule for MD005ListIndent {
                             line: line_num + 1,
                             column: 1,
                             message: inconsistent_message,
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_num + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, line_num + 1, 1),
                                 replacement,
                             }),
                         });
@@ -305,9 +306,9 @@ impl Rule for MD005ListIndent {
                             line: line_num + 1,
                             column: 1,
                             message,
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_num + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, line_num + 1, 1),
                                 replacement,
                             }),
                         });
@@ -327,33 +328,34 @@ impl Rule for MD005ListIndent {
             return Ok(content.to_string());
         }
         
-        // Create a map of line numbers to fixes
-        let mut fix_map: HashMap<usize, &Fix> = HashMap::new();
+        // Create a map of line numbers to replacements
+        let mut line_replacements: HashMap<usize, String> = HashMap::new();
         for warning in &warnings {
             if let Some(fix) = &warning.fix {
-                fix_map.insert(fix.line, fix);
+                // Line number is 1-based in warnings but we need 0-based for array indexing
+                let line_idx = warning.line - 1;
+                line_replacements.insert(line_idx, fix.replacement.clone());
             }
         }
         
-        // Apply fixes line by line
-        let mut fixed_content = String::new();
+        // Apply replacements line by line
         let lines: Vec<&str> = content.lines().collect();
+        let mut fixed_lines: Vec<String> = Vec::with_capacity(lines.len());
         
         for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
-            
-            if let Some(fix) = fix_map.get(&line_num) {
-                fixed_content.push_str(&fix.replacement);
+            if let Some(replacement) = line_replacements.get(&i) {
+                fixed_lines.push(replacement.clone());
             } else {
-                fixed_content.push_str(line);
-            }
-            
-            // Preserve trailing newlines
-            if i < lines.len() - 1 || content.ends_with('\n') {
-                fixed_content.push('\n');
+                fixed_lines.push(line.to_string());
             }
         }
         
-        Ok(fixed_content)
+        // Join the fixed lines, preserving the original ending
+        let result = fixed_lines.join("\n");
+        if content.ends_with('\n') {
+            Ok(result + "\n")
+        } else {
+            Ok(result)
+        }
     }
 } 

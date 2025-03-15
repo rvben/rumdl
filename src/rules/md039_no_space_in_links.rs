@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug, Default)]
 pub struct MD039NoSpaceInLinks;
@@ -134,14 +135,14 @@ impl Rule for MD039NoSpaceInLinks {
 
         for (i, line) in content.lines().enumerate() {
             if !self.is_in_code_block(content, i + 1) {
-                for (column, original, fixed) in self.check_line(line) {
+                for (column, _original, fixed) in self.check_line(line) {
                     warnings.push(LintWarning {
-                        message: format!("Spaces inside link text: '{}'", original),
                         line: i + 1,
                         column,
+                        message: "Spaces inside link text should be removed".to_string(),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: i + 1,
-                            column,
+                            range: line_col_to_byte_range(content, i + 1, column),
                             replacement: fixed,
                         }),
                     });

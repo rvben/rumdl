@@ -1,4 +1,5 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -241,10 +242,13 @@ impl Rule for MD033NoInlineHtml {
                     continue;
                 }
                 
+                let start = position;
+                
                 warnings.push(LintWarning {
                     line: line_num + 1,
-                    column: position + 1,
+                    column: start + 1,
                     message: format!("HTML tag '{}' is not allowed", tag),
+                    severity: Severity::Warning,
                     fix: None,
                 });
             }

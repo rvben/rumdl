@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
 /// Rule MD042: No empty links
@@ -33,12 +34,12 @@ impl Rule for MD042NoEmptyLinks {
                 if text.trim().is_empty() || url.trim().is_empty() {
                     let full_match = cap.get(0).unwrap();
                     warnings.push(LintWarning {
+                        message: format!("Empty link found: [{}]({})", text, url),
                         line: line_num + 1,
                         column: full_match.start() + 1,
-                        message: format!("Empty link found: [{}]({})", text, url),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: full_match.start() + 1,
+                            range: line_col_to_byte_range(content, line_num + 1, full_match.start() + 1),
                             replacement: String::new(), // Remove empty link
                         }),
                     });

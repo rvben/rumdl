@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug)]
 pub struct MD010NoHardTabs {
@@ -106,9 +107,9 @@ impl Rule for MD010NoHardTabs {
                     line: line_num + 1,
                     column: pos + 1,
                     message,
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: pos + 1,
+                        range: line_col_to_byte_range(content, line_num + 1, pos + 1),
                         replacement: line.replace('\t', &" ".repeat(self.spaces_per_tab)),
                     }),
                 });

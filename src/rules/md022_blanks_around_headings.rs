@@ -1,14 +1,12 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use once_cell::sync::Lazy;
 use regex::Regex;
-use lazy_static::lazy_static;
-use std::collections::HashMap;
+use std::cmp;
 
-lazy_static! {
-    static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s*)```").unwrap();
-    static ref FRONT_MATTER_PATTERN: Regex = Regex::new(r"^---\s*$").unwrap();
-    static ref SETEXT_HEADING_PATTERN: Regex = Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
-    static ref ATX_HEADING_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})(\s*).*$").unwrap();
-}
+static SETEXT_HEADING_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap());
+static ATX_HEADING_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(\s*)(#{1,6})(\s*).*$").unwrap());
+static CODE_BLOCK_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(\s*)```").unwrap());
+static FRONT_MATTER_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^---\s*$").unwrap());
 
 #[derive(Debug)]
 pub struct MD022BlanksAroundHeadings {
@@ -27,216 +25,237 @@ impl Default for MD022BlanksAroundHeadings {
 
 impl MD022BlanksAroundHeadings {
     pub fn new(lines_above: usize, lines_below: usize) -> Self {
-        Self {
+        MD022BlanksAroundHeadings {
             lines_above,
             lines_below,
         }
     }
-
-    fn is_blank_line(line: &str) -> bool {
-        line.trim().is_empty()
-    }
-
-    fn count_blank_lines_above(&self, lines: &[&str], current_line: usize) -> usize {
-        let mut count = 0;
-        let mut line_idx = current_line;
-        while line_idx > 0 {
-            line_idx -= 1;
-            if Self::is_blank_line(lines[line_idx]) {
-                count += 1;
-            } else {
-                break;
-            }
-        }
-        count
-    }
-
-    fn count_blank_lines_below(&self, lines: &[&str], current_line: usize) -> usize {
-        let mut count = 0;
-        let mut line_idx = current_line;
-        while line_idx < lines.len() - 1 {
-            line_idx += 1;
-            if Self::is_blank_line(lines[line_idx]) {
-                count += 1;
-            } else {
-                break;
-            }
-        }
-        count
-    }
-
+    
     fn is_setext_heading_underline(&self, line: &str) -> bool {
         SETEXT_HEADING_PATTERN.is_match(line)
     }
-
+    
     fn is_heading(&self, line: &str) -> bool {
         ATX_HEADING_PATTERN.is_match(line)
     }
-
+    
     fn is_setext_heading(&self, line: &str, next_line: Option<&str>) -> bool {
         if let Some(next) = next_line {
-            !Self::is_blank_line(line) && self.is_setext_heading_underline(next)
+            !line.trim().is_empty() && self.is_setext_heading_underline(next)
         } else {
             false
         }
     }
-
+    
     fn is_code_block_delimiter(&self, line: &str) -> bool {
         CODE_BLOCK_PATTERN.is_match(line)
     }
-
+    
     fn is_front_matter_delimiter(&self, line: &str) -> bool {
         FRONT_MATTER_PATTERN.is_match(line)
     }
-
-    fn check_heading_spacing(&self, lines: &[&str], line_num: usize, need_blank_above: bool, is_setext: bool, warnings: &mut Vec<LintWarning>) {
-        let heading_line = line_num;
-        let underline_line = if is_setext { line_num + 1 } else { line_num };
+    
+    fn find_previous_non_blank_line(&self, lines: &[&str], current_line: usize) -> usize {
+        let mut line_index = current_line;
+        while line_index > 0 {
+            line_index -= 1;
+            if !lines[line_index].trim().is_empty() {
+                return line_index;
+            }
+        }
+        0
+    }
+    
+    fn count_blank_lines_above(&self, lines: &[&str], current_line: usize) -> usize {
+        let mut blank_lines = 0;
+        let mut line_index = current_line;
         
-        // For setext headings, we need to check blank lines above the heading text and below the underline
+        while line_index > 0 {
+            line_index -= 1;
+            if lines[line_index].trim().is_empty() {
+                blank_lines += 1;
+            } else {
+                break;
+            }
+        }
+        
+        blank_lines
+    }
+    
+    fn count_blank_lines_below(&self, lines: &[&str], current_line: usize) -> usize {
+        let mut blank_lines = 0;
+        let mut line_index = current_line + 1;
+        
+        while line_index < lines.len() {
+            if lines[line_index].trim().is_empty() {
+                blank_lines += 1;
+                line_index += 1;
+            } else {
+                break;
+            }
+        }
+        
+        blank_lines
+    }
+    
+    // Helper method to check spacing around a heading and generate warnings/fixes
+    fn check_heading_spacing(&self, content: &str, lines: &[&str], heading_line: usize, need_blank_above: bool, is_setext: bool, warnings: &mut Vec<LintWarning>) {
         let blank_lines_above = self.count_blank_lines_above(lines, heading_line);
+        let underline_line = if is_setext { heading_line + 1 } else { heading_line };
         let blank_lines_below = self.count_blank_lines_below(lines, underline_line);
         
-        // Required blank lines above depends on if it's the first heading or after another heading
-        let required_lines_above = if !need_blank_above || heading_line == 0 {
-            0
-        } else {
-            self.lines_above
-        };
-        
         // Check blank lines above
-        if blank_lines_above < required_lines_above {
-            // Only add a warning if blank lines are required above
-            if required_lines_above > 0 {
-                // Get the heading line content with its indentation
-                let heading_content = lines[heading_line];
-                
-                warnings.push(LintWarning {
-                    line: heading_line + 1,
-                    column: 1,
-                    message: format!(
-                        "Heading should have {} blank line{} above",
-                        required_lines_above,
-                        if required_lines_above == 1 { "" } else { "s" }
-                    ),
-                    fix: Some(Fix {
-                        line: heading_line + 1,
-                        column: 1,
-                        // We need to preserve the original heading content with its indentation
-                        replacement: format!("{}\n{}", "\n".repeat(required_lines_above - blank_lines_above), heading_content),
-                    }),
-                });
+        if need_blank_above && blank_lines_above < self.lines_above {
+            let message = format!("Heading should have at least {} blank {} above", 
+                                self.lines_above, 
+                                if self.lines_above == 1 { "line" } else { "lines" });
+            
+            // Calculate byte offset to the start of the heading line
+            let mut heading_start_pos = 0;
+            for i in 0..heading_line {
+                heading_start_pos += lines[i].len() + 1; // +1 for newline
             }
+            
+            // Create a replacement that includes the required number of blank lines
+            let mut replacement = String::new();
+            
+            // If there are already some blank lines, we only add what's missing
+            for _ in 0..(self.lines_above - blank_lines_above) {
+                replacement.push('\n');
+            }
+            
+            let range = heading_start_pos..heading_start_pos;
+            let fix = Fix {
+                range,
+                replacement,
+            };
+            
+            warnings.push(LintWarning {
+                message,
+                line: heading_line + 1,
+                column: 1,
+                severity: Severity::Warning,
+                fix: Some(fix),
+            });
         }
         
         // Check blank lines below
         if blank_lines_below < self.lines_below {
-            // Calculate position for the warning
-            let warning_line = underline_line + 1;
+            let heading_end_line = if is_setext { underline_line } else { heading_line };
+            let message = format!("Heading should have at least {} blank {} below", 
+                                self.lines_below, 
+                                if self.lines_below == 1 { "line" } else { "lines" });
             
-            // Get the content for the fix
-            let next_content = if warning_line < lines.len() {
-                lines[warning_line]
+            // Calculate byte offset to the end of the heading/underline line
+            let mut end_pos = 0;
+            for i in 0..=heading_end_line {
+                end_pos += lines[i].len() + 1; // +1 for newline
+            }
+            
+            // If we're at the end of the content, we might need to adjust
+            let end_pos = if end_pos > content.len() {
+                content.len()
             } else {
-                ""
+                end_pos
+            };
+            
+            // Create a replacement that includes the required number of blank lines
+            let mut replacement = String::new();
+            
+            // If there are already some blank lines, we only add what's missing
+            for _ in 0..(self.lines_below - blank_lines_below) {
+                replacement.push('\n');
+            }
+            
+            let range = end_pos..end_pos;
+            let fix = Fix {
+                range,
+                replacement,
             };
             
             warnings.push(LintWarning {
-                line: if warning_line < lines.len() { warning_line + 1 } else { lines.len() },
+                message,
+                line: heading_end_line + 1,
                 column: 1,
-                message: format!(
-                    "Heading should have {} blank line{} below",
-                    self.lines_below,
-                    if self.lines_below == 1 { "" } else { "s" }
-                ),
-                fix: Some(Fix {
-                    line: if warning_line < lines.len() { warning_line + 1 } else { lines.len() + 1 },
-                    column: 1,
-                    replacement: format!("{}{}", "\n".repeat(self.lines_below - blank_lines_below), next_content),
-                }),
+                severity: Severity::Warning,
+                fix: Some(fix),
             });
         }
+    }
+
+    fn internal_check(&self, content: &str) -> LintResult {
+        let mut warnings = Vec::new();
+        
+        let mut in_code_block = false;
+        let mut is_front_matter = false;
+        
+        // Split content into lines
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Skip YAML front matter if present
+        if lines.first().map_or(false, |&line| line.trim() == "---") {
+            is_front_matter = true;
+        }
+        
+        // Process each line
+        for (i, line) in lines.iter().enumerate() {
+            // Check for end of front matter
+            if is_front_matter && i > 0 && *line == "---" {
+                is_front_matter = false;
+                continue;
+            }
+            
+            // Skip processing in front matter
+            if is_front_matter {
+                continue;
+            }
+            
+            // Check for code blocks
+            if line.trim().starts_with("```") {
+                in_code_block = !in_code_block;
+                continue;
+            }
+            
+            // Skip processing in code blocks
+            if in_code_block {
+                continue;
+            }
+            
+            // Check for ATX headings (# style)
+            if line.trim().starts_with('#') && line.trim().chars().nth(1).map_or(true, |c| c.is_whitespace() || c == '#') {
+                // Need blank line above except for first line
+                let need_blank_above = i > 0;
+                self.check_heading_spacing(content, &lines, i, need_blank_above, false, &mut warnings);
+            } 
+            // Check for Setext headings (underlined style)
+            else if i > 0 && !line.trim().is_empty() && 
+                     (line.trim().chars().all(|c| c == '=') || line.trim().chars().all(|c| c == '-')) && 
+                     !lines[i-1].trim().is_empty() {
+                // This is a Setext heading underline, the actual heading is on the previous line
+                self.check_heading_spacing(content, &lines, i-1, true, true, &mut warnings);
+            }
+        }
+        
+        Ok(warnings)
     }
 }
 
 impl Rule for MD022BlanksAroundHeadings {
     fn name(&self) -> &'static str {
-        "MD022"
+        "blanks-around-headings"
     }
-
+    
     fn description(&self) -> &'static str {
         "Headings should be surrounded by blank lines"
     }
-
+    
     fn check(&self, content: &str) -> LintResult {
-        let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-        
-        let mut in_code_block = false;
-        let mut in_front_matter = false;
-        let mut first_heading = true;
-        
-        let mut i = 0;
-        while i < lines.len() {
-            // Skip content in code blocks and front matter
-            if self.is_code_block_delimiter(&lines[i]) {
-                in_code_block = !in_code_block;
-                i += 1;
-                continue;
-            }
-            
-            if i == 0 && self.is_front_matter_delimiter(&lines[i]) {
-                in_front_matter = true;
-                i += 1;
-                continue;
-            }
-            
-            if in_front_matter && self.is_front_matter_delimiter(&lines[i]) {
-                in_front_matter = false;
-                i += 1;
-                continue;
-            }
-            
-            if in_code_block || in_front_matter {
-                i += 1;
-                continue;
-            }
-            
-            // Check if this is a heading and the previous line was also a heading
-            let is_after_heading = i > 0 && (
-                self.is_heading(&lines[i-1]) || 
-                (i > 1 && self.is_setext_heading(&lines[i-2], Some(&lines[i-1])))
-            );
-            
-            // Check ATX headings
-            if self.is_heading(&lines[i]) {
-                let need_blank_above = !first_heading && !is_after_heading;
-                
-                self.check_heading_spacing(&lines, i, need_blank_above, false, &mut warnings);
-                first_heading = false;
-                i += 1;
-                continue;
-            }
-            
-            // Check setext headings
-            if i + 1 < lines.len() && self.is_setext_heading(&lines[i], Some(&lines[i + 1])) {
-                let need_blank_above = !first_heading && !is_after_heading;
-                
-                self.check_heading_spacing(&lines, i, need_blank_above, true, &mut warnings);
-                first_heading = false;
-                i += 2; // Skip the underline, we've already processed it
-                continue;
-            }
-            
-            i += 1;
-        }
-        
-        Ok(warnings)
+        self.internal_check(content)
     }
-
+    
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        // Get warnings with their fixes
-        let warnings = self.check(content)?;
+        // Get warnings but ignore their fixes - we'll implement a more direct line-based approach
+        let warnings = self.internal_check(content)?;
         
         // If there are no warnings, return the original content
         if warnings.is_empty() {
@@ -245,58 +264,175 @@ impl Rule for MD022BlanksAroundHeadings {
         
         // Split content into lines for processing
         let lines: Vec<&str> = content.lines().collect();
-        let mut result = Vec::with_capacity(lines.len() * 2); // Pre-allocate with extra space for blank lines
+        let mut fixed_lines: Vec<String> = Vec::with_capacity(lines.len() * 2); // Allocate extra space for blank lines
         
-        // Create mappings for blank lines to add before and after specific line indices
-        let mut add_blanks_above: HashMap<usize, usize> = HashMap::new();
-        let mut add_blanks_below: HashMap<usize, usize> = HashMap::new();
+        let mut in_code_block = false;
+        let mut is_front_matter = false;
+        let mut i = 0;
         
-        // Process warnings to determine blank lines needed
-        for warning in &warnings {
-            if let Some(fix) = &warning.fix {
-                // Line number is 1-indexed in warnings but 0-indexed in our lines vector
-                let line_idx = fix.line - 1;
+        // Check for YAML front matter
+        if !lines.is_empty() && lines[0].trim() == "---" {
+            is_front_matter = true;
+            fixed_lines.push(lines[0].to_string());
+            i += 1;
+        }
+        
+        // Process each line
+        while i < lines.len() {
+            // Check for end of front matter
+            if is_front_matter && lines[i] == "---" {
+                is_front_matter = false;
+                fixed_lines.push(lines[i].to_string());
+                i += 1;
+                continue;
+            }
+            
+            // Skip processing in front matter
+            if is_front_matter {
+                fixed_lines.push(lines[i].to_string());
+                i += 1;
+                continue;
+            }
+            
+            // Check for code blocks
+            if lines[i].trim().starts_with("```") {
+                in_code_block = !in_code_block;
+                fixed_lines.push(lines[i].to_string());
+                i += 1;
+                continue;
+            }
+            
+            // Skip processing in code blocks
+            if in_code_block {
+                fixed_lines.push(lines[i].to_string());
+                i += 1;
+                continue;
+            }
+            
+            // Check for ATX headings (# style)
+            if lines[i].trim().starts_with('#') && 
+               lines[i].trim().chars().nth(1).map_or(true, |c| c.is_whitespace() || c == '#') {
                 
-                if fix.replacement.starts_with('\n') {
-                    // This is a warning about blank lines above content
-                    let blanks = fix.replacement.chars().take_while(|&c| c == '\n').count();
-                    add_blanks_above.insert(line_idx, blanks);
-                } else if fix.replacement.ends_with('\n') {
-                    // This is a warning about blank lines below content
-                    let blanks = fix.replacement.chars().filter(|&c| c == '\n').count();
-                    add_blanks_below.insert(line_idx - 1, blanks);
+                // Insert blank lines above (unless it's the first line)
+                if i > 0 && !is_front_matter {
+                    // Count the existing blank lines above
+                    let mut blank_above = 0;
+                    let mut j = i - 1;
+                    while j < i && lines[j].trim().is_empty() {
+                        blank_above += 1;
+                        j = j.wrapping_sub(1);
+                        if j >= lines.len() { break; } // Prevent underflow
+                    }
+                    
+                    // Add any missing blank lines above
+                    if blank_above < self.lines_above {
+                        // Remove existing blank lines from fixed_lines
+                        for _ in 0..blank_above {
+                            if !fixed_lines.is_empty() {
+                                fixed_lines.pop();
+                            }
+                        }
+                        
+                        // Add the correct number of blank lines
+                        for _ in 0..self.lines_above {
+                            fixed_lines.push(String::new());
+                        }
+                    }
                 }
-            }
-        }
-        
-        // Process each line and apply fixes
-        for (i, line) in lines.iter().enumerate() {
-            // Add blank lines above if needed
-            if let Some(blanks) = add_blanks_above.get(&i) {
-                for _ in 0..*blanks {
-                    result.push("");
+                
+                // Add the heading line
+                fixed_lines.push(lines[i].to_string());
+                i += 1;
+                
+                // Insert blank lines below
+                let mut blank_below = 0;
+                let mut j = i;
+                while j < lines.len() && lines[j].trim().is_empty() {
+                    blank_below += 1;
+                    j += 1;
                 }
+                
+                // Skip existing blank lines
+                i += blank_below;
+                
+                // Add the correct number of blank lines below
+                for _ in 0..self.lines_below {
+                    fixed_lines.push(String::new());
+                }
+                
+                continue;
             }
             
-            // Add the current line
-            result.push(line);
-            
-            // Add blank lines below if needed
-            if let Some(blanks) = add_blanks_below.get(&i) {
-                for _ in 0..*blanks {
-                    result.push("");
+            // Check for Setext headings (underlined style)
+            if i + 1 < lines.len() && !lines[i].trim().is_empty() && 
+               (lines[i+1].trim().chars().all(|c| c == '=') || 
+                lines[i+1].trim().chars().all(|c| c == '-')) {
+                
+                // Insert blank lines above (unless it's the first line)
+                if i > 0 {
+                    // Count the existing blank lines above
+                    let mut blank_above = 0;
+                    let mut j = i - 1;
+                    while j < i && lines[j].trim().is_empty() {
+                        blank_above += 1;
+                        j = j.wrapping_sub(1);
+                        if j >= lines.len() { break; } // Prevent underflow
+                    }
+                    
+                    // Add any missing blank lines above
+                    if blank_above < self.lines_above {
+                        // Remove existing blank lines from fixed_lines
+                        for _ in 0..blank_above {
+                            if !fixed_lines.is_empty() {
+                                fixed_lines.pop();
+                            }
+                        }
+                        
+                        // Add the correct number of blank lines
+                        for _ in 0..self.lines_above {
+                            fixed_lines.push(String::new());
+                        }
+                    }
                 }
+                
+                // Add the heading and underline lines
+                fixed_lines.push(lines[i].to_string());
+                fixed_lines.push(lines[i+1].to_string());
+                i += 2;
+                
+                // Insert blank lines below
+                let mut blank_below = 0;
+                let mut j = i;
+                while j < lines.len() && lines[j].trim().is_empty() {
+                    blank_below += 1;
+                    j += 1;
+                }
+                
+                // Skip existing blank lines
+                i += blank_below;
+                
+                // Add the correct number of blank lines below
+                for _ in 0..self.lines_below {
+                    fixed_lines.push(String::new());
+                }
+                
+                continue;
             }
+            
+            // Not a heading - just add the line
+            fixed_lines.push(lines[i].to_string());
+            i += 1;
         }
         
-        // Join lines with newlines
-        let mut fixed_content = result.join("\n");
+        // Join lines back together
+        let fixed_content = fixed_lines.join("\n");
         
-        // Preserve trailing newline if present in original content
-        if content.ends_with('\n') && !fixed_content.ends_with('\n') {
-            fixed_content.push('\n');
+        // Ensure the content ends with a newline if the original did
+        let mut result = fixed_content;
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
         }
         
-        Ok(fixed_content)
+        Ok(result)
     }
-} 
+}

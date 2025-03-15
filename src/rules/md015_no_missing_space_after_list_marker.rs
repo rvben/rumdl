@@ -1,9 +1,11 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::code_block_utils::CodeBlockUtils;
 use crate::rules::list_utils::ListUtils;
 use regex::Regex;
 use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
 #[derive(Debug)]
 pub struct MD015NoMissingSpaceAfterListMarker {
@@ -33,13 +35,8 @@ impl MD015NoMissingSpaceAfterListMarker {
     
     /// Fix a list item without space for MD015 rule
     fn fix_list_item(line: &str) -> String {
-        let list_item_re = Regex::new(r"^(\s*)((?:[-*+]|\d+[.)]))(\S.*)").unwrap();
-        if let Some(caps) = list_item_re.captures(line) {
-            format!("{}{} {}",
-                &caps[1],  // indentation
-                &caps[2],  // list marker (-, *, +, 1., 1)
-                &caps[3]   // content
-            )
+        if let Some(caps) = LIST_ITEM_RE.captures(line) {
+            format!("{}{} {}", &caps[1], &caps[2], &caps[3])
         } else {
             line.to_string()
         }
@@ -51,6 +48,10 @@ lazy_static! {
     static ref HR_ASTERISK: Regex = Regex::new(r"^\*{3,}\s*$").unwrap();
     static ref HR_UNDERSCORE: Regex = Regex::new(r"^_{3,}\s*$").unwrap();
 }
+
+static LIST_ITEM_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^(\s*)((?:[-*+]|\d+[.)]))(\S.*)").unwrap()
+});
 
 impl Rule for MD015NoMissingSpaceAfterListMarker {
     fn name(&self) -> &'static str {
@@ -82,7 +83,8 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
             if ListUtils::is_list_item_without_space(line) {
                 warnings.push(LintWarning {
-                    line: line_num + 1,
+        severity: Severity::Warning,
+        line: line_num + 1,
                     column: 1,
                     message: if line.trim_start().starts_with(|c| c == '*' || c == '+' || c == '-') {
                         "Missing space after unordered list marker".to_string()
@@ -90,8 +92,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
                         "Missing space after ordered list marker".to_string()
                     },
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: 1,
+            range: line_col_to_byte_range(content, line_num + 1, 1),
                         replacement: Self::fix_list_item(line),
                     }),
                 });

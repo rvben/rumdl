@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug, Default)]
 pub struct MD031BlanksAroundFences;
@@ -35,9 +36,9 @@ impl Rule for MD031BlanksAroundFences {
                         line: i + 1,
                         column: 1,
                         message: "No blank line before fenced code block".to_string(),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: i + 1,
-                            column: 1,
+                            range: line_col_to_byte_range(content, i + 1, 1),
                             replacement: format!("\n{}", lines[i]),
                         }),
                     });
@@ -58,9 +59,9 @@ impl Rule for MD031BlanksAroundFences {
                             line: i + 1,
                             column: 1,
                             message: "No blank line after fenced code block".to_string(),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: i + 1,
-                                column: lines[i].len() + 1,
+                                range: line_col_to_byte_range(content, i + 1, lines[i].len() + 1),
                                 replacement: format!("{}\n", lines[i]),
                             }),
                         });

@@ -1,6 +1,7 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
 use crate::HeadingStyle;
+use crate::utils::range_utils::line_col_to_byte_range;
 
 #[derive(Debug, Default)]
 pub struct MD001HeadingIncrement;
@@ -34,10 +35,10 @@ impl Rule for MD001HeadingIncrement {
                     warnings.push(LintWarning {
                         line: line_num + 1,
                         column: indentation + 1,
+                        severity: Severity::Warning,
                         message: format!("Heading level should be {} for this level", prev_level + 1),
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: indentation + 1,
+                            range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
                             replacement: format!("{}{}", " ".repeat(indentation), replacement),
                         }),
                     });

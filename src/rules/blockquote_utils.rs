@@ -201,4 +201,15 @@ impl BlockquoteUtils {
         
         result.join("\n")
     }
+    
+    /// Get the starting column of the blockquote marker '>'
+    pub fn get_blockquote_start_col(line: &str) -> usize {
+        let indent_length = Self::extract_indentation(line).len();
+        indent_length + 1 // 1-indexed column for the '>' character
+    }
+    
+    /// Get the content after the blockquote marker
+    pub fn get_blockquote_content(line: &str) -> String {
+        Self::extract_content(line)
+    }
 } 

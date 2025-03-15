@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use std::collections::HashSet;
 use lazy_static::lazy_static;
@@ -88,9 +89,9 @@ impl Rule for MD044ProperNames {
                             line: line_num + 1,
                             column: cap.start() + 1,
                             message: format!("Proper name '{}' should be '{}'", found_name, name),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_num + 1,
-                                column: cap.start() + 1,
+                                range: line_col_to_byte_range(content, line_num + 1, cap.start() + 1),
                                 replacement: name.to_string(),
                             }),
                         });

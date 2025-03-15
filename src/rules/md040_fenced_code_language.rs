@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug, Default)]
 pub struct MD040FencedCodeLanguage;
@@ -33,16 +34,19 @@ impl Rule for MD040FencedCodeLanguage {
                 // Check if language is specified
                 let after_fence = trimmed[fence.len()..].trim();
                 if after_fence.is_empty() {
-                    let indent = line.len() - line.trim_start().len();
+                    let _indent = line.len() - line.trim_start().len();
                     warnings.push(LintWarning {
-                        message: "Fenced code block should specify a language".to_string(),
                         line: i + 1,
-                        column: indent + 1,
+                        column: 1,
+                        message: "Fenced code blocks should have a language specified".to_string(),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: i + 1,
-                            column: 1,
-                            // For tests, we add the language without indentation
-                            replacement: format!("{}text", fence),
+                            range: line_col_to_byte_range(content, i + 1, 1),
+                            replacement: if line.starts_with("```") { 
+                                "```text".to_string() 
+                            } else { 
+                                "~~~text".to_string() 
+                            },
                         }),
                     });
                 }

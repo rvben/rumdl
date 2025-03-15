@@ -1,4 +1,5 @@
 use thiserror::Error;
+use std::ops::Range;
 
 #[derive(Debug, Error)]
 pub enum LintError {
@@ -10,19 +11,25 @@ pub enum LintError {
 
 pub type LintResult = Result<Vec<LintWarning>, LintError>;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct LintWarning {
+    pub message: String,
     pub line: usize,
     pub column: usize,
-    pub message: String,
+    pub severity: Severity,
     pub fix: Option<Fix>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq)]
 pub struct Fix {
-    pub line: usize,
-    pub column: usize,
+    pub range: Range<usize>,
     pub replacement: String,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Severity {
+    Error,
+    Warning,
 }
 
 pub trait Rule {

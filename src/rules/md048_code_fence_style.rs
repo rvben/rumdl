@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 /// Rule MD048: Code fence style should be consistent
 pub struct MD048CodeFenceStyle {
@@ -50,23 +51,23 @@ impl Rule for MD048CodeFenceStyle {
             let trimmed = line.trim_start();
             if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
                 warnings.push(LintWarning {
+                    message: "Code fence style should use tildes".to_string(),
                     line: line_num + 1,
                     column: line.len() - trimmed.len() + 1,
-                    message: "Code fence style should use tildes".to_string(),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: line.len() - trimmed.len() + 1,
+                        range: line_col_to_byte_range(content, line_num + 1, line.len() - trimmed.len() + 1),
                         replacement: line.replace("```", "~~~"),
                     }),
                 });
             } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
                 warnings.push(LintWarning {
+                    message: "Code fence style should use backticks".to_string(),
                     line: line_num + 1,
                     column: line.len() - trimmed.len() + 1,
-                    message: "Code fence style should use backticks".to_string(),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: line.len() - trimmed.len() + 1,
+                        range: line_col_to_byte_range(content, line_num + 1, line.len() - trimmed.len() + 1),
                         replacement: line.replace("~~~", "```"),
                     }),
                 });
@@ -97,4 +98,4 @@ impl Rule for MD048CodeFenceStyle {
 
         Ok(result)
     }
-} 
+}

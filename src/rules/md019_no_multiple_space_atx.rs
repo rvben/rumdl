@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -63,9 +64,9 @@ impl Rule for MD019NoMultipleSpaceAtx {
                     ),
                     line: line_num + 1,
                     column: hashes.end() + 1,
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: 1,
+                        range: line_col_to_byte_range(content, line_num + 1, 1),
                         replacement: self.fix_atx_heading(line),
                     }),
                 });

@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -120,9 +121,9 @@ impl Rule for MD014CommandsShowOutput {
                             line: block_start_line + 1,
                             column: 1,
                             message: "Commands in code blocks should show output".to_string(),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: block_start_line + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, block_start_line + 1, 1),
                                 replacement: self.fix_command_block(&current_block),
                             }),
                         });

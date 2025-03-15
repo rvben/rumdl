@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
 #[derive(Debug, Default)]
@@ -39,16 +40,17 @@ impl Rule for MD037NoSpaceInEmphasis {
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
 
-        for (line_num, line) in content.lines().enumerate() {
+        for (i, line) in content.lines().enumerate() {
             let issues = Self::find_emphasis_issues(line);
             for (start, _, fixed) in issues {
+                let column = start + 1;
                 warnings.push(LintWarning {
-                    line: line_num + 1,
-                    column: start + 1,
+                    line: i + 1,
+                    column,
                     message: "Spaces inside emphasis markers should be removed".to_string(),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: start + 1,
+                        range: line_col_to_byte_range(content, i + 1, column),
                         replacement: fixed,
                     }),
                 });

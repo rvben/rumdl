@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
 /// Rule MD045: Images should have alternate text
@@ -30,15 +31,15 @@ impl Rule for MD045NoAltText {
                 let alt_text = cap.get(1).map_or("", |m| m.as_str());
                 if alt_text.trim().is_empty() {
                     let full_match = cap.get(0).unwrap();
-                    let url_part = cap.get(2).unwrap();
+                    let _url_part = cap.get(2).unwrap();
                     warnings.push(LintWarning {
                         line: line_num + 1,
                         column: full_match.start() + 1,
                         message: "Image should have alternate text".to_string(),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: full_match.start() + 1,
-                            replacement: format!("![Image description]{}", url_part.as_str()),
+                            range: line_col_to_byte_range(content, line_num + 1, full_match.start() + 1),
+                            replacement: format!("![Image description]{}", &line[full_match.start() + 2..full_match.end()]),
                         }),
                     });
                 }
@@ -53,10 +54,10 @@ impl Rule for MD045NoAltText {
         
         let result = image_regex.replace_all(content, |caps: &regex::Captures| {
             let alt_text = caps.get(1).map_or("", |m| m.as_str());
-            let url_part = caps.get(2).map_or("", |m| m.as_str());
+            let _url_part = caps.get(2).map_or("", |m| m.as_str());
             
             if alt_text.trim().is_empty() {
-                format!("![Image description]{}", url_part)
+                format!("![Image description]{}", _url_part)
             } else {
                 caps[0].to_string()
             }

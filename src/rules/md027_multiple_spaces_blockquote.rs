@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::blockquote_utils::BlockquoteUtils;
 
 #[derive(Debug, Default)]
@@ -19,14 +20,16 @@ impl Rule for MD027MultipleSpacesBlockquote {
         
         for (i, &line) in lines.iter().enumerate() {
             if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::has_multiple_spaces_after_marker(line) {
+                let start_col = BlockquoteUtils::get_blockquote_start_col(line);
+                let actual_content = BlockquoteUtils::get_blockquote_content(line);
                 warnings.push(LintWarning {
-                    message: "Multiple spaces after blockquote symbol".to_string(),
                     line: i + 1,
-                    column: 1,
+                    column: start_col,
+                    message: "Multiple spaces after blockquote symbol".to_string(),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: i + 1,
-                        column: 1,
-                        replacement: BlockquoteUtils::fix_blockquote_spacing(line),
+                        range: line_col_to_byte_range(content, i + 1, start_col),
+                        replacement: format!("> {}", actual_content.trim_start()),
                     }),
                 });
             }

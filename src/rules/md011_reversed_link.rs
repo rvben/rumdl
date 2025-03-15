@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
 #[derive(Debug, Default)]
@@ -26,9 +27,9 @@ impl Rule for MD011ReversedLink {
                     line: line_num + 1,
                     column: start + 1,
                     message: "Reversed link syntax found".to_string(),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: start + 1,
+                        range: line_col_to_byte_range(content, line_num + 1, start + 1),
                         replacement: format!("[{}]({})", text, url),
                     }),
                 });

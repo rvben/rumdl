@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug)]
 pub struct MD009TrailingSpaces {
@@ -81,9 +82,9 @@ impl Rule for MD009TrailingSpaces {
                         line: line_num + 1,
                         column: 1,
                         message: "Empty line should not have trailing spaces".to_string(),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: 1,
+                            range: line_col_to_byte_range(content, line_num + 1, 1),
                             replacement: String::new(),
                         }),
                     });
@@ -108,9 +109,9 @@ impl Rule for MD009TrailingSpaces {
                     line: line_num + 1,
                     column: trimmed.len() + 1,
                     message: "Empty blockquote line should have a space after >".to_string(),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: trimmed.len() + 1,
+                        range: line_col_to_byte_range(content, line_num + 1, trimmed.len() + 1),
                         replacement: format!("{} ", trimmed),
                     }),
                 });
@@ -126,9 +127,9 @@ impl Rule for MD009TrailingSpaces {
                 } else {
                     format!("{} trailing spaces found", trailing_spaces)
                 },
+                severity: Severity::Warning,
                 fix: Some(Fix {
-                    line: line_num + 1,
-                    column: trimmed.len() + 1,
+                    range: line_col_to_byte_range(content, line_num + 1, trimmed.len() + 1),
                     replacement: if !self.strict && line_num < lines.len() - 1 {
                         format!("{}{}", trimmed, " ".repeat(self.br_spaces))
                     } else {

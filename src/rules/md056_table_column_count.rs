@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 /// Ensures all rows in a table have the same number of cells
 #[derive(Debug)]
@@ -194,15 +195,15 @@ impl Rule for MD056TableColumnCount {
                         let fix_result = self.fix_table_row(lines[i], expected_count);
                         
                         warnings.push(LintWarning {
-                            line: i + 1,
-                            column: 1,
                             message: format!(
                                 "Table row has {} cells, but expected {}",
                                 count, expected_count
                             ),
+                            line: i + 1,
+                            column: 1,
+                            severity: Severity::Warning,
                             fix: fix_result.map(|fixed_row| Fix {
-                                line: i + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, i + 1, 1),
                                 replacement: fixed_row,
                             }),
                         });
@@ -215,7 +216,7 @@ impl Rule for MD056TableColumnCount {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut warnings = self.check(content)?;
+        let warnings = self.check(content)?;
         if warnings.is_empty() {
             return Ok(content.to_string());
         }
@@ -229,13 +230,10 @@ impl Rule for MD056TableColumnCount {
             if let Some(idx) = warning_idx {
                 if let Some(fix) = &warnings[idx].fix {
                     result.push(fix.replacement.clone());
-                } else {
-                    result.push(line.to_string());
+                    continue;
                 }
-                warnings.remove(idx);
-            } else {
-                result.push(line.to_string());
             }
+            result.push(line.to_string());
         }
 
         // Preserve the original line endings

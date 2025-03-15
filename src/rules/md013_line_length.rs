@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -158,6 +158,7 @@ impl Rule for MD013LineLength {
                         ),
                         line: line_num + 1,
                         column: self.line_length + 1,
+                        severity: Severity::Warning,
                         fix: None, // Line wrapping requires manual intervention
                     });
                 }

@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -169,9 +170,9 @@ impl Rule for MD004UnorderedListStyle {
                         ),
                         line: line_num + 1,
                         column: indent + 1,
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: indent + 1,
+                            range: line_col_to_byte_range(content, line_num + 1, indent + 1),
                             replacement: format!(
                                 "{}{}{}",
                                 " ".repeat(indent),

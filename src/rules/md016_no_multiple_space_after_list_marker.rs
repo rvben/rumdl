@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::code_block_utils::CodeBlockUtils;
 use crate::rules::list_utils::ListUtils;
 
@@ -48,7 +49,8 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
 
             if ListUtils::is_list_item_with_multiple_spaces(line) {
                 warnings.push(LintWarning {
-                    line: line_num + 1,
+        severity: Severity::Warning,
+        line: line_num + 1,
                     column: 1,
                     message: if line.trim_start().starts_with(|c| c == '*' || c == '+' || c == '-') {
                         "Multiple spaces after unordered list marker".to_string()
@@ -56,8 +58,7 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
                         "Multiple spaces after ordered list marker".to_string()
                     },
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: 1,
+            range: line_col_to_byte_range(content, line_num + 1, 1),
                         replacement: ListUtils::fix_list_item_with_multiple_spaces(line),
                     }),
                 });

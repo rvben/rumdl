@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 /// Rule MD046: Code block style
 ///
@@ -65,9 +66,9 @@ impl Rule for MD046CodeBlockStyle {
                         line: line_num + 1,
                         column: 1,
                         message: "Code block style should be indented".to_string(),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: 1,
+                            range: line_col_to_byte_range(content, line_num + 1, 1),
                             replacement: "    ".to_string() + line.trim_start(),
                         }),
                     });
@@ -78,9 +79,9 @@ impl Rule for MD046CodeBlockStyle {
                         line: line_num + 1,
                         column: 1,
                         message: "Code block style should be fenced".to_string(),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: 1,
+                            range: line_col_to_byte_range(content, line_num + 1, 1),
                             replacement: "```\n".to_string() + line.trim_start(),
                         }),
                     });

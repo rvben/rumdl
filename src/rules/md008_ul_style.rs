@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::heading_utils::HeadingUtils;
 
@@ -101,9 +102,9 @@ impl Rule for MD008ULStyle {
                         message,
                         line: line_num + 1,
                         column: line.find(_marker).unwrap() + 1,
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: line.find(_marker).unwrap() + 1,
+                            range: line_col_to_byte_range(content, line_num + 1, line.find(_marker).unwrap() + 1),
                             replacement: line.replacen(_marker, &target_style.to_string(), 1),
                         }),
                     });

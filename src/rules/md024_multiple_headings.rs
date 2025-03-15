@@ -1,8 +1,9 @@
+use crate::utils::range_utils::line_col_to_byte_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::{extract_heading_text, get_heading_level};
 
 lazy_static! {
@@ -164,6 +165,7 @@ impl Rule for MD024MultipleHeadings {
                             line: i + 1,
                             column: 1,
                             message: format!("Multiple headings with the same content (first occurrence at line {})", first_occurrence),
+                            severity: Severity::Warning,
                             fix: None,
                         });
                     } else {

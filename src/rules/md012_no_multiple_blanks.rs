@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug)]
 pub struct MD012NoMultipleBlanks {
@@ -80,15 +81,15 @@ impl Rule for MD012NoMultipleBlanks {
                         "between content"
                     };
                     warnings.push(LintWarning {
-                        message: format!(
+        severity: Severity::Warning,
+        message: format!(
                             "Multiple consecutive blank lines {} ({} > {})",
                             location, blank_count, self.maximum
                         ),
                         line: blank_start + 1,
                         column: 1,
                         fix: Some(Fix {
-                            line: blank_start + 1,
-                            column: 1,
+            range: line_col_to_byte_range(content, blank_start + 1, 1),
                             replacement: "\n".repeat(self.maximum),
                         }),
                     });
@@ -100,15 +101,15 @@ impl Rule for MD012NoMultipleBlanks {
         // Check for trailing blank lines
         if blank_count > self.maximum {
             warnings.push(LintWarning {
-                message: format!(
+        severity: Severity::Warning,
+        message: format!(
                     "Multiple consecutive blank lines at end of file ({} > {})",
                     blank_count, self.maximum
                 ),
                 line: blank_start + 1,
                 column: 1,
                 fix: Some(Fix {
-                    line: blank_start + 1,
-                    column: 1,
+            range: line_col_to_byte_range(content, blank_start + 1, 1),
                     replacement: "\n".repeat(self.maximum),
                 }),
             });

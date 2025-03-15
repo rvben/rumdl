@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 /// Enforces consistent use of leading and trailing pipe characters in tables
 pub struct MD055TablePipeStyle {
@@ -278,15 +279,12 @@ impl Rule for MD055TablePipeStyle {
                     
                     if !matches_style {
                         warnings.push(LintWarning {
+                            message: format!("Table pipe style for delimiter row is not consistent with {}", if self.style == "consistent" { "the first row" } else { "the configured style" }),
                             line: line_idx + 1,
                             column: 1,
-                            message: format!(
-                                "Table pipe style for delimiter row is not consistent with {}",
-                                if self.style == "consistent" { "the first row" } else { "the configured style" }
-                            ),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_idx + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, line_idx + 1, 1),
                                 replacement: self.fix_table_row(line, expected_style),
                             }),
                         });
@@ -294,16 +292,12 @@ impl Rule for MD055TablePipeStyle {
                 } else if let Some(style) = self.determine_pipe_style(line) {
                     if style != expected_style {
                         warnings.push(LintWarning {
+                            message: format!("Table pipe style '{}' is not consistent with {}", style, if self.style == "consistent" { "the first row" } else { "the configured style" }),
                             line: line_idx + 1,
                             column: 1,
-                            message: format!(
-                                "Table pipe style '{}' is not consistent with {}",
-                                style,
-                                if self.style == "consistent" { "the first row" } else { "the configured style" }
-                            ),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_idx + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, line_idx + 1, 1),
                                 replacement: self.fix_table_row(line, expected_style),
                             }),
                         });
@@ -329,12 +323,10 @@ impl Rule for MD055TablePipeStyle {
             if let Some(idx) = warning_idx {
                 if let Some(fix) = &warnings[idx].fix {
                     result.push(fix.replacement.clone());
-                } else {
-                    result.push(line.to_string());
+                    continue;
                 }
-            } else {
-                result.push(line.to_string());
             }
+            result.push(line.to_string());
         }
 
         // Preserve the original line endings

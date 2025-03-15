@@ -1,4 +1,5 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use std::collections::{HashSet, HashMap};
 use lazy_static::lazy_static;
@@ -322,6 +323,7 @@ impl Rule for MD052ReferenceLinkImages {
                 line: line_num,
                 column: column + 1,
                 message: format!("Reference '{}' not found", ref_text),
+                severity: Severity::Warning,
                 fix: None, // Cannot automatically fix undefined references
             });
         }

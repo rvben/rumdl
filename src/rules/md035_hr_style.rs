@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -111,9 +112,9 @@ impl Rule for MD035HRStyle {
                         } else {
                             format!("Horizontal rule style should be \"{}\"", expected_style)
                         },
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: i + 1,
-                            column: 1,
+                            range: line_col_to_byte_range(content, i + 1, 1),
                             replacement: expected_style.clone(),
                         }),
                     });

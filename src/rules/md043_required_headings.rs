@@ -1,4 +1,5 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -97,6 +98,7 @@ impl Rule for MD043RequiredHeadings {
                         line: i + 1,
                         column: 1,
                         message: "Heading structure does not match the required structure".to_string(),
+                        severity: Severity::Warning,
                         fix: None, // Cannot automatically fix as we don't know the intended structure
                     });
                 }

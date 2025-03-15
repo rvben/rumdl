@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
 
 #[derive(Debug)]
@@ -57,6 +57,7 @@ impl Rule for MD003HeadingStyle {
                         line: i + 1,
                         column: indentation + 1,
                         message: format!("Heading style should be {:?}", self.style),
+                        severity: Severity::Warning,
                         fix: None,
                     });
                 }

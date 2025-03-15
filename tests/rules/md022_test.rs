@@ -82,15 +82,35 @@ fn test_custom_blank_lines() {
     let rule = MD022BlanksAroundHeadings::new(2, 2);
     let content = "# Heading 1\nSome content here.\n## Heading 2\nMore content here.";
     let result = rule.check(content).unwrap();
+    
     // Verify we get warnings about blank lines
     assert!(!result.is_empty());
     assert!(result.iter().any(|w| w.message.contains("2 blank lines")));
     
+    // Run the fix
     let fixed = rule.fix(content).unwrap();
-    // Verify that headings have blank lines around them
-    assert!(fixed.contains("# Heading 1\n\n\n"));
-    assert!(fixed.contains("\n\n\n## Heading 2"));
-    assert!(fixed.contains("## Heading 2\n\n\n"));
+
+    // Split the fixed content into lines for easier testing
+    let fixed_lines: Vec<&str> = fixed.lines().collect();
+    
+    // Test for blank lines above and below headings
+    assert!(fixed.contains("# Heading 1"));
+    
+    // There should be exactly 2 blank lines after the first heading
+    let heading1_index = fixed_lines.iter().position(|&line| line == "# Heading 1").unwrap();
+    assert_eq!(fixed_lines[heading1_index + 1], "");
+    assert_eq!(fixed_lines[heading1_index + 2], "");
+    assert_eq!(fixed_lines[heading1_index + 3], "Some content here.");
+    
+    // There should be exactly 2 blank lines before the second heading
+    let heading2_index = fixed_lines.iter().position(|&line| line == "## Heading 2").unwrap();
+    assert_eq!(fixed_lines[heading2_index - 1], "");
+    assert_eq!(fixed_lines[heading2_index - 2], "");
+    
+    // There should be exactly 2 blank lines after the second heading
+    assert_eq!(fixed_lines[heading2_index + 1], "");
+    assert_eq!(fixed_lines[heading2_index + 2], "");
+    assert_eq!(fixed_lines[heading2_index + 3], "More content here.");
 }
 
 #[test]

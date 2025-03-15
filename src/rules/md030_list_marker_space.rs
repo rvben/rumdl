@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -155,19 +156,15 @@ impl Rule for MD030ListMarkerSpace {
                 let expected_spaces = self.get_expected_spaces(list_type, is_multi);
 
                 if spaces != expected_spaces {
+                    let fixed_line = self.fix_line(line, list_type, is_multi);
                     warnings.push(LintWarning {
-                        message: format!(
-                            "Expected {} space{} after list marker (found {})",
-                            expected_spaces,
-                            if expected_spaces == 1 { "" } else { "s" },
-                            spaces
-                        ),
                         line: i + 1,
-                        column: line.find(char::is_whitespace).unwrap_or(0) + 1,
+                        column: 1,
+                        message: format!("Expected {} spaces after list marker, found {}", expected_spaces, spaces),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: i + 1,
-                            column: 1,
-                            replacement: self.fix_line(line, list_type, is_multi),
+                            range: line_col_to_byte_range(content, i + 1, 1),
+                            replacement: fixed_line,
                         }),
                     });
                 }

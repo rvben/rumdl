@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -58,6 +59,14 @@ impl MD050StrongStyle {
         }
         backslash_count % 2 == 1
     }
+
+    fn convert_style(&self, text: &str, found_style: StrongStyle, expected_style: StrongStyle) -> String {
+        match (found_style, expected_style) {
+            (StrongStyle::Asterisk, StrongStyle::Underscore) => format!("__{}__", &text[2..text.len()-2]),
+            (StrongStyle::Underscore, StrongStyle::Asterisk) => format!("**{}**", &text[2..text.len()-2]),
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Rule for MD050StrongStyle {
@@ -96,9 +105,9 @@ impl Rule for MD050StrongStyle {
                         line: line_num + 1,
                         column: m.start() + 1,
                         message: message.to_string(),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: m.start() + 1,
+                            range: line_col_to_byte_range(content, line_num + 1, m.start() + 1),
                             replacement: match target_style {
                                 StrongStyle::Asterisk => format!("**{}**", text),
                                 StrongStyle::Underscore => format!("__{}__", text),

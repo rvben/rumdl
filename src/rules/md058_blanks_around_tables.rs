@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 /// Ensures tables have blank lines before and after them
 #[derive(Debug)]
@@ -116,12 +117,12 @@ impl Rule for MD058BlanksAroundTables {
             // Check for blank line before table
             if table_start > 0 && !self.is_blank_line(lines[table_start - 1]) {
                 warnings.push(LintWarning {
+                    message: "Missing blank line before table".to_string(),
                     line: table_start + 1,
                     column: 1,
-                    message: "Missing blank line before table".to_string(),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: table_start + 1,
-                        column: 1,
+                        range: line_col_to_byte_range(content, table_start + 1, 1),
                         replacement: format!("\n{}", lines[table_start]),
                     }),
                 });
@@ -130,12 +131,12 @@ impl Rule for MD058BlanksAroundTables {
             // Check for blank line after table
             if table_end < lines.len() - 1 && !self.is_blank_line(lines[table_end + 1]) {
                 warnings.push(LintWarning {
+                    message: "Missing blank line after table".to_string(),
                     line: table_end + 1,
                     column: lines[table_end].len() + 1,
-                    message: "Missing blank line after table".to_string(),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: table_end + 1,
-                        column: lines[table_end].len() + 1,
+                        range: line_col_to_byte_range(content, table_end + 1, lines[table_end].len() + 1),
                         replacement: format!("{}\n", lines[table_end]),
                     }),
                 });

@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use regex::Regex;
 
@@ -107,12 +108,12 @@ impl Rule for MD041FirstLineHeading {
         match self.find_first_heading(content) {
             None => {
                 warnings.push(LintWarning {
-                    message: format!("First line in file should be a level {} heading", self.level),
                     line: 1,
                     column: 1,
+                    message: format!("First line in file should be a level {} heading", self.level),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: 1,
-                        column: 1,
+                        range: line_col_to_byte_range(content, 1, 1),
                         replacement: format!("{} Title\n\n{}", "#".repeat(self.level), content),
                     }),
                 });
@@ -120,15 +121,15 @@ impl Rule for MD041FirstLineHeading {
             Some((line_num, level)) => {
                 if level != self.level {
                     warnings.push(LintWarning {
+                        line: line_num,
+                        column: 1,
                         message: format!(
                             "First heading should be a level {} heading, found level {}",
                             self.level, level
                         ),
-                        line: line_num,
-                        column: 1,
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num,
-                            column: 1,
+                            range: line_col_to_byte_range(content, line_num, 1),
                             replacement: format!("{} {}", "#".repeat(self.level), content.lines().nth(line_num - 1).unwrap().trim_start().trim_start_matches('#').trim_start()),
                         }),
                     });

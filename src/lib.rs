@@ -1,5 +1,6 @@
 pub mod rule;
 pub mod rules;
+pub mod utils;
 pub mod config;
 pub mod init;
 pub mod profiling;

@@ -1,4 +1,5 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::code_block_utils::CodeBlockUtils;
 use regex::Regex;
@@ -117,10 +118,14 @@ impl Rule for MD032BlanksAroundLists {
                     // Check if there's no blank line before the list (unless it's at the start of the document)
                     if i > 0 && !is_empty_vec[i - 1] && !excluded_lines[i - 1] {
                         warnings.push(LintWarning {
-                            message: "List should be preceded by a blank line".to_string(),
                             line: i + 1,
                             column: 1,
-                            fix: None,
+                            message: "List should be preceded by a blank line".to_string(),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_col_to_byte_range(content, i + 1, 1),
+                                replacement: format!("\n{}", lines[i]),
+                            }),
                         });
                     }
                 }
@@ -133,10 +138,14 @@ impl Rule for MD032BlanksAroundLists {
                 if in_list {
                     // Just finished a list, check if there's no blank line after
                     warnings.push(LintWarning {
-                        message: "List should be followed by a blank line".to_string(),
                         line: i + 1,
                         column: 1,
-                        fix: None,
+                        message: "List should be followed by a blank line".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_col_to_byte_range(content, i + 1, lines[i].len() + 1),
+                            replacement: format!("{}\n", lines[i]),
+                        }),
                     });
                     in_list = false;
                 }

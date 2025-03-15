@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::{Heading, HeadingUtils, HeadingStyle};
 
 #[derive(Debug)]
@@ -122,9 +123,9 @@ impl Rule for MD002FirstHeadingH1 {
                     line: line_num + 1,
                     column: indentation + 1,
                     message: format!("First heading level should be {}", self.level),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: indentation + 1,
+                        range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
                         replacement: self.generate_replacement(&first_heading, indentation),
                     }),
                 });

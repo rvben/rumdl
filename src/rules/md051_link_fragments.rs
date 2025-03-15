@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use std::collections::HashSet;
 use lazy_static::lazy_static;
@@ -187,9 +188,9 @@ impl Rule for MD051LinkFragments {
                         line: line_num + 1,
                         column: full_match.start() + 1,
                         message: format!("Link fragment '{}' does not exist", fragment),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: full_match.start() + 1,
+                            range: line_col_to_byte_range(content, line_num + 1, full_match.start() + 1),
                             replacement,
                         }),
                     });

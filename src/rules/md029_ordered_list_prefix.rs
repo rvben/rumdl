@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use std::collections::HashMap;
 use lazy_static::lazy_static;
@@ -116,9 +117,9 @@ impl Rule for MD029OrderedListPrefix {
                         line: line_num + 1,
                         column: indentation + 1,
                         message: format!("List item prefix should be {} for style '{}'", expected, self.style),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            line: line_num + 1,
-                            column: indentation + 1,
+                            range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
                             replacement: format!("{}{}.{}", 
                                 " ".repeat(indentation),
                                 expected,

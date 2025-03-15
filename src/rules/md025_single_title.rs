@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 
@@ -52,9 +53,9 @@ impl Rule for MD025SingleTitle {
                             message: format!("Multiple top-level headings (level {}) in the same document", self.level),
                             line: i + 1,
                             column: line.find('#').unwrap_or(0) + 1,
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: i + 1,
-                                column: line.find('#').unwrap_or(0) + 1,
+                                range: line_col_to_byte_range(content, i + 1, line.find('#').unwrap_or(0) + 1),
                                 replacement: format!("{} {}", "#".repeat(level + 1), &line[level + line.find('#').unwrap_or(0)..]),
                             }),
                         });

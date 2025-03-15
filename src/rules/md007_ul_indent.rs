@@ -1,4 +1,7 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use once_cell::sync::Lazy;
+use regex::Regex;
 
 #[derive(Debug)]
 pub struct MD007ULIndent {
@@ -11,9 +14,17 @@ impl Default for MD007ULIndent {
     }
 }
 
+static INDENT_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^( {4})+").unwrap()
+});
+
 impl MD007ULIndent {
     pub fn new(indent: usize) -> Self {
         Self { indent }
+    }
+
+    fn calculate_indent_level(line: &str) -> usize {
+        INDENT_RE.find_iter(line).count()
     }
 
     fn is_list_item(line: &str) -> Option<(usize, char)> {
@@ -75,9 +86,9 @@ impl Rule for MD007ULIndent {
                                 "List item with marker '{}' should be indented {} spaces (found {})",
                                 marker, expected_indent, indent
                             ),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_num + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, line_num + 1, 1),
                                 replacement: format!("{}{}", " ".repeat(expected_indent), line.trim_start()),
                             }),
                         });
@@ -96,9 +107,9 @@ impl Rule for MD007ULIndent {
                                 "List item with marker '{}' should be indented {} spaces (found {})",
                                 marker, expected_indent, indent
                             ),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_num + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, line_num + 1, 1),
                                 replacement: format!("{}{}", " ".repeat(expected_indent), line.trim_start()),
                             }),
                         });
@@ -117,9 +128,9 @@ impl Rule for MD007ULIndent {
                                 "List continuation should be indented {} spaces (found {})",
                                 expected_indent, indent
                             ),
+                            severity: Severity::Warning,
                             fix: Some(Fix {
-                                line: line_num + 1,
-                                column: 1,
+                                range: line_col_to_byte_range(content, line_num + 1, 1),
                                 replacement: format!("{}{}", " ".repeat(expected_indent), line.trim_start()),
                             }),
                         });

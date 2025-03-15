@@ -1,4 +1,5 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use std::collections::HashSet;
 use lazy_static::lazy_static;
@@ -263,6 +264,7 @@ impl Rule for MD054LinkImageStyle {
                             line: line_num + 1,
                             column: match_start + 1,
                             message: format!("Link/image style '{}' is not consistent with document", style),
+                            severity: Severity::Warning,
                             fix: None, // Automatic fixing is complex, so we leave it manual for now
                         });
                     }

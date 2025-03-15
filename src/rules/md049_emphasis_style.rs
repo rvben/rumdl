@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::utils::range_utils::line_col_to_byte_range;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -14,7 +15,7 @@ pub struct MD049EmphasisStyle {
     style: EmphasisStyle,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmphasisStyle {
     Asterisk,
     Underscore,
@@ -78,6 +79,14 @@ impl MD049EmphasisStyle {
         }
         false
     }
+
+    fn convert_style(&self, text: &str, found_style: EmphasisStyle, expected_style: EmphasisStyle) -> String {
+        match (found_style, expected_style) {
+            (EmphasisStyle::Asterisk, EmphasisStyle::Underscore) => format!("_{}_", &text[1..text.len()-1]),
+            (EmphasisStyle::Underscore, EmphasisStyle::Asterisk) => format!("*{}*", &text[1..text.len()-1]),
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Rule for MD049EmphasisStyle {
@@ -93,7 +102,7 @@ impl Rule for MD049EmphasisStyle {
         let mut warnings = Vec::new();
         let target_style = match self.style {
             EmphasisStyle::Consistent => self.detect_style(content).unwrap_or(EmphasisStyle::Asterisk),
-            _ => self.style.clone(),
+            _ => self.style,
         };
 
         let emphasis_regex = match target_style {
@@ -111,25 +120,31 @@ impl Rule for MD049EmphasisStyle {
                     continue;
                 }
                 
-                let text = &line[m.start()+1..m.end()-1];
-                let message = match target_style {
-                    EmphasisStyle::Asterisk => "Emphasis should use asterisks",
-                    EmphasisStyle::Underscore => "Emphasis should use underscores",
+                let _text = &line[m.start()+1..m.end()-1];
+                let expected_style = match target_style {
+                    EmphasisStyle::Asterisk => EmphasisStyle::Asterisk,
+                    EmphasisStyle::Underscore => EmphasisStyle::Underscore,
                     EmphasisStyle::Consistent => unreachable!(),
+                };
+                let found_style = if emphasis_regex.as_str() == UNDERSCORE_PATTERN.as_str() {
+                    EmphasisStyle::Underscore
+                } else if emphasis_regex.as_str() == ASTERISK_PATTERN.as_str() {
+                    EmphasisStyle::Asterisk
+                } else {
+                    unreachable!()
                 };
 
                 warnings.push(LintWarning {
                     line: line_num + 1,
                     column: m.start() + 1,
-                    message: message.to_string(),
+                    message: format!("Emphasis style should be {} ({})", 
+                        if expected_style == EmphasisStyle::Asterisk { "asterisk" } else { "underscore" },
+                        if expected_style == EmphasisStyle::Asterisk { "*" } else { "_" }
+                    ),
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column: m.start() + 1,
-                        replacement: match target_style {
-                            EmphasisStyle::Asterisk => format!("*{}*", text),
-                            EmphasisStyle::Underscore => format!("_{}_", text),
-                            EmphasisStyle::Consistent => unreachable!(),
-                        },
+                        range: line_col_to_byte_range(content, line_num + 1, m.start() + 1),
+                        replacement: self.convert_style(m.as_str(), found_style, expected_style),
                     }),
                 });
             }
@@ -141,7 +156,7 @@ impl Rule for MD049EmphasisStyle {
     fn fix(&self, content: &str) -> Result<String, LintError> {
         let target_style = match self.style {
             EmphasisStyle::Consistent => self.detect_style(content).unwrap_or(EmphasisStyle::Asterisk),
-            _ => self.style.clone(),
+            _ => self.style,
         };
 
         let emphasis_regex = match target_style {
@@ -163,12 +178,16 @@ impl Rule for MD049EmphasisStyle {
         // Process matches in reverse order to maintain correct indices
         let mut result = content.to_string();
         for (start, end) in matches.into_iter().rev() {
-            let text = &result[start+1..end-1];
-            let replacement = match target_style {
-                EmphasisStyle::Asterisk => format!("*{}*", text),
-                EmphasisStyle::Underscore => format!("_{}_", text),
-                EmphasisStyle::Consistent => unreachable!(),
-            };
+            let _text = &result[start+1..end-1];
+            let replacement = self.convert_style(&result[start..end], 
+                if emphasis_regex.as_str() == UNDERSCORE_PATTERN.as_str() {
+                    EmphasisStyle::Underscore
+                } else if emphasis_regex.as_str() == ASTERISK_PATTERN.as_str() {
+                    EmphasisStyle::Asterisk
+                } else {
+                    unreachable!()
+                }, 
+                target_style);
             result.replace_range(start..end, &replacement);
         }
 
