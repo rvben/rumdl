@@ -137,7 +137,7 @@ impl CodeBlockUtils {
 // Cached regex patterns for better performance
 lazy_static! {
     static ref FENCED_CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(?:```|~~~)").unwrap();
-    static ref INDENTED_CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(?: {4}|\t)").unwrap();
+    static ref INDENTED_CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s{4,})").unwrap();
     static ref BACKTICK_PATTERN: Regex = Regex::new(r"(`+)").unwrap();
 }
 
@@ -254,54 +254,115 @@ pub fn compute_code_blocks(content: &str) -> Vec<CodeBlockState> {
 /// Compute positions of code spans in the text
 pub fn compute_code_spans(content: &str) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
-    let mut position = 0;
     
-    // First try to use regex to find backticks
-    for cap in BACKTICK_PATTERN.captures_iter(content) {
-        let backticks = &cap[1];
-        let start_pos = content[..position + cap.get(1).unwrap().start()].len();
-        
-        // Look for matching closing backticks
-        if let Some(end_pos) = find_closing_backtick(content, start_pos + backticks.len(), backticks.len()) {
-            spans.push((start_pos, end_pos));
+    // Simplify by using a safer character-based approach
+    let chars: Vec<char> = content.chars().collect();
+    let mut i = 0;
+    
+    while i < chars.len() {
+        // Skip escaped backticks
+        if i > 0 && chars[i] == '`' && chars[i-1] == '\\' {
+            i += 1;
+            continue;
         }
         
-        position += cap.get(0).unwrap().end();
-    }
-    
-    // If regex fails (e.g., in complex cases), fall back to manual parsing
-    if spans.is_empty() {
-        let mut in_code = false;
-        let mut backtick_count = 0;
-        let mut start = 0;
-        
-        for (i, c) in content.chars().enumerate() {
-            if c == '`' {
-                if !in_code {
-                    in_code = true;
-                    backtick_count = 1;
-                    start = i;
-                } else if backtick_count == 1 {
-                    in_code = false;
-                    spans.push((start, i));
-                }
-            } else if in_code && backtick_count == 1 {
-                // We're in a single-backtick code span
+        // Look for backtick sequences
+        if chars[i] == '`' {
+            let mut backtick_count = 1;
+            let start_idx = i;
+            
+            // Count consecutive backticks
+            i += 1;
+            while i < chars.len() && chars[i] == '`' {
+                backtick_count += 1;
+                i += 1;
             }
+            
+            // Skip this if it looks like a code block delimiter
+            // This prevents confusion between code spans and code blocks
+            if is_likely_code_block_delimiter(&chars, start_idx) {
+                continue;
+            }
+            
+            // Skip over content until we find a matching sequence of backticks
+            let mut j = i;
+            let mut found_closing = false;
+            
+            while j < chars.len() {
+                // Skip escaped backticks in the search too
+                if j > 0 && chars[j] == '`' && chars[j-1] == '\\' {
+                    j += 1;
+                    continue;
+                }
+                
+                if chars[j] == '`' {
+                    let mut closing_count = 1;
+                    let potential_end = j;
+                    
+                    // Count consecutive backticks
+                    j += 1;
+                    while j < chars.len() && chars[j] == '`' {
+                        closing_count += 1;
+                        j += 1;
+                    }
+                    
+                    // If we found a matching sequence, record the span
+                    if closing_count == backtick_count {
+                        // Convert from character indices to byte indices
+                        let start_byte = chars[..start_idx].iter().map(|c| c.len_utf8()).sum();
+                        let end_byte = chars[..potential_end + closing_count].iter().map(|c| c.len_utf8()).sum();
+                        
+                        spans.push((start_byte, end_byte));
+                        i = j;  // Resume search after this span
+                        found_closing = true;
+                        break;
+                    }
+                }
+                
+                j += 1;
+            }
+            
+            if !found_closing {
+                // If we didn't find a matching sequence, continue from where we left off
+                continue;
+            }
+        } else {
+            i += 1;
         }
     }
     
     spans
 }
 
-/// Find closing backtick sequence of the same length
-fn find_closing_backtick(content: &str, start_pos: usize, length: usize) -> Option<usize> {
-    let backtick_sequence = "`".repeat(length);
-    let substring = &content[start_pos..];
+// Helper function to determine if a backtick sequence is likely a code block delimiter
+fn is_likely_code_block_delimiter(chars: &[char], start_idx: usize) -> bool {
+    let mut count = 0;
+    let mut i = start_idx;
     
-    if let Some(pos) = substring.find(&backtick_sequence) {
-        Some(start_pos + pos + length - 1)
-    } else {
-        None
+    // Count the backticks
+    while i < chars.len() && chars[i] == '`' {
+        count += 1;
+        i += 1;
     }
-} 
+    
+    if count < 3 {
+        // Not enough backticks for a code block
+        return false;
+    }
+    
+    // Check if this is at the start of a line or after only whitespace
+    let mut j = start_idx;
+    if j > 0 {
+        j -= 1;
+        // Go back to the beginning of the line
+        while j > 0 && chars[j] != '\n' {
+            if !chars[j].is_whitespace() {
+                // Non-whitespace character before the backticks on the same line
+                return false;
+            }
+            j -= 1;
+        }
+    }
+    
+    true
+}
