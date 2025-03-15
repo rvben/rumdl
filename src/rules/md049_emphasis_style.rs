@@ -27,39 +27,22 @@ impl MD049EmphasisStyle {
     }
 
     fn detect_style(&self, content: &str) -> Option<EmphasisStyle> {
-        // Instead of trying to modify the content, count only valid emphasis markers
-        let mut asterisk_count = 0;
-        let mut underscore_count = 0;
+        // Find the first occurrence of either style
+        let first_asterisk = ASTERISK_PATTERN.find(content);
+        let first_underscore = UNDERSCORE_PATTERN.find(content);
         
-        // Process content line by line
-        for line in content.lines() {
-            // Count valid asterisk emphasis
-            for m in ASTERISK_PATTERN.find_iter(line) {
-                if !self.is_escaped(line, m.start()) && 
-                   !self.is_in_url(line, m.start()) && 
-                   !self.is_in_inline_code(line, m.start()) {
-                    asterisk_count += 1;
+        match (first_asterisk, first_underscore) {
+            (Some(a), Some(u)) => {
+                // Whichever pattern appears first determines the style
+                if a.start() < u.start() {
+                    Some(EmphasisStyle::Asterisk)
+                } else {
+                    Some(EmphasisStyle::Underscore)
                 }
-            }
-            
-            // Count valid underscore emphasis
-            for m in UNDERSCORE_PATTERN.find_iter(line) {
-                if !self.is_escaped(line, m.start()) && 
-                   !self.is_in_url(line, m.start()) && 
-                   !self.is_in_inline_code(line, m.start()) {
-                    underscore_count += 1;
-                }
-            }
-        }
-
-        if asterisk_count > underscore_count {
-            Some(EmphasisStyle::Asterisk)
-        } else if underscore_count > asterisk_count {
-            Some(EmphasisStyle::Underscore)
-        } else if asterisk_count > 0 {
-            Some(EmphasisStyle::Asterisk) // Default to asterisk if both are equal but present
-        } else {
-            None
+            },
+            (Some(_), None) => Some(EmphasisStyle::Asterisk),
+            (None, Some(_)) => Some(EmphasisStyle::Underscore),
+            (None, None) => None
         }
     }
 

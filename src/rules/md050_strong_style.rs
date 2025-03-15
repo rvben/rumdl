@@ -25,15 +25,22 @@ impl MD050StrongStyle {
     }
 
     fn detect_style(&self, content: &str) -> Option<StrongStyle> {
-        let asterisk_count = content.matches("**").count();
-        let underscore_count = content.matches("__").count();
-
-        if asterisk_count > underscore_count {
-            Some(StrongStyle::Asterisk)
-        } else if underscore_count > asterisk_count {
-            Some(StrongStyle::Underscore)
-        } else {
-            None
+        // Find the first occurrence of either style
+        let first_asterisk = ASTERISK_PATTERN.find(content);
+        let first_underscore = UNDERSCORE_PATTERN.find(content);
+        
+        match (first_asterisk, first_underscore) {
+            (Some(a), Some(u)) => {
+                // Whichever pattern appears first determines the style
+                if a.start() < u.start() {
+                    Some(StrongStyle::Asterisk)
+                } else {
+                    Some(StrongStyle::Underscore)
+                }
+            },
+            (Some(_), None) => Some(StrongStyle::Asterisk),
+            (None, Some(_)) => Some(StrongStyle::Underscore),
+            (None, None) => None
         }
     }
 

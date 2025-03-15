@@ -1,5 +1,13 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule};
 use regex::Regex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    // Pattern for ATX headings
+    static ref ATX_HEADING: Regex = Regex::new(r"^(#+)\s+(.+)$").unwrap();
+    // Pattern for setext heading underlines
+    static ref SETEXT_UNDERLINE: Regex = Regex::new(r"^([=-]+)$").unwrap();
+}
 
 /// Rule MD043: Required headings
 ///
@@ -15,26 +23,51 @@ impl MD043RequiredHeadings {
 
     fn extract_headings(&self, content: &str) -> Vec<String> {
         let mut result = Vec::new();
-        let heading_regex = Regex::new(r"^(#+)\s+(.+)$|^(.+)\n([=-]+)$").unwrap();
-
-        for line in content.lines() {
-            if let Some(cap) = heading_regex.captures(line) {
-                let heading_text = if let Some(atx_text) = cap.get(2) {
-                    atx_text.as_str()
-                } else if let Some(setext_text) = cap.get(3) {
-                    setext_text.as_str()
-                } else {
-                    continue;
-                };
-                result.push(heading_text.trim().to_string());
+        let lines: Vec<&str> = content.lines().collect();
+        let mut i = 0;
+        
+        while i < lines.len() {
+            let line = lines[i];
+            
+            // Check for ATX heading
+            if let Some(cap) = ATX_HEADING.captures(line) {
+                if let Some(heading_text) = cap.get(2) {
+                    result.push(heading_text.as_str().trim().to_string());
+                }
+            } 
+            // Check for setext heading (requires looking at next line)
+            else if i + 1 < lines.len() && !line.trim().is_empty() {
+                let next_line = lines[i + 1];
+                if SETEXT_UNDERLINE.is_match(next_line) {
+                    result.push(line.trim().to_string());
+                    i += 1; // Skip the underline
+                }
             }
+            
+            i += 1;
         }
+        
         result
     }
 
-    fn is_heading(&self, line: &str) -> bool {
-        let heading_regex = Regex::new(r"^(#+)\s+(.+)$|^(.+)\n([=-]+)$").unwrap();
-        heading_regex.is_match(line)
+    fn is_heading(&self, content: &str, line_index: usize) -> bool {
+        let lines: Vec<&str> = content.lines().collect();
+        let line = lines[line_index];
+        
+        // Check for ATX heading
+        if ATX_HEADING.is_match(line) {
+            return true;
+        }
+        
+        // Check for setext heading (requires looking at next line)
+        if line_index + 1 < lines.len() && !line.trim().is_empty() {
+            let next_line = lines[line_index + 1];
+            if SETEXT_UNDERLINE.is_match(next_line) {
+                return true;
+            }
+        }
+        
+        false
     }
 }
 
@@ -57,10 +90,11 @@ impl Rule for MD043RequiredHeadings {
         }
 
         if actual_headings != self.headings {
-            for (line_num, line) in content.lines().enumerate() {
-                if self.is_heading(line) {
+            let lines: Vec<&str> = content.lines().collect();
+            for i in 0..lines.len() {
+                if self.is_heading(content, i) {
                     warnings.push(LintWarning {
-                        line: line_num + 1,
+                        line: i + 1,
                         column: 1,
                         message: "Heading structure does not match the required structure".to_string(),
                         fix: None, // Cannot automatically fix as we don't know the intended structure

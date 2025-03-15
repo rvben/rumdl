@@ -1,6 +1,12 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 use regex::Regex;
 use std::collections::HashSet;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref CODE_BLOCK_FENCE: Regex = Regex::new(r"^```").unwrap();
+    static ref INDENTED_CODE_BLOCK: Regex = Regex::new(r"^    ").unwrap();
+}
 
 /// Rule MD044: Proper names should have the correct capitalization
 ///
@@ -18,8 +24,27 @@ impl MD044ProperNames {
         }
     }
 
-    fn is_in_code_block(&self, line: &str) -> bool {
-        line.trim_start().starts_with("```") || line.trim_start().starts_with("    ")
+    // Helper method for checking code blocks
+    fn is_code_block(&self, line: &str, in_code_block: bool) -> bool {
+        in_code_block || INDENTED_CODE_BLOCK.is_match(line)
+    }
+    
+    // Create a regex-safe version of the name for word boundary matches
+    fn create_safe_pattern(&self, name: &str) -> String {
+        // Create variations of the name with and without dots
+        let variations = vec![
+            name.to_lowercase(),
+            name.to_lowercase().replace(".", "")
+        ];
+        
+        // Create a pattern that matches any of the variations with word boundaries
+        let pattern = variations
+            .iter()
+            .map(|v| regex::escape(v))
+            .collect::<Vec<_>>()
+            .join("|");
+            
+        format!(r"(?i)\b({})\b", pattern)
     }
 }
 
@@ -33,23 +58,28 @@ impl Rule for MD044ProperNames {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        if content.is_empty() || self.names.is_empty() {
+            return Ok(Vec::new());
+        }
+        
         let mut warnings = Vec::new();
         let mut in_code_block = false;
 
         for (line_num, line) in content.lines().enumerate() {
             // Handle code blocks
-            if line.trim_start().starts_with("```") {
+            if CODE_BLOCK_FENCE.is_match(line.trim_start()) {
                 in_code_block = !in_code_block;
                 continue;
             }
 
-            if self.code_blocks_excluded && (in_code_block || self.is_in_code_block(line)) {
+            if self.code_blocks_excluded && self.is_code_block(line, in_code_block) {
                 continue;
             }
 
             for name in &self.names {
-                let name_pattern = format!(r"\b{}\b", regex::escape(name));
-                let re = Regex::new(&name_pattern).unwrap();
+                // Create a pattern that handles variations of the name
+                let pattern = self.create_safe_pattern(name);
+                let re = Regex::new(&pattern).unwrap();
 
                 for cap in re.find_iter(line) {
                     let found_name = &line[cap.start()..cap.end()];
@@ -73,31 +103,39 @@ impl Rule for MD044ProperNames {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = content.to_string();
+        if content.is_empty() || self.names.is_empty() {
+            return Ok(content.to_string());
+        }
+        
+        let lines: Vec<&str> = content.lines().collect();
+        let mut new_lines = Vec::with_capacity(lines.len());
         let mut in_code_block = false;
 
-        for name in &self.names {
-            let name_pattern = format!(r"\b{}\b", regex::escape(&name.to_lowercase()));
-            let re = Regex::new(&name_pattern).unwrap();
+        for line in lines {
+            let mut current_line = line.to_string();
+            
+            // Handle code blocks
+            if CODE_BLOCK_FENCE.is_match(line.trim_start()) {
+                in_code_block = !in_code_block;
+                new_lines.push(current_line);
+                continue;
+            }
 
-            // Split content into lines to handle code blocks
-            let lines: Vec<String> = result
-                .lines()
-                .map(|line| {
-                    if line.trim_start().starts_with("```") {
-                        in_code_block = !in_code_block;
-                        line.to_string()
-                    } else if self.code_blocks_excluded && (in_code_block || self.is_in_code_block(line)) {
-                        line.to_string()
-                    } else {
-                        re.replace_all(line, name).to_string()
-                    }
-                })
-                .collect();
+            if self.code_blocks_excluded && self.is_code_block(line, in_code_block) {
+                new_lines.push(current_line);
+                continue;
+            }
 
-            result = lines.join("\n");
+            // Apply all name replacements to this line
+            for name in &self.names {
+                let pattern = self.create_safe_pattern(name);
+                let re = Regex::new(&pattern).unwrap();
+                current_line = re.replace_all(&current_line, name.as_str()).to_string();
+            }
+            
+            new_lines.push(current_line);
         }
 
-        Ok(result)
+        Ok(new_lines.join("\n"))
     }
 } 
