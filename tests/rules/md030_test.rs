@@ -1,5 +1,5 @@
-use rumdl::rules::MD030ListMarkerSpace;
 use rumdl::rule::Rule;
+use rumdl::rules::MD030ListMarkerSpace;
 
 #[test]
 fn test_valid_single_line_lists() {
@@ -94,7 +94,10 @@ fn test_multi_line_items() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1); // Only the multi-line item should be flagged
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "* Single line\n*  Multi line\n  continued here\n* Another single");
+    assert_eq!(
+        fixed,
+        "* Single line\n*  Multi line\n  continued here\n* Another single"
+    );
 }
 
 #[test]
@@ -103,4 +106,4 @@ fn test_preserve_indentation() {
     let content = "  *  Item\n    -   Another\n      +    Third";
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "  * Item\n    - Another\n      + Third");
-} 
+}

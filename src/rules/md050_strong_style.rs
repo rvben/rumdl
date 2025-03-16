@@ -1,7 +1,8 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"__[^_\\]+__").unwrap();
@@ -27,9 +28,11 @@ impl MD050StrongStyle {
 
     fn detect_style(&self, content: &str) -> Option<StrongStyle> {
         // Find the first occurrence of either style
+
         let first_asterisk = ASTERISK_PATTERN.find(content);
+
         let first_underscore = UNDERSCORE_PATTERN.find(content);
-        
+
         match (first_asterisk, first_underscore) {
             (Some(a), Some(u)) => {
                 // Whichever pattern appears first determines the style
@@ -38,10 +41,10 @@ impl MD050StrongStyle {
                 } else {
                     Some(StrongStyle::Underscore)
                 }
-            },
+            }
             (Some(_), None) => Some(StrongStyle::Asterisk),
             (None, Some(_)) => Some(StrongStyle::Underscore),
-            (None, None) => None
+            (None, None) => None,
         }
     }
 
@@ -49,23 +52,18 @@ impl MD050StrongStyle {
         if pos == 0 {
             return false;
         }
+
         let mut backslash_count = 0;
-        for c in text[..pos].chars().rev() {
-            if c == '\\' {
-                backslash_count += 1;
-            } else {
+        let mut i = pos;
+        while i > 0 {
+            i -= 1;
+            let c = text.chars().nth(i).unwrap_or(' ');
+            if c != '\\' {
                 break;
             }
+            backslash_count += 1;
         }
         backslash_count % 2 == 1
-    }
-
-    fn convert_style(&self, text: &str, found_style: StrongStyle, expected_style: StrongStyle) -> String {
-        match (found_style, expected_style) {
-            (StrongStyle::Asterisk, StrongStyle::Underscore) => format!("__{}__", &text[2..text.len()-2]),
-            (StrongStyle::Underscore, StrongStyle::Asterisk) => format!("**{}**", &text[2..text.len()-2]),
-            _ => unreachable!(),
-        }
     }
 }
 
@@ -79,7 +77,10 @@ impl Rule for MD050StrongStyle {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let target_style = match self.style {
             StrongStyle::Consistent => self.detect_style(content).unwrap_or(StrongStyle::Asterisk),
             _ => self.style.clone(),
@@ -94,7 +95,7 @@ impl Rule for MD050StrongStyle {
         for (line_num, line) in content.lines().enumerate() {
             for m in strong_regex.find_iter(line) {
                 if !self.is_escaped(line, m.start()) {
-                    let text = &line[m.start()+2..m.end()-2];
+                    let text = &line[m.start() + 2..m.end() - 2];
                     let message = match target_style {
                         StrongStyle::Asterisk => "Strong emphasis should use asterisks",
                         StrongStyle::Underscore => "Strong emphasis should use underscores",
@@ -107,7 +108,7 @@ impl Rule for MD050StrongStyle {
                         message: message.to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, m.start() + 1),
+                            range: _line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
                             replacement: match target_style {
                                 StrongStyle::Asterisk => format!("**{}**", text),
                                 StrongStyle::Underscore => format!("__{}__", text),
@@ -123,6 +124,8 @@ impl Rule for MD050StrongStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let target_style = match self.style {
             StrongStyle::Consistent => self.detect_style(content).unwrap_or(StrongStyle::Asterisk),
             _ => self.style.clone(),
@@ -135,15 +138,18 @@ impl Rule for MD050StrongStyle {
         };
 
         // Store matches with their positions
-        let matches: Vec<(usize, usize)> = strong_regex.find_iter(content)
+
+        let matches: Vec<(usize, usize)> = strong_regex
+            .find_iter(content)
             .filter(|m| !self.is_escaped(content, m.start()))
             .map(|m| (m.start(), m.end()))
             .collect();
 
         // Process matches in reverse order to maintain correct indices
+
         let mut result = content.to_string();
         for (start, end) in matches.into_iter().rev() {
-            let text = &result[start+2..end-2];
+            let text = &result[start + 2..end - 2];
             let replacement = match target_style {
                 StrongStyle::Asterisk => format!("**{}**", text),
                 StrongStyle::Underscore => format!("__{}__", text),
@@ -154,4 +160,4 @@ impl Rule for MD050StrongStyle {
 
         Ok(result)
     }
-} 
+}

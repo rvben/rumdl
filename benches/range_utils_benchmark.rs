@@ -1,25 +1,30 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rumdl::utils::range_utils::line_col_to_byte_range;
+use rumdl::utils::range_utils::LineIndex;
 
 // Naive implementation that doesn't use the optimized function
-fn naive_line_col_to_byte_range(content: &str, line: usize, column: usize) -> std::ops::Range<usize> {
+fn naive_line_col_to_byte_range(
+    content: &str,
+    line: usize,
+    column: usize,
+) -> std::ops::Range<usize> {
     let lines: Vec<&str> = content.lines().collect();
-    
+
     // Handle out of bounds
     if line == 0 || line > lines.len() {
         return content.len()..content.len();
     }
-    
+
     // Manually iterate through each line to find the byte position
     let mut current_pos = 0;
-    for i in 0..(line-1) {
+    for i in 0..(line - 1) {
         if i < lines.len() {
             current_pos += lines[i].len() + 1; // +1 for newline
         }
     }
-    
+
     // Adjust column
-    let current_line = lines[line-1];
+    let current_line = lines[line - 1];
     let col = if column == 0 {
         1
     } else if column > current_line.len() + 1 {
@@ -27,25 +32,27 @@ fn naive_line_col_to_byte_range(content: &str, line: usize, column: usize) -> st
     } else {
         column
     };
-    
+
     let start = current_pos + col - 1;
     let safe_start = std::cmp::min(start, content.len());
-    
+
     safe_start..safe_start
 }
 
-fn bench_range_utils(c: &mut Criterion) {
-    // Generate a sample content with many lines
-    let line_count = 10_000;
-    let content = (0..line_count)
+fn generate_test_content(line_count: usize) -> String {
+    (0..line_count)
         .map(|i| format!("Line {}: This is a test line with some content.", i))
         .collect::<Vec<String>>()
-        .join("\n");
-    
-    // Benchmark the optimized function
-    c.bench_function("line_col_to_byte_range", |b| {
+        .join("\n")
+}
+
+fn bench_range_utils(c: &mut Criterion) {
+    let line_count = 10_000;
+    let content = generate_test_content(line_count);
+
+    // Original implementation
+    c.bench_function("original_line_col_to_byte_range", |b| {
         b.iter(|| {
-            // Access various positions in the content
             for line in [1, 100, 1000, 5000, 9999].iter() {
                 for col in [1, 10, 20, 40].iter() {
                     black_box(line_col_to_byte_range(black_box(&content), *line, *col));
@@ -53,23 +60,39 @@ fn bench_range_utils(c: &mut Criterion) {
             }
         })
     });
-    
+
+    // New cached implementation
+    let line_index = LineIndex::new(content.clone());
+    c.bench_function("cached_line_col_to_byte_range", |b| {
+        b.iter(|| {
+            for line in [1, 100, 1000, 5000, 9999].iter() {
+                for col in [1, 10, 20, 40].iter() {
+                    black_box(line_index.line_col_to_byte_range(*line, *col));
+                }
+            }
+        })
+    });
+
     // Benchmark the naive implementation
     c.bench_function("naive_line_col_to_byte_range", |b| {
         b.iter(|| {
             // Access the same positions
             for line in [1, 100, 1000, 5000, 9999].iter() {
                 for col in [1, 10, 20, 40].iter() {
-                    black_box(naive_line_col_to_byte_range(black_box(&content), *line, *col));
+                    black_box(naive_line_col_to_byte_range(
+                        black_box(&content),
+                        *line,
+                        *col,
+                    ));
                 }
             }
         })
     });
-    
+
     // Benchmark with random accesses
     use rand::prelude::*;
     let mut rng = rand::thread_rng();
-    
+
     c.bench_function("random_access_optimized", |b| {
         b.iter(|| {
             for _ in 0..20 {
@@ -79,7 +102,7 @@ fn bench_range_utils(c: &mut Criterion) {
             }
         })
     });
-    
+
     c.bench_function("random_access_naive", |b| {
         b.iter(|| {
             for _ in 0..20 {

@@ -1,7 +1,7 @@
+pub mod code_block_utils;
+pub mod front_matter_utils;
 pub mod heading_utils;
 pub mod heading_utils_new;
-pub mod front_matter_utils;
-pub mod code_block_utils;
 pub mod list_utils;
 
 // Add the new module

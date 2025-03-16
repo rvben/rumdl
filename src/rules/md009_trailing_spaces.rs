@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug)]
@@ -35,7 +36,6 @@ impl MD009TrailingSpaces {
         false
     }
 
-
     fn is_empty_blockquote_line(line: &str) -> bool {
         let trimmed = line.trim_start();
         trimmed.starts_with('>') && trimmed.trim_end() == ">"
@@ -64,12 +64,15 @@ impl Rule for MD009TrailingSpaces {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, &line) in lines.iter().enumerate() {
             let trailing_spaces = Self::count_trailing_spaces(line);
-            
+
             // Skip if no trailing spaces
             if trailing_spaces == 0 {
                 continue;
@@ -84,7 +87,7 @@ impl Rule for MD009TrailingSpaces {
                         message: "Empty line should not have trailing spaces".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, 1),
+                            range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                             replacement: String::new(),
                         }),
                     });
@@ -111,7 +114,7 @@ impl Rule for MD009TrailingSpaces {
                     message: "Empty blockquote line should have a space after >".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, line_num + 1, trimmed.len() + 1),
+                        range: _line_index.line_col_to_byte_range(line_num + 1, trimmed.len() + 1),
                         replacement: format!("{} ", trimmed),
                     }),
                 });
@@ -129,7 +132,7 @@ impl Rule for MD009TrailingSpaces {
                 },
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: line_col_to_byte_range(content, line_num + 1, trimmed.len() + 1),
+                    range: _line_index.line_col_to_byte_range(line_num + 1, trimmed.len() + 1),
                     replacement: if !self.strict && line_num < lines.len() - 1 {
                         format!("{}{}", trimmed, " ".repeat(self.br_spaces))
                     } else {
@@ -143,12 +146,15 @@ impl Rule for MD009TrailingSpaces {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
+
         let lines: Vec<&str> = content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_end();
-            
+
             // Handle empty lines
             if trimmed.is_empty() {
                 result.push('\n');
@@ -189,4 +195,4 @@ impl Rule for MD009TrailingSpaces {
 
         Ok(result)
     }
-} 
+}

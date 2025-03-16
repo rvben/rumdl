@@ -1,5 +1,5 @@
-use rumdl::rules::MD045NoAltText;
 use rumdl::rule::Rule;
+use rumdl::rules::MD045NoAltText;
 
 #[test]
 fn test_valid_alt_text() {
@@ -46,13 +46,17 @@ fn test_complex_urls() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "![Image description](https://example.com/image.png?param=value#fragment)");
+    assert_eq!(
+        fixed,
+        "![Image description](https://example.com/image.png?param=value#fragment)"
+    );
 }
 
 #[test]
 fn test_mixed_content() {
     let rule = MD045NoAltText::new();
-    let content = "# Images\n\nSome text here\n\n![Alt text](image1.png)\n\nMore text\n\n![](image2.png)";
+    let content =
+        "# Images\n\nSome text here\n\n![Alt text](image1.png)\n\nMore text\n\n![](image2.png)";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
@@ -66,5 +70,8 @@ fn test_inline_images() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "Text with ![Alt text](inline1.png) and ![Image description](inline2.png) images.");
-} 
+    assert_eq!(
+        fixed,
+        "Text with ![Alt text](inline1.png) and ![Image description](inline2.png) images."
+    );
+}

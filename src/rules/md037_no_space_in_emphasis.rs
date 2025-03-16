@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
@@ -7,7 +8,9 @@ pub struct MD037NoSpaceInEmphasis;
 
 impl MD037NoSpaceInEmphasis {
     fn find_emphasis_issues(content: &str) -> Vec<(usize, usize, String)> {
+
         let mut issues = Vec::new();
+
         let re = Regex::new(r"(\*\s|\s\*|\*{2}\s|\s\*{2}|_\s|\s_|_{2}\s|\s_{2})([^*_]+?)(\*\s|\s\*|\*{2}\s|\s\*{2}|_\s|\s_|_{2}\s|\s_{2})").unwrap();
         
         for line in content.lines() {
@@ -38,6 +41,8 @@ impl Rule for MD037NoSpaceInEmphasis {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
 
         for (i, line) in content.lines().enumerate() {
@@ -50,7 +55,7 @@ impl Rule for MD037NoSpaceInEmphasis {
                     message: "Spaces inside emphasis markers should be removed".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, i + 1, column),
+                        range: line_index.line_col_to_byte_range(i + 1, column),
                         replacement: fixed,
                     }),
                 });
@@ -61,6 +66,8 @@ impl Rule for MD037NoSpaceInEmphasis {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
         
         for line in content.lines() {

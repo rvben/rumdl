@@ -1,7 +1,8 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::heading_utils::HeadingUtils;
 use crate::rules::front_matter_utils::FrontMatterUtils;
+use crate::rules::heading_utils::HeadingUtils;
 
 #[derive(Debug)]
 pub struct MD025SingleTitle {
@@ -10,17 +11,13 @@ pub struct MD025SingleTitle {
 
 impl Default for MD025SingleTitle {
     fn default() -> Self {
-        Self {
-            level: 1,
-        }
+        Self { level: 1 }
     }
 }
 
 impl MD025SingleTitle {
     pub fn new(level: usize, _front_matter_title: &str) -> Self {
-        Self {
-            level,
-        }
+        Self { level }
     }
 }
 
@@ -34,29 +31,43 @@ impl Rule for MD025SingleTitle {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let mut found_title = false;
+
         let lines: Vec<&str> = content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
             // Skip processing if line is in a code block or front matter
-            if HeadingUtils::is_in_code_block(content, i) || FrontMatterUtils::is_in_front_matter(content, i) {
+            if HeadingUtils::is_in_code_block(content, i)
+                || FrontMatterUtils::is_in_front_matter(content, i)
+            {
                 continue;
             }
-            
+
             let trimmed = line.trim_start();
             if trimmed.starts_with('#') {
                 let level = trimmed.chars().take_while(|&c| c == '#').count();
                 if level == self.level {
                     if found_title {
                         warnings.push(LintWarning {
-                            message: format!("Multiple top-level headings (level {}) in the same document", self.level),
+                            message: format!(
+                                "Multiple top-level headings (level {}) in the same document",
+                                self.level
+                            ),
                             line: i + 1,
                             column: line.find('#').unwrap_or(0) + 1,
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_col_to_byte_range(content, i + 1, line.find('#').unwrap_or(0) + 1),
-                                replacement: format!("{} {}", "#".repeat(level + 1), &line[level + line.find('#').unwrap_or(0)..]),
+                                range: _line_index
+                                    .line_col_to_byte_range(i + 1, line.find('#').unwrap_or(0) + 1),
+                                replacement: format!(
+                                    "{} {}",
+                                    "#".repeat(level + 1),
+                                    &line[level + line.find('#').unwrap_or(0)..]
+                                ),
                             }),
                         });
                     }
@@ -69,24 +80,35 @@ impl Rule for MD025SingleTitle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
+
         let mut found_first_title = false;
+
         let lines: Vec<&str> = content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
             // Don't modify lines in code blocks or front matter
-            if HeadingUtils::is_in_code_block(&content, i) || FrontMatterUtils::is_in_front_matter(&content, i) {
+            if HeadingUtils::is_in_code_block(&content, i)
+                || FrontMatterUtils::is_in_front_matter(&content, i)
+            {
                 result.push_str(line);
             } else {
                 let trimmed = line.trim_start();
                 if trimmed.starts_with('#') {
                     let level = trimmed.chars().take_while(|&c| c == '#').count();
                     let indent = line.len() - trimmed.len();
-                    
+
                     if level == self.level {
                         if found_first_title {
                             // This is a duplicate level-n heading - add one more # to increase level
-                            let modified = format!("{}{}{}", " ".repeat(indent), "#".repeat(level + 1), &trimmed[level..]);
+                            let modified = format!(
+                                "{}{}{}",
+                                " ".repeat(indent),
+                                "#".repeat(level + 1),
+                                &trimmed[level..]
+                            );
                             result.push_str(&modified);
                         } else {
                             // This is the first level-n heading - keep it as is
@@ -102,7 +124,7 @@ impl Rule for MD025SingleTitle {
                     result.push_str(line);
                 }
             }
-            
+
             // Add newline between lines (except after the last line)
             if i < lines.len() - 1 {
                 result.push('\n');
@@ -116,4 +138,4 @@ impl Rule for MD025SingleTitle {
 
         Ok(result)
     }
-} 
+}

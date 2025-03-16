@@ -10,7 +10,7 @@ fn test_name() {
 #[test]
 fn test_consistent_column_count() {
     let rule = MD056TableColumnCount;
-    
+
     // Regular table with consistent column count
     let content = r#"
 | Header 1 | Header 2 | Header 3 |
@@ -18,10 +18,10 @@ fn test_consistent_column_count() {
 | Cell 1.1 | Cell 1.2 | Cell 1.3 |
 | Cell 2.1 | Cell 2.2 | Cell 2.3 |
     "#;
-    
+
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
-    
+
     // Table without leading/trailing pipes but consistent columns
     let content = r#"
 Header 1 | Header 2 | Header 3
@@ -29,7 +29,7 @@ Header 1 | Header 2 | Header 3
 Cell 1.1 | Cell 1.2 | Cell 1.3
 Cell 2.1 | Cell 2.2 | Cell 2.3
     "#;
-    
+
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -37,18 +37,18 @@ Cell 2.1 | Cell 2.2 | Cell 2.3
 #[test]
 fn test_inconsistent_column_count() {
     let rule = MD056TableColumnCount;
-    
+
     let content = r#"
 | Header 1 | Header 2 | Header 3 |
 | -------- | -------- | -------- |
 | Cell 1.1 | Cell 1.2 |
 | Cell 2.1 | Cell 2.2 | Cell 2.3 | Extra |
     "#;
-    
+
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].line, 4);  // 2 columns instead of 3
-    assert_eq!(result[1].line, 5);  // 4 columns instead of 3
+    assert_eq!(result[0].line, 4); // 2 columns instead of 3
+    assert_eq!(result[1].line, 5); // 4 columns instead of 3
     assert!(result[0].message.contains("2 cells, but expected 3"));
     assert!(result[1].message.contains("4 cells, but expected 3"));
 }
@@ -56,7 +56,7 @@ fn test_inconsistent_column_count() {
 #[test]
 fn test_complex_tables() {
     let rule = MD056TableColumnCount;
-    
+
     // Table with empty cells
     let content = r#"
 | Header 1 | Header 2 | Header 3 |
@@ -64,10 +64,10 @@ fn test_complex_tables() {
 | Cell 1.1 |          | Cell 1.3 |
 |          | Cell 2.2 |          |
     "#;
-    
+
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
-    
+
     // Table with alignment specifiers
     let content = r#"
 | Left | Center | Right |
@@ -75,7 +75,7 @@ fn test_complex_tables() {
 | 1    | 2      | 3     |
 | 4    | 5      | 6     |
     "#;
-    
+
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -83,7 +83,7 @@ fn test_complex_tables() {
 #[test]
 fn test_code_blocks_ignored() {
     let rule = MD056TableColumnCount;
-    
+
     let content = r#"
 | Header 1 | Header 2 | Header 3 |
 | -------- | -------- | -------- |
@@ -95,7 +95,7 @@ fn test_code_blocks_ignored() {
 | Too few | columns |
 ```
     "#;
-    
+
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -103,13 +103,13 @@ fn test_code_blocks_ignored() {
 #[test]
 fn test_fix_too_few_columns() {
     let rule = MD056TableColumnCount;
-    
+
     let content = r#"
 | Header 1 | Header 2 | Header 3 |
 | -------- | -------- | -------- |
 | Cell 1.1 | Cell 1.2 |
     "#;
-    
+
     let result = rule.fix(content).unwrap();
     assert!(result.contains("| Cell 1.1 | Cell 1.2 |  |"));
 }
@@ -117,13 +117,13 @@ fn test_fix_too_few_columns() {
 #[test]
 fn test_fix_too_many_columns() {
     let rule = MD056TableColumnCount;
-    
+
     let content = r#"
 | Header 1 | Header 2 | Header 3 |
 | -------- | -------- | -------- |
 | Cell 1.1 | Cell 1.2 | Cell 1.3 | Extra |
     "#;
-    
+
     let result = rule.fix(content).unwrap();
     assert!(result.contains("| Cell 1.1 | Cell 1.2 | Cell 1.3 |"));
     assert!(!result.contains("Extra"));
@@ -132,7 +132,7 @@ fn test_fix_too_many_columns() {
 #[test]
 fn test_table_row_detection() {
     let rule = MD056TableColumnCount;
-    
+
     // Make sure non-table lines don't trigger warnings
     let content = r#"
 This is a paragraph that happens to have | pipe characters
@@ -142,7 +142,7 @@ but isn't actually a table row.
 | -------- | -------- |
 | Cell 1.1 | Cell 1.2 |
     "#;
-    
+
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
-} 
+}

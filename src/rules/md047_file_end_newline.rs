@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug, Default)]
@@ -14,7 +15,10 @@ impl Rule for MD047FileEndNewline {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let lines: Vec<&str> = content.lines().collect();
 
         if !lines.is_empty() {
@@ -24,14 +28,14 @@ impl Rule for MD047FileEndNewline {
             if !has_trailing_newline || has_multiple_newlines {
                 let last_line = lines.len();
                 let last_column = lines.last().map_or(1, |line| line.len() + 1);
-                
+
                 warnings.push(LintWarning {
                     message: String::from("File should end with a single newline character"),
                     line: last_line + 1,
                     column: last_column,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, last_line + 1, last_column),
+                        range: _line_index.line_col_to_byte_range(last_line + 1, last_column),
                         replacement: if has_trailing_newline {
                             // If there are multiple newlines, trim them and add a single one
                             content.trim_end().to_string() + "\n"
@@ -48,6 +52,8 @@ impl Rule for MD047FileEndNewline {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = content.to_string();
 
         // If the content doesn't end with a newline, add one
@@ -63,4 +69,4 @@ impl Rule for MD047FileEndNewline {
 
         Ok(result)
     }
-} 
+}

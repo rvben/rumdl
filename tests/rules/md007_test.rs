@@ -1,5 +1,5 @@
-use rumdl::rules::MD007ULIndent;
 use rumdl::rule::Rule;
+use rumdl::rules::MD007ULIndent;
 
 #[test]
 fn test_valid_list_indent() {
@@ -35,4 +35,4 @@ fn test_fix_indentation() {
     let content = "* Item 1\n   * Item 2\n      * Item 3";
     let result = rule.fix(content).unwrap();
     assert_eq!(result, "* Item 1\n  * Item 2\n    * Item 3");
-} 
+}

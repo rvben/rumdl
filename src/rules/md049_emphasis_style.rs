@@ -1,7 +1,8 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"_[^_\\]+_").unwrap();
@@ -29,9 +30,11 @@ impl MD049EmphasisStyle {
 
     fn detect_style(&self, content: &str) -> Option<EmphasisStyle> {
         // Find the first occurrence of either style
+
         let first_asterisk = ASTERISK_PATTERN.find(content);
+
         let first_underscore = UNDERSCORE_PATTERN.find(content);
-        
+
         match (first_asterisk, first_underscore) {
             (Some(a), Some(u)) => {
                 // Whichever pattern appears first determines the style
@@ -40,10 +43,10 @@ impl MD049EmphasisStyle {
                 } else {
                     Some(EmphasisStyle::Underscore)
                 }
-            },
+            }
             (Some(_), None) => Some(EmphasisStyle::Asterisk),
             (None, Some(_)) => Some(EmphasisStyle::Underscore),
-            (None, None) => None
+            (None, None) => None,
         }
     }
 
@@ -51,6 +54,7 @@ impl MD049EmphasisStyle {
         if pos == 0 {
             return false;
         }
+
         let mut backslash_count = 0;
         for c in text[..pos].chars().rev() {
             if c == '\\' {
@@ -80,10 +84,19 @@ impl MD049EmphasisStyle {
         false
     }
 
-    fn convert_style(&self, text: &str, found_style: EmphasisStyle, expected_style: EmphasisStyle) -> String {
+    fn convert_style(
+        &self,
+        text: &str,
+        found_style: EmphasisStyle,
+        expected_style: EmphasisStyle,
+    ) -> String {
         match (found_style, expected_style) {
-            (EmphasisStyle::Asterisk, EmphasisStyle::Underscore) => format!("_{}_", &text[1..text.len()-1]),
-            (EmphasisStyle::Underscore, EmphasisStyle::Asterisk) => format!("*{}*", &text[1..text.len()-1]),
+            (EmphasisStyle::Asterisk, EmphasisStyle::Underscore) => {
+                format!("_{}_", &text[1..text.len() - 1])
+            }
+            (EmphasisStyle::Underscore, EmphasisStyle::Asterisk) => {
+                format!("*{}*", &text[1..text.len() - 1])
+            }
             _ => unreachable!(),
         }
     }
@@ -99,9 +112,14 @@ impl Rule for MD049EmphasisStyle {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let target_style = match self.style {
-            EmphasisStyle::Consistent => self.detect_style(content).unwrap_or(EmphasisStyle::Asterisk),
+            EmphasisStyle::Consistent => self
+                .detect_style(content)
+                .unwrap_or(EmphasisStyle::Asterisk),
             _ => self.style,
         };
 
@@ -114,13 +132,14 @@ impl Rule for MD049EmphasisStyle {
         for (line_num, line) in content.lines().enumerate() {
             for m in emphasis_regex.find_iter(line) {
                 // Skip this match if it's escaped or within a URL/code
-                if self.is_escaped(line, m.start()) ||
-                   self.is_in_url(line, m.start()) ||
-                   self.is_in_inline_code(line, m.start()) {
+                if self.is_escaped(line, m.start())
+                    || self.is_in_url(line, m.start())
+                    || self.is_in_inline_code(line, m.start())
+                {
                     continue;
                 }
-                
-                let _text = &line[m.start()+1..m.end()-1];
+
+                let _text = &line[m.start() + 1..m.end() - 1];
                 let expected_style = match target_style {
                     EmphasisStyle::Asterisk => EmphasisStyle::Asterisk,
                     EmphasisStyle::Underscore => EmphasisStyle::Underscore,
@@ -137,13 +156,22 @@ impl Rule for MD049EmphasisStyle {
                 warnings.push(LintWarning {
                     line: line_num + 1,
                     column: m.start() + 1,
-                    message: format!("Emphasis style should be {} ({})", 
-                        if expected_style == EmphasisStyle::Asterisk { "asterisk" } else { "underscore" },
-                        if expected_style == EmphasisStyle::Asterisk { "*" } else { "_" }
+                    message: format!(
+                        "Emphasis style should be {} ({})",
+                        if expected_style == EmphasisStyle::Asterisk {
+                            "asterisk"
+                        } else {
+                            "underscore"
+                        },
+                        if expected_style == EmphasisStyle::Asterisk {
+                            "*"
+                        } else {
+                            "_"
+                        }
                     ),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, line_num + 1, m.start() + 1),
+                        range: _line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
                         replacement: self.convert_style(m.as_str(), found_style, expected_style),
                     }),
                 });
@@ -154,8 +182,12 @@ impl Rule for MD049EmphasisStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let target_style = match self.style {
-            EmphasisStyle::Consistent => self.detect_style(content).unwrap_or(EmphasisStyle::Asterisk),
+            EmphasisStyle::Consistent => self
+                .detect_style(content)
+                .unwrap_or(EmphasisStyle::Asterisk),
             _ => self.style,
         };
 
@@ -166,31 +198,36 @@ impl Rule for MD049EmphasisStyle {
         };
 
         // Store matches with their positions, filtering out URLs and code
-        let matches: Vec<(usize, usize)> = emphasis_regex.find_iter(content)
-            .filter(|m| 
-                !self.is_escaped(content, m.start()) && 
-                !self.is_in_url(content, m.start()) && 
-                !self.is_in_inline_code(content, m.start())
-            )
+
+        let matches: Vec<(usize, usize)> = emphasis_regex
+            .find_iter(content)
+            .filter(|m| {
+                !self.is_escaped(content, m.start())
+                    && !self.is_in_url(content, m.start())
+                    && !self.is_in_inline_code(content, m.start())
+            })
             .map(|m| (m.start(), m.end()))
             .collect();
 
         // Process matches in reverse order to maintain correct indices
+
         let mut result = content.to_string();
         for (start, end) in matches.into_iter().rev() {
-            let _text = &result[start+1..end-1];
-            let replacement = self.convert_style(&result[start..end], 
+            let _text = &result[start + 1..end - 1];
+            let replacement = self.convert_style(
+                &result[start..end],
                 if emphasis_regex.as_str() == UNDERSCORE_PATTERN.as_str() {
                     EmphasisStyle::Underscore
                 } else if emphasis_regex.as_str() == ASTERISK_PATTERN.as_str() {
                     EmphasisStyle::Asterisk
                 } else {
                     unreachable!()
-                }, 
-                target_style);
+                },
+                target_style,
+            );
             result.replace_range(start..end, &replacement);
         }
 
         Ok(result)
     }
-} 
+}

@@ -1,5 +1,5 @@
-use rumdl::rules::MD034NoBareUrls;
 use rumdl::rule::Rule;
+use rumdl::rules::MD034NoBareUrls;
 
 #[test]
 fn test_valid_urls() {
@@ -26,7 +26,10 @@ fn test_multiple_urls() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "Visit <https://example.com> and <http://another.com>");
+    assert_eq!(
+        fixed,
+        "Visit <https://example.com> and <http://another.com>"
+    );
 }
 
 #[test]
@@ -36,7 +39,10 @@ fn test_urls_in_code_block() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "```\nhttps://example.com\n```\n<https://outside.com>");
+    assert_eq!(
+        fixed,
+        "```\nhttps://example.com\n```\n<https://outside.com>"
+    );
 }
 
 #[test]
@@ -76,7 +82,10 @@ fn test_complex_urls() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "Visit <https://example.com/path?param=value#fragment>");
+    assert_eq!(
+        fixed,
+        "Visit <https://example.com/path?param=value#fragment>"
+    );
 }
 
 #[test]
@@ -86,7 +95,10 @@ fn test_multiple_protocols() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "<http://example.com>\n<https://secure.com>\n<ftp://files.com>");
+    assert_eq!(
+        fixed,
+        "<http://example.com>\n<https://secure.com>\n<ftp://files.com>"
+    );
 }
 
 #[test]
@@ -96,7 +108,10 @@ fn test_mixed_content() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "# Heading\nVisit <https://example.com>\n> Quote with <https://another.com>");
+    assert_eq!(
+        fixed,
+        "# Heading\nVisit <https://example.com>\n> Quote with <https://another.com>"
+    );
 }
 
 #[test]
@@ -105,4 +120,4 @@ fn test_not_urls() {
     let content = "Text with example.com and just://something";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-} 
+}

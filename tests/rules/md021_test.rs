@@ -1,5 +1,5 @@
-use rumdl::rules::MD021NoMultipleSpaceClosedAtx;
 use rumdl::rule::Rule;
+use rumdl::rules::MD021NoMultipleSpaceClosedAtx;
 
 #[test]
 fn test_valid_closed_atx_headings() {
@@ -31,7 +31,8 @@ fn test_mixed_closed_atx_headings() {
 #[test]
 fn test_code_block() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
-    let content = "```markdown\n#  Not a heading  #\n##   Also not a heading   ##\n```\n# Real Heading #";
+    let content =
+        "```markdown\n#  Not a heading  #\n##   Also not a heading   ##\n```\n# Real Heading #";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
 }
@@ -49,7 +50,10 @@ fn test_fix_mixed_closed_atx_headings() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "# Heading 1 #\n##  Heading 2  ##\n### Heading 3 ###\n####    Heading 4    ####";
     let result = rule.fix(content).unwrap();
-    assert_eq!(result, "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###\n#### Heading 4 ####");
+    assert_eq!(
+        result,
+        "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###\n#### Heading 4 ####"
+    );
 }
 
 #[test]
@@ -57,7 +61,10 @@ fn test_preserve_code_blocks() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "# Real Heading #\n```\n#  Not a heading  #\n```\n# Another Heading #";
     let result = rule.fix(content).unwrap();
-    assert_eq!(result, "# Real Heading #\n```\n#  Not a heading  #\n```\n# Another Heading #");
+    assert_eq!(
+        result,
+        "# Real Heading #\n```\n#  Not a heading  #\n```\n# Another Heading #"
+    );
 }
 
 #[test]
@@ -86,7 +93,10 @@ fn test_indented_closed_atx_headings() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "  # Heading 1 #\n    ## Heading 2 ##\n      ### Heading 3 ###");
+    assert_eq!(
+        fixed,
+        "  # Heading 1 #\n    ## Heading 2 ##\n      ### Heading 3 ###"
+    );
 }
 
 #[test]
@@ -103,7 +113,10 @@ fn test_multiple_spaces_at_start() {
     let content = "#   Heading 1 #\n##    Heading 2 ##\n###     Heading 3 ###";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3);
-    assert_eq!(result[0].message, "Multiple spaces (3) after opening hashes on closed ATX style heading with 1 hashes");
+    assert_eq!(
+        result[0].message,
+        "Multiple spaces (3) after opening hashes on closed ATX style heading with 1 hashes"
+    );
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###");
 }
@@ -114,7 +127,10 @@ fn test_multiple_spaces_at_end() {
     let content = "# Heading 1   #\n## Heading 2    ##\n### Heading 3     ###";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3);
-    assert_eq!(result[0].message, "Multiple spaces (3) before closing hashes on closed ATX style heading with 1 hashes");
+    assert_eq!(
+        result[0].message,
+        "Multiple spaces (3) before closing hashes on closed ATX style heading with 1 hashes"
+    );
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###");
-} 
+}

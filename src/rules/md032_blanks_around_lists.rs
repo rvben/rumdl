@@ -1,9 +1,10 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::code_block_utils::CodeBlockUtils;
-use regex::Regex;
+use crate::rules::front_matter_utils::FrontMatterUtils;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)\s").unwrap();
@@ -16,41 +17,49 @@ pub struct MD032BlanksAroundLists;
 impl MD032BlanksAroundLists {
     fn is_list_item(line: &str) -> bool {
         // Fast path for empty lines
+
         if line.trim().is_empty() {
             return false;
         }
-        
+
         // Quick literal check before regex
         let trimmed = line.trim_start();
+
         if trimmed.is_empty() {
             return false;
         }
-        
+
         let first_char = trimmed.chars().next().unwrap();
-        if first_char == '-' || first_char == '*' || first_char == '+' || first_char.is_ascii_digit() {
+
+        if first_char == '-'
+            || first_char == '*'
+            || first_char == '+'
+            || first_char.is_ascii_digit()
+        {
             // Use regex for complete validation
             return LIST_ITEM_REGEX.is_match(line);
         }
-        
+
         false
     }
 
     fn is_empty_line(line: &str) -> bool {
         line.trim().is_empty()
     }
-    
+
     fn is_list_content(line: &str) -> bool {
         if Self::is_empty_line(line) {
             return false;
         }
-        
+
         // Fast path - check if line starts with at least 2 spaces
+
         if let Some(idx) = line.find(|c: char| !c.is_whitespace()) {
             if idx >= 2 {
                 return true;
             }
         }
-        
+
         false
     }
 }
@@ -65,36 +74,38 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         if content.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Pre-compute which lines are in code blocks or front matter
         let mut excluded_lines = vec![false; lines.len()];
         for i in 0..lines.len() {
-            excluded_lines[i] = FrontMatterUtils::is_in_front_matter(content, i) || 
-                               CodeBlockUtils::is_in_code_block(content, i);
+            excluded_lines[i] = FrontMatterUtils::is_in_front_matter(content, i)
+                || CodeBlockUtils::is_in_code_block(content, i);
         }
-        
+
         // Pre-compute list items and content lines
         let mut is_list_item_vec = vec![false; lines.len()];
         let mut is_list_content_vec = vec![false; lines.len()];
         let mut is_empty_vec = vec![false; lines.len()];
-        
+
         for i in 0..lines.len() {
             if excluded_lines[i] {
                 continue;
             }
-            
+
             let line = lines[i];
             is_list_item_vec[i] = Self::is_list_item(line);
             is_list_content_vec[i] = Self::is_list_content(line);
             is_empty_vec[i] = Self::is_empty_line(line);
         }
-        
+
         let mut in_list = false;
         let mut _list_start_index = 0;
         let mut _list_end_index = 0;
@@ -104,7 +115,7 @@ impl Rule for MD032BlanksAroundLists {
             if excluded_lines[i] {
                 continue;
             }
-            
+
             let is_list_item = is_list_item_vec[i];
             let is_list_content = is_list_content_vec[i];
             let is_empty = is_empty_vec[i];
@@ -123,7 +134,7 @@ impl Rule for MD032BlanksAroundLists {
                             message: "List should be preceded by a blank line".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_col_to_byte_range(content, i + 1, 1),
+                                range: _line_index.line_col_to_byte_range(i + 1, 1),
                                 replacement: format!("\n{}", lines[i]),
                             }),
                         });
@@ -143,7 +154,7 @@ impl Rule for MD032BlanksAroundLists {
                         message: "List should be followed by a blank line".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, i + 1, lines[i].len() + 1),
+                            range: _line_index.line_col_to_byte_range(i + 1, lines[i].len() + 1),
                             replacement: format!("{}\n", lines[i]),
                         }),
                     });
@@ -161,23 +172,25 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         if content.is_empty() {
             return Ok(String::new());
         }
-        
+
         // Apply front matter fixes first if needed
         let content = FrontMatterUtils::fix_malformed_front_matter(content);
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        let mut result = Vec::with_capacity(lines.len() + 10);  // Add some extra capacity for blank lines
-        
+        let mut result = Vec::with_capacity(lines.len() + 10); // Add some extra capacity for blank lines
+
         // Pre-compute which lines are in code blocks or front matter
         let mut excluded_lines = vec![false; lines.len()];
         for i in 0..lines.len() {
-            excluded_lines[i] = FrontMatterUtils::is_in_front_matter(&content, i) || 
-                               CodeBlockUtils::is_in_code_block(&content, i);
+            excluded_lines[i] = FrontMatterUtils::is_in_front_matter(&content, i)
+                || CodeBlockUtils::is_in_code_block(&content, i);
         }
-        
+
         let mut in_list = false;
         let mut _list_start_index = 0;
         let mut _list_end_index = 0;
@@ -188,13 +201,16 @@ impl Rule for MD032BlanksAroundLists {
                 result.push(line.to_string());
                 continue;
             }
-            
+
             if Self::is_list_item(line) {
                 if !in_list {
                     // Starting a new list
                     // Add blank line before list if needed (unless it's the start of the document)
-                    if i > 0 && !Self::is_empty_line(lines[i - 1]) && 
-                       !excluded_lines[i - 1] && !result.is_empty() {
+                    if i > 0
+                        && !Self::is_empty_line(lines[i - 1])
+                        && !excluded_lines[i - 1]
+                        && !result.is_empty()
+                    {
                         result.push("".to_string());
                     }
                     in_list = true;
@@ -218,7 +234,7 @@ impl Rule for MD032BlanksAroundLists {
                 result.push(line.to_string());
             }
         }
-        
+
         Ok(result.join("\n"))
     }
-} 
+}

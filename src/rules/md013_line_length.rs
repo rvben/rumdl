@@ -1,6 +1,6 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use regex::Regex;
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     static ref URL_PATTERN: Regex = Regex::new(r"^https?://\S+$").unwrap();
@@ -30,7 +30,13 @@ impl Default for MD013LineLength {
 }
 
 impl MD013LineLength {
-    pub fn new(line_length: usize, code_blocks: bool, tables: bool, headings: bool, strict: bool) -> Self {
+    pub fn new(
+        line_length: usize,
+        code_blocks: bool,
+        tables: bool,
+        headings: bool,
+        strict: bool,
+    ) -> Self {
         Self {
             line_length,
             code_blocks,
@@ -64,8 +70,9 @@ impl MD013LineLength {
         if current_line > 0 && current_line + 1 < lines.len() {
             let prev = lines[current_line - 1].trim();
             let next = lines[current_line + 1].trim();
-            if (prev.starts_with('|') || prev.starts_with("|-")) &&
-               (next.starts_with('|') || next.starts_with("|-")) {
+            if (prev.starts_with('|') || prev.starts_with("|-"))
+                && (next.starts_with('|') || next.starts_with("|-"))
+            {
                 return true;
             }
         }
@@ -74,7 +81,7 @@ impl MD013LineLength {
 
     fn is_heading(&self, lines: &[&str], current_line: usize) -> bool {
         let line = lines[current_line];
-        
+
         // ATX headings
         if line.trim_start().starts_with('#') {
             return true;
@@ -119,8 +126,11 @@ impl MD013LineLength {
         }
 
         // Code blocks with long strings
-        if Self::is_in_code_block(lines, current_line) && line.trim().len() > 0 &&
-           !line.contains(' ') && !line.contains('\t') {
+        if Self::is_in_code_block(lines, current_line)
+            && line.trim().len() > 0
+            && !line.contains(' ')
+            && !line.contains('\t')
+        {
             return true;
         }
 
@@ -177,4 +187,4 @@ impl Rule for MD013LineLength {
         // - Code blocks and tables
         Ok(content.to_string())
     }
-} 
+}

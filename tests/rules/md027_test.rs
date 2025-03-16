@@ -1,5 +1,5 @@
-use rumdl::rules::MD027MultipleSpacesBlockquote;
 use rumdl::rule::Rule;
+use rumdl::rules::MD027MultipleSpacesBlockquote;
 
 #[test]
 fn test_md027_valid() {
@@ -35,4 +35,4 @@ fn test_md027_fix() {
     let content = ">  Quote\n>   Another line\n>    Third line\n";
     let result = rule.fix(content).unwrap();
     assert_eq!(result, "> Quote\n> Another line\n> Third line\n");
-} 
+}

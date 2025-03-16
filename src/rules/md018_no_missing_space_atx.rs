@@ -1,8 +1,9 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     static ref ATX_NO_SPACE_PATTERN: Regex = Regex::new(r"^(#+)([^#\s])").unwrap();
@@ -22,7 +23,9 @@ impl MD018NoMissingSpaceAtx {
 
     fn fix_atx_heading(&self, line: &str) -> String {
         let captures = ATX_NO_SPACE_PATTERN.captures(line).unwrap();
+
         let hashes = captures.get(1).unwrap();
+
         let content = &line[hashes.end()..];
         format!("{} {}", hashes.as_str(), content)
     }
@@ -38,7 +41,10 @@ impl Rule for MD018NoMissingSpaceAtx {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, line) in lines.iter().enumerate() {
@@ -46,7 +52,7 @@ impl Rule for MD018NoMissingSpaceAtx {
             if HeadingUtils::is_in_code_block(content, line_num) {
                 continue;
             }
-            
+
             if self.is_atx_heading_without_space(line) {
                 let hashes = ATX_NO_SPACE_PATTERN.captures(line).unwrap().get(1).unwrap();
                 warnings.push(LintWarning {
@@ -58,7 +64,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                     column: hashes.end() + 1,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, line_num + 1, 1),
+                        range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                         replacement: self.fix_atx_heading(line),
                     }),
                 });
@@ -69,7 +75,10 @@ impl Rule for MD018NoMissingSpaceAtx {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
+
         let lines: Vec<&str> = content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
@@ -81,7 +90,7 @@ impl Rule for MD018NoMissingSpaceAtx {
             } else {
                 result.push_str(line);
             }
-            
+
             if i < lines.len() - 1 {
                 result.push('\n');
             }
@@ -94,4 +103,4 @@ impl Rule for MD018NoMissingSpaceAtx {
 
         Ok(result)
     }
-} 
+}

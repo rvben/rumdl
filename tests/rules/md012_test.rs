@@ -1,5 +1,5 @@
-use rumdl::rules::MD012NoMultipleBlanks;
 use rumdl::rule::Rule;
+use rumdl::rules::MD012NoMultipleBlanks;
 
 #[test]
 fn test_md012_valid() {
@@ -16,9 +16,15 @@ fn test_md012_invalid() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].message, "Multiple consecutive blank lines between content (2 > 1)");
+    assert_eq!(
+        result[0].message,
+        "Multiple consecutive blank lines between content (2 > 1)"
+    );
     assert_eq!(result[1].line, 5);
-    assert_eq!(result[1].message, "Multiple consecutive blank lines between content (3 > 1)");
+    assert_eq!(
+        result[1].message,
+        "Multiple consecutive blank lines between content (3 > 1)"
+    );
 }
 
 #[test]
@@ -28,9 +34,15 @@ fn test_md012_start_end() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 1);
-    assert_eq!(result[0].message, "Multiple consecutive blank lines at start of file (2 > 1)");
+    assert_eq!(
+        result[0].message,
+        "Multiple consecutive blank lines at start of file (2 > 1)"
+    );
     assert_eq!(result[1].line, 5);
-    assert_eq!(result[1].message, "Multiple consecutive blank lines at end of file (2 > 1)");
+    assert_eq!(
+        result[1].message,
+        "Multiple consecutive blank lines at end of file (2 > 1)"
+    );
 }
 
 #[test]
@@ -79,7 +91,10 @@ fn test_md012_fix_with_front_matter() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "---\ntitle: Test\n\n\ndescription: Test\n---\n\n\n\nContent\n";
     let result = rule.fix(content).unwrap();
-    assert_eq!(result, "---\ntitle: Test\n\n\ndescription: Test\n---\n\nContent\n");
+    assert_eq!(
+        result,
+        "---\ntitle: Test\n\n\ndescription: Test\n---\n\nContent\n"
+    );
 }
 
 #[test]
@@ -89,4 +104,4 @@ fn test_md012_whitespace_lines() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
-} 
+}

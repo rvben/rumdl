@@ -1,7 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
+use crate::utils::range_utils::LineIndex;
 use crate::HeadingStyle;
-use crate::utils::range_utils::line_col_to_byte_range;
 
 #[derive(Debug, Default)]
 pub struct MD001HeadingIncrement;
@@ -16,11 +16,13 @@ impl Rule for MD001HeadingIncrement {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
         let mut prev_level = 0;
         let mut prev_style = None;
 
         let lines: Vec<&str> = content.lines().collect();
+
         for line_num in 0..lines.len() {
             if let Some(heading) = HeadingUtils::parse_heading(content, line_num) {
                 if prev_level > 0 && heading.level > prev_level + 1 {
@@ -28,17 +30,18 @@ impl Rule for MD001HeadingIncrement {
                     let mut fixed_heading = heading.clone();
                     fixed_heading.level = prev_level + 1;
                     let style = prev_style.unwrap_or(heading.style.clone());
-                    let replacement = HeadingUtils::convert_heading_style(
-                        &fixed_heading,
-                        &style
-                    );
+                    let replacement = HeadingUtils::convert_heading_style(&fixed_heading, &style);
                     warnings.push(LintWarning {
                         line: line_num + 1,
                         column: indentation + 1,
                         severity: Severity::Warning,
-                        message: format!("Heading level should be {} for this level", prev_level + 1),
+                        message: format!(
+                            "Heading level should be {} for this level",
+                            prev_level + 1
+                        ),
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
+                            range: _line_index
+                                .line_col_to_byte_range(line_num + 1, indentation + 1),
                             replacement: format!("{}{}", " ".repeat(indentation), replacement),
                         }),
                     });
@@ -52,10 +55,11 @@ impl Rule for MD001HeadingIncrement {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
         let mut result = String::new();
         let mut prev_level = 0;
         let mut prev_style = None;
-        
+
         let lines: Vec<&str> = content.lines().collect();
         let mut line_num = 0;
         while line_num < lines.len() {
@@ -66,10 +70,7 @@ impl Rule for MD001HeadingIncrement {
                     let mut fixed_heading = heading.clone();
                     fixed_heading.level = prev_level + 1;
                     let style = prev_style.unwrap_or(fixed_heading.style.clone());
-                    let replacement = HeadingUtils::convert_heading_style(
-                        &fixed_heading,
-                        &style
-                    );
+                    let replacement = HeadingUtils::convert_heading_style(&fixed_heading, &style);
                     result.push_str(&format!("{}{}\n", " ".repeat(indentation), replacement));
                     prev_level = prev_level + 1;
                 } else {
@@ -78,7 +79,7 @@ impl Rule for MD001HeadingIncrement {
                     prev_level = heading.level;
                 }
                 prev_style = Some(heading.style);
-                
+
                 // Skip the next line if this was a setext heading
                 if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
                     line_num += 1;
@@ -100,4 +101,4 @@ impl Rule for MD001HeadingIncrement {
 
         Ok(result)
     }
-} 
+}

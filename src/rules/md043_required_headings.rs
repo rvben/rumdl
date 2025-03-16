@@ -1,7 +1,6 @@
-use crate::utils::range_utils::line_col_to_byte_range;
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     // Pattern for ATX headings
@@ -26,16 +25,16 @@ impl MD043RequiredHeadings {
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         let mut i = 0;
-        
+
         while i < lines.len() {
             let line = lines[i];
-            
+
             // Check for ATX heading
             if let Some(cap) = ATX_HEADING.captures(line) {
                 if let Some(heading_text) = cap.get(2) {
                     result.push(heading_text.as_str().trim().to_string());
                 }
-            } 
+            }
             // Check for setext heading (requires looking at next line)
             else if i + 1 < lines.len() && !line.trim().is_empty() {
                 let next_line = lines[i + 1];
@@ -44,22 +43,22 @@ impl MD043RequiredHeadings {
                     i += 1; // Skip the underline
                 }
             }
-            
+
             i += 1;
         }
-        
+
         result
     }
 
     fn is_heading(&self, content: &str, line_index: usize) -> bool {
         let lines: Vec<&str> = content.lines().collect();
         let line = lines[line_index];
-        
+
         // Check for ATX heading
         if ATX_HEADING.is_match(line) {
             return true;
         }
-        
+
         // Check for setext heading (requires looking at next line)
         if line_index + 1 < lines.len() && !line.trim().is_empty() {
             let next_line = lines[line_index + 1];
@@ -67,7 +66,7 @@ impl MD043RequiredHeadings {
                 return true;
             }
         }
-        
+
         false
     }
 }
@@ -84,7 +83,7 @@ impl Rule for MD043RequiredHeadings {
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
         let actual_headings = self.extract_headings(content);
-        
+
         // If no required headings are specified, the rule is disabled
         if self.headings.is_empty() {
             return Ok(warnings);
@@ -97,7 +96,8 @@ impl Rule for MD043RequiredHeadings {
                     warnings.push(LintWarning {
                         line: i + 1,
                         column: 1,
-                        message: "Heading structure does not match the required structure".to_string(),
+                        message: "Heading structure does not match the required structure"
+                            .to_string(),
                         severity: Severity::Warning,
                         fix: None, // Cannot automatically fix as we don't know the intended structure
                     });
@@ -128,4 +128,4 @@ impl Rule for MD043RequiredHeadings {
 
         Ok(result)
     }
-} 
+}

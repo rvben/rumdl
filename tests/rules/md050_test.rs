@@ -1,6 +1,6 @@
-use rumdl::rules::MD050StrongStyle;
-use rumdl::rules::md050_strong_style::StrongStyle;
 use rumdl::rule::Rule;
+use rumdl::rules::md050_strong_style::StrongStyle;
+use rumdl::rules::MD050StrongStyle;
 
 #[test]
 fn test_consistent_asterisks() {
@@ -24,7 +24,7 @@ fn test_mixed_strong_prefer_asterisks() {
     let content = "# Mixed strong\n\nThis is **asterisk** and this is __underscore__";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     let fixed = rule.fix(content).unwrap();
     // Use contains for more flexible assertion
     assert!(fixed.contains("This is **asterisk** and this is **underscore**"));
@@ -36,7 +36,7 @@ fn test_mixed_strong_prefer_underscores() {
     let content = "# Mixed strong\n\nThis is **asterisk** and this is __underscore__";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     let fixed = rule.fix(content).unwrap();
     // Use contains for more flexible assertion
     assert!(fixed.contains("This is __asterisk__ and this is __underscore__"));
@@ -48,7 +48,7 @@ fn test_consistent_style_first_asterisk() {
     let content = "# Mixed strong\n\nThis is **asterisk** and this is __underscore__";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     let fixed = rule.fix(content).unwrap();
     // Use contains for more flexible assertion
     assert!(fixed.contains("This is **asterisk** and this is **underscore**"));
@@ -60,7 +60,7 @@ fn test_consistent_style_first_underscore() {
     let content = "# Mixed strong\n\nThis is __underscore__ and this is **asterisk**";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     let fixed = rule.fix(content).unwrap();
     // Use contains for more flexible assertion
     assert!(fixed.contains("This is __underscore__ and this is __asterisk__"));
@@ -88,4 +88,4 @@ fn test_ignore_emphasis() {
     let content = "# Test\n\nThis is *emphasis* and this is **strong**";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-} 
+}

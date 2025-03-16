@@ -1,5 +1,5 @@
-use rumdl::rules::MD011ReversedLink;
 use rumdl::rule::Rule;
+use rumdl::rules::MD011ReversedLink;
 
 #[test]
 fn test_md011_valid() {
@@ -34,4 +34,4 @@ fn test_md011_fix() {
     let content = "(text)[link]\n(more text)[another/link]\n";
     let result = rule.fix(content).unwrap();
     assert_eq!(result, "[text](link)\n[more text](another/link)\n");
-} 
+}

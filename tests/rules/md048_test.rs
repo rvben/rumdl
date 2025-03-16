@@ -1,6 +1,6 @@
-use rumdl::rules::MD048CodeFenceStyle;
-use rumdl::rules::md048_code_fence_style::CodeFenceStyle;
 use rumdl::rule::Rule;
+use rumdl::rules::md048_code_fence_style::CodeFenceStyle;
+use rumdl::rules::MD048CodeFenceStyle;
 
 #[test]
 fn test_consistent_backticks() {
@@ -25,7 +25,10 @@ fn test_mixed_fences_prefer_backticks() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "# Mixed blocks\n\n```\nbacktick block\n```\n\n```\ntilde block\n```\n");
+    assert_eq!(
+        fixed,
+        "# Mixed blocks\n\n```\nbacktick block\n```\n\n```\ntilde block\n```\n"
+    );
 }
 
 #[test]
@@ -35,7 +38,10 @@ fn test_mixed_fences_prefer_tildes() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "# Mixed blocks\n\n~~~\nbacktick block\n~~~\n\n~~~\ntilde block\n~~~\n");
+    assert_eq!(
+        fixed,
+        "# Mixed blocks\n\n~~~\nbacktick block\n~~~\n\n~~~\ntilde block\n~~~\n"
+    );
 }
 
 #[test]
@@ -45,7 +51,10 @@ fn test_consistent_style_first_backtick() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "# Mixed blocks\n\n```\nbacktick block\n```\n\n```\ntilde block\n```\n");
+    assert_eq!(
+        fixed,
+        "# Mixed blocks\n\n```\nbacktick block\n```\n\n```\ntilde block\n```\n"
+    );
 }
 
 #[test]
@@ -55,7 +64,10 @@ fn test_consistent_style_first_tilde() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "# Mixed blocks\n\n~~~\ntilde block\n~~~\n\n~~~\nbacktick block\n~~~\n");
+    assert_eq!(
+        fixed,
+        "# Mixed blocks\n\n~~~\ntilde block\n~~~\n\n~~~\nbacktick block\n~~~\n"
+    );
 }
 
 #[test]
@@ -72,4 +84,4 @@ fn test_no_code_blocks() {
     let content = "# Just a heading\n\nSome regular text\n\n> A blockquote";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-} 
+}

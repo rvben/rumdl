@@ -1,6 +1,6 @@
-use rumdl::rules::MD003HeadingStyle;
-use rumdl::rules::heading_utils::HeadingStyle;
 use rumdl::rule::Rule;
+use rumdl::rules::heading_utils::HeadingStyle;
+use rumdl::rules::MD003HeadingStyle;
 
 #[test]
 fn test_consistent_atx() {
@@ -121,7 +121,10 @@ fn test_fix_mixed_setext_atx() {
     let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
     let content = "Heading 1\n=========\n\n## Heading 2\n### Heading 3";
     let result = rule.fix(content).unwrap();
-    assert_eq!(result, "Heading 1\n=========\n\nHeading 2\n---------\n### Heading 3");
+    assert_eq!(
+        result,
+        "Heading 1\n=========\n\nHeading 2\n---------\n### Heading 3"
+    );
 }
 
 #[test]
@@ -130,4 +133,4 @@ fn test_setext_with_indentation() {
     let content = "  Heading 1\n  =========\n\n  Heading 2\n  ---------";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-} 
+}

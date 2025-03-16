@@ -1,4 +1,4 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 
 #[derive(Debug, Default)]

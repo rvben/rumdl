@@ -1,5 +1,5 @@
-use rumdl::rules::MD025SingleTitle;
 use rumdl::rule::Rule;
+use rumdl::rules::MD025SingleTitle;
 
 #[test]
 fn test_md025_valid() {
@@ -31,7 +31,10 @@ fn test_md025_with_front_matter() {
     let rule = MD025SingleTitle::default();
     let content = "---\ntitle: Document Title\n---\n# Title\n## Heading 2\n";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Should not flag a single title after front matter");
+    assert!(
+        result.is_empty(),
+        "Should not flag a single title after front matter"
+    );
 }
 
 #[test]
@@ -109,21 +112,24 @@ fn test_md025_setext_headings() {
 #[test]
 fn test_md025_performance() {
     let rule = MD025SingleTitle::default();
-    
+
     // Generate a large document with many headings
     let mut content = String::new();
     content.push_str("# Main Title\n\n");
-    
+
     for i in 1..=100 {
         content.push_str(&format!("## Heading {}\n\nSome text here.\n\n", i));
     }
-    
+
     let start = std::time::Instant::now();
     let result = rule.check(&content).unwrap();
     let duration = start.elapsed();
-    
+
     assert!(result.is_empty());
-    assert!(duration.as_millis() < 500, "Processing large document should take less than 500ms");
+    assert!(
+        duration.as_millis() < 500,
+        "Processing large document should take less than 500ms"
+    );
 }
 
 #[test]
@@ -149,7 +155,7 @@ fn test_md025_fix_with_indentation() {
     // so the heavily indented heading is not processed as a heading
     let content = "# Title 1\n  # Title 2\n    # Title 3\n";
     let fixed = rule.fix(content).unwrap();
-    
+
     // Expected behavior: only the first two headings are processed,
     // the third one is preserved as is since it's detected as a code block
     assert_eq!(fixed, "# Title 1\n  ## Title 2\n    # Title 3\n", 

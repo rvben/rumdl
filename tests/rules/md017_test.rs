@@ -1,5 +1,5 @@
-use rumdl::rules::MD017NoEmphasisAsHeading;
 use rumdl::rule::Rule;
+use rumdl::rules::MD017NoEmphasisAsHeading;
 
 #[test]
 fn test_valid_headings() {
@@ -25,7 +25,10 @@ fn test_invalid_single_emphasis() {
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 1);
     assert_eq!(result[0].column, 1);
-    assert_eq!(result[0].message, "Single emphasis should not be used as a heading");
+    assert_eq!(
+        result[0].message,
+        "Single emphasis should not be used as a heading"
+    );
 }
 
 #[test]
@@ -36,13 +39,17 @@ fn test_invalid_double_emphasis() {
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 1);
     assert_eq!(result[0].column, 1);
-    assert_eq!(result[0].message, "Double emphasis should not be used as a heading");
+    assert_eq!(
+        result[0].message,
+        "Double emphasis should not be used as a heading"
+    );
 }
 
 #[test]
 fn test_mixed_emphasis() {
     let rule = MD017NoEmphasisAsHeading::new();
-    let content = "*Single Emphasis*\n**Double Emphasis**\n_Single Underscore_\n__Double Underscore__";
+    let content =
+        "*Single Emphasis*\n**Double Emphasis**\n_Single Underscore_\n__Double Underscore__";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 4);
 }
@@ -102,7 +109,10 @@ fn test_preserve_code_blocks() {
     let rule = MD017NoEmphasisAsHeading::new();
     let content = "# Real Heading\n```\n*Not a Heading*\n```\n# Another Heading";
     let result = rule.fix(content).unwrap();
-    assert_eq!(result, "# Real Heading\n```\n*Not a Heading*\n```\n# Another Heading");
+    assert_eq!(
+        result,
+        "# Real Heading\n```\n*Not a Heading*\n```\n# Another Heading"
+    );
 }
 
 #[test]

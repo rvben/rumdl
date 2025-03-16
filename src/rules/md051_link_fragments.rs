@@ -1,15 +1,18 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
-use lazy_static::lazy_static;
 
 lazy_static! {
     static ref HEADING_REGEX: Regex = Regex::new(r"^#+\s+(.+)$|^(.+)\n[=-]+$").unwrap();
     static ref LINK_REGEX: Regex = Regex::new(r"\[([^\]]*)\]\((?:([^)]+))?#([^)]+)\)").unwrap();
-    static ref EXTERNAL_URL_REGEX: Regex = Regex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap();
+    static ref EXTERNAL_URL_REGEX: Regex =
+        Regex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap();
     static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
-    static ref MD_FORMAT_REGEX: Regex = Regex::new(r"(\*\*.*?\*\*|\*.*?\*|__.*?__|_.*?_|`.*?`|~~.*?~~|\[.*?\]\(.*?\))").unwrap();
+    static ref MD_FORMAT_REGEX: Regex =
+        Regex::new(r"(\*\*.*?\*\*|\*.*?\*|__.*?__|_.*?_|`.*?`|~~.*?~~|\[.*?\]\(.*?\))").unwrap();
 }
 
 /// Rule MD051: Link fragments should exist
@@ -25,10 +28,13 @@ impl MD051LinkFragments {
 
     fn extract_headings(&self, content: &str) -> HashSet<String> {
         let mut headings = HashSet::new();
+
         let lines: Vec<&str> = content.lines().collect();
+
         let mut in_code_block = false;
+
         let mut code_fence_marker = String::new();
-        
+
         // Process ATX headings (# Heading)
         for (i, line) in lines.iter().enumerate() {
             // Check if we're entering/exiting a code block
@@ -43,12 +49,12 @@ impl MD051LinkFragments {
                 }
                 continue;
             }
-            
+
             // Skip lines in code blocks
             if in_code_block {
                 continue;
             }
-            
+
             // Process ATX headings
             if line.starts_with('#') {
                 if let Some(cap) = HEADING_REGEX.captures(line) {
@@ -59,15 +65,16 @@ impl MD051LinkFragments {
                     }
                 }
             }
-            
+
             // Process Setext headings
             if i < lines.len() - 1 {
                 let next_line = lines[i + 1];
-                
+
                 if !line.is_empty() && !next_line.is_empty() {
                     let trimmed_next = next_line.trim();
-                    if (trimmed_next.starts_with('=') && trimmed_next.chars().all(|c| c == '=')) ||
-                       (trimmed_next.starts_with('-') && trimmed_next.chars().all(|c| c == '-')) {
+                    if (trimmed_next.starts_with('=') && trimmed_next.chars().all(|c| c == '='))
+                        || (trimmed_next.starts_with('-') && trimmed_next.chars().all(|c| c == '-'))
+                    {
                         let fragment = self.heading_to_fragment(line.trim());
                         headings.insert(fragment.to_lowercase());
                     }
@@ -86,26 +93,30 @@ impl MD051LinkFragments {
     /// 4. Remove non-alphanumeric characters except hyphens
     fn heading_to_fragment(&self, heading: &str) -> String {
         // Directly strip formatting patterns
+
         let mut stripped = heading.to_string();
-        
+
         // Remove bold formatting
         stripped = stripped.replace("**", "").replace("__", "");
-        
+
         // Remove italic formatting
         stripped = stripped.replace("*", "").replace("_", "");
-        
+
         // Remove inline code
+
         let code_pattern = Regex::new(r"`[^`]+`").unwrap();
         stripped = code_pattern.replace_all(&stripped, "").to_string();
-        
+
         // Remove links
+
         let link_pattern = Regex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap();
         stripped = link_pattern.replace_all(&stripped, "$1").to_string();
-        
+
         // Remove strikethrough
         stripped = stripped.replace("~~", "");
-        
+
         // Then process the remaining text
+
         let fragment = stripped
             .to_lowercase()
             .chars()
@@ -115,8 +126,9 @@ impl MD051LinkFragments {
                 _ => '-',
             })
             .collect::<String>();
-        
+
         // Replace multiple consecutive hyphens with a single one
+
         let multiple_hyphens = Regex::new(r"-{2,}").unwrap();
         multiple_hyphens.replace_all(&fragment, "-").to_string()
     }
@@ -137,12 +149,16 @@ impl Rule for MD051LinkFragments {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let headings = self.extract_headings(content);
-        
+
         let mut in_code_block = false;
+
         let mut code_fence_marker = String::new();
-        
+
         for (line_num, line) in content.lines().enumerate() {
             // Check if we're entering/exiting a code block
             if let Some(cap) = CODE_FENCE_REGEX.captures(line) {
@@ -156,12 +172,12 @@ impl Rule for MD051LinkFragments {
                 }
                 continue;
             }
-            
+
             // Skip lines in code blocks
             if in_code_block {
                 continue;
             }
-            
+
             // Check for invalid link fragments
             for cap in LINK_REGEX.captures_iter(line) {
                 let url = cap.get(2).map_or("", |m| m.as_str());
@@ -176,21 +192,22 @@ impl Rule for MD051LinkFragments {
                 if !headings.contains(&fragment.to_lowercase()) {
                     let full_match = cap.get(0).unwrap();
                     let text = &cap[1];
-                    
+
                     // Create the fix, accounting for shortcut links
                     let replacement = if url.is_empty() {
                         format!("[{}]", text)
                     } else {
                         format!("[{}]({})", text, url)
                     };
-                    
+
                     warnings.push(LintWarning {
                         line: line_num + 1,
                         column: full_match.start() + 1,
                         message: format!("Link fragment '{}' does not exist", fragment),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, full_match.start() + 1),
+                            range: _line_index
+                                .line_col_to_byte_range(line_num + 1, full_match.start() + 1),
                             replacement,
                         }),
                     });
@@ -202,12 +219,16 @@ impl Rule for MD051LinkFragments {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
+
         let headings = self.extract_headings(content);
-        
+
         let mut in_code_block = false;
+
         let mut code_fence_marker = String::new();
-        
+
         for line in content.lines() {
             // Check if we're entering/exiting a code block
             if let Some(cap) = CODE_FENCE_REGEX.captures(line) {
@@ -219,26 +240,26 @@ impl Rule for MD051LinkFragments {
                     in_code_block = false;
                     code_fence_marker.clear();
                 }
-                
+
                 // Add the line as-is
                 result.push_str(line);
                 result.push('\n');
                 continue;
             }
-            
+
             // Lines in code blocks are left unchanged
             if in_code_block {
                 result.push_str(line);
                 result.push('\n');
                 continue;
             }
-            
+
             // Process links in normal text
             let processed_line = LINK_REGEX.replace_all(line, |caps: &regex::Captures| {
                 let url = caps.get(2).map_or("", |m| m.as_str());
                 let fragment = &caps[3];
                 let text = &caps[1];
-                
+
                 // Skip validation for external URLs
                 if !url.is_empty() && self.is_external_url(url) {
                     return caps[0].to_string();
@@ -255,11 +276,11 @@ impl Rule for MD051LinkFragments {
                     caps[0].to_string()
                 }
             });
-            
+
             result.push_str(&processed_line);
             result.push('\n');
         }
-        
+
         // Remove the trailing newline if the original content doesn't end with one
         if !content.ends_with('\n') && result.ends_with('\n') {
             result.pop();
@@ -267,4 +288,4 @@ impl Rule for MD051LinkFragments {
 
         Ok(result)
     }
-} 
+}

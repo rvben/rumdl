@@ -1,7 +1,8 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     // Optimize regex patterns with compilation once at startup
@@ -40,7 +41,7 @@ impl MD030ListMarkerSpace {
     }
 
     fn is_list_item(line: &str) -> Option<(ListType, String, usize)> {
-        // Fast path for non-list lines
+        // Fast path
         if line.trim().is_empty() {
             return None;
         }
@@ -55,28 +56,38 @@ impl MD030ListMarkerSpace {
             };
             return Some((list_type, cap[0].to_string(), spaces));
         }
-        
+
         None
     }
 
     fn is_multi_line_item(&self, lines: &[&str], current_idx: usize) -> bool {
-        if current_idx + 1 >= lines.len() {
+        if current_idx >= lines.len() - 1 {
             return false;
         }
 
         let next_line = lines[current_idx + 1].trim();
-        
-        // Fast path for empty lines
+
+        // Fast path
         if next_line.is_empty() {
             return false;
         }
-        
-        // Check if next line is a new list item
-        if let Some((_, _, _)) = Self::is_list_item(lines[current_idx + 1]) {
+
+        // Check if the next line is a list item or not
+        if Self::is_list_item(next_line).is_some() {
             return false;
         }
-        
-        true
+
+        // Check if it's a continued list item (indented)
+        let current_indentation = lines[current_idx]
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .count();
+        let next_indentation = lines[current_idx + 1]
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .count();
+
+        next_indentation > current_indentation
     }
 
     fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
@@ -90,13 +101,14 @@ impl MD030ListMarkerSpace {
 
     fn fix_line(&self, line: &str, list_type: ListType, is_multi: bool) -> String {
         let expected_spaces = self.get_expected_spaces(list_type, is_multi);
-        LIST_FIX_REGEX.replace(line, format!("$1$2{}", " ".repeat(expected_spaces)))
+        LIST_FIX_REGEX
+            .replace(line, format!("$1$2{}", " ".repeat(expected_spaces)))
             .to_string()
     }
 
-    fn precompute_states(&self, lines: &[&str]) -> (Vec<bool>, Vec<Option<bool>>) {
-        let mut code_block_state = vec![false; lines.len()];
-        let mut multi_line_state = vec![None; lines.len()];
+    fn precompute_states(&self, lines: &[&str]) -> (Vec<bool>, Vec<bool>) {
+        let mut is_list_line = vec![false; lines.len()];
+        let mut multi_line = vec![false; lines.len()];
         let mut in_code_block = false;
 
         // First pass: mark code blocks
@@ -104,17 +116,19 @@ impl MD030ListMarkerSpace {
             if CODE_BLOCK_REGEX.is_match(line) {
                 in_code_block = !in_code_block;
             }
-            code_block_state[i] = in_code_block;
+            if !in_code_block && Self::is_list_item(line).is_some() {
+                is_list_line[i] = true;
+            }
         }
 
         // Second pass: compute multi-line states
         for i in 0..lines.len() {
-            if !code_block_state[i] {
-                multi_line_state[i] = Some(self.is_multi_line_item(lines, i));
+            if is_list_line[i] {
+                multi_line[i] = self.is_multi_line_item(lines, i);
             }
         }
 
-        (code_block_state, multi_line_state)
+        (is_list_line, multi_line)
     }
 }
 
@@ -134,37 +148,40 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        // Fast path for empty content
+        let _line_index = LineIndex::new(content.to_string());
+        // Fast path
         if content.is_empty() {
             return Ok(Vec::new());
         }
-        
-        let mut warnings = Vec::new();
+
         let lines: Vec<&str> = content.lines().collect();
-        
-        // Pre-compute states
-        let (code_block_state, multi_line_state) = self.precompute_states(&lines);
-        
-        // Check list items
-        for (i, &line) in lines.iter().enumerate() {
-            if code_block_state[i] {
+        let (is_list_line, multi_line) = self.precompute_states(&lines);
+        let mut warnings = Vec::new();
+
+        for i in 0..lines.len() {
+            if !is_list_line[i] {
                 continue;
             }
 
-            if let Some((list_type, _, spaces)) = Self::is_list_item(line) {
-                let is_multi = multi_line_state[i].unwrap_or_else(|| self.is_multi_line_item(&lines, i));
+            let line = lines[i];
+            if let Some((list_type, marker, spaces)) = Self::is_list_item(line) {
+                let is_multi = multi_line[i];
                 let expected_spaces = self.get_expected_spaces(list_type, is_multi);
 
                 if spaces != expected_spaces {
-                    let fixed_line = self.fix_line(line, list_type, is_multi);
                     warnings.push(LintWarning {
                         line: i + 1,
-                        column: 1,
-                        message: format!("Expected {} spaces after list marker, found {}", expected_spaces, spaces),
+                        column: marker.len() - spaces,
                         severity: Severity::Warning,
+                        message: format!(
+                            "Expected {} space{} after list marker, got {}",
+                            expected_spaces,
+                            if expected_spaces == 1 { "" } else { "s" },
+                            spaces
+                        ),
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, i + 1, 1),
-                            replacement: fixed_line,
+                            range: _line_index.line_col_to_byte_range(i + 1, 1),
+                            replacement: self.fix_line(line, list_type, is_multi),
                         }),
                     });
                 }
@@ -175,43 +192,29 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        // Fast path for empty content
+        let _line_index = LineIndex::new(content.to_string());
+        // Fast path
         if content.is_empty() {
             return Ok(String::new());
         }
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        let mut result = String::with_capacity(content.len());
-        
-        // Pre-compute states
-        let (code_block_state, multi_line_state) = self.precompute_states(&lines);
+        let (is_list_line, multi_line) = self.precompute_states(&lines);
+        let mut result = String::new();
 
-        for (i, &line) in lines.iter().enumerate() {
-            if code_block_state[i] {
-                result.push_str(line);
-                if i < lines.len() - 1 {
-                    result.push('\n');
+        for i in 0..lines.len() {
+            let line = lines[i];
+            if is_list_line[i] {
+                if let Some((list_type, _, _)) = Self::is_list_item(line) {
+                    let is_multi = multi_line[i];
+                    result.push_str(&self.fix_line(line, list_type, is_multi));
+                } else {
+                    result.push_str(line);
                 }
-                continue;
-            }
-
-            // Fast path for non-list items
-            if line.trim().is_empty() || !line.contains('-') && !line.contains('*') && 
-               !line.contains('+') && !line.contains('.') {
-                result.push_str(line);
-                if i < lines.len() - 1 {
-                    result.push('\n');
-                }
-                continue;
-            }
-
-            if let Some((list_type, _, _)) = Self::is_list_item(line) {
-                let is_multi = multi_line_state[i].unwrap_or_else(|| self.is_multi_line_item(&lines, i));
-                result.push_str(&self.fix_line(line, list_type, is_multi));
             } else {
                 result.push_str(line);
             }
-            
+
             if i < lines.len() - 1 {
                 result.push('\n');
             }
@@ -219,4 +222,4 @@ impl Rule for MD030ListMarkerSpace {
 
         Ok(result)
     }
-} 
+}

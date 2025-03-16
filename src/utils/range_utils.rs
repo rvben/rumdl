@@ -1,37 +1,233 @@
 //! Utilities for position/range conversions
 
-/// Convert line/column positions to byte ranges
-pub fn line_col_to_byte_range(content: &str, line: usize, column: usize) -> std::ops::Range<usize> {
-    // Make sure we don't go out of bounds
-    let lines: Vec<&str> = content.lines().collect();
-    
-    // If the line number is beyond the end of the content, return the last position
-    if line == 0 || line > lines.len() {
-        return content.len()..content.len();
+use std::collections::HashSet;
+use std::ops::Range;
+
+#[derive(Debug)]
+pub struct LineIndex {
+    line_starts: Vec<usize>,
+    content: String,
+    code_block_lines: Option<HashSet<usize>>,
+}
+
+impl LineIndex {
+    pub fn new(content: String) -> Self {
+        let mut line_starts = vec![0];
+        let mut pos = 0;
+
+        for c in content.chars() {
+            pos += c.len_utf8();
+            if c == '\n' {
+                line_starts.push(pos);
+            }
+        }
+
+        let mut index = Self {
+            line_starts,
+            content,
+            code_block_lines: None,
+        };
+
+        // Pre-compute code block lines for better performance
+        index.compute_code_block_lines();
+
+        index
     }
-    
-    // Calculate the start byte position by summing the lengths of previous lines plus newlines
-    let line_start = lines[..line-1]
-        .iter()
-        .map(|l| l.len() + 1) // +1 for newline
-        .sum::<usize>();
-    
-    // Get the current line to check its length
-    let current_line = lines[line-1];
-    
-    // Make sure the column isn't beyond the end of the line
-    let col = if column == 0 {
-        1
-    } else if column > current_line.len() + 1 {
-        current_line.len() + 1
-    } else {
-        column
-    };
-    
-    let start = line_start + col - 1; // Convert to 0-based
-    
-    // Ensure start position doesn't exceed content length
-    let safe_start = std::cmp::min(start, content.len());
-    
-    safe_start..safe_start
+
+    pub fn line_col_to_byte_range(&self, line: usize, column: usize) -> Range<usize> {
+        let line = line.saturating_sub(1);
+        let line_start = *self.line_starts.get(line).unwrap_or(&self.content.len());
+
+        let current_line = self.content.lines().nth(line).unwrap_or("");
+        let col = column.clamp(1, current_line.len() + 1);
+
+        let start = line_start + col - 1;
+        start..start
+    }
+
+    /// Check if the line at the given index is within a code block
+    pub fn is_code_block(&self, line: usize) -> bool {
+        if let Some(ref code_block_lines) = self.code_block_lines {
+            code_block_lines.contains(&line)
+        } else {
+            // Fallback to a simpler check if pre-computation wasn't done
+            self.is_code_fence(line)
+        }
+    }
+
+    /// Check if the line is a code fence marker (``` or ~~~)
+    pub fn is_code_fence(&self, line: usize) -> bool {
+        self.content.lines().nth(line).map_or(false, |l| {
+            let trimmed = l.trim();
+            trimmed.starts_with("```") || trimmed.starts_with("~~~")
+        })
+    }
+
+    /// Check if the line is a tilde code fence marker (~~~)
+    pub fn is_tilde_code_block(&self, line: usize) -> bool {
+        self.content
+            .lines()
+            .nth(line)
+            .map_or(false, |l| l.trim().starts_with("~~~"))
+    }
+
+    /// Get a reference to the content
+    pub fn get_content(&self) -> &str {
+        &self.content
+    }
+
+    /// Pre-compute which lines are within code blocks for faster lookup
+    fn compute_code_block_lines(&mut self) {
+        let mut code_block_lines = HashSet::new();
+        let lines: Vec<&str> = self.content.lines().collect();
+
+        // For debugging
+        let debug_mode = lines.len() > 12 && lines[6] == "nested code";
+
+        if debug_mode {
+            println!(
+                "DEBUG: Starting code block detection with {} lines",
+                lines.len()
+            );
+        }
+
+        // Initialize block tracking
+        let mut in_block = false;
+        let mut active_fence_type = ' '; // '`' or '~'
+        let mut block_indent = 0;
+        let mut block_fence_length = 0;
+        let mut in_markdown_block = false;
+        let mut nested_fence_start = None;
+        let mut nested_fence_end = None;
+
+        // Process each line
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            let indent = line.len() - trimmed.len();
+
+            if debug_mode {
+                println!(
+                    "DEBUG: Line {}: '{}', in_block: {}, in_markdown_block: {}",
+                    i, line, in_block, in_markdown_block
+                );
+            }
+
+            // 1. Detect indented code blocks (independent of fenced code blocks)
+            if line.starts_with("    ") || line.starts_with("\t") {
+                code_block_lines.insert(i);
+                continue; // Skip further processing for indented code blocks
+            }
+
+            // 2. Handle fenced code blocks (backticks and tildes)
+            if !in_block {
+                // Check for opening fences
+                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                    let char_type = if trimmed.starts_with("```") { '`' } else { '~' };
+                    let count = trimmed.chars().take_while(|&c| c == char_type).count();
+                    let info_string = if trimmed.len() > count {
+                        trimmed[count..].trim()
+                    } else {
+                        ""
+                    };
+
+                    // Mark the start of a new code block
+                    in_block = true;
+                    active_fence_type = char_type;
+                    block_indent = indent;
+                    block_fence_length = count;
+                    in_markdown_block = info_string == "markdown";
+                    nested_fence_start = None;
+                    nested_fence_end = None;
+
+                    if debug_mode {
+                        println!("DEBUG: Opening code block at line {} with fence type {}, info_string: '{}'", 
+                                i, active_fence_type, info_string);
+                    }
+
+                    code_block_lines.insert(i);
+                }
+            } else {
+                // We're inside a code block
+                code_block_lines.insert(i);
+
+                // Detection of nested fences in markdown blocks
+                if in_markdown_block && nested_fence_start.is_none() && trimmed.starts_with("```") {
+                    // Check if this looks like a nested fence opening (has content after the backticks)
+                    let count = trimmed.chars().take_while(|&c| c == '`').count();
+                    let remaining = if trimmed.len() > count {
+                        trimmed[count..].trim()
+                    } else {
+                        ""
+                    };
+
+                    if !remaining.is_empty() {
+                        nested_fence_start = Some(i);
+                        if debug_mode {
+                            println!("DEBUG: Detected nested fence opening at line {}", i);
+                        }
+                    }
+                }
+
+                // Check if we've found a nested fence end (only if we have a start)
+                if in_markdown_block
+                    && nested_fence_start.is_some()
+                    && nested_fence_end.is_none()
+                    && trimmed.starts_with("```")
+                    && trimmed.trim_start_matches('`').trim().is_empty()
+                {
+                    nested_fence_end = Some(i);
+                    if debug_mode {
+                        println!("DEBUG: Detected nested fence closing at line {}", i);
+                    }
+                }
+
+                // Check if this line matches the closing fence pattern for the outer block
+                if trimmed.starts_with(&active_fence_type.to_string().repeat(3)) {
+                    let count = trimmed
+                        .chars()
+                        .take_while(|&c| c == active_fence_type)
+                        .count();
+                    let remaining = if trimmed.len() > count {
+                        trimmed[count..].trim()
+                    } else {
+                        ""
+                    };
+
+                    // A line is a closing fence if:
+                    // 1. It uses the same fence character as the opening fence
+                    // 2. It has at least as many fence characters as the opening fence
+                    // 3. It has no content after the fence characters (except for whitespace)
+                    // 4. Its indentation level is less than or equal to the opening fence
+                    let is_valid_closing_fence = count >= block_fence_length
+                        && remaining.is_empty()
+                        && indent <= block_indent;
+
+                    // For nested code blocks in markdown, the first backtick fence after the nested content
+                    // should be recognized as the closing fence for the outer block
+                    let is_nested_closing =
+                        nested_fence_end.is_some() && i == nested_fence_end.unwrap();
+
+                    // Skip nested closing fences
+                    if is_valid_closing_fence && !is_nested_closing {
+                        if debug_mode {
+                            println!("DEBUG: Closing outer code block at line {}", i);
+                        }
+                        in_block = false;
+                        in_markdown_block = false;
+                    } else if is_nested_closing && debug_mode {
+                        println!("DEBUG: Skipping nested closing fence at line {}", i);
+                    }
+                }
+            }
+        }
+
+        if debug_mode {
+            println!("DEBUG: Final code_block_lines: {:?}", code_block_lines);
+            let mut sorted_lines: Vec<_> = code_block_lines.iter().collect();
+            sorted_lines.sort();
+            println!("DEBUG: Sorted code block lines: {:?}", sorted_lines);
+        }
+
+        self.code_block_lines = Some(code_block_lines);
+    }
 }

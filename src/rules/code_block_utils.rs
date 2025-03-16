@@ -1,5 +1,5 @@
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     // Standard code block detection patterns
@@ -20,15 +20,15 @@ impl CodeBlockUtils {
         if line_num >= lines.len() {
             return false;
         }
-        
+
         let mut in_fenced_code = false;
         let mut in_alternate_fenced = false;
-        
+
         for (i, line) in lines.iter().enumerate() {
             if i > line_num {
                 break;
             }
-            
+
             if FENCED_CODE_BLOCK_START.is_match(line) {
                 in_fenced_code = !in_fenced_code;
             } else if FENCED_CODE_BLOCK_END.is_match(line) && in_fenced_code {
@@ -39,39 +39,39 @@ impl CodeBlockUtils {
                 in_alternate_fenced = false;
             }
         }
-        
+
         // Check if the current line is indented as code block
         if line_num < lines.len() && INDENTED_CODE_BLOCK.is_match(lines[line_num]) {
             return true;
         }
-        
+
         // Return true if we're in any type of code block
         in_fenced_code || in_alternate_fenced
     }
-    
+
     /// Check if a line is a code block delimiter (start or end)
     pub fn is_code_block_delimiter(line: &str) -> bool {
-        FENCED_CODE_BLOCK_START.is_match(line) || 
-        FENCED_CODE_BLOCK_END.is_match(line) || 
-        ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line) || 
-        ALTERNATE_FENCED_CODE_BLOCK_END.is_match(line)
+        FENCED_CODE_BLOCK_START.is_match(line)
+            || FENCED_CODE_BLOCK_END.is_match(line)
+            || ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line)
+            || ALTERNATE_FENCED_CODE_BLOCK_END.is_match(line)
     }
-    
+
     /// Check if a line is the start of a code block
     pub fn is_code_block_start(line: &str) -> bool {
         FENCED_CODE_BLOCK_START.is_match(line) || ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line)
     }
-    
+
     /// Check if a line is the end of a code block
     pub fn is_code_block_end(line: &str) -> bool {
         FENCED_CODE_BLOCK_END.is_match(line) || ALTERNATE_FENCED_CODE_BLOCK_END.is_match(line)
     }
-    
+
     /// Check if a line is an indented code block
     pub fn is_indented_code_block(line: &str) -> bool {
         INDENTED_CODE_BLOCK.is_match(line)
     }
-    
+
     /// Get the language specifier from a code block start line
     pub fn get_language_specifier(line: &str) -> Option<String> {
         if FENCED_CODE_BLOCK_START.is_match(line) {
@@ -89,20 +89,20 @@ impl CodeBlockUtils {
         }
         None
     }
-    
+
     /// Identify which lines in the content are in code blocks
     /// Returns a vector of booleans, where each element indicates if the corresponding line is in a code block
     pub fn identify_code_block_lines(content: &str) -> Vec<bool> {
         let lines: Vec<&str> = content.lines().collect();
         let mut in_code_block = vec![false; lines.len()];
-        
+
         let mut in_fenced_code = false;
         let mut in_alternate_fenced = false;
-        
+
         for (i, line) in lines.iter().enumerate() {
             // Quick check for code fence markers with literal prefixes
             let trimmed = line.trim_start();
-            
+
             if trimmed.starts_with("```") {
                 if FENCED_CODE_BLOCK_START.is_match(line) {
                     in_fenced_code = !in_fenced_code;
@@ -120,7 +120,7 @@ impl CodeBlockUtils {
                     in_code_block[i] = true; // Mark the delimiter line as part of the code block
                 }
             }
-            
+
             // If we're in a code fence, mark the line
             if in_fenced_code || in_alternate_fenced {
                 in_code_block[i] = true;
@@ -129,7 +129,7 @@ impl CodeBlockUtils {
                 in_code_block[i] = line.starts_with("    ") || INDENTED_CODE_BLOCK.is_match(line);
             }
         }
-        
+
         in_code_block
     }
 }
@@ -165,14 +165,14 @@ impl CodeBlockInfo {
     pub fn new(content: &str) -> Self {
         let block_states = compute_code_blocks(content);
         let code_spans = compute_code_spans(content);
-        
+
         CodeBlockInfo {
             block_states,
             code_spans,
             content: content.to_string(),
         }
     }
-    
+
     /// Check if a line is inside a code block
     pub fn is_in_code_block(&self, line_index: usize) -> bool {
         if line_index < self.block_states.len() {
@@ -181,25 +181,25 @@ impl CodeBlockInfo {
             false
         }
     }
-    
+
     /// Check if a position is inside a code span
     pub fn is_in_code_span(&self, line_index: usize, column_index: usize) -> bool {
         // Calculate absolute position (this assumes content is ASCII-only)
         let mut position = 0;
         let content_lines: Vec<&str> = self.content.lines().collect();
-        
+
         for i in 0..line_index {
             if i < content_lines.len() {
                 position += content_lines[i].len() + 1; // +1 for newline
             }
         }
-        
+
         if line_index < content_lines.len() {
             // Add column position
             let line = content_lines[line_index];
             if column_index < line.len() {
                 position += column_index;
-                
+
                 // Check if position is in any code span
                 for &(start, end) in &self.code_spans {
                     if position >= start && position <= end {
@@ -208,15 +208,17 @@ impl CodeBlockInfo {
                 }
             }
         }
-        
+
         false
     }
-    
+
     /// Quick check if content contains any code blocks
     pub fn has_code_blocks(&self) -> bool {
-        self.block_states.iter().any(|state| *state != CodeBlockState::None)
+        self.block_states
+            .iter()
+            .any(|state| *state != CodeBlockState::None)
     }
-    
+
     /// Quick check if content contains any code spans
     pub fn has_code_spans(&self) -> bool {
         !self.code_spans.is_empty()
@@ -228,7 +230,7 @@ pub fn compute_code_blocks(content: &str) -> Vec<CodeBlockState> {
     let mut in_fenced_block = false;
     let mut result = Vec::new();
     let mut fence_marker = "";
-    
+
     for line in content.lines() {
         if in_fenced_block {
             if line.trim().starts_with(fence_marker) {
@@ -239,7 +241,11 @@ pub fn compute_code_blocks(content: &str) -> Vec<CodeBlockState> {
             }
         } else if FENCED_CODE_BLOCK_PATTERN.is_match(line) {
             in_fenced_block = true;
-            fence_marker = if line.trim().starts_with("```") { "```" } else { "~~~" };
+            fence_marker = if line.trim().starts_with("```") {
+                "```"
+            } else {
+                "~~~"
+            };
             result.push(CodeBlockState::Fenced); // The opening fence is part of the block
         } else if INDENTED_CODE_BLOCK_PATTERN.is_match(line) && !line.trim().is_empty() {
             result.push(CodeBlockState::Indented);
@@ -247,81 +253,84 @@ pub fn compute_code_blocks(content: &str) -> Vec<CodeBlockState> {
             result.push(CodeBlockState::None);
         }
     }
-    
+
     result
 }
 
 /// Compute positions of code spans in the text
 pub fn compute_code_spans(content: &str) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
-    
+
     // Simplify by using a safer character-based approach
     let chars: Vec<char> = content.chars().collect();
     let mut i = 0;
-    
+
     while i < chars.len() {
         // Skip escaped backticks
-        if i > 0 && chars[i] == '`' && chars[i-1] == '\\' {
+        if i > 0 && chars[i] == '`' && chars[i - 1] == '\\' {
             i += 1;
             continue;
         }
-        
+
         // Look for backtick sequences
         if chars[i] == '`' {
             let mut backtick_count = 1;
             let start_idx = i;
-            
+
             // Count consecutive backticks
             i += 1;
             while i < chars.len() && chars[i] == '`' {
                 backtick_count += 1;
                 i += 1;
             }
-            
+
             // Skip this if it looks like a code block delimiter
             // This prevents confusion between code spans and code blocks
             if is_likely_code_block_delimiter(&chars, start_idx) {
                 continue;
             }
-            
+
             // Skip over content until we find a matching sequence of backticks
             let mut j = i;
             let mut found_closing = false;
-            
+
             while j < chars.len() {
                 // Skip escaped backticks in the search too
-                if j > 0 && chars[j] == '`' && chars[j-1] == '\\' {
+                if j > 0 && chars[j] == '`' && chars[j - 1] == '\\' {
                     j += 1;
                     continue;
                 }
-                
+
                 if chars[j] == '`' {
                     let mut closing_count = 1;
                     let potential_end = j;
-                    
+
                     // Count consecutive backticks
                     j += 1;
                     while j < chars.len() && chars[j] == '`' {
                         closing_count += 1;
                         j += 1;
                     }
-                    
+
                     // If we found a matching sequence, record the span
                     if closing_count == backtick_count {
                         // Convert from character indices to byte indices
                         let start_byte = chars[..start_idx].iter().map(|c| c.len_utf8()).sum();
-                        let end_byte = chars[..potential_end + closing_count].iter().map(|c| c.len_utf8()).sum();
-                        
+                        let end_byte = chars[..potential_end + closing_count]
+                            .iter()
+                            .map(|c| c.len_utf8())
+                            .sum();
+
                         spans.push((start_byte, end_byte));
-                        i = j;  // Resume search after this span
+                        i = j; // Resume search after this span
                         found_closing = true;
                         break;
                     }
                 }
-                
+
                 j += 1;
             }
-            
+
             if !found_closing {
                 // If we didn't find a matching sequence, continue from where we left off
                 continue;
@@ -330,7 +339,7 @@ pub fn compute_code_spans(content: &str) -> Vec<(usize, usize)> {
             i += 1;
         }
     }
-    
+
     spans
 }
 
@@ -338,18 +347,18 @@ pub fn compute_code_spans(content: &str) -> Vec<(usize, usize)> {
 fn is_likely_code_block_delimiter(chars: &[char], start_idx: usize) -> bool {
     let mut count = 0;
     let mut i = start_idx;
-    
+
     // Count the backticks
     while i < chars.len() && chars[i] == '`' {
         count += 1;
         i += 1;
     }
-    
+
     if count < 3 {
         // Not enough backticks for a code block
         return false;
     }
-    
+
     // Check if this is at the start of a line or after only whitespace
     let mut j = start_idx;
     if j > 0 {
@@ -363,6 +372,6 @@ fn is_likely_code_block_delimiter(chars: &[char], start_idx: usize) -> bool {
             j -= 1;
         }
     }
-    
+
     true
 }

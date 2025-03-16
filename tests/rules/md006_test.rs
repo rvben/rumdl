@@ -1,5 +1,5 @@
-use rumdl::rules::MD006StartBullets;
 use rumdl::rule::Rule;
+use rumdl::rules::MD006StartBullets;
 
 #[test]
 fn test_valid_unordered_list() {
@@ -38,12 +38,15 @@ Some text here.
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "\
+    assert_eq!(
+        fixed,
+        "\
 Some text here.
 
 * First item should not be indented
 * Second item should not be indented
-* Third item should not be indented");
+* Third item should not be indented"
+    );
 }
 
 #[test]
@@ -75,14 +78,17 @@ Some text here
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "\
+    assert_eq!(
+        fixed,
+        "\
 * First list item
 * Second list item
 
 Some text here
 
 * Indented list 1
-* Indented list 2");
+* Indented list 2"
+    );
 }
 
 #[test]
@@ -121,4 +127,4 @@ fn test_code_blocks_ignored() {
 * Regular item outside code block";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-} 
+}

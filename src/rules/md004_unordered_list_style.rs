@@ -1,13 +1,18 @@
-use crate::utils::range_utils::line_col_to_byte_range;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::range_utils::LineIndex;
+use lazy_static::lazy_static;
 use regex::Regex;
+
+lazy_static! {
+    static ref CODE_BLOCK_MARKER: Regex = Regex::new(r"^(```|~~~)").unwrap();
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnorderedListStyle {
-    Asterisk,  // * * *
-    Plus,      // + + +
-    Dash,      // - - -
-    Consistent, // Use first marker style found
+    Asterisk,   // "*"
+    Plus,       // "+"
+    Dash,       // "-"
+    Consistent, // Use the first marker in a file consistently
 }
 
 impl Default for UnorderedListStyle {
@@ -16,84 +21,18 @@ impl Default for UnorderedListStyle {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MD004UnorderedListStyle {
     pub style: UnorderedListStyle,
-}
-
-impl Default for MD004UnorderedListStyle {
-    fn default() -> Self {
-        Self {
-            style: UnorderedListStyle::default(),
-        }
-    }
+    pub after_marker: usize,
 }
 
 impl MD004UnorderedListStyle {
     pub fn new(style: UnorderedListStyle) -> Self {
-        Self { style }
-    }
-
-    fn is_ordered_list(line: &str) -> bool {
-        let re = Regex::new(r"^\s*\d+[.)]\s").unwrap();
-        re.is_match(line)
-    }
-
-    fn get_list_marker_and_indent(line: &str) -> Option<(char, usize)> {
-        let re = Regex::new(r"^(\s*)([*+-])(?:\s+[^*+\-\s]|\s*$)").unwrap();
-        if Self::is_ordered_list(line) {
-            return None;
+        Self {
+            style,
+            after_marker: 1,
         }
-        re.captures(line).map(|cap| {
-            let indent = cap[1].len();
-            let marker = cap[2].chars().next().unwrap();
-            (marker, indent)
-        })
-    }
-
-    fn detect_first_marker_style(&self, content: &str) -> Option<UnorderedListStyle> {
-        let re = Regex::new(r"^(\s*)([*+-])(?:\s+[^*+\-\s]|\s*$)").unwrap();
-        let mut in_code_block = false;
-        let mut in_blockquote = false;
-
-        for line in content.lines() {
-            let trimmed = line.trim_start();
-            
-            // Handle code blocks
-            if trimmed.starts_with("```") {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if in_code_block {
-                continue;
-            }
-
-            // Handle blockquotes
-            if trimmed.starts_with('>') {
-                in_blockquote = true;
-                continue;
-            } else if trimmed.is_empty() {
-                in_blockquote = false;
-                continue;
-            }
-            if in_blockquote {
-                continue;
-            }
-
-            if Self::is_ordered_list(line) {
-                continue;
-            }
-
-            if let Some(cap) = re.captures(line) {
-                return Some(match &cap[2] {
-                    "*" => UnorderedListStyle::Asterisk,
-                    "+" => UnorderedListStyle::Plus,
-                    "-" => UnorderedListStyle::Dash,
-                    _ => unreachable!(),
-                });
-            }
-        }
-        None
     }
 
     fn get_marker_char(style: UnorderedListStyle) -> char {
@@ -101,8 +40,50 @@ impl MD004UnorderedListStyle {
             UnorderedListStyle::Asterisk => '*',
             UnorderedListStyle::Plus => '+',
             UnorderedListStyle::Dash => '-',
-            UnorderedListStyle::Consistent => unreachable!(),
+            UnorderedListStyle::Consistent => '*', // Default, but will be overridden
         }
+    }
+
+    fn parse_list_marker(line: &str) -> Option<(usize, char)> {
+        let indentation = line.len() - line.trim_start().len();
+        let trimmed = line.trim_start();
+
+        if let Some(c) = trimmed.chars().next() {
+            if (c == '*' || c == '-' || c == '+')
+                && trimmed.len() > 1
+                && trimmed
+                    .chars()
+                    .nth(1)
+                    .map_or(false, |next| next.is_whitespace())
+            {
+                return Some((indentation, c));
+            }
+        }
+
+        None
+    }
+
+    fn is_in_code_block(code_blocks: &[bool], line_num: usize) -> bool {
+        if line_num < code_blocks.len() {
+            code_blocks[line_num]
+        } else {
+            false
+        }
+    }
+
+    fn precompute_code_blocks(content: &str) -> Vec<bool> {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut in_code_block = false;
+        let mut code_blocks = vec![false; lines.len()];
+
+        for (i, line) in lines.iter().enumerate() {
+            if CODE_BLOCK_MARKER.is_match(line.trim_start()) {
+                in_code_block = !in_code_block;
+            }
+            code_blocks[i] = in_code_block;
+        }
+
+        code_blocks
     }
 }
 
@@ -112,73 +93,51 @@ impl Rule for MD004UnorderedListStyle {
     }
 
     fn description(&self) -> &'static str {
-        "Unordered list style should be consistent throughout the document"
+        "Use consistent style for unordered list markers"
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        let target_style = match self.style {
-            UnorderedListStyle::Consistent => {
-                self.detect_first_marker_style(content)
-                    .unwrap_or(UnorderedListStyle::Dash)
-            }
-            style => style,
-        };
 
-        let mut in_code_block = false;
-        let mut in_blockquote = false;
+        // Precompute code blocks
+        let code_blocks = Self::precompute_code_blocks(content);
 
-        for (line_num, line) in content.lines().enumerate() {
-            let trimmed = line.trim_start();
-            
-            // Handle code blocks
-            if trimmed.starts_with("```") {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if in_code_block {
+        // Track the first marker style for the "consistent" option
+        let mut first_marker: Option<char> = None;
+
+        let lines: Vec<&str> = content.lines().collect();
+
+        for (line_num, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks
+            if Self::is_in_code_block(&code_blocks, line_num) {
                 continue;
             }
 
-            // Handle blockquotes
-            if trimmed.starts_with('>') {
-                in_blockquote = true;
-                continue;
-            } else if trimmed.is_empty() {
-                in_blockquote = false;
-                continue;
-            }
-            if in_blockquote {
-                continue;
-            }
-
-            // Handle list items
-            if let Some((marker, indent)) = Self::get_list_marker_and_indent(line) {
-                let current_style = match marker {
-                    '*' => UnorderedListStyle::Asterisk,
-                    '+' => UnorderedListStyle::Plus,
-                    '-' => UnorderedListStyle::Dash,
-                    _ => unreachable!(),
+            if let Some((indent, marker)) = Self::parse_list_marker(line) {
+                // For consistent style, use the first marker encountered
+                let target_style = match self.style {
+                    UnorderedListStyle::Consistent => {
+                        if first_marker.is_none() {
+                            first_marker = Some(marker);
+                        }
+                        first_marker.unwrap()
+                    }
+                    specific_style => Self::get_marker_char(specific_style),
                 };
 
-                if current_style != target_style {
+                if marker != target_style {
                     warnings.push(LintWarning {
-                        message: format!(
-                            "Unordered list marker '{}' should be '{}'",
-                            marker,
-                            Self::get_marker_char(target_style)
-                        ),
                         line: line_num + 1,
                         column: indent + 1,
                         severity: Severity::Warning,
+                        message: format!(
+                            "Unordered list item marker '{}' does not match style '{}'",
+                            marker, target_style
+                        ),
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, indent + 1),
-                            replacement: format!(
-                                "{}{}{}",
-                                " ".repeat(indent),
-                                Self::get_marker_char(target_style),
-                                &line[indent + 1..]
-                            ),
+                            range: line_index.line_col_to_byte_range(line_num + 1, indent + 1),
+                            replacement: format!("{}{} ", " ".repeat(indent), target_style),
                         }),
                     });
                 }
@@ -189,67 +148,53 @@ impl Rule for MD004UnorderedListStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let target_style = match self.style {
-            UnorderedListStyle::Consistent => {
-                self.detect_first_marker_style(content)
-                    .unwrap_or(UnorderedListStyle::Dash)
-            }
-            style => style,
-        };
+        let warnings = self.check(content)?;
+
+        if warnings.is_empty() {
+            return Ok(content.to_string());
+        }
 
         let mut result = String::new();
-        let mut in_code_block = false;
-        let mut in_blockquote = false;
+        let lines: Vec<&str> = content.lines().collect();
 
-        for line in content.lines() {
-            let trimmed = line.trim_start();
-            
-            // Handle code blocks
-            if trimmed.starts_with("```") {
-                in_code_block = !in_code_block;
-                result.push_str(line);
-                result.push('\n');
-                continue;
+        // Create a map of line numbers with fixes
+        let mut line_fixes: std::collections::HashMap<usize, String> =
+            std::collections::HashMap::new();
+        for warning in &warnings {
+            if let Some(fix) = &warning.fix {
+                line_fixes.insert(warning.line, fix.replacement.clone());
             }
-            if in_code_block {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
+        }
 
-            // Handle blockquotes
-            if trimmed.starts_with('>') {
-                in_blockquote = true;
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            } else if trimmed.is_empty() {
-                in_blockquote = false;
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-            if in_blockquote {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
+        for (i, line) in lines.iter().enumerate() {
+            let line_num = i + 1;
+            if let Some(fixed_marker) = line_fixes.get(&line_num) {
+                // Replace just the marker, keeping the rest of the line
+                if let Some((indent, _)) = Self::parse_list_marker(line) {
+                    let rest_of_line = &line[indent + 1..];
+                    let first_non_space = rest_of_line.trim_start().len();
+                    let spaces = rest_of_line.len() - first_non_space;
 
-            // Fix list markers
-            if let Some((_, indent)) = Self::get_list_marker_and_indent(line) {
-                result.push_str(&format!(
-                    "{}{}{}",
-                    " ".repeat(indent),
-                    Self::get_marker_char(target_style),
-                    &line[indent + 1..]
-                ));
-                result.push('\n');
+                    result.push_str(&format!("{}{}", fixed_marker, &rest_of_line[spaces..]));
+                } else {
+                    // Shouldn't happen if warnings are accurate
+                    result.push_str(line);
+                }
             } else {
                 result.push_str(line);
+            }
+
+            // Add newline for all lines except the last one, unless the original content ends with newline
+            if i < lines.len() - 1 {
                 result.push('\n');
             }
         }
 
+        // Preserve trailing newline if present or add it
+        if content.ends_with('\n') || !content.is_empty() {
+            result.push('\n');
+        }
+
         Ok(result)
     }
-} 
+}

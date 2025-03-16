@@ -1,7 +1,6 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use once_cell::sync::Lazy;
-use regex::Regex;
 
 #[derive(Debug)]
 pub struct MD007ULIndent {
@@ -14,26 +13,21 @@ impl Default for MD007ULIndent {
     }
 }
 
-static INDENT_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^( {4})+").unwrap()
-});
-
 impl MD007ULIndent {
     pub fn new(indent: usize) -> Self {
         Self { indent }
     }
 
-    fn calculate_indent_level(line: &str) -> usize {
-        INDENT_RE.find_iter(line).count()
-    }
-
     fn is_list_item(line: &str) -> Option<(usize, char)> {
         let indentation = line.len() - line.trim_start().len();
+
         let trimmed = line.trim_start();
-        
+
         if let Some(c) = trimmed.chars().next() {
-            if (c == '*' || c == '-' || c == '+') && 
-               (trimmed.len() == 1 || trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace())) {
+            if (c == '*' || c == '-' || c == '+')
+                && (trimmed.len() == 1
+                    || trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace()))
+            {
                 return Some((indentation, c));
             }
         }
@@ -60,9 +54,14 @@ impl Rule for MD007ULIndent {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let mut current_level = 0;
+
         let mut level_indents = vec![0];
+
         let mut in_list = false;
 
         for (line_num, line) in content.lines().enumerate() {
@@ -88,7 +87,7 @@ impl Rule for MD007ULIndent {
                             ),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_col_to_byte_range(content, line_num + 1, 1),
+                                range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                                 replacement: format!("{}{}", " ".repeat(expected_indent), line.trim_start()),
                             }),
                         });
@@ -109,7 +108,7 @@ impl Rule for MD007ULIndent {
                             ),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_col_to_byte_range(content, line_num + 1, 1),
+                                range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                                 replacement: format!("{}{}", " ".repeat(expected_indent), line.trim_start()),
                             }),
                         });
@@ -130,8 +129,12 @@ impl Rule for MD007ULIndent {
                             ),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_col_to_byte_range(content, line_num + 1, 1),
-                                replacement: format!("{}{}", " ".repeat(expected_indent), line.trim_start()),
+                                range: _line_index.line_col_to_byte_range(line_num + 1, 1),
+                                replacement: format!(
+                                    "{}{}",
+                                    " ".repeat(expected_indent),
+                                    line.trim_start()
+                                ),
                             }),
                         });
                     }
@@ -147,9 +150,14 @@ impl Rule for MD007ULIndent {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
+
         let mut current_level = 0;
+
         let mut level_indents = vec![0];
+
         let mut in_list = false;
 
         for line in content.lines() {
@@ -167,19 +175,31 @@ impl Rule for MD007ULIndent {
                     if current_level >= level_indents.len() {
                         level_indents.push(expected_indent);
                     }
-                    result.push_str(&format!("{}{}\n", " ".repeat(expected_indent), line.trim_start()));
+                    result.push_str(&format!(
+                        "{}{}\n",
+                        " ".repeat(expected_indent),
+                        line.trim_start()
+                    ));
                 } else {
                     // Same level or going back
                     while current_level > 0 && indent <= level_indents[current_level - 1] {
                         current_level -= 1;
                     }
                     let expected_indent = self.get_expected_indent(current_level);
-                    result.push_str(&format!("{}{}\n", " ".repeat(expected_indent), line.trim_start()));
+                    result.push_str(&format!(
+                        "{}{}\n",
+                        " ".repeat(expected_indent),
+                        line.trim_start()
+                    ));
                 }
                 in_list = true;
             } else if Self::is_list_continuation(line) && in_list {
                 let expected_indent = self.get_expected_indent(current_level);
-                result.push_str(&format!("{}{}\n", " ".repeat(expected_indent), line.trim_start()));
+                result.push_str(&format!(
+                    "{}{}\n",
+                    " ".repeat(expected_indent),
+                    line.trim_start()
+                ));
             } else {
                 in_list = false;
                 current_level = 0;
@@ -195,4 +215,4 @@ impl Rule for MD007ULIndent {
 
         Ok(result)
     }
-} 
+}

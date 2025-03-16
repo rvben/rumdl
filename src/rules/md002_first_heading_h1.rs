@@ -1,6 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::heading_utils::{Heading, HeadingUtils, HeadingStyle};
+use crate::rules::heading_utils::{Heading, HeadingStyle, HeadingUtils};
 
 #[derive(Debug)]
 pub struct MD002FirstHeadingH1 {
@@ -38,7 +37,7 @@ impl MD002FirstHeadingH1 {
         // Find first heading
         while line_num < lines.len() {
             let line = lines[line_num];
-            
+
             // Check for ATX headings (with possible indentation)
             if line.trim_start().starts_with('#') {
                 let trimmed = line.trim_start();
@@ -46,31 +45,48 @@ impl MD002FirstHeadingH1 {
                 if hash_count >= 1 && hash_count <= 6 {
                     let after_hash = &trimmed[hash_count..];
                     if after_hash.is_empty() || after_hash.starts_with(' ') {
-                        let text = after_hash.trim_start().trim_end_matches(|c| c == '#' || c == ' ').to_string();
+                        let text = after_hash
+                            .trim_start()
+                            .trim_end_matches(|c| c == '#' || c == ' ')
+                            .to_string();
                         let style = if after_hash.trim_end().ends_with('#') {
                             HeadingStyle::AtxClosed
                         } else {
                             HeadingStyle::Atx
                         };
-                        return Some((Heading { level: hash_count, text, style }, line_num));
+                        return Some((
+                            Heading {
+                                level: hash_count,
+                                text,
+                                style,
+                            },
+                            line_num,
+                        ));
                     }
                 }
-            } 
+            }
             // Check for Setext headings (with possible indentation)
             else if line_num + 1 < lines.len() {
                 let next_line = lines[line_num + 1];
                 let next_trimmed = next_line.trim_start();
                 if !next_trimmed.is_empty() && next_trimmed.chars().all(|c| c == '=' || c == '-') {
                     let level = if next_trimmed.starts_with('=') { 1 } else { 2 };
-                    let style = if level == 1 { HeadingStyle::Setext1 } else { HeadingStyle::Setext2 };
-                    return Some((Heading { 
-                        level, 
-                        text: line.trim_start().to_string(),
-                        style 
-                    }, line_num));
+                    let style = if level == 1 {
+                        HeadingStyle::Setext1
+                    } else {
+                        HeadingStyle::Setext2
+                    };
+                    return Some((
+                        Heading {
+                            level,
+                            text: line.trim_start().to_string(),
+                            style,
+                        },
+                        line_num,
+                    ));
                 }
             }
-            
+
             line_num += 1;
         }
 
@@ -80,17 +96,23 @@ impl MD002FirstHeadingH1 {
     // Helper method to generate replacement text for a heading
     fn generate_replacement(&self, heading: &Heading, indentation: usize) -> String {
         let indent = " ".repeat(indentation);
-        
+
         // Create the correct heading marker based on the style
         match heading.style {
             HeadingStyle::Atx => {
                 // For ATX style, use the exact number of # characters needed for the desired level
                 format!("{}{} {}", indent, "#".repeat(self.level), heading.text)
-            },
+            }
             HeadingStyle::AtxClosed => {
                 // For closed ATX, ensure we use the correct number of # characters
-                format!("{}{} {} {}", indent, "#".repeat(self.level), heading.text, "#".repeat(self.level))
-            },
+                format!(
+                    "{}{} {} {}",
+                    indent,
+                    "#".repeat(self.level),
+                    heading.text,
+                    "#".repeat(self.level)
+                )
+            }
             HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
                 // Convert setext to ATX with the correct level
                 format!("{}{} {}", indent, "#".repeat(self.level), heading.text)
@@ -117,7 +139,7 @@ impl Rule for MD002FirstHeadingH1 {
             // Check if the heading is not at the expected level
             if first_heading.level != self.level {
                 let indentation = HeadingUtils::get_indentation(lines[line_num]);
-                
+
                 // Generate a warning with the appropriate fix
                 warnings.push(LintWarning {
                     line: line_num + 1,
@@ -125,7 +147,7 @@ impl Rule for MD002FirstHeadingH1 {
                     message: format!("First heading level should be {}", self.level),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
+                        range: 0..0, // Placeholder range until proper LineIndex implementation
                         replacement: self.generate_replacement(&first_heading, indentation),
                     }),
                 });
@@ -140,54 +162,59 @@ impl Rule for MD002FirstHeadingH1 {
             if heading.level != self.level {
                 let lines: Vec<&str> = content.lines().collect();
                 let mut result = Vec::new();
-                
+
                 // Copy lines before the heading
                 for i in 0..line_num {
                     result.push(lines[i].to_string());
                 }
-                
+
                 // Replace the heading with the correct level
                 match heading.style {
                     HeadingStyle::Atx | HeadingStyle::AtxClosed => {
-                        let indentation = lines[line_num].len() - lines[line_num].trim_start().len();
+                        let indentation =
+                            lines[line_num].len() - lines[line_num].trim_start().len();
                         let indent_str = " ".repeat(indentation);
                         let hashes = "#".repeat(self.level);
-                        
+
                         if heading.style == HeadingStyle::AtxClosed {
-                            result.push(format!("{}{} {} {}", indent_str, hashes, heading.text, hashes));
+                            result.push(format!(
+                                "{}{} {} {}",
+                                indent_str, hashes, heading.text, hashes
+                            ));
                         } else {
                             result.push(format!("{}{} {}", indent_str, hashes, heading.text));
                         }
-                    },
+                    }
                     HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
                         // For Setext headings, convert to ATX style with the correct level
-                        let indentation = lines[line_num].len() - lines[line_num].trim_start().len();
+                        let indentation =
+                            lines[line_num].len() - lines[line_num].trim_start().len();
                         let indent_str = " ".repeat(indentation);
                         let hashes = "#".repeat(self.level);
-                        
+
                         result.push(format!("{}{} {}", indent_str, hashes, heading.text));
-                        
+
                         // Skip the original underline
                         line_num += 1;
                     }
                 }
-                
+
                 // Copy remaining lines
                 for i in (line_num + 1)..lines.len() {
                     result.push(lines[i].to_string());
                 }
-                
+
                 // Preserve trailing newline if original had it
                 let result_str = if content.ends_with('\n') {
                     format!("{}\n", result.join("\n"))
                 } else {
                     result.join("\n")
                 };
-                
+
                 return Ok(result_str);
             }
         }
-        
+
         Ok(content.to_string())
     }
-} 
+}

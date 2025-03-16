@@ -1,5 +1,5 @@
-use rumdl::rules::MD010NoHardTabs;
 use rumdl::rule::Rule;
+use rumdl::rules::MD010NoHardTabs;
 
 #[test]
 fn test_no_hard_tabs() {
@@ -16,9 +16,15 @@ fn test_leading_hard_tabs() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
-    assert_eq!(result[0].message, "Found 1 leading hard tab(s), use 4 spaces instead");
+    assert_eq!(
+        result[0].message,
+        "Found 1 leading hard tab(s), use 4 spaces instead"
+    );
     assert_eq!(result[1].line, 2);
-    assert_eq!(result[1].message, "Found 2 leading hard tab(s), use 8 spaces instead");
+    assert_eq!(
+        result[1].message,
+        "Found 2 leading hard tab(s), use 8 spaces instead"
+    );
 }
 
 #[test]
@@ -28,7 +34,10 @@ fn test_alignment_tabs() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 1);
-    assert_eq!(result[0].message, "Found 1 hard tab(s) for alignment, use spaces instead");
+    assert_eq!(
+        result[0].message,
+        "Found 1 hard tab(s) for alignment, use spaces instead"
+    );
 }
 
 #[test]
@@ -63,7 +72,10 @@ fn test_fix_with_code_blocks() {
     let rule = MD010NoHardTabs::new(2, false); // 2 spaces per tab, preserve code blocks
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "  Indented line\n```\n\tCode\n```\n    Double indented");
+    assert_eq!(
+        fixed,
+        "  Indented line\n```\n\tCode\n```\n    Double indented"
+    );
 }
 
 #[test]
@@ -71,7 +83,10 @@ fn test_fix_without_code_blocks() {
     let rule = MD010NoHardTabs::new(2, true); // 2 spaces per tab, fix code blocks
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "  Indented line\n```\n  Code\n```\n    Double indented");
+    assert_eq!(
+        fixed,
+        "  Indented line\n```\n  Code\n```\n    Double indented"
+    );
 }
 
 #[test]
@@ -82,4 +97,4 @@ fn test_mixed_indentation() {
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 2);
     assert_eq!(result[1].line, 3);
-} 
+}

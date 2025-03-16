@@ -1,5 +1,5 @@
-use rumdl::rules::MD040FencedCodeLanguage;
 use rumdl::rule::Rule;
+use rumdl::rules::MD040FencedCodeLanguage;
 
 #[test]
 fn test_valid_code_blocks() {
@@ -26,7 +26,10 @@ fn test_multiple_code_blocks() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "```rust\nfn main() {}\n```\n```text\nsome code\n```\n```python\nprint('hello')\n```");
+    assert_eq!(
+        fixed,
+        "```rust\nfn main() {}\n```\n```text\nsome code\n```\n```python\nprint('hello')\n```"
+    );
 }
 
 #[test]
@@ -67,4 +70,4 @@ fn test_preserve_whitespace() {
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "```text\nsome code\n```");
-} 
+}

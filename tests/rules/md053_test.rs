@@ -1,5 +1,5 @@
-use rumdl::rules::MD053LinkImageReferenceDefinitions;
 use rumdl::rule::Rule;
+use rumdl::rules::MD053LinkImageReferenceDefinitions;
 
 #[test]
 fn test_all_references_used() {
@@ -78,7 +78,10 @@ fn test_mixed_used_unused_references() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "[link][used]\nSome text\n\n[used]: http://example.com/used");
+    assert_eq!(
+        fixed,
+        "[link][used]\nSome text\n\n[used]: http://example.com/used"
+    );
 }
 
 #[test]
@@ -100,7 +103,8 @@ fn test_unused_reference_definition() {
 #[test]
 fn test_multiple_references() {
     let rule = MD053LinkImageReferenceDefinitions::new(vec![]);
-    let content = "[ref1]: https://example1.com\n[ref2]: https://example2.com\n[ref1] and [ref2] are links";
+    let content =
+        "[ref1]: https://example1.com\n[ref2]: https://example2.com\n[ref1] and [ref2] are links";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
 }
@@ -143,4 +147,4 @@ fn test_fix_unused_references() {
     let content = "[unused]: https://example.com\n[used]: https://example.com\n[used] is a link";
     let result = rule.fix(content).unwrap();
     assert!(!result.contains("[unused]"));
-} 
+}

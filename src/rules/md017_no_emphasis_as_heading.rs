@@ -1,11 +1,13 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     static ref SINGLE_EMPHASIS_PATTERN: Regex = Regex::new(r"^\s*[*_]([^*_\n]+)[*_]\s*$").unwrap();
-    static ref DOUBLE_EMPHASIS_PATTERN: Regex = Regex::new(r"^\s*(?:\*\*|__)([^*_\n]+)(?:\*\*|__)\s*$").unwrap();
+    static ref DOUBLE_EMPHASIS_PATTERN: Regex =
+        Regex::new(r"^\s*(?:\*\*|__)([^*_\n]+)(?:\*\*|__)\s*$").unwrap();
     static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s*)```").unwrap();
 }
 
@@ -16,7 +18,9 @@ pub struct MD017NoEmphasisAsHeading {
 
 impl Default for MD017NoEmphasisAsHeading {
     fn default() -> Self {
-        Self { allow_emphasis_headings: false }
+        Self {
+            allow_emphasis_headings: false,
+        }
     }
 }
 
@@ -26,7 +30,9 @@ impl MD017NoEmphasisAsHeading {
     }
 
     pub fn with_allow_emphasis_headings(allow_emphasis_headings: bool) -> Self {
-        Self { allow_emphasis_headings }
+        Self {
+            allow_emphasis_headings,
+        }
     }
 
     fn is_single_emphasis_heading(&self, line: &str) -> bool {
@@ -60,6 +66,8 @@ impl Rule for MD017NoEmphasisAsHeading {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         if self.allow_emphasis_headings {
             return Ok(Vec::new());
         }
@@ -81,7 +89,7 @@ impl Rule for MD017NoEmphasisAsHeading {
                         severity: Severity::Warning,
                         message: "Single emphasis should not be used as a heading".to_string(),
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, 1),
+                            range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                             replacement: self.fix_single_emphasis(line),
                         }),
                     });
@@ -92,7 +100,7 @@ impl Rule for MD017NoEmphasisAsHeading {
                         severity: Severity::Warning,
                         message: "Double emphasis should not be used as a heading".to_string(),
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, 1),
+                            range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                             replacement: self.fix_double_emphasis(line),
                         }),
                     });
@@ -104,6 +112,8 @@ impl Rule for MD017NoEmphasisAsHeading {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         if self.allow_emphasis_headings {
             return Ok(content.to_string());
         }
@@ -130,10 +140,11 @@ impl Rule for MD017NoEmphasisAsHeading {
         }
 
         // Remove trailing newline if the original content didn't have one
+
         if !content.ends_with('\n') {
             result.pop();
         }
 
         Ok(result)
     }
-} 
+}

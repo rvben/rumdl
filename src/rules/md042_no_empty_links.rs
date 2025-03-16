@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
@@ -23,7 +24,10 @@ impl Rule for MD042NoEmptyLinks {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let empty_link_regex = Regex::new(r"\[([^\]]*)\]\(([^\)]*)\)").unwrap();
 
         for (line_num, line) in content.lines().enumerate() {
@@ -39,7 +43,8 @@ impl Rule for MD042NoEmptyLinks {
                         column: full_match.start() + 1,
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, full_match.start() + 1),
+                            range: _line_index
+                                .line_col_to_byte_range(line_num + 1, full_match.start() + 1),
                             replacement: String::new(), // Remove empty link
                         }),
                     });
@@ -51,11 +56,14 @@ impl Rule for MD042NoEmptyLinks {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let empty_link_regex = Regex::new(r"\[([^\]]*)\]\(([^\)]*)\)").unwrap();
+
         let result = empty_link_regex.replace_all(content, |caps: &regex::Captures| {
             let text = caps.get(1).map_or("", |m| m.as_str());
             let url = caps.get(2).map_or("", |m| m.as_str());
-            
+
             if text.trim().is_empty() || url.trim().is_empty() {
                 String::new()
             } else {
@@ -65,4 +73,4 @@ impl Rule for MD042NoEmptyLinks {
 
         Ok(result.to_string())
     }
-} 
+}

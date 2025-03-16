@@ -1,8 +1,9 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
-use lazy_static::lazy_static;
 
 lazy_static! {
     static ref CODE_BLOCK_FENCE: Regex = Regex::new(r"^```").unwrap();
@@ -29,22 +30,19 @@ impl MD044ProperNames {
     fn is_code_block(&self, line: &str, in_code_block: bool) -> bool {
         in_code_block || INDENTED_CODE_BLOCK.is_match(line)
     }
-    
+
     // Create a regex-safe version of the name for word boundary matches
     fn create_safe_pattern(&self, name: &str) -> String {
         // Create variations of the name with and without dots
-        let variations = vec![
-            name.to_lowercase(),
-            name.to_lowercase().replace(".", "")
-        ];
-        
+        let variations = vec![name.to_lowercase(), name.to_lowercase().replace(".", "")];
+
         // Create a pattern that matches any of the variations with word boundaries
         let pattern = variations
             .iter()
             .map(|v| regex::escape(v))
             .collect::<Vec<_>>()
             .join("|");
-            
+
         format!(r"(?i)\b({})\b", pattern)
     }
 }
@@ -59,10 +57,12 @@ impl Rule for MD044ProperNames {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         if content.is_empty() || self.names.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let mut warnings = Vec::new();
         let mut in_code_block = false;
 
@@ -91,7 +91,8 @@ impl Rule for MD044ProperNames {
                             message: format!("Proper name '{}' should be '{}'", found_name, name),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_col_to_byte_range(content, line_num + 1, cap.start() + 1),
+                                range: _line_index
+                                    .line_col_to_byte_range(line_num + 1, cap.start() + 1),
                                 replacement: name.to_string(),
                             }),
                         });
@@ -104,17 +105,19 @@ impl Rule for MD044ProperNames {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         if content.is_empty() || self.names.is_empty() {
             return Ok(content.to_string());
         }
-        
+
         let lines: Vec<&str> = content.lines().collect();
         let mut new_lines = Vec::with_capacity(lines.len());
         let mut in_code_block = false;
 
         for line in lines {
             let mut current_line = line.to_string();
-            
+
             // Handle code blocks
             if CODE_BLOCK_FENCE.is_match(line.trim_start()) {
                 in_code_block = !in_code_block;
@@ -133,10 +136,10 @@ impl Rule for MD044ProperNames {
                 let re = Regex::new(&pattern).unwrap();
                 current_line = re.replace_all(&current_line, name.as_str()).to_string();
             }
-            
+
             new_lines.push(current_line);
         }
 
         Ok(new_lines.join("\n"))
     }
-} 
+}

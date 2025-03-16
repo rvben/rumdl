@@ -1,5 +1,5 @@
-use rumdl::rules::MD038NoSpaceInCode;
 use rumdl::rule::Rule;
+use rumdl::rules::MD038NoSpaceInCode;
 
 #[test]
 fn test_valid_code_spans() {
@@ -77,4 +77,4 @@ fn test_code_with_punctuation() {
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "`code!` and `code?` here");
-} 
+}

@@ -1,5 +1,5 @@
-use rumdl::rules::MD041FirstLineHeading;
 use rumdl::rule::Rule;
+use rumdl::rules::MD041FirstLineHeading;
 
 #[test]
 fn test_valid_first_line_heading() {
@@ -57,4 +57,4 @@ fn test_custom_level() {
     let result = rule.check(content).unwrap();
     println!("Custom level test result: {:?}", result);
     assert!(result.is_empty());
-} 
+}

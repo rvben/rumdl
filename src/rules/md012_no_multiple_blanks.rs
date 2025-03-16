@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug)]
@@ -34,6 +35,7 @@ impl MD012NoMultipleBlanks {
         if current_line == 0 {
             return lines[0].trim() == "---";
         }
+
         let mut dashes = 0;
         for (i, line) in lines.iter().take(current_line + 1).enumerate() {
             if line.trim() == "---" {
@@ -57,14 +59,21 @@ impl Rule for MD012NoMultipleBlanks {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let mut blank_count = 0;
+
         let mut blank_start = 0;
+
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, &line) in lines.iter().enumerate() {
             // Skip code blocks and front matter
-            if Self::is_in_code_block(&lines, line_num) || Self::is_in_front_matter(&lines, line_num) {
+            if Self::is_in_code_block(&lines, line_num)
+                || Self::is_in_front_matter(&lines, line_num)
+            {
                 continue;
             }
 
@@ -81,15 +90,15 @@ impl Rule for MD012NoMultipleBlanks {
                         "between content"
                     };
                     warnings.push(LintWarning {
-        severity: Severity::Warning,
-        message: format!(
+                        severity: Severity::Warning,
+                        message: format!(
                             "Multiple consecutive blank lines {} ({} > {})",
                             location, blank_count, self.maximum
                         ),
                         line: blank_start + 1,
                         column: 1,
                         fix: Some(Fix {
-            range: line_col_to_byte_range(content, blank_start + 1, 1),
+                            range: _line_index.line_col_to_byte_range(blank_start + 1, 1),
                             replacement: "\n".repeat(self.maximum),
                         }),
                     });
@@ -101,15 +110,15 @@ impl Rule for MD012NoMultipleBlanks {
         // Check for trailing blank lines
         if blank_count > self.maximum {
             warnings.push(LintWarning {
-        severity: Severity::Warning,
-        message: format!(
+                severity: Severity::Warning,
+                message: format!(
                     "Multiple consecutive blank lines at end of file ({} > {})",
                     blank_count, self.maximum
                 ),
                 line: blank_start + 1,
                 column: 1,
                 fix: Some(Fix {
-            range: line_col_to_byte_range(content, blank_start + 1, 1),
+                    range: _line_index.line_col_to_byte_range(blank_start + 1, 1),
                     replacement: "\n".repeat(self.maximum),
                 }),
             });
@@ -119,11 +128,18 @@ impl Rule for MD012NoMultipleBlanks {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = Vec::new();
+
         let mut blank_count = 0;
+
         let lines: Vec<&str> = content.lines().collect();
+
         let mut in_code_block = false;
+
         let mut in_front_matter = false;
+
         let mut code_block_blanks = Vec::new();
 
         for (_i, &line) in lines.iter().enumerate() {
@@ -190,6 +206,7 @@ impl Rule for MD012NoMultipleBlanks {
         }
 
         // Join lines and handle final newline
+
         let mut output = result.join("\n");
         if content.ends_with('\n') {
             output.push('\n');
@@ -197,4 +214,4 @@ impl Rule for MD012NoMultipleBlanks {
 
         Ok(output)
     }
-} 
+}

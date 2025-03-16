@@ -1,5 +1,5 @@
-use rumdl::rules::MD035HRStyle;
 use rumdl::rule::Rule;
+use rumdl::rules::MD035HRStyle;
 
 #[test]
 fn test_valid_hr_style() {
@@ -51,4 +51,4 @@ fn test_spaced_hr() {
     assert!(!result.is_empty());
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "Some text\n\n---\n\nMore text");
-} 
+}

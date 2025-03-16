@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -9,102 +10,39 @@ lazy_static! {
     static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r"\[.*?\]\((?P<url>.*?)\)").unwrap();
     static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r"<(?:https?|ftp)://[^>]+>").unwrap();
     static ref CODE_FENCE_PATTERN: Regex = Regex::new(r"^(?:\s*)(?:```|~~~)").unwrap();
+    static ref HTML_BLOCK_START: Regex = Regex::new(r"^<\w+>").unwrap();
+    static ref HTML_BLOCK_END: Regex = Regex::new(r"^</\w+>").unwrap();
+    static ref URL_REGEX: Regex = Regex::new(r"(?:https?|ftp)://[^\s<>\[\]()']+[^\s<>\[\]()'.,]").unwrap();
+    static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(?:\s*)(?:```|~~~)").unwrap();
 }
 
 #[derive(Debug, Default)]
 pub struct MD034NoBareUrls;
 
 impl MD034NoBareUrls {
-    // Pre-compute code blocks to avoid repetitive processing
-    fn precompute_code_blocks(&self, content: &str) -> Vec<bool> {
-        let lines: Vec<&str> = content.lines().collect();
-        let mut in_code_block = false;
-        let mut code_block_map = vec![false; lines.len()];
-        
-        for (i, line) in lines.iter().enumerate() {
-            if CODE_FENCE_PATTERN.is_match(line) {
-                in_code_block = !in_code_block;
-            }
-            code_block_map[i] = in_code_block;
-        }
-        
-        code_block_map
-    }
-
     // Optimized inline code detection
     fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
         if !line.contains('`') {
             return Vec::new();
         }
-        
+
         let mut spans = Vec::new();
         let mut in_code = false;
         let mut code_start = 0;
-        
+
         for (i, c) in line.chars().enumerate() {
             if c == '`' {
                 if !in_code {
                     code_start = i;
                     in_code = true;
                 } else {
-                    spans.push((code_start, i));
+                    spans.push((code_start, i + 1)); // Include the closing backtick
                     in_code = false;
                 }
             }
         }
-        
-        spans
-    }
-    
-    // Check if position is within a code span
-    fn is_in_inline_code(&self, code_spans: &[(usize, usize)], position: usize) -> bool {
-        code_spans.iter().any(|(start, end)| position >= *start && position < *end)
-    }
-    
-    // Optimized link detection with cached regex
-    fn compute_markdown_link_spans(&self, line: &str) -> Vec<(usize, usize)> {
-        if !line.contains('[') && !line.contains('<') {
-            return Vec::new();
-        }
-        
-        let mut spans = Vec::new();
-        
-        // Check for standard markdown links: [text](url)
-        for cap in MARKDOWN_LINK_PATTERN.captures_iter(line) {
-            if let Some(url_match) = cap.name("url") {
-                spans.push((url_match.start(), url_match.end()));
-            }
-        }
-        
-        // Check for angle-bracket enclosed URLs: <http://example.com>
-        for cap in ANGLE_LINK_PATTERN.find_iter(line) {
-            spans.push((cap.start(), cap.end()));
-        }
-        
-        spans
-    }
 
-    // Optimized URL finding with pre-computed regions to avoid
-    fn find_bare_urls(&self, line: &str, code_spans: &[(usize, usize)], link_spans: &[(usize, usize)]) -> Vec<(usize, String)> {
-        // Early return if no URL protocol identifier in line
-        if !line.contains("http") && !line.contains("ftp") {
-            return Vec::new();
-        }
-        
-        let mut urls = Vec::new();
-        
-        for cap in URL_PATTERN.find_iter(line) {
-            let url = cap.as_str();
-            let position = cap.start();
-            
-            // Skip URLs that are in inline code or markdown links
-            if !self.is_in_inline_code(code_spans, position) && 
-               !link_spans.iter().any(|(start, end)| position >= *start && position < *end) {
-                urls.push((position, url.to_string()));
-            }
-        }
-
-        urls
+        spans
     }
 }
 
@@ -118,44 +56,84 @@ impl Rule for MD034NoBareUrls {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        // Early return for empty content or content without URLs
-        if content.is_empty() || (!content.contains("http") && !content.contains("ftp")) {
-            return Ok(vec![]);
+        let line_index = LineIndex::new(content.to_string());
+        // Fast path for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
         }
-        
+
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
-        // Pre-compute code block regions
-        let code_block_map = self.precompute_code_blocks(content);
+        let mut in_code_block = false;
+        let mut in_html_block = false;
 
         for (i, line) in lines.iter().enumerate() {
-            // Skip lines without URLs
-            if !line.contains("http") && !line.contains("ftp") {
+            // Skip code blocks and HTML blocks
+            if CODE_FENCE_REGEX.is_match(line) {
+                in_code_block = !in_code_block;
                 continue;
             }
-            
-            // Skip code blocks
-            if code_block_map[i] {
+
+            if HTML_BLOCK_START.is_match(line) {
+                in_html_block = true;
                 continue;
             }
-            
-            // Compute code spans and link spans once per line
-            let code_spans = self.compute_inline_code_spans(line);
-            let link_spans = self.compute_markdown_link_spans(line);
-            
-            // Find bare URLs
-            for (col, url) in self.find_bare_urls(line, &code_spans, &link_spans) {
-                warnings.push(LintWarning {
-                    line: i + 1,
-                    column: col,
-                    message: format!("Bare URL should be enclosed in angle brackets or as a proper Markdown link: {}", url),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_col_to_byte_range(content, i + 1, col),
-                        replacement: format!("<{}>", url),
-                    }),
-                });
+
+            if in_html_block && HTML_BLOCK_END.is_match(line) {
+                in_html_block = false;
+                continue;
+            }
+
+            if in_code_block || in_html_block {
+                continue;
+            }
+
+            // Find inline code blocks first
+            let inline_code_spans = self.compute_inline_code_spans(line);
+
+            // Find URLs that are not in links or inline code
+            let mut last_end = 0;
+            while let Some(m) = URL_REGEX.find_at(line, last_end) {
+                let url_start = m.start();
+                let url_end = m.end();
+                let url = &line[url_start..url_end];
+                last_end = url_end;
+
+                // Skip URLs in inline code blocks
+                if inline_code_spans
+                    .iter()
+                    .any(|(start, end)| url_start >= *start && url_end <= *end)
+                {
+                    continue;
+                }
+
+                // Check if this URL is part of a link
+                let mut in_link = false;
+                let start_of_line = &line[..url_start];
+                let end_of_line = &line[url_end..];
+
+                // Check for Markdown link syntax: [text](url)
+                if start_of_line.ends_with("](") && end_of_line.starts_with(")") {
+                    in_link = true;
+                }
+
+                // Check for auto-link syntax: <url>
+                if start_of_line.ends_with("<") && end_of_line.starts_with(">") {
+                    in_link = true;
+                }
+
+                if !in_link {
+                    warnings.push(LintWarning {
+                        line: i + 1,
+                        column: url_start + 1,
+                        severity: Severity::Warning,
+                        message: format!("URL '{}' should be enclosed in angle brackets", url),
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(i + 1, url_start + 1),
+                            replacement: format!("<{}>", url),
+                        }),
+                    });
+                }
             }
         }
 
@@ -167,45 +145,103 @@ impl Rule for MD034NoBareUrls {
         if content.is_empty() || (!content.contains("http") && !content.contains("ftp")) {
             return Ok(content.to_string());
         }
-        
-        let lines: Vec<&str> = content.lines().collect();
-        let mut result = String::with_capacity(content.len() + 100); // Allocate extra space for angle brackets
-        
-        // Pre-compute code block regions
-        let code_block_map = self.precompute_code_blocks(content);
 
-        for (i, line) in lines.iter().enumerate() {
-            // Skip processing for lines without URLs
-            if !line.contains("http") && !line.contains("ftp") {
+        let mut result = String::new();
+        let lines: Vec<&str> = content.lines().collect();
+        let mut in_code_block = false;
+        let mut in_html_block = false;
+
+        for line in &lines {
+            // Handle code blocks and HTML blocks
+            if CODE_FENCE_REGEX.is_match(line) {
+                in_code_block = !in_code_block;
                 result.push_str(line);
-                if i < lines.len() - 1 {
-                    result.push('\n');
-                }
+                result.push('\n');
                 continue;
             }
-            
-            let mut fixed_line = line.to_string();
-            
-            if !code_block_map[i] {
-                // Compute code spans and link spans once per line
-                let code_spans = self.compute_inline_code_spans(line);
-                let link_spans = self.compute_markdown_link_spans(line);
-                
-                // Find and fix bare URLs (process from right to left to maintain correct indices)
-                let mut urls = self.find_bare_urls(line, &code_spans, &link_spans);
-                urls.reverse();
-                
-                for (col, url) in urls {
-                    fixed_line.replace_range(col..col + url.len(), &format!("<{}>", url));
-                }
-            }
-            
-            result.push_str(&fixed_line);
-            if i < lines.len() - 1 {
+
+            if HTML_BLOCK_START.is_match(line) {
+                in_html_block = true;
+                result.push_str(line);
                 result.push('\n');
+                continue;
             }
+
+            if in_html_block && HTML_BLOCK_END.is_match(line) {
+                in_html_block = false;
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+
+            if in_code_block || in_html_block {
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+
+            // Find inline code blocks first
+            let inline_code_spans = self.compute_inline_code_spans(line);
+
+            // Fix bare URLs
+            let mut fixed_line = String::new();
+            let mut last_end = 0;
+
+            // Find and process all URLs in the line
+            while let Some(m) = URL_REGEX.find_at(line, last_end) {
+                let url_start = m.start();
+                let url_end = m.end();
+                let url = &line[url_start..url_end];
+
+                // Skip URLs in inline code blocks
+                if inline_code_spans
+                    .iter()
+                    .any(|(start, end)| url_start >= *start && url_end <= *end)
+                {
+                    // Add text up to the end of this URL
+                    fixed_line.push_str(&line[last_end..url_end]);
+                    last_end = url_end;
+                    continue;
+                }
+
+                // Add the text between the last match and this match
+                fixed_line.push_str(&line[last_end..url_start]);
+
+                // Check if this URL is part of a link
+                let mut in_link = false;
+                let start_part = &line[..url_start];
+                let end_part = &line[url_end..];
+
+                // Check for Markdown link syntax: [text](url)
+                if start_part.ends_with("](") && end_part.starts_with(")") {
+                    in_link = true;
+                }
+
+                // Check for auto-link syntax: <url>
+                if start_part.ends_with("<") && end_part.starts_with(">") {
+                    in_link = true;
+                }
+
+                if in_link {
+                    fixed_line.push_str(url);
+                } else {
+                    fixed_line.push_str(&format!("<{}>", url));
+                }
+
+                last_end = url_end;
+            }
+
+            // Add any remaining text
+            fixed_line.push_str(&line[last_end..]);
+            result.push_str(&fixed_line);
+            result.push('\n');
+        }
+
+        // Remove the trailing newline if the original content didn't have one
+        if !content.ends_with('\n') && result.ends_with('\n') {
+            result.pop();
         }
 
         Ok(result)
     }
-} 
+}

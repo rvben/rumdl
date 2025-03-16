@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::blockquote_utils::BlockquoteUtils;
 
@@ -15,11 +16,16 @@ impl Rule for MD027MultipleSpacesBlockquote {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let lines: Vec<&str> = content.lines().collect();
-        
+
         for (i, &line) in lines.iter().enumerate() {
-            if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::has_multiple_spaces_after_marker(line) {
+            if BlockquoteUtils::is_blockquote(line)
+                && BlockquoteUtils::has_multiple_spaces_after_marker(line)
+            {
                 let start_col = BlockquoteUtils::get_blockquote_start_col(line);
                 let actual_content = BlockquoteUtils::get_blockquote_content(line);
                 warnings.push(LintWarning {
@@ -28,29 +34,34 @@ impl Rule for MD027MultipleSpacesBlockquote {
                     message: "Multiple spaces after blockquote symbol".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, i + 1, start_col),
+                        range: _line_index.line_col_to_byte_range(i + 1, start_col),
                         replacement: format!("> {}", actual_content.trim_start()),
                     }),
                 });
             }
         }
-        
+
         Ok(warnings)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let lines: Vec<&str> = content.lines().collect();
+
         let mut result = Vec::with_capacity(lines.len());
-        
+
         for line in lines {
-            if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::has_multiple_spaces_after_marker(line) {
+            if BlockquoteUtils::is_blockquote(line)
+                && BlockquoteUtils::has_multiple_spaces_after_marker(line)
+            {
                 result.push(BlockquoteUtils::fix_blockquote_spacing(line));
             } else {
                 result.push(line.to_string());
             }
         }
-        
+
         // Preserve trailing newline if original content had one
         Ok(result.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
     }
-} 
+}

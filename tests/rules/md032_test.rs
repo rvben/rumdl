@@ -1,5 +1,5 @@
-use rumdl::rules::MD032BlanksAroundLists;
 use rumdl::rule::Rule;
+use rumdl::rules::MD032BlanksAroundLists;
 
 #[test]
 fn test_valid_lists() {
@@ -40,7 +40,10 @@ fn test_multiple_lists() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 4);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "Text\n\n* List 1\n* List 1\n\nText\n\n1. List 2\n2. List 2\n\nText");
+    assert_eq!(
+        fixed,
+        "Text\n\n* List 1\n* List 1\n\nText\n\n1. List 2\n2. List 2\n\nText"
+    );
 }
 
 #[test]
@@ -50,7 +53,10 @@ fn test_nested_lists() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "Text\n\n* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2\n\nText");
+    assert_eq!(
+        fixed,
+        "Text\n\n* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2\n\nText"
+    );
 }
 
 #[test]
@@ -60,7 +66,10 @@ fn test_mixed_list_types() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 4);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "Text\n\n* Unordered\n* List\n\nText\n\n1. Ordered\n2. List\n\nText");
+    assert_eq!(
+        fixed,
+        "Text\n\n* Unordered\n* List\n\nText\n\n1. Ordered\n2. List\n\nText"
+    );
 }
 
 #[test]
@@ -70,7 +79,10 @@ fn test_list_with_content() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "Text\n\n* Item 1\n  Content\n* Item 2\n  More content\n\nText");
+    assert_eq!(
+        fixed,
+        "Text\n\n* Item 1\n  Content\n* Item 2\n  More content\n\nText"
+    );
 }
 
 #[test]
@@ -107,4 +119,4 @@ fn test_list_with_blank_lines() {
     let content = "Text\n\n* Item 1\n\n* Item 2\n\nText";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-} 
+}

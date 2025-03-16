@@ -5,10 +5,10 @@ use pyo3::prelude::*;
 fn rumdl(_py: Python, m: &PyModule) -> PyResult<()> {
     // Add version
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
-    
+
     // Add a function to check a file
     m.add_function(wrap_pyfunction!(check_file, m)?)?;
-    
+
     Ok(())
 }
 
@@ -21,10 +21,11 @@ fn check_file(file_path: &str) -> PyResult<i32> {
         .arg(file_path)
         .status()
         .map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("Failed to execute rumdl: {}", e)
-            )
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to execute rumdl: {}",
+                e
+            ))
         })?;
-    
+
     Ok(status.code().unwrap_or(1))
-} 
+}

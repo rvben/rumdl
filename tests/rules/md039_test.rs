@@ -1,5 +1,5 @@
-use rumdl::rules::MD039NoSpaceInLinks;
 use rumdl::rule::Rule;
+use rumdl::rules::MD039NoSpaceInLinks;
 
 #[test]
 fn test_valid_links() {
@@ -77,4 +77,4 @@ fn test_link_with_punctuation() {
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "[link!](url) and [link?](url) here");
-} 
+}

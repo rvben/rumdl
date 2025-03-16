@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
 use std::collections::HashSet;
@@ -37,10 +38,16 @@ impl Rule for MD024NoDuplicateHeading {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let mut seen_headings = HashSet::new();
+
         let mut current_level = 0;
+
         let mut current_siblings = HashSet::new();
+
         let mut level_siblings = Vec::new();
 
         for (line_num, line) in content.lines().enumerate() {
@@ -68,7 +75,7 @@ impl Rule for MD024NoDuplicateHeading {
                             message: "Multiple headings with the same content at the same nesting level".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
+                                range: line_index.line_col_to_byte_range(line_num + 1, indentation + 1),
                                 replacement: format!("{}{} {} ({})",
                                     " ".repeat(indentation),
                                     "#".repeat(heading.level),
@@ -87,7 +94,7 @@ impl Rule for MD024NoDuplicateHeading {
                             message: "Multiple headings with the same content".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_col_to_byte_range(content, line_num + 1, indentation + 1),
+                                range: line_index.line_col_to_byte_range(line_num + 1, indentation + 1),
                                 replacement: format!("{}{} {} ({})",
                                     " ".repeat(indentation),
                                     "#".repeat(heading.level),
@@ -105,10 +112,16 @@ impl Rule for MD024NoDuplicateHeading {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
+
         let mut seen_headings = HashSet::new();
+
         let mut current_level = 0;
+
         let mut current_siblings = HashSet::new();
+
         let mut level_siblings = Vec::new();
 
         for line in content.lines() {

@@ -1,10 +1,12 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
-    static ref CLOSED_ATX_MULTIPLE_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)(#+)(\s+)(.*?)(\s+)(#+)\s*$").unwrap();
+    static ref CLOSED_ATX_MULTIPLE_SPACE_PATTERN: Regex =
+        Regex::new(r"^(\s*)(#+)(\s+)(.*?)(\s+)(#+)\s*$").unwrap();
     static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s*)```").unwrap();
 }
 
@@ -32,7 +34,13 @@ impl MD021NoMultipleSpaceClosedAtx {
             let opening_hashes = &captures[2];
             let content = &captures[4];
             let closing_hashes = &captures[6];
-            format!("{}{} {} {}", indentation, opening_hashes, content.trim(), closing_hashes)
+            format!(
+                "{}{} {} {}",
+                indentation,
+                opening_hashes,
+                content.trim(),
+                closing_hashes
+            )
         } else {
             line.to_string()
         }
@@ -59,7 +67,10 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let mut in_code_block = false;
 
         for (line_num, line) in content.lines().enumerate() {
@@ -99,7 +110,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                     column: indentation.end() + 1,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, line_num + 1, 1),
+                        range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                         replacement: self.fix_closed_atx_heading(line),
                     }),
                 });
@@ -110,7 +121,10 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
+
         let mut in_code_block = false;
 
         for line in content.lines() {
@@ -132,4 +146,4 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
 
         Ok(result)
     }
-} 
+}

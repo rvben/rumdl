@@ -1,5 +1,5 @@
-use rumdl::rules::MD001HeadingIncrement;
 use rumdl::rule::Rule;
+use rumdl::rules::MD001HeadingIncrement;
 
 #[test]
 pub fn test_md001_valid() {
@@ -16,7 +16,10 @@ pub fn test_md001_invalid() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].message, "Heading level should be 2 for this level");
+    assert_eq!(
+        result[0].message,
+        "Heading level should be 2 for this level"
+    );
 }
 
 #[test]
@@ -58,4 +61,4 @@ pub fn test_md001_atx_and_setext() {
     let content = "# Heading 1\nHeading 2\n---------\n### Heading 3\n";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-} 
+}

@@ -1,5 +1,5 @@
-use rumdl::rules::MD047FileEndNewline;
 use rumdl::rule::Rule;
+use rumdl::rules::MD047FileEndNewline;
 
 #[test]
 fn test_valid_file_end_newline() {
@@ -31,4 +31,4 @@ fn test_fix_file_end_newline() {
     let content = "Some text\nMore text";
     let result = rule.fix(content).unwrap();
     assert_eq!(result, "Some text\nMore text\n");
-} 
+}

@@ -1,5 +1,5 @@
-use rumdl::rules::MD042NoEmptyLinks;
 use rumdl::rule::Rule;
+use rumdl::rules::MD042NoEmptyLinks;
 
 #[test]
 fn test_valid_links() {
@@ -66,5 +66,8 @@ fn test_mixed_valid_and_empty_links() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "[Valid](https://example.com) and  and [Another](./path)");
-} 
+    assert_eq!(
+        fixed,
+        "[Valid](https://example.com) and  and [Another](./path)"
+    );
+}

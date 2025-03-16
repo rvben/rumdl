@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 /// Rule MD048: Code fence style should be consistent
@@ -41,9 +42,14 @@ impl Rule for MD048CodeFenceStyle {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let target_style = match self.style {
-            CodeFenceStyle::Consistent => self.detect_style(content).unwrap_or(CodeFenceStyle::Backtick),
+            CodeFenceStyle::Consistent => self
+                .detect_style(content)
+                .unwrap_or(CodeFenceStyle::Backtick),
             _ => self.style.clone(),
         };
 
@@ -56,7 +62,8 @@ impl Rule for MD048CodeFenceStyle {
                     column: line.len() - trimmed.len() + 1,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, line_num + 1, line.len() - trimmed.len() + 1),
+                        range: _line_index
+                            .line_col_to_byte_range(line_num + 1, line.len() - trimmed.len() + 1),
                         replacement: line.replace("```", "~~~"),
                     }),
                 });
@@ -67,7 +74,8 @@ impl Rule for MD048CodeFenceStyle {
                     column: line.len() - trimmed.len() + 1,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, line_num + 1, line.len() - trimmed.len() + 1),
+                        range: _line_index
+                            .line_col_to_byte_range(line_num + 1, line.len() - trimmed.len() + 1),
                         replacement: line.replace("~~~", "```"),
                     }),
                 });
@@ -78,8 +86,12 @@ impl Rule for MD048CodeFenceStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let target_style = match self.style {
-            CodeFenceStyle::Consistent => self.detect_style(content).unwrap_or(CodeFenceStyle::Backtick),
+            CodeFenceStyle::Consistent => self
+                .detect_style(content)
+                .unwrap_or(CodeFenceStyle::Backtick),
             _ => self.style.clone(),
         };
 

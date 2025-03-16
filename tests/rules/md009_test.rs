@@ -1,5 +1,5 @@
-use rumdl::rules::MD009TrailingSpaces;
 use rumdl::rule::Rule;
+use rumdl::rules::MD009TrailingSpaces;
 
 #[test]
 fn test_md009_valid() {
@@ -26,7 +26,10 @@ fn test_md009_empty_lines() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].message, "Empty line should not have trailing spaces");
+    assert_eq!(
+        result[0].message,
+        "Empty line should not have trailing spaces"
+    );
 }
 
 #[test]
@@ -83,4 +86,4 @@ fn test_md009_fix_strict() {
         result,
         "Line with spaces\nAnother line\nNo spaces\n\n```\nCode\n```\n"
     );
-} 
+}

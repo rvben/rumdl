@@ -47,8 +47,8 @@ impl Rule for MD003HeadingStyle {
                         } else {
                             false
                         }
-                    },
-                    _ => heading.style != self.style
+                    }
+                    _ => heading.style != self.style,
                 };
 
                 if should_check {
@@ -86,7 +86,7 @@ impl Rule for MD003HeadingStyle {
         // Process each line
         while i < lines.len() {
             let line = lines[i];
-            
+
             // Handle front matter
             if i == 0 && line.trim() == "---" {
                 in_front_matter = true;
@@ -94,7 +94,7 @@ impl Rule for MD003HeadingStyle {
                 i += 1;
                 continue;
             }
-            
+
             if in_front_matter {
                 fixed_lines.push(line.to_string());
                 if line.trim() == "---" {
@@ -103,31 +103,34 @@ impl Rule for MD003HeadingStyle {
                 i += 1;
                 continue;
             }
-            
+
             // Preserve blank lines
             if line.trim().is_empty() {
                 fixed_lines.push(line.to_string());
                 i += 1;
                 continue;
             }
-            
+
             let indentation = HeadingUtils::get_indentation(line);
 
             // Check if current line is a heading
             if let Some(heading) = HeadingUtils::parse_heading(content, i) {
-                if matches!(target_style, HeadingStyle::Setext1 | HeadingStyle::Setext2) 
-                    && heading.level <= 2 {
+                if matches!(target_style, HeadingStyle::Setext1 | HeadingStyle::Setext2)
+                    && heading.level <= 2
+                {
                     // For setext headings
                     let text = heading.text.trim();
                     let underline_char = if heading.level == 1 { '=' } else { '-' };
-                    let underline = underline_char.to_string().repeat(text.chars().count().max(3));
-                    
+                    let underline = underline_char
+                        .to_string()
+                        .repeat(text.chars().count().max(3));
+
                     // Add the heading text with indentation
                     fixed_lines.push(format!("{}{}", " ".repeat(indentation), text));
-                    
+
                     // Add the underline with same indentation
                     fixed_lines.push(format!("{}{}", " ".repeat(indentation), underline));
-                    
+
                     // Skip the underline for source setext headings
                     if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
                         i += 1;
@@ -146,10 +149,10 @@ impl Rule for MD003HeadingStyle {
                 // Not a heading, just copy the line
                 fixed_lines.push(line.to_string());
             }
-            
+
             i += 1;
         }
 
         Ok(fixed_lines.join("\n"))
     }
-} 
+}

@@ -1,28 +1,27 @@
-pub mod rule;
-pub mod rules;
-pub mod utils;
 pub mod config;
 pub mod init;
 pub mod profiling;
+pub mod rule;
+pub mod rules;
+pub mod utils;
 
 #[cfg(feature = "python")]
 pub mod python;
 
 // Re-export commonly used types
-pub use rules::heading_utils::{HeadingStyle, Heading};
+pub use rules::heading_utils::{Heading, HeadingStyle};
 pub use rules::*;
 
-
 /// Collect patterns from .gitignore files
-/// 
+///
 /// This function reads the closest .gitignore file and returns a list of patterns
 /// that can be used to exclude files from linting.
 pub fn collect_gitignore_patterns(start_dir: &str) -> Vec<String> {
-    use std::path::Path;
     use std::fs;
-    
+    use std::path::Path;
+
     let mut patterns = Vec::new();
-    
+
     // Start from the given directory and look for .gitignore files
     // going up to parent directories
     let path = Path::new(start_dir);
@@ -31,13 +30,13 @@ pub fn collect_gitignore_patterns(start_dir: &str) -> Vec<String> {
     } else {
         path.to_path_buf()
     };
-    
+
     // Track visited directories to avoid duplicates
     let mut visited_dirs = std::collections::HashSet::new();
-    
+
     while visited_dirs.insert(current_dir.clone()) {
         let gitignore_path = current_dir.join(".gitignore");
-        
+
         if gitignore_path.exists() && gitignore_path.is_file() {
             // Read the .gitignore file and process each pattern
             if let Ok(content) = fs::read_to_string(&gitignore_path) {
@@ -54,7 +53,7 @@ pub fn collect_gitignore_patterns(start_dir: &str) -> Vec<String> {
                 }
             }
         }
-        
+
         // Check for global gitignore in .git/info/exclude
         let git_dir = current_dir.join(".git");
         if git_dir.exists() && git_dir.is_dir() {
@@ -75,14 +74,14 @@ pub fn collect_gitignore_patterns(start_dir: &str) -> Vec<String> {
                 }
             }
         }
-        
+
         // Go up to parent directory
         match current_dir.parent() {
             Some(parent) => current_dir = parent.to_path_buf(),
             None => break,
         }
     }
-    
+
     // Add some common patterns that are usually in .gitignore files
     // but might not be in the specific project's .gitignore
     let common_patterns = vec![
@@ -95,43 +94,43 @@ pub fn collect_gitignore_patterns(start_dir: &str) -> Vec<String> {
         "build",
         "target",
     ];
-    
+
     for pattern in common_patterns {
         if !patterns.iter().any(|p| p == pattern) {
             patterns.push(pattern.to_string());
         }
     }
-    
+
     patterns
 }
 
 /// Normalize a gitignore pattern to fit our exclude format
-/// 
+///
 /// This function converts gitignore-style patterns to glob patterns
 /// that can be used with the `should_exclude` function.
 fn normalize_gitignore_pattern(pattern: &str) -> String {
     let mut normalized = pattern.trim().to_string();
-    
+
     // Remove leading slash (gitignore uses it for absolute paths)
     if normalized.starts_with('/') {
         normalized = normalized[1..].to_string();
     }
-    
+
     // Remove trailing slash (used in gitignore to specify directories)
     if normalized.ends_with('/') && normalized.len() > 1 {
         normalized = normalized[..normalized.len() - 1].to_string();
     }
-    
+
     // Handle negated patterns (we don't support them currently)
     if normalized.starts_with('!') {
         return String::new();
     }
-    
+
     // Convert ** pattern
     if normalized.contains("**") {
         return normalized;
     }
-    
+
     // Add trailing / for directories
     if !normalized.contains('/') && !normalized.contains('*') {
         // This could be either a file or directory name, treat it as both
@@ -174,7 +173,7 @@ pub fn should_exclude(file_path: &str, exclude_patterns: &[String]) -> bool {
                 if glob.matches(normalized_path) {
                     return true;
                 }
-            },
+            }
             Err(_) => {
                 // For invalid glob patterns, fall back to simple substring matching
                 if normalized_path.contains(normalized_pattern) {
@@ -183,19 +182,19 @@ pub fn should_exclude(file_path: &str, exclude_patterns: &[String]) -> bool {
             }
         }
     }
-    
+
     false
 }
 
 /// Lint a Markdown file
 pub fn lint(content: &str, rules: &[Box<dyn rule::Rule>]) -> rule::LintResult {
     let _timer = profiling::ScopedTimer::new("lint_total");
-    
+
     let mut warnings = Vec::new();
-    
+
     for rule in rules {
         let _rule_timer = profiling::ScopedTimer::new(&format!("rule:{}", rule.name()));
-        
+
         match rule.check(content) {
             Ok(rule_warnings) => {
                 warnings.extend(rule_warnings);
@@ -205,7 +204,7 @@ pub fn lint(content: &str, rules: &[Box<dyn rule::Rule>]) -> rule::LintResult {
             }
         }
     }
-    
+
     // Force profiling to be enabled in debug mode
     #[cfg(debug_assertions)]
     {
@@ -213,7 +212,7 @@ pub fn lint(content: &str, rules: &[Box<dyn rule::Rule>]) -> rule::LintResult {
             eprintln!("Found {} warnings", warnings.len());
         }
     }
-    
+
     Ok(warnings)
 }
 
@@ -225,4 +224,4 @@ pub fn get_profiling_report() -> String {
 /// Reset the profiling data
 pub fn reset_profiling() {
     profiling::reset()
-} 
+}

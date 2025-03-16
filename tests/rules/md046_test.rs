@@ -1,6 +1,6 @@
-use rumdl::rules::MD046CodeBlockStyle;
-use rumdl::rules::md046_code_block_style::CodeBlockStyle;
 use rumdl::rule::Rule;
+use rumdl::rules::md046_code_block_style::CodeBlockStyle;
+use rumdl::rules::MD046CodeBlockStyle;
 
 #[test]
 fn test_consistent_fenced_blocks() {
@@ -13,7 +13,8 @@ fn test_consistent_fenced_blocks() {
 #[test]
 fn test_consistent_indented_blocks() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
-    let content = "# Code blocks\n\n    code here\n    more code\n\n    another block\n    continues";
+    let content =
+        "# Code blocks\n\n    code here\n    more code\n\n    another block\n    continues";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
 }
@@ -26,8 +27,14 @@ fn test_mixed_blocks_prefer_fenced() {
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
-    assert!(fixed.contains("```\nfenced block\n```"), "Should preserve fenced blocks");
-    assert!(fixed.contains("```\nindented block"), "Should convert indented blocks to fenced");
+    assert!(
+        fixed.contains("```\nfenced block\n```"),
+        "Should preserve fenced blocks"
+    );
+    assert!(
+        fixed.contains("```\nindented block"),
+        "Should convert indented blocks to fenced"
+    );
 }
 
 #[test]
@@ -38,8 +45,14 @@ fn test_mixed_blocks_prefer_indented() {
     assert!(result.len() > 0, "Should detect inconsistent code blocks");
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
-    assert!(fixed.contains("    fenced block"), "Should convert fenced blocks to indented");
-    assert!(fixed.contains("    indented block"), "Should preserve indented blocks");
+    assert!(
+        fixed.contains("    fenced block"),
+        "Should convert fenced blocks to indented"
+    );
+    assert!(
+        fixed.contains("    indented block"),
+        "Should preserve indented blocks"
+    );
 }
 
 #[test]
@@ -50,8 +63,14 @@ fn test_consistent_style_fenced_first() {
     assert!(result.len() > 0, "Should detect inconsistent code blocks");
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
-    assert!(fixed.contains("```\nfenced block\n```"), "Should preserve fenced blocks");
-    assert!(fixed.contains("```\nindented block"), "Should convert indented blocks to fenced");
+    assert!(
+        fixed.contains("```\nfenced block\n```"),
+        "Should preserve fenced blocks"
+    );
+    assert!(
+        fixed.contains("```\nindented block"),
+        "Should convert indented blocks to fenced"
+    );
 }
 
 #[test]
@@ -62,8 +81,14 @@ fn test_consistent_style_indented_first() {
     assert!(result.len() > 0, "Should detect inconsistent code blocks");
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
-    assert!(fixed.contains("    indented block"), "Should preserve indented blocks");
-    assert!(fixed.contains("    fenced block"), "Should convert fenced blocks to indented");
+    assert!(
+        fixed.contains("    indented block"),
+        "Should preserve indented blocks"
+    );
+    assert!(
+        fixed.contains("    fenced block"),
+        "Should convert fenced blocks to indented"
+    );
 }
 
 #[test]
@@ -97,5 +122,8 @@ fn test_convert_indented_preserves_content() {
     let result = rule.check(content).unwrap();
     assert!(result.len() > 0, "Should detect indented code blocks");
     let fixed = rule.fix(content).unwrap();
-    assert!(fixed.contains("```\nlet x = 42;\nprintln!"), "Should convert indented to fenced and preserve content");
-} 
+    assert!(
+        fixed.contains("```\nlet x = 42;\nprintln!"),
+        "Should convert indented to fenced and preserve content"
+    );
+}

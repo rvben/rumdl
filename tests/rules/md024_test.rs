@@ -1,5 +1,5 @@
-use rumdl::rules::MD024MultipleHeadings;
 use rumdl::rule::Rule;
+use rumdl::rules::MD024MultipleHeadings;
 
 #[test]
 fn test_md024_valid() {
@@ -31,10 +31,14 @@ fn test_md024_different_levels_with_allow_different_nesting() {
     let rule = MD024MultipleHeadings::new(true);
     let content = "# Heading\n## Heading\n### Heading\n";
     let result = rule.check(content).unwrap();
-    
+
     // Since we're converting all headings to lowercase with the same content,
     // we should expect 2 warnings (one for each duplicate heading)
-    assert_eq!(result.len(), 2, "Expected 2 warnings for duplicated headings with allow_different_nesting=true");
+    assert_eq!(
+        result.len(),
+        2,
+        "Expected 2 warnings for duplicated headings with allow_different_nesting=true"
+    );
     assert_eq!(result[0].line, 2);
     assert_eq!(result[1].line, 3);
 }
@@ -126,19 +130,22 @@ fn test_md024_with_trailing_whitespace() {
 #[test]
 fn test_md024_performance_with_many_headings() {
     let rule = MD024MultipleHeadings::default();
-    
+
     // Create a document with 100 unique headings
     let mut content = String::new();
     for i in 1..=100 {
         content.push_str(&format!("# Heading {}\n\n", i));
     }
-    
+
     let start = std::time::Instant::now();
     let result = rule.check(&content).unwrap();
     let duration = start.elapsed();
-    
+
     assert!(result.is_empty());
-    assert!(duration.as_millis() < 100, "Checking 100 unique headings should take less than 100ms");
+    assert!(
+        duration.as_millis() < 100,
+        "Checking 100 unique headings should take less than 100ms"
+    );
 }
 
 #[test]

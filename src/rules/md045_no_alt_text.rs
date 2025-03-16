@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
@@ -23,7 +24,10 @@ impl Rule for MD045NoAltText {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let image_regex = Regex::new(r"!\[([^\]]*)\](\([^)]+\))").unwrap();
 
         for (line_num, line) in content.lines().enumerate() {
@@ -38,8 +42,12 @@ impl Rule for MD045NoAltText {
                         message: "Image should have alternate text".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, full_match.start() + 1),
-                            replacement: format!("![Image description]{}", &line[full_match.start() + 2..full_match.end()]),
+                            range: _line_index
+                                .line_col_to_byte_range(line_num + 1, full_match.start() + 1),
+                            replacement: format!(
+                                "![Image description]{}",
+                                &line[full_match.start() + 2..full_match.end()]
+                            ),
                         }),
                     });
                 }
@@ -50,12 +58,14 @@ impl Rule for MD045NoAltText {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let image_regex = Regex::new(r"!\[([^\]]*)\](\([^)]+\))").unwrap();
-        
+
         let result = image_regex.replace_all(content, |caps: &regex::Captures| {
             let alt_text = caps.get(1).map_or("", |m| m.as_str());
             let _url_part = caps.get(2).map_or("", |m| m.as_str());
-            
+
             if alt_text.trim().is_empty() {
                 format!("![Image description]{}", _url_part)
             } else {
@@ -65,4 +75,4 @@ impl Rule for MD045NoAltText {
 
         Ok(result.to_string())
     }
-} 
+}

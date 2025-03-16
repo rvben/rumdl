@@ -1,8 +1,8 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
 use std::io;
+use std::path::Path;
 
 /// Represents a rule-specific configuration
 #[derive(Debug, Deserialize, Default)]
@@ -18,7 +18,7 @@ pub struct Config {
     /// Global configuration options
     #[serde(default)]
     pub global: GlobalConfig,
-    
+
     /// Rule-specific configurations
     #[serde(flatten)]
     pub rules: HashMap<String, RuleConfig>,
@@ -30,15 +30,15 @@ pub struct GlobalConfig {
     /// List of rules to disable
     #[serde(default)]
     pub disable: Vec<String>,
-    
+
     /// List of rules to enable exclusively (if provided, only these rules will run)
     #[serde(default)]
     pub enable: Vec<String>,
-    
+
     /// List of file/directory patterns to exclude from linting
     #[serde(default)]
     pub exclude: Vec<String>,
-    
+
     /// Whether to respect .gitignore files
     #[serde(default)]
     pub respect_gitignore: bool,
@@ -50,7 +50,7 @@ pub fn load_config(config_path: Option<&str>) -> Result<Config, ConfigError> {
     if let Some(path) = config_path {
         return load_config_from_file(path);
     }
-    
+
     // Otherwise, look for default config files in standard locations
     for filename in ["rumdl.toml", ".rumdl.toml"] {
         // Try in current directory
@@ -58,7 +58,7 @@ pub fn load_config(config_path: Option<&str>) -> Result<Config, ConfigError> {
             return load_config_from_file(filename);
         }
     }
-    
+
     // No config file found, return default config
     Ok(Config::default())
 }
@@ -70,7 +70,10 @@ fn load_config_from_file(path: &str) -> Result<Config, ConfigError> {
             let config: Config = toml::from_str(&content)?;
             Ok(config)
         }
-        Err(err) => Err(ConfigError::IoError { source: err, path: path.to_string() }),
+        Err(err) => Err(ConfigError::IoError {
+            source: err,
+            path: path.to_string(),
+        }),
     }
 }
 
@@ -78,9 +81,11 @@ fn load_config_from_file(path: &str) -> Result<Config, ConfigError> {
 pub fn create_default_config(path: &str) -> Result<(), ConfigError> {
     // Check if file already exists
     if Path::new(path).exists() {
-        return Err(ConfigError::FileExists { path: path.to_string() });
+        return Err(ConfigError::FileExists {
+            path: path.to_string(),
+        });
     }
-    
+
     // Default configuration content
     let default_config = r#"# rumdl configuration file
 
@@ -135,7 +140,10 @@ respect_gitignore = true
     // Write the default configuration to the file
     match fs::write(path, default_config) {
         Ok(_) => Ok(()),
-        Err(err) => Err(ConfigError::IoError { source: err, path: path.to_string() }),
+        Err(err) => Err(ConfigError::IoError {
+            source: err,
+            path: path.to_string(),
+        }),
     }
 }
 
@@ -144,20 +152,15 @@ respect_gitignore = true
 pub enum ConfigError {
     /// Failed to read the configuration file
     #[error("Failed to read config file at {path}: {source}")]
-    IoError {
-        source: io::Error,
-        path: String,
-    },
-    
+    IoError { source: io::Error, path: String },
+
     /// Failed to parse the TOML content
     #[error("Failed to parse TOML: {0}")]
     ParseError(#[from] toml::de::Error),
-    
+
     /// Configuration file already exists
     #[error("Configuration file already exists at {path}")]
-    FileExists {
-        path: String,
-    },
+    FileExists { path: String },
 }
 
 /// Get a rule-specific configuration value
@@ -171,4 +174,4 @@ pub fn get_rule_config_value<T: serde::de::DeserializeOwned>(
         .get(rule_name)
         .and_then(|rule_config| rule_config.values.get(key))
         .and_then(|value| T::deserialize(value.clone()).ok())
-} 
+}

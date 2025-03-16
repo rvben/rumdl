@@ -1,5 +1,5 @@
-use rumdl::rules::MD013LineLength;
 use rumdl::rule::Rule;
+use rumdl::rules::MD013LineLength;
 
 #[test]
 fn test_valid_line_length() {
@@ -38,7 +38,8 @@ fn test_tables() {
 #[test]
 fn test_headings() {
     let rule = MD013LineLength::new(20, true, true, false, false);
-    let content = "# This is a very long heading that exceeds the line length limit\nThis is a normal line.";
+    let content =
+        "# This is a very long heading that exceeds the line length limit\nThis is a normal line.";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1); // Only normal line should be flagged
     assert_eq!(result[0].line, 2);
@@ -80,7 +81,8 @@ fn test_image_ref_exceptions() {
 #[test]
 fn test_link_ref_exceptions() {
     let rule = MD013LineLength::new(20, true, true, true, false);
-    let content = "[reference]: https://very-long-url-that-exceeds-length.com/path/to/resource\nNormal text.";
+    let content =
+        "[reference]: https://very-long-url-that-exceeds-length.com/path/to/resource\nNormal text.";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0); // Link reference should be ignored
 }
@@ -96,7 +98,8 @@ fn test_code_block_string_exceptions() {
 #[test]
 fn test_setext_headings() {
     let rule = MD013LineLength::new(20, true, true, false, false);
-    let content = "This is a very long setext heading\n==========================\nThis is a normal line.";
+    let content =
+        "This is a very long setext heading\n==========================\nThis is a normal line.";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1); // Only normal line should be flagged
     assert_eq!(result[0].line, 3);
@@ -108,4 +111,4 @@ fn test_table_alignment() {
     let content = "| Left | Center | Right |\n|:-----|:------:|------:|\n| Long cell content | More content | Content |";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty()); // Table should be ignored
-} 
+}

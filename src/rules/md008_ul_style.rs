@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::heading_utils::HeadingUtils;
@@ -11,45 +12,48 @@ pub struct MD008ULStyle {
 
 impl Default for MD008ULStyle {
     fn default() -> Self {
-        Self { 
+        Self {
             style: '-',
-            use_consistent: true
+            use_consistent: true,
         }
     }
 }
 
 impl MD008ULStyle {
     pub fn new(style: char) -> Self {
-        Self { 
+        Self {
             style,
-            use_consistent: false 
+            use_consistent: false,
         }
     }
 
     fn get_list_marker(line: &str) -> Option<char> {
         let trimmed = line.trim_start();
-        
+
         // Skip empty lines
         if trimmed.is_empty() {
             return None;
         }
-        
+
         // Check for actual list markers
-        if trimmed.starts_with(['*', '+', '-']) && 
-           (trimmed.len() == 1 || trimmed.chars().nth(1) == Some(' ')) {
+        if trimmed.starts_with(['*', '+', '-'])
+            && (trimmed.len() == 1 || trimmed.chars().nth(1) == Some(' '))
+        {
             Some(trimmed.chars().next().unwrap())
         } else {
             None
         }
     }
-    
+
     fn detect_first_marker_style(&self, content: &str) -> Option<char> {
         for (i, line) in content.lines().enumerate() {
             // Skip front matter and code blocks
-            if FrontMatterUtils::is_in_front_matter(content, i) || HeadingUtils::is_in_code_block(content, i) {
+            if FrontMatterUtils::is_in_front_matter(content, i)
+                || HeadingUtils::is_in_code_block(content, i)
+            {
                 continue;
             }
-            
+
             // Look for a list marker
             if let Some(marker) = Self::get_list_marker(line) {
                 return Some(marker);
@@ -69,21 +73,27 @@ impl Rule for MD008ULStyle {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
-        
+
         // Determine the target style - use the first marker found or fall back to default
+
         let target_style = if self.use_consistent {
-            self.detect_first_marker_style(content).unwrap_or(self.style)
+            self.detect_first_marker_style(content)
+                .unwrap_or(self.style)
         } else {
             self.style
         };
 
         for (line_num, line) in content.lines().enumerate() {
             // Skip front matter and code blocks
-            if FrontMatterUtils::is_in_front_matter(content, line_num) || HeadingUtils::is_in_code_block(content, line_num) {
+            if FrontMatterUtils::is_in_front_matter(content, line_num)
+                || HeadingUtils::is_in_code_block(content, line_num)
+            {
                 continue;
             }
-            
+
             if let Some(_marker) = Self::get_list_marker(line) {
                 if _marker != target_style {
                     let message = if self.use_consistent {
@@ -97,14 +107,17 @@ impl Rule for MD008ULStyle {
                             _marker, target_style
                         )
                     };
-                    
+
                     warnings.push(LintWarning {
                         message,
                         line: line_num + 1,
                         column: line.find(_marker).unwrap() + 1,
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, line.find(_marker).unwrap() + 1),
+                            range: _line_index.line_col_to_byte_range(
+                                line_num + 1,
+                                line.find(_marker).unwrap() + 1,
+                            ),
                             replacement: line.replacen(_marker, &target_style.to_string(), 1),
                         }),
                     });
@@ -116,21 +129,27 @@ impl Rule for MD008ULStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
         // Apply front matter fixes first if needed
+
         let content = FrontMatterUtils::fix_malformed_front_matter(content);
-        
+
         // Determine the target style - use the first marker found or fall back to default
+
         let target_style = if self.use_consistent {
-            self.detect_first_marker_style(&content).unwrap_or(self.style)
+            self.detect_first_marker_style(&content)
+                .unwrap_or(self.style)
         } else {
             self.style
         };
-        
+
         let mut result = String::new();
 
         for (i, line) in content.lines().enumerate() {
             // Skip modifying front matter and code blocks
-            if FrontMatterUtils::is_in_front_matter(&content, i) || HeadingUtils::is_in_code_block(&content, i) {
+            if FrontMatterUtils::is_in_front_matter(&content, i)
+                || HeadingUtils::is_in_code_block(&content, i)
+            {
                 result.push_str(line);
             } else if let Some(_marker) = Self::get_list_marker(line) {
                 if _marker != target_style {
@@ -141,7 +160,7 @@ impl Rule for MD008ULStyle {
             } else {
                 result.push_str(line);
             }
-            
+
             if i < content.lines().count() - 1 {
                 result.push('\n');
             }
@@ -154,4 +173,4 @@ impl Rule for MD008ULStyle {
 
         Ok(result)
     }
-} 
+}

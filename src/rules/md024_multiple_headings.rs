@@ -1,4 +1,3 @@
-use crate::utils::range_utils::line_col_to_byte_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
@@ -29,9 +28,12 @@ impl CodeBlockState {
     fn update(&mut self, line: &str) {
         // Fast path - check for literal markers first
         let trimmed = line.trim_start();
-        
+
         // YAML front matter handling
-        if !self.front_matter_started && line.trim() == "---" && YAML_FRONT_MATTER_START.is_match(line) {
+        if !self.front_matter_started
+            && line.trim() == "---"
+            && YAML_FRONT_MATTER_START.is_match(line)
+        {
             self.front_matter_started = true;
             self.in_front_matter = true;
             return;
@@ -39,12 +41,12 @@ impl CodeBlockState {
             self.in_front_matter = false;
             return;
         }
-        
+
         // Skip the rest if we're in front matter
         if self.in_front_matter {
             return;
         }
-        
+
         // Code block handling
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
             if !self.in_code_block && FENCED_CODE_BLOCK.is_match(line) {
@@ -62,30 +64,31 @@ fn is_heading(content_lines: &[&str], index: usize, code_block_state: &CodeBlock
     if code_block_state.in_code_block || code_block_state.in_front_matter {
         return false;
     }
-    
+
     let line = content_lines[index];
     let trimmed = line.trim();
-    
+
     // Fast path checks before regex
     if trimmed.is_empty() {
         return false;
     }
-    
+
     // Check for ATX style headings (# Heading)
     if trimmed.starts_with('#') {
         return ATX_HEADING.is_match(line) || CLOSED_ATX_HEADING.is_match(line);
     }
-    
+
     // Check for setext style headings (followed by ==== or ----)
     if index + 1 < content_lines.len() {
         let next_line = content_lines[index + 1].trim();
-        if !next_line.is_empty() && 
-           (next_line.starts_with('=') && SETEXT_HEADING_1.is_match(next_line)) || 
-           (next_line.starts_with('-') && SETEXT_HEADING_2.is_match(next_line)) {
+        if !next_line.is_empty()
+            && (next_line.starts_with('=') && SETEXT_HEADING_1.is_match(next_line))
+            || (next_line.starts_with('-') && SETEXT_HEADING_2.is_match(next_line))
+        {
             return true;
         }
     }
-    
+
     false
 }
 
@@ -102,12 +105,12 @@ impl MD024MultipleHeadings {
             allow_different_nesting,
         }
     }
-    
+
     /// Get the heading signature based on configuration
     fn get_heading_signature(&self, text: &str, level: usize) -> String {
         // Convert text to lowercase for case-insensitive comparison
         let normalized_text = text.trim().to_lowercase();
-        
+
         if self.allow_different_nesting {
             // When allow_different_nesting is true, we only compare by text content
             // This means headings with the same text will be flagged as duplicates
@@ -136,29 +139,29 @@ impl Rule for MD024MultipleHeadings {
         if content.is_empty() {
             return Ok(vec![]);
         }
-        
+
         let mut warnings = Vec::new();
         let content_lines: Vec<&str> = content.lines().collect();
         let mut code_block_state = CodeBlockState::default();
-        
+
         // Track headings by their signature
         let mut headings = HashMap::new();
-        
+
         // First pass - identify headings and their lines
         let mut i = 0;
         while i < content_lines.len() {
             // Update code block state
             code_block_state.update(content_lines[i]);
-            
+
             // Check if this line is a heading
             if is_heading(&content_lines, i, &code_block_state) {
                 let heading_level = get_heading_level(&content_lines, i);
                 let heading_text = extract_heading_text(&content_lines, i, heading_level);
-                
+
                 // Skip empty headings
                 if !heading_text.trim().is_empty() {
                     let signature = self.get_heading_signature(&heading_text, heading_level);
-                    
+
                     // Check if we've seen this heading before
                     if let Some(first_occurrence) = headings.get(&signature) {
                         warnings.push(LintWarning {
@@ -173,18 +176,24 @@ impl Rule for MD024MultipleHeadings {
                         headings.insert(signature, i + 1);
                     }
                 }
-                
+
                 // Skip the next line if this is a setext heading
-                if heading_level == 1 && i + 1 < content_lines.len() && SETEXT_HEADING_1.is_match(content_lines[i + 1]) {
+                if heading_level == 1
+                    && i + 1 < content_lines.len()
+                    && SETEXT_HEADING_1.is_match(content_lines[i + 1])
+                {
                     i += 1;
-                } else if heading_level == 2 && i + 1 < content_lines.len() && SETEXT_HEADING_2.is_match(content_lines[i + 1]) {
+                } else if heading_level == 2
+                    && i + 1 < content_lines.len()
+                    && SETEXT_HEADING_2.is_match(content_lines[i + 1])
+                {
                     i += 1;
                 }
             }
-            
+
             i += 1;
         }
-        
+
         Ok(warnings)
     }
 
@@ -193,4 +202,4 @@ impl Rule for MD024MultipleHeadings {
         // The user needs to decide how to make each heading unique
         Ok(content.to_string())
     }
-} 
+}

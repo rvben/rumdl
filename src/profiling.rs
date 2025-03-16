@@ -1,7 +1,7 @@
+use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use lazy_static::lazy_static;
 
 // Global profiler state
 lazy_static! {
@@ -44,9 +44,12 @@ impl Profiler {
             let section_name = section.to_string();
             if let Some(start_time) = self.active_timers.remove(&section_name) {
                 let elapsed = start_time.elapsed();
-                
+
                 // Update or insert the measurement
-                let entry = self.measurements.entry(section_name).or_insert((Duration::new(0, 0), 0));
+                let entry = self
+                    .measurements
+                    .entry(section_name)
+                    .or_insert((Duration::new(0, 0), 0));
                 entry.0 += elapsed;
                 entry.1 += 1;
             }
@@ -61,17 +64,21 @@ impl Profiler {
 
         // Sort measurements by total time (descending)
         let mut sorted_measurements: Vec<_> = self.measurements.iter().collect();
-        sorted_measurements.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+        sorted_measurements.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
 
         // Calculate total time across all sections
-        let total_time: Duration = sorted_measurements.iter()
+        let total_time: Duration = sorted_measurements
+            .iter()
             .map(|(_, (duration, _))| duration)
             .sum();
 
         // Generate the report
         let mut report = String::new();
         report.push_str("=== Profiling Report ===\n");
-        report.push_str(&format!("Total execution time: {:.6} seconds\n\n", total_time.as_secs_f64()));
+        report.push_str(&format!(
+            "Total execution time: {:.6} seconds\n\n",
+            total_time.as_secs_f64()
+        ));
         report.push_str("Section                                  | Total Time (s) | Calls | Avg Time (ms) | % of Total\n");
         report.push_str("------------------------------------------|----------------|-------|---------------|----------\n");
 
@@ -161,21 +168,17 @@ impl Drop for ScopedTimer {
 /// Convenience macro to time a block of code
 #[macro_export]
 macro_rules! time_section {
-    ($section:expr, $block:block) => {
-        {
-            let _timer = crate::profiling::ScopedTimer::new($section);
-            $block
-        }
-    };
+    ($section:expr, $block:block) => {{
+        let _timer = crate::profiling::ScopedTimer::new($section);
+        $block
+    }};
 }
 
 /// Convenience macro to time a function call
 #[macro_export]
 macro_rules! time_function {
-    ($section:expr, $func:expr) => {
-        {
-            let _timer = crate::profiling::ScopedTimer::new($section);
-            $func
-        }
-    };
-} 
+    ($section:expr, $func:expr) => {{
+        let _timer = crate::profiling::ScopedTimer::new($section);
+        $func
+    }};
+}

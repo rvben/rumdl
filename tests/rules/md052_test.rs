@@ -1,5 +1,5 @@
-use rumdl::rules::MD052ReferenceLinkImages;
 use rumdl::rule::Rule;
+use rumdl::rules::MD052ReferenceLinkImages;
 
 #[test]
 fn test_valid_reference_link() {
@@ -79,4 +79,4 @@ fn test_no_references() {
     let content = "# Just a heading\n\nSome regular text\n\n> A blockquote";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-} 
+}

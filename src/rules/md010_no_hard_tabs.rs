@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug)]
@@ -68,7 +69,10 @@ impl Rule for MD010NoHardTabs {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, &line) in lines.iter().enumerate() {
@@ -109,7 +113,7 @@ impl Rule for MD010NoHardTabs {
                     message,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, line_num + 1, pos + 1),
+                        range: _line_index.line_col_to_byte_range(line_num + 1, pos + 1),
                         replacement: line.replace('\t', &" ".repeat(self.spaces_per_tab)),
                     }),
                 });
@@ -120,7 +124,10 @@ impl Rule for MD010NoHardTabs {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
+
         let lines: Vec<&str> = content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
@@ -138,4 +145,4 @@ impl Rule for MD010NoHardTabs {
 
         Ok(result)
     }
-} 
+}

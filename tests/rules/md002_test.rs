@@ -1,5 +1,5 @@
-use rumdl::rules::MD002FirstHeadingH1;
 use rumdl::rule::Rule;
+use rumdl::rules::MD002FirstHeadingH1;
 
 #[test]
 fn test_custom_level() {
@@ -66,7 +66,10 @@ fn test_mixed_heading_styles() {
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading\n### Subheading ###\n#### Another heading";
     let result = rule.fix(content).unwrap();
-    assert_eq!(result, "# Heading\n### Subheading ###\n#### Another heading");
+    assert_eq!(
+        result,
+        "# Heading\n### Subheading ###\n#### Another heading"
+    );
 }
 
 #[test]
@@ -76,9 +79,17 @@ fn test_indented_first_heading() {
     println!("Input: '{}'", content.replace("\n", "\\n"));
     let result = rule.fix(content).unwrap();
     println!("Output: '{}'", result.replace("\n", "\\n"));
-    println!("Expected: '{}' (len {})", "  # Heading\n# Subheading".replace("\n", "\\n"), "  # Heading\n# Subheading".len());
-    println!("Got:      '{}' (len {})", result.replace("\n", "\\n"), result.len());
-    
+    println!(
+        "Expected: '{}' (len {})",
+        "  # Heading\n# Subheading".replace("\n", "\\n"),
+        "  # Heading\n# Subheading".len()
+    );
+    println!(
+        "Got:      '{}' (len {})",
+        result.replace("\n", "\\n"),
+        result.len()
+    );
+
     // Print each character's byte value
     println!("Expected bytes: ");
     for (i, b) in "  # Heading\n# Subheading".bytes().enumerate() {
@@ -89,7 +100,7 @@ fn test_indented_first_heading() {
         print!("{}:{} ", i, b);
     }
     println!();
-    
+
     assert_eq!(result, "  # Heading\n# Subheading");
 }
 
@@ -124,4 +135,4 @@ fn test_setext_with_front_matter() {
     assert_eq!(result[0].line, 4);
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "---\ntitle: Test\n---\n# Heading\n### Subheading");
-} 
+}

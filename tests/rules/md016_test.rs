@@ -1,5 +1,5 @@
-use rumdl::rules::MD016NoMultipleSpaceAfterListMarker;
 use rumdl::rule::Rule;
+use rumdl::rules::MD016NoMultipleSpaceAfterListMarker;
 
 #[test]
 fn test_valid_unordered_list() {
@@ -25,7 +25,10 @@ fn test_invalid_unordered_list() {
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
     assert_eq!(result[0].column, 1);
-    assert_eq!(result[0].message, "Multiple spaces after unordered list marker");
+    assert_eq!(
+        result[0].message,
+        "Multiple spaces after unordered list marker"
+    );
 }
 
 #[test]
@@ -36,7 +39,10 @@ fn test_invalid_ordered_list() {
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
     assert_eq!(result[0].column, 1);
-    assert_eq!(result[0].message, "Multiple spaces after ordered list marker");
+    assert_eq!(
+        result[0].message,
+        "Multiple spaces after ordered list marker"
+    );
 }
 
 #[test]

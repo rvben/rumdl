@@ -1,4 +1,4 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
 
 /// Rule MD047: Files should end with a single trailing newline character

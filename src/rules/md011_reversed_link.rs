@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
@@ -15,7 +16,10 @@ impl Rule for MD011ReversedLink {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let re = Regex::new(r"\(([^)]+)\)\[([^\]]+)\]").unwrap();
 
         for (line_num, line) in content.lines().enumerate() {
@@ -29,7 +33,7 @@ impl Rule for MD011ReversedLink {
                     message: "Reversed link syntax found".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_col_to_byte_range(content, line_num + 1, start + 1),
+                        range: _line_index.line_col_to_byte_range(line_num + 1, start + 1),
                         replacement: format!("[{}]({})", text, url),
                     }),
                 });
@@ -40,7 +44,10 @@ impl Rule for MD011ReversedLink {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
+
         let re = Regex::new(r"\(([^)]+)\)\[([^\]]+)\]").unwrap();
 
         for line in content.lines() {
@@ -62,4 +69,4 @@ impl Rule for MD011ReversedLink {
 
         Ok(result)
     }
-} 
+}

@@ -1,5 +1,5 @@
-use rumdl::rules::MD005ListIndent;
 use rumdl::rule::Rule;
+use rumdl::rules::MD005ListIndent;
 
 #[test]
 fn test_valid_unordered_list() {
@@ -75,10 +75,13 @@ fn test_multiple_levels() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "\
+    assert_eq!(
+        fixed,
+        "\
 * Level 1
   * Level 2
-    * Level 3");
+    * Level 3"
+    );
 }
 
 #[test]

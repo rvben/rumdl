@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::code_block_utils::CodeBlockUtils;
 use crate::rules::list_utils::ListUtils;
@@ -10,7 +11,9 @@ pub struct MD016NoMultipleSpaceAfterListMarker {
 
 impl Default for MD016NoMultipleSpaceAfterListMarker {
     fn default() -> Self {
-        Self { allow_multiple_spaces: false }
+        Self {
+            allow_multiple_spaces: false,
+        }
     }
 }
 
@@ -20,7 +23,9 @@ impl MD016NoMultipleSpaceAfterListMarker {
     }
 
     pub fn with_allow_multiple_spaces(allow_multiple_spaces: bool) -> Self {
-        Self { allow_multiple_spaces }
+        Self {
+            allow_multiple_spaces,
+        }
     }
 }
 
@@ -34,6 +39,8 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         if self.allow_multiple_spaces {
             return Ok(Vec::new());
         }
@@ -49,16 +56,19 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
 
             if ListUtils::is_list_item_with_multiple_spaces(line) {
                 warnings.push(LintWarning {
-        severity: Severity::Warning,
-        line: line_num + 1,
+                    severity: Severity::Warning,
+                    line: line_num + 1,
                     column: 1,
-                    message: if line.trim_start().starts_with(|c| c == '*' || c == '+' || c == '-') {
+                    message: if line
+                        .trim_start()
+                        .starts_with(|c| c == '*' || c == '+' || c == '-')
+                    {
                         "Multiple spaces after unordered list marker".to_string()
                     } else {
                         "Multiple spaces after ordered list marker".to_string()
                     },
                     fix: Some(Fix {
-            range: line_col_to_byte_range(content, line_num + 1, 1),
+                        range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                         replacement: ListUtils::fix_list_item_with_multiple_spaces(line),
                     }),
                 });
@@ -69,6 +79,8 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         if self.allow_multiple_spaces {
             return Ok(content.to_string());
         }
@@ -87,7 +99,7 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
                 }
                 continue;
             }
-            
+
             // Skip processing if line is in a code block
             if in_code_block {
                 result.push_str(line);
@@ -99,17 +111,18 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
                     result.push_str(line);
                 }
             }
-            
+
             if i < lines.len() - 1 {
                 result.push('\n');
             }
         }
 
         // Remove trailing newline if original didn't have one
+
         if !content.ends_with('\n') && result.ends_with('\n') {
             result.pop();
         }
 
         Ok(result)
     }
-} 
+}

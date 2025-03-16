@@ -1,5 +1,5 @@
-use rumdl::rules::MD008ULStyle;
 use rumdl::rule::Rule;
+use rumdl::rules::MD008ULStyle;
 
 #[test]
 fn test_valid_list_style() {
@@ -8,12 +8,12 @@ fn test_valid_list_style() {
     let content = "* Item 1\n  * Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-    
+
     // Testing dash style markers
     let content = "- Item 1\n  - Item 2\n    - Item 3";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-    
+
     // Testing plus style markers
     let content = "+ Item 1\n  + Item 2\n    + Item 3";
     let result = rule.check(content).unwrap();
@@ -27,12 +27,12 @@ fn test_invalid_list_style() {
     let content = "* Item 1\n  + Item 2\n    - Item 3";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     // First marker is dash, so others should be dashes too
     let content = "- Item 1\n  + Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     // First marker is plus, so others should be pluses too
     let content = "+ Item 1\n  - Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
@@ -56,13 +56,13 @@ fn test_fix_list_style() {
     let result = rule.fix(content).unwrap();
     let expected = rule.fix(content).unwrap();
     assert_eq!(result, expected);
-    
+
     // First marker is dash, so all should be fixed to dashes
     let content = "- Item 1\n  + Item 2\n    * Item 3";
     let result = rule.fix(content).unwrap();
     let expected = rule.fix(content).unwrap();
     assert_eq!(result, expected);
-    
+
     // First marker is plus, so all should be fixed to pluses
     let content = "+ Item 1\n  - Item 2\n    * Item 3";
     let result = rule.fix(content).unwrap();
@@ -73,21 +73,22 @@ fn test_fix_list_style() {
 #[test]
 fn test_code_block_skipping() {
     let rule = MD008ULStyle::default();
-    let content = "* Item 1\n\n```\n* Not a real list item\n+ Also not a real item\n```\n\n* Item 2";
+    let content =
+        "* Item 1\n\n```\n* Not a real list item\n+ Also not a real item\n```\n\n* Item 2";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
 }
 
 #[test]
 fn test_explicitly_configured_style() {
-    // When explicitly configured with a specific style, 
+    // When explicitly configured with a specific style,
     // it should enforce that style regardless of what's in the document
     let rule = MD008ULStyle::new('-');
     let content = "* Item 1\n  * Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
-    
+
     let fixed = rule.fix(content).unwrap();
     let expected = rule.fix(content).unwrap();
     assert_eq!(fixed, expected);
-} 
+}

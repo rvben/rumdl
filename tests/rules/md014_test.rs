@@ -1,5 +1,5 @@
-use rumdl::rules::MD014CommandsShowOutput;
 use rumdl::rule::Rule;
+use rumdl::rules::MD014CommandsShowOutput;
 
 #[test]
 fn test_valid_command() {
@@ -113,4 +113,4 @@ fn test_fix_indented_commands() {
     let content = "```bash\n    $ ls -l\n    $ pwd\n```";
     let result = rule.fix(content).unwrap();
     assert_eq!(result, "```bash\n    ls -l\n    pwd\n```");
-} 
+}

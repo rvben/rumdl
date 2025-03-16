@@ -1,5 +1,5 @@
-use rumdl::rules::MD015NoMissingSpaceAfterListMarker;
 use rumdl::rule::Rule;
+use rumdl::rules::MD015NoMissingSpaceAfterListMarker;
 
 #[test]
 fn test_valid_unordered_list() {
@@ -25,7 +25,10 @@ fn test_invalid_unordered_list() {
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
     assert_eq!(result[0].column, 1);
-    assert_eq!(result[0].message, "Missing space after unordered list marker");
+    assert_eq!(
+        result[0].message,
+        "Missing space after unordered list marker"
+    );
 }
 
 #[test]
@@ -116,17 +119,17 @@ fn test_list_marker_variations() {
 #[test]
 fn test_preserve_indentation() {
     let rule = MD015NoMissingSpaceAfterListMarker::new();
-    
+
     // Test with a single line to verify indentation preservation
     let single_line = "  *Item 1";
     let result = rule.fix(single_line).unwrap();
     assert_eq!(result, "  * Item 1");
-    
+
     // Test with multiple lines to verify each line is fixed properly
     let multi_line = "  *Item 1\n  *Item 2\n  *Item 3";
     let result = rule.fix(multi_line).unwrap();
     assert_eq!(result, "  * Item 1\n  * Item 2\n  * Item 3");
-    
+
     // Test with increasing indentation
     let indented = "  *Item 1\n    *Item 2\n      *Item 3";
     let result = rule.fix(indented).unwrap();
@@ -144,40 +147,61 @@ fn test_preserve_code_blocks() {
 #[test]
 fn test_horizontal_rule() {
     let rule = MD015NoMissingSpaceAfterListMarker::new();
-    
+
     // Test with asterisk horizontal rule
     let content = "***";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Horizontal rule with asterisks should not trigger warnings");
+    assert!(
+        result.is_empty(),
+        "Horizontal rule with asterisks should not trigger warnings"
+    );
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "***", "Horizontal rule should not be modified");
-    
+
     // Test with dash horizontal rule
     let content = "---";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Horizontal rule with dashes should not trigger warnings");
-    
+    assert!(
+        result.is_empty(),
+        "Horizontal rule with dashes should not trigger warnings"
+    );
+
     // Test with underscore horizontal rule
     let content = "___";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Horizontal rule with underscores should not trigger warnings");
-    
+    assert!(
+        result.is_empty(),
+        "Horizontal rule with underscores should not trigger warnings"
+    );
+
     // Test with longer horizontal rules
     let content = "*****";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Longer horizontal rule should not trigger warnings");
-    
+    assert!(
+        result.is_empty(),
+        "Longer horizontal rule should not trigger warnings"
+    );
+
     // Test with spaced horizontal rules
     let content = "* * *";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Spaced horizontal rule should not trigger warnings");
-    
+    assert!(
+        result.is_empty(),
+        "Spaced horizontal rule should not trigger warnings"
+    );
+
     // Test with horizontal rule in context
     let content = "# Heading\n\n***\n\nParagraph after rule.";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Horizontal rule in content should not trigger warnings");
+    assert!(
+        result.is_empty(),
+        "Horizontal rule in content should not trigger warnings"
+    );
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "# Heading\n\n***\n\nParagraph after rule.", "Horizontal rule in content should not be modified");
+    assert_eq!(
+        fixed, "# Heading\n\n***\n\nParagraph after rule.",
+        "Horizontal rule in content should not be modified"
+    );
 }
 
 #[test]

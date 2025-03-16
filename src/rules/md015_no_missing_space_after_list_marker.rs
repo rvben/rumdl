@@ -1,11 +1,12 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::code_block_utils::CodeBlockUtils;
+use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::list_utils::ListUtils;
-use regex::Regex;
 use lazy_static::lazy_static;
 use once_cell::sync::Lazy;
+use regex::Regex;
 
 #[derive(Debug)]
 pub struct MD015NoMissingSpaceAfterListMarker {
@@ -14,7 +15,9 @@ pub struct MD015NoMissingSpaceAfterListMarker {
 
 impl Default for MD015NoMissingSpaceAfterListMarker {
     fn default() -> Self {
-        Self { require_space: true }
+        Self {
+            require_space: true,
+        }
     }
 }
 
@@ -30,9 +33,11 @@ impl MD015NoMissingSpaceAfterListMarker {
     /// Check if a line is a horizontal rule
     fn is_horizontal_rule(line: &str) -> bool {
         let trimmed = line.trim();
-        HR_DASH.is_match(trimmed) || HR_ASTERISK.is_match(trimmed) || HR_UNDERSCORE.is_match(trimmed)
+        HR_DASH.is_match(trimmed)
+            || HR_ASTERISK.is_match(trimmed)
+            || HR_UNDERSCORE.is_match(trimmed)
     }
-    
+
     /// Fix a list item without space for MD015 rule
     fn fix_list_item(line: &str) -> String {
         if let Some(caps) = LIST_ITEM_RE.captures(line) {
@@ -49,9 +54,8 @@ lazy_static! {
     static ref HR_UNDERSCORE: Regex = Regex::new(r"^_{3,}\s*$").unwrap();
 }
 
-static LIST_ITEM_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(\s*)((?:[-*+]|\d+[.)]))(\S.*)").unwrap()
-});
+static LIST_ITEM_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^(\s*)((?:[-*+]|\d+[.)]))(\S.*)").unwrap());
 
 impl Rule for MD015NoMissingSpaceAfterListMarker {
     fn name(&self) -> &'static str {
@@ -63,6 +67,8 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         if !self.require_space {
             return Ok(Vec::new());
         }
@@ -72,7 +78,9 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
         for (line_num, line) in lines.iter().enumerate() {
             // Skip processing if line is in a code block or front matter
-            if CodeBlockUtils::is_in_code_block(content, line_num) || FrontMatterUtils::is_in_front_matter(content, line_num) {
+            if CodeBlockUtils::is_in_code_block(content, line_num)
+                || FrontMatterUtils::is_in_front_matter(content, line_num)
+            {
                 continue;
             }
 
@@ -83,16 +91,19 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
             if ListUtils::is_list_item_without_space(line) {
                 warnings.push(LintWarning {
-        severity: Severity::Warning,
-        line: line_num + 1,
+                    severity: Severity::Warning,
+                    line: line_num + 1,
                     column: 1,
-                    message: if line.trim_start().starts_with(|c| c == '*' || c == '+' || c == '-') {
+                    message: if line
+                        .trim_start()
+                        .starts_with(|c| c == '*' || c == '+' || c == '-')
+                    {
                         "Missing space after unordered list marker".to_string()
                     } else {
                         "Missing space after ordered list marker".to_string()
                     },
                     fix: Some(Fix {
-            range: line_col_to_byte_range(content, line_num + 1, 1),
+                        range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                         replacement: Self::fix_list_item(line),
                     }),
                 });
@@ -103,6 +114,8 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         if !self.require_space {
             return Ok(content.to_string());
         }
@@ -121,7 +134,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
                 result.push('\n');
                 continue;
             }
-            
+
             if in_front_matter {
                 if line.trim() == "---" {
                     in_front_matter = false;
@@ -130,7 +143,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
                 result.push('\n');
                 continue;
             }
-            
+
             // Track code blocks
             if CodeBlockUtils::is_code_block_delimiter(line) {
                 in_code_block = !in_code_block;
@@ -140,7 +153,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
                 }
                 continue;
             }
-            
+
             // Skip processing if line is in a code block
             if in_code_block {
                 result.push_str(line);
@@ -156,17 +169,18 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
                     result.push_str(line);
                 }
             }
-            
+
             if i < lines.len() - 1 {
                 result.push('\n');
             }
         }
 
         // Remove trailing newline if original didn't have one
+
         if !content.ends_with('\n') && result.ends_with('\n') {
             result.pop();
         }
 
         Ok(result)
     }
-} 
+}

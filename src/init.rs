@@ -1,6 +1,6 @@
 use std::fs;
-use std::path::Path;
 use std::io;
+use std::path::Path;
 use thiserror::Error;
 
 /// Error type for initialization operations
@@ -11,11 +11,11 @@ pub enum InitError {
 }
 
 /// Create a default configuration file at the specified path.
-/// 
+///
 /// Returns `true` if the file was created, or `false` if it already exists.
-/// 
+///
 /// # Errors
-/// 
+///
 /// Returns an error if the file cannot be created due to permissions or other I/O errors.
 pub fn create_default_config(path: &str) -> Result<bool, InitError> {
     if Path::new(path).exists() {
@@ -78,8 +78,10 @@ style = "*"
 style = "**"
 "#;
 
-    fs::write(path, default_config)
-        .map_err(|e| InitError::IoError { source: e, path: path.to_string() })?;
+    fs::write(path, default_config).map_err(|e| InitError::IoError {
+        source: e,
+        path: path.to_string(),
+    })?;
 
     Ok(true)
-} 
+}

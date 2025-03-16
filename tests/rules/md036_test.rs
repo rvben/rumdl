@@ -1,5 +1,5 @@
-use rumdl::rules::MD036NoEmphasisOnlyFirst;
 use rumdl::rule::Rule;
+use rumdl::rules::MD036NoEmphasisOnlyFirst;
 
 #[test]
 fn test_valid_emphasis() {
@@ -81,4 +81,4 @@ fn test_emphasis_with_punctuation() {
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "# Hello with punctuation!\n# Hi there!");
-} 
+}

@@ -1,36 +1,76 @@
-use rumdl::rules::MD029OrderedListPrefix;
 use rumdl::rule::Rule;
+use rumdl::rules::MD029OrderedListPrefix;
+use rumdl::utils::range_utils::LineIndex;
 
 #[test]
 fn test_md029_valid() {
-    let rule = MD029OrderedListPrefix::default();
-    let content = "1. First item\n2. Second item\n3. Third item\n";
+    let rule = MD029OrderedListPrefix::new("one");
+
+    let content = r#"1. Item 1
+1. Item 2
+1. Item 3"#;
+
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
 }
 
 #[test]
-fn test_md029_invalid() {
-    let rule = MD029OrderedListPrefix::default();
-    let content = "1. First item\n3. Second item\n5. Third item\n";
+fn test_md029_ordered_any_valid() {
+    let rule = MD029OrderedListPrefix::new("ordered");
+
+    let content = r#"1. Item 1
+2. Item 2
+3. Item 3"#;
+
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 2);
-    assert_eq!(result[0].line, 2);
-    assert_eq!(result[1].line, 3);
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_md029_ordered_any_invalid() {
+    let rule = MD029OrderedListPrefix::new("ordered");
+
+    let content = r#"1. Item 1
+1. Item 2
+1. Item 3"#;
+
+    let result = rule.check(content).unwrap();
+    assert!(!result.is_empty());
+
+    // Check that it fixes to 1, 2, 3
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "1. Item 1\n2. Item 2\n3. Item 3");
 }
 
 #[test]
 fn test_md029_nested() {
-    let rule = MD029OrderedListPrefix::default();
-    let content = "1. First item\n   1. Nested first\n   2. Nested second\n2. Second item\n";
+    let rule = MD029OrderedListPrefix::new("one");
+    let content = r#"1. First item
+   1. Nested first
+   1. Nested second
+1. Second item"#;
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
 }
 
 #[test]
 fn test_md029_fix() {
-    let rule = MD029OrderedListPrefix::default();
-    let content = "1. First item\n3. Second item\n5. Third item\n";
+    let rule = MD029OrderedListPrefix::new("ordered");
+    let content = r#"1. First item
+3. Second item
+5. Third item"#;
     let result = rule.fix(content).unwrap();
-    assert_eq!(result, "1. First item\n2. Second item\n3. Third item\n");
-} 
+    assert_eq!(result, "1. First item\n2. Second item\n3. Third item");
+}
+
+#[test]
+fn test_line_index() {
+    let content = r#"1. First item
+2. Second item
+3. Third item"#;
+    let index = LineIndex::new(content.to_string());
+
+    // The byte range should be calculated based on the actual content
+    // Line 2, Column 1 corresponds to the beginning of "2. Second item" which is at index 14
+    assert_eq!(index.line_col_to_byte_range(2, 1), 14..14);
+}

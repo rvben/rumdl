@@ -1,5 +1,5 @@
-use rumdl::rules::MD023HeadingStartLeft;
 use rumdl::rule::Rule;
+use rumdl::rules::MD023HeadingStartLeft;
 
 #[test]
 fn test_valid_heading_positions() {
@@ -69,4 +69,4 @@ fn test_multiple_heading_levels() {
     assert_eq!(result.len(), 3); // Only the indented ones should be flagged
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "# H1\n## H2\n### H3\n#### H4");
-} 
+}

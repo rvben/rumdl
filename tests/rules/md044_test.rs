@@ -1,5 +1,5 @@
-use rumdl::rules::MD044ProperNames;
 use rumdl::rule::Rule;
+use rumdl::rules::MD044ProperNames;
 
 #[test]
 fn test_correct_names() {
@@ -18,7 +18,10 @@ fn test_incorrect_names() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "# Guide to JavaScript and TypeScript\n\nJavaScript is awesome!");
+    assert_eq!(
+        fixed,
+        "# Guide to JavaScript and TypeScript\n\nJavaScript is awesome!"
+    );
 }
 
 #[test]
@@ -36,9 +39,15 @@ fn test_code_block_included() {
     let rule = MD044ProperNames::new(names, false);
     let content = "# JavaScript Guide\n\n```javascript\nconst x = 'javascript';\n```";
     let result = rule.check(content).unwrap();
-    assert!(result.len() > 0, "Should detect 'javascript' in the code block");
+    assert!(
+        result.len() > 0,
+        "Should detect 'javascript' in the code block"
+    );
     let fixed = rule.fix(content).unwrap();
-    assert!(fixed.contains("const x = 'JavaScript';"), "Should replace 'javascript' with 'JavaScript' in code blocks");
+    assert!(
+        fixed.contains("const x = 'JavaScript';"),
+        "Should replace 'javascript' with 'JavaScript' in code blocks"
+    );
 }
 
 #[test]
@@ -56,24 +65,35 @@ fn test_multiple_occurrences() {
     let rule = MD044ProperNames::new(names, true);
     let content = "javascript with nodejs\njavascript and nodejs again";
     let result = rule.check(content).unwrap();
-    
+
     // Add debug output
     println!("Number of warnings: {}", result.len());
     for (i, warning) in result.iter().enumerate() {
-        println!("Warning {}: Line {}, Column {}, Message: {}", 
-                i + 1, warning.line, warning.column, warning.message);
+        println!(
+            "Warning {}: Line {}, Column {}, Message: {}",
+            i + 1,
+            warning.line,
+            warning.column,
+            warning.message
+        );
     }
-    
+
     // The important part is that it finds the occurrences, the exact count may vary
     assert!(result.len() > 0, "Should detect multiple improper names");
-    
+
     let fixed = rule.fix(content).unwrap();
     println!("Original content: '{}'", content);
     println!("Fixed content: '{}'", fixed);
-    
+
     // More lenient assertions
-    assert!(fixed.contains("JavaScript"), "Should replace 'javascript' with 'JavaScript'");
-    assert!(fixed.contains("Node.js"), "Should replace 'nodejs' with 'Node.js'");
+    assert!(
+        fixed.contains("JavaScript"),
+        "Should replace 'javascript' with 'JavaScript'"
+    );
+    assert!(
+        fixed.contains("Node.js"),
+        "Should replace 'nodejs' with 'Node.js'"
+    );
 }
 
 #[test]
@@ -85,4 +105,4 @@ fn test_word_boundaries() {
     assert_eq!(result.len(), 1); // Only "git" should be flagged, not "github" or "gitflow"
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "Using Git and github with gitflow");
-} 
+}

@@ -1,11 +1,13 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     static ref COMMAND_PATTERN: Regex = Regex::new(r"^\s*[$>]\s+\S+").unwrap();
-    static ref SHELL_LANG_PATTERN: Regex = Regex::new(r"^(?i)(bash|sh|shell|console|terminal)").unwrap();
+    static ref SHELL_LANG_PATTERN: Regex =
+        Regex::new(r"^(?i)(bash|sh|shell|console|terminal)").unwrap();
 }
 
 #[derive(Debug)]
@@ -38,13 +40,22 @@ impl MD014CommandsShowOutput {
 
     fn is_output_line(&self, line: &str) -> bool {
         let trimmed = line.trim();
-        !trimmed.is_empty() && !trimmed.starts_with('$') && !trimmed.starts_with('>') && !trimmed.starts_with('#')
+        !trimmed.is_empty()
+            && !trimmed.starts_with('$')
+            && !trimmed.starts_with('>')
+            && !trimmed.starts_with('#')
     }
 
     fn is_no_output_command(&self, cmd: &str) -> bool {
         let cmd = cmd.trim().to_lowercase();
-        cmd.contains("cd ") || cmd.contains("mkdir ") || cmd.contains("touch ") || cmd.contains("rm ") ||
-        cmd.contains("mv ") || cmd.contains("cp ") || cmd.contains("export ") || cmd.contains("set ")
+        cmd.contains("cd ")
+            || cmd.contains("mkdir ")
+            || cmd.contains("touch ")
+            || cmd.contains("rm ")
+            || cmd.contains("mv ")
+            || cmd.contains("cp ")
+            || cmd.contains("export ")
+            || cmd.contains("set ")
     }
 
     fn is_command_without_output(&self, block: &[&str], lang: &str) -> bool {
@@ -53,7 +64,9 @@ impl MD014CommandsShowOutput {
         }
 
         let mut has_command = false;
+
         let mut has_output = false;
+
         let mut last_command = String::new();
 
         for line in block {
@@ -70,12 +83,18 @@ impl MD014CommandsShowOutput {
     }
 
     fn fix_command_block(&self, block: &[&str]) -> String {
-        block.iter()
+        block
+            .iter()
             .map(|line| {
                 let trimmed = line.trim_start();
                 if self.is_command_line(line) {
                     let spaces = line.len() - line.trim_start().len();
-                    let cmd = trimmed.chars().skip(1).collect::<String>().trim_start().to_string();
+                    let cmd = trimmed
+                        .chars()
+                        .skip(1)
+                        .collect::<String>()
+                        .trim_start()
+                        .to_string();
                     format!("{}{}", " ".repeat(spaces), cmd)
                 } else {
                     line.to_string()
@@ -86,7 +105,8 @@ impl MD014CommandsShowOutput {
     }
 
     fn get_code_block_language(block_start: &str) -> String {
-        block_start.trim_start()
+        block_start
+            .trim_start()
             .trim_start_matches("```")
             .trim_start()
             .split_whitespace()
@@ -106,10 +126,16 @@ impl Rule for MD014CommandsShowOutput {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let mut current_block = Vec::new();
+
         let mut in_code_block = false;
+
         let mut block_start_line = 0;
+
         let mut current_lang = String::new();
 
         for (line_num, line) in content.lines().enumerate() {
@@ -123,7 +149,7 @@ impl Rule for MD014CommandsShowOutput {
                             message: "Commands in code blocks should show output".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_col_to_byte_range(content, block_start_line + 1, 1),
+                                range: _line_index.line_col_to_byte_range(block_start_line + 1, 1),
                                 replacement: self.fix_command_block(&current_block),
                             }),
                         });
@@ -144,9 +170,14 @@ impl Rule for MD014CommandsShowOutput {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut result = String::new();
+
         let mut current_block = Vec::new();
+
         let mut in_code_block = false;
+
         let mut current_lang = String::new();
 
         for line in content.lines() {
@@ -184,4 +215,4 @@ impl Rule for MD014CommandsShowOutput {
 
         Ok(result)
     }
-} 
+}

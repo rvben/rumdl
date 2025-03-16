@@ -1,5 +1,5 @@
-use rumdl::rules::MD006StartBullets;
 use rumdl::rule::Rule;
+use rumdl::rules::MD006StartBullets;
 
 #[test]
 fn test_unicode_list_items() {
@@ -11,7 +11,10 @@ fn test_unicode_list_items() {
   * Nested item with mixed Unicode こんにちは
 * Item with Arabic مرحبا";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Valid Unicode list items should not trigger warnings");
+    assert!(
+        result.is_empty(),
+        "Valid Unicode list items should not trigger warnings"
+    );
 }
 
 #[test]
@@ -24,14 +27,21 @@ Some Unicode text here 汉字.
   * Second item with emoji 🔥 should not be indented
   * Third item with Unicode こんにちは should not be indented";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 3, "Indented Unicode list items should trigger warnings");
+    assert_eq!(
+        result.len(),
+        3,
+        "Indented Unicode list items should trigger warnings"
+    );
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "\
+    assert_eq!(
+        fixed,
+        "\
 Some Unicode text here 汉字.
 
 * First item with Unicode café should not be indented
 * Second item with emoji 🔥 should not be indented
-* Third item with Unicode こんにちは should not be indented");
+* Third item with Unicode こんにちは should not be indented"
+    );
 }
 
 #[test]
@@ -46,16 +56,23 @@ Some Unicode text here こんにちは
   * Indented Unicode list 1 🔥
   * Indented Unicode list 2 مرحبا";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 2, "Indented Unicode list items should trigger warnings");
+    assert_eq!(
+        result.len(),
+        2,
+        "Indented Unicode list items should trigger warnings"
+    );
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "\
+    assert_eq!(
+        fixed,
+        "\
 * First Unicode list item café
 * Second Unicode list item 汉字
 
 Some Unicode text here こんにちは
 
 * Indented Unicode list 1 🔥
-* Indented Unicode list 2 مرحبا");
+* Indented Unicode list 2 مرحبا"
+    );
 }
 
 #[test]
@@ -68,7 +85,10 @@ fn test_unicode_lists_with_blank_lines() {
 
 * Unicode item 2 🔥";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Valid Unicode list items with blank lines should not trigger warnings");
+    assert!(
+        result.is_empty(),
+        "Valid Unicode list items with blank lines should not trigger warnings"
+    );
 }
 
 #[test]
@@ -83,5 +103,8 @@ fn test_unicode_code_blocks() {
 
 * Regular Unicode item こんにちは outside code block";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Unicode content in code blocks should be ignored");
-} 
+    assert!(
+        result.is_empty(),
+        "Unicode content in code blocks should be ignored"
+    );
+}

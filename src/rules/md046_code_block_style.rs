@@ -1,4 +1,5 @@
-use crate::utils::range_utils::line_col_to_byte_range;
+use crate::utils::range_utils::LineIndex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 /// Rule MD046: Code block style
@@ -51,10 +52,16 @@ impl Rule for MD046CodeBlockStyle {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let _line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
+
         let mut in_fenced_block = false;
+
         let target_style = match self.style {
-            CodeBlockStyle::Consistent => self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced),
+            CodeBlockStyle::Consistent => {
+                self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced)
+            }
             _ => self.style.clone(),
         };
 
@@ -68,7 +75,7 @@ impl Rule for MD046CodeBlockStyle {
                         message: "Code block style should be indented".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, 1),
+                            range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                             replacement: "    ".to_string() + line.trim_start(),
                         }),
                     });
@@ -81,7 +88,7 @@ impl Rule for MD046CodeBlockStyle {
                         message: "Code block style should be fenced".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_col_to_byte_range(content, line_num + 1, 1),
+                            range: _line_index.line_col_to_byte_range(line_num + 1, 1),
                             replacement: "```\n".to_string() + line.trim_start(),
                         }),
                     });
@@ -93,14 +100,21 @@ impl Rule for MD046CodeBlockStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
+        let _line_index = LineIndex::new(content.to_string());
+
         let target_style = match self.style {
-            CodeBlockStyle::Consistent => self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced),
+            CodeBlockStyle::Consistent => {
+                self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced)
+            }
             _ => self.style.clone(),
         };
 
         let mut result = String::new();
+
         let mut in_fenced_block = false;
+
         let mut in_indented_block = false;
+
         let mut buffer = Vec::new();
 
         for line in content.lines() {
@@ -155,4 +169,4 @@ impl Rule for MD046CodeBlockStyle {
 
         Ok(result)
     }
-} 
+}

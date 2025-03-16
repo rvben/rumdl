@@ -1,5 +1,5 @@
-use rumdl::rules::MD031BlanksAroundFences;
 use rumdl::rule::Rule;
+use rumdl::rules::MD031BlanksAroundFences;
 
 #[test]
 fn test_valid_fenced_blocks() {
@@ -35,4 +35,4 @@ fn test_fix_missing_blanks() {
     let content = "Text before\n```\ncode block\n```\nText after";
     let result = rule.fix(content).unwrap();
     assert_eq!(result, "Text before\n\n```\ncode block\n```\n\nText after");
-} 
+}
