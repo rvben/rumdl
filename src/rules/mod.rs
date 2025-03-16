@@ -48,7 +48,7 @@ pub mod md049_emphasis_style;
 pub mod md050_strong_style;
 mod md051_link_fragments;
 mod md052_reference_links_images;
-mod md053_link_image_reference_definitions;
+pub mod md053_link_image_reference_definitions;
 mod md054_link_image_style;
 mod md055_table_pipe_style;
 mod md056_table_column_count;

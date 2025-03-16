@@ -1,5 +1,4 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rumdl::utils::range_utils::line_col_to_byte_range;
 use rumdl::utils::range_utils::LineIndex;
 
 // Naive implementation that doesn't use the optimized function
@@ -50,17 +49,6 @@ fn bench_range_utils(c: &mut Criterion) {
     let line_count = 10_000;
     let content = generate_test_content(line_count);
 
-    // Original implementation
-    c.bench_function("original_line_col_to_byte_range", |b| {
-        b.iter(|| {
-            for line in [1, 100, 1000, 5000, 9999].iter() {
-                for col in [1, 10, 20, 40].iter() {
-                    black_box(line_col_to_byte_range(black_box(&content), *line, *col));
-                }
-            }
-        })
-    });
-
     // New cached implementation
     let line_index = LineIndex::new(content.clone());
     c.bench_function("cached_line_col_to_byte_range", |b| {
@@ -98,7 +86,7 @@ fn bench_range_utils(c: &mut Criterion) {
             for _ in 0..20 {
                 let line = rng.gen_range(1..=line_count);
                 let col = rng.gen_range(1..=40);
-                black_box(line_col_to_byte_range(black_box(&content), line, col));
+                black_box(line_index.line_col_to_byte_range(line, col));
             }
         })
     });
