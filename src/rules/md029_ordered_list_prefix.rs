@@ -23,6 +23,13 @@ impl Default for MD029OrderedListPrefix {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ListSequence {
+    index: usize,
+    indent_level: usize,
+    last_seen_line: usize,
+}
+
 impl MD029OrderedListPrefix {
     pub fn new(style: &str) -> Self {
         Self {
@@ -31,7 +38,6 @@ impl MD029OrderedListPrefix {
     }
 
     fn get_list_number(line: &str) -> Option<usize> {
-        // Use cached regex pattern
         LIST_NUMBER_PATTERN
             .captures(line)
             .and_then(|cap| cap[1].parse().ok())
@@ -42,27 +48,60 @@ impl MD029OrderedListPrefix {
         indent / 2 // Assuming 2 spaces per indent level
     }
 
-    fn get_expected_number(&self, index: usize) -> usize {
+    fn get_expected_number(&self, sequence: &ListSequence) -> usize {
         match self.style.as_str() {
-            "ordered" => index + 1,
+            "ordered" => {
+                if sequence.indent_level > 0 {
+                    // For nested lists, always start at 1
+                    sequence.index + 1
+                } else {
+                    // For root level lists, maintain sequence
+                    sequence.index + 1
+                }
+            }
             "one" => 1,
             "zero" => 0,
-            _ => index + 1,
+            _ => sequence.index + 1,
         }
     }
 
-    // Pre-compute which lines are in code blocks
-    fn precompute_code_blocks(content: &str) -> Vec<bool> {
-        let mut in_code_block = false;
-        content
-            .lines()
-            .map(|line| {
-                if CODE_BLOCK_PATTERN.is_match(line) {
-                    in_code_block = !in_code_block;
-                }
-                in_code_block
-            })
-            .collect()
+    fn is_blank_line(line: &str) -> bool {
+        line.trim().is_empty()
+    }
+
+    // Helper function to find or create a sequence for a given indentation level
+    fn find_or_create_sequence<'a>(
+        sequences: &'a mut HashMap<usize, ListSequence>,
+        indent_level: usize,
+        line_num: usize,
+    ) -> &'a mut ListSequence {
+        sequences.entry(indent_level).or_insert(ListSequence {
+            index: 0,
+            indent_level,
+            last_seen_line: line_num,
+        })
+    }
+
+    // Helper function to check if a number matches the expected value
+    fn is_number_valid(&self, number: usize, expected: usize) -> bool {
+        match self.style.as_str() {
+            "one" => number == 1,
+            "zero" => number == 0,
+            _ => number == expected,
+        }
+    }
+
+    // Helper function to reset sequences for deeper levels
+    fn reset_deeper_sequences(sequences: &mut HashMap<usize, ListSequence>, current_level: usize, line_num: usize) {
+        // Only reset sequences at deeper levels that haven't been seen recently
+        sequences.retain(|&level, sequence| {
+            level <= current_level || line_num - sequence.last_seen_line <= 2
+        });
+    }
+
+    // Helper function to check if a line is part of a code block
+    fn is_code_block_marker(line: &str) -> bool {
+        line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~")
     }
 }
 
@@ -89,104 +128,64 @@ impl Rule for MD029OrderedListPrefix {
         }
 
         let mut warnings = Vec::new();
-        let mut level_indices = HashMap::new();
+        let mut sequences: HashMap<usize, ListSequence> = HashMap::new();
+        let mut in_code_block = false;
 
-        // Pre-compute code block regions
-        let in_code_block = Self::precompute_code_blocks(content);
+        let lines: Vec<&str> = content.lines().collect();
 
-        for (line_num, (line, is_in_code_block)) in
-            content.lines().zip(in_code_block.iter()).enumerate()
-        {
+        for (line_num, line) in lines.iter().enumerate() {
+            // Handle code block transitions
+            if Self::is_code_block_marker(line) {
+                in_code_block = !in_code_block;
+                continue;
+            }
+
             // Skip lines in code blocks
-            if *is_in_code_block {
+            if in_code_block {
                 continue;
             }
 
             if let Some(number) = Self::get_list_number(line) {
                 let indent_level = Self::get_indent_level(line);
 
-                // Get or insert a new counter for this indent level
-                let index = *level_indices.entry(indent_level).or_insert(0);
+                // Reset sequences for deeper levels when going back to a shallower level
+                Self::reset_deeper_sequences(&mut sequences, indent_level, line_num);
 
-                let expected = self.get_expected_number(index);
+                // Find or create sequence for this level
+                let sequence = Self::find_or_create_sequence(&mut sequences, indent_level, line_num);
+                let expected = self.get_expected_number(sequence);
 
-                if self.style == "one" {
-                    // For "one" style, all list items should have number 1
-                    if number != 1 {
-                        let indentation = line.len() - line.trim_start().len();
-                        warnings.push(LintWarning {
-                            line: line_num + 1,
-                            column: indentation + 1,
-                            message: "List item prefix should be 1 for style 'one'".to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index
-                                    .line_col_to_byte_range(line_num + 1, indentation + 1),
-                                replacement: format!(
-                                    "1{}",
-                                    // Get everything after the number including the period
-                                    &line[indentation + number.to_string().len()..]
-                                ),
-                            }),
-                        });
-                    }
-                } else if self.style == "zero" {
-                    // For "zero" style, all list items should have number 0
-                    if number != 0 {
-                        let indentation = line.len() - line.trim_start().len();
-                        warnings.push(LintWarning {
-                            line: line_num + 1,
-                            column: indentation + 1,
-                            message: "List item prefix should be 0 for style 'zero'".to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index
-                                    .line_col_to_byte_range(line_num + 1, indentation + 1),
-                                replacement: format!(
-                                    "0{}",
-                                    &line[indentation + number.to_string().len()..]
-                                ),
-                            }),
-                        });
-                    }
-                } else if self.style == "ordered" {
-                    // For "ordered" style, list items should be sequential
-                    if number != index + 1 {
-                        let indentation = line.len() - line.trim_start().len();
-                        warnings.push(LintWarning {
-                            line: line_num + 1,
-                            column: indentation + 1,
-                            message: format!(
-                                "List item prefix should be {} for style 'ordered'",
-                                expected
+                if !self.is_number_valid(number, expected) {
+                    let indentation = line.len() - line.trim_start().len();
+                    let message = match self.style.as_str() {
+                        "one" => "List item prefix should be 1 for style 'one'".to_string(),
+                        "zero" => "List item prefix should be 0 for style 'zero'".to_string(),
+                        _ => format!("List item prefix should be {}", expected),
+                    };
+
+                    warnings.push(LintWarning {
+                        line: line_num + 1,
+                        column: indentation + 1,
+                        message,
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(line_num + 1, indentation + 1),
+                            replacement: format!(
+                                "{}{}",
+                                if self.style == "one" { 1 } 
+                                else if self.style == "zero" { 0 }
+                                else { expected },
+                                &line[indentation + number.to_string().len()..]
                             ),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index
-                                    .line_col_to_byte_range(line_num + 1, indentation + 1),
-                                replacement: format!(
-                                    "{}{}",
-                                    expected,
-                                    &line[indentation + number.to_string().len()..]
-                                ),
-                            }),
-                        });
-                    }
+                        }),
+                    });
                 }
 
-                // Increment the counter for this indent level
-                level_indices.insert(indent_level, index + 1);
-
-                // Reset all deeper indent levels when we encounter a less indented item
-                let deeper_levels: Vec<usize> = level_indices
-                    .keys()
-                    .filter(|&k| *k > indent_level)
-                    .cloned()
-                    .collect();
-
-                for level in deeper_levels {
-                    level_indices.remove(&level);
-                }
+                sequence.index += 1;
+                sequence.last_seen_line = line_num;
+            } else if !Self::is_blank_line(line) && !Self::is_code_block_marker(line) {
+                // Non-list, non-blank, non-code-block line resets all sequences
+                sequences.clear();
             }
         }
 
@@ -202,51 +201,67 @@ impl Rule for MD029OrderedListPrefix {
         }
 
         let mut result = String::new();
-        let mut level_indices = HashMap::new();
-        let in_code_block = Self::precompute_code_blocks(content);
+        let mut sequences: HashMap<usize, ListSequence> = HashMap::new();
+        let mut in_code_block = false;
 
-        for (line_num, (line, is_in_code_block)) in
-            content.lines().zip(in_code_block.iter()).enumerate()
-        {
+        let lines: Vec<&str> = content.lines().collect();
+
+        for (line_num, line) in lines.iter().enumerate() {
             let mut fixed_line = line.to_string();
 
-            // Don't fix lines in code blocks
-            if !*is_in_code_block {
-                if let Some(number) = Self::get_list_number(line) {
-                    let indent_level = Self::get_indent_level(line);
-                    let index = *level_indices.entry(indent_level).or_insert(0);
-                    let expected = self.get_expected_number(index);
-
-                    if (self.style == "one" && number != 1)
-                        || (self.style == "zero" && number != 0)
-                        || (self.style == "ordered" && number != index + 1)
-                    {
-                        let indentation = line.len() - line.trim_start().len();
-                        fixed_line = format!(
-                            "{}{}{}",
-                            " ".repeat(indentation),
-                            expected,
-                            &line[indentation + number.to_string().len()..]
-                        );
-                    }
-
-                    level_indices.insert(indent_level, index + 1);
-
-                    // Reset deeper levels
-                    let deeper_levels: Vec<usize> = level_indices
-                        .keys()
-                        .filter(|&k| *k > indent_level)
-                        .cloned()
-                        .collect();
-
-                    for level in deeper_levels {
-                        level_indices.remove(&level);
-                    }
+            // Handle code block transitions
+            if Self::is_code_block_marker(line) {
+                in_code_block = !in_code_block;
+                result.push_str(&fixed_line);
+                if line_num < lines.len() - 1 {
+                    result.push('\n');
                 }
+                continue;
+            }
+
+            // Skip lines in code blocks
+            if in_code_block {
+                result.push_str(&fixed_line);
+                if line_num < lines.len() - 1 {
+                    result.push('\n');
+                }
+                continue;
+            }
+
+            if let Some(number) = Self::get_list_number(line) {
+                let indent_level = Self::get_indent_level(line);
+
+                // Reset sequences for deeper levels when going back to a shallower level
+                Self::reset_deeper_sequences(&mut sequences, indent_level, line_num);
+
+                // Find or create sequence for this level
+                let sequence = Self::find_or_create_sequence(&mut sequences, indent_level, line_num);
+                let expected = self.get_expected_number(sequence);
+                let expected_num = match self.style.as_str() {
+                    "one" => 1,
+                    "zero" => 0,
+                    _ => expected,
+                };
+
+                if !self.is_number_valid(number, expected) {
+                    let indentation = line.len() - line.trim_start().len();
+                    fixed_line = format!(
+                        "{}{}{}",
+                        " ".repeat(indentation),
+                        expected_num,
+                        &line[indentation + number.to_string().len()..]
+                    );
+                }
+
+                sequence.index += 1;
+                sequence.last_seen_line = line_num;
+            } else if !Self::is_blank_line(line) && !Self::is_code_block_marker(line) {
+                // Non-list, non-blank, non-code-block line resets all sequences
+                sequences.clear();
             }
 
             result.push_str(&fixed_line);
-            if line_num < content.lines().count() - 1 {
+            if line_num < lines.len() - 1 {
                 result.push('\n');
             }
         }

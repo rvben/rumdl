@@ -74,3 +74,56 @@ fn test_line_index() {
     // Line 2, Column 1 corresponds to the beginning of "2. Second item" which is at index 14
     assert_eq!(index.line_col_to_byte_range(2, 1), 14..14);
 }
+
+#[test]
+fn test_md029_with_code_blocks() {
+    let rule = MD029OrderedListPrefix::new("ordered");
+
+    let content = r#"1. First step
+```bash
+some code
+```
+2. Second step
+```bash
+more code
+```
+3. Third step
+```bash
+final code
+```"#;
+
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty(), "List items with code blocks between them should maintain sequence");
+
+    // Test that it doesn't generate false positives
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, content, "Content should remain unchanged as it's already correct");
+}
+
+#[test]
+fn test_md029_nested_with_code_blocks() {
+    let rule = MD029OrderedListPrefix::new("ordered");
+
+    let content = r#"1. First step
+   ```bash
+   some code
+   ```
+   1. First substep
+   ```bash
+   nested code
+   ```
+   2. Second substep
+2. Second step
+   ```bash
+   more code
+   ```
+3. Third step"#;
+
+    let result = rule.check(content).unwrap();
+    println!("Warnings: {:?}", result);
+    assert!(result.is_empty(), "Nested lists with code blocks should maintain correct sequence");
+
+    // Test that it doesn't generate false positives
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, content, "Content should remain unchanged as it's already correct");
+}

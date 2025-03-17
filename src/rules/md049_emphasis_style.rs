@@ -8,7 +8,7 @@ lazy_static! {
     static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"_[^_\\]+_").unwrap();
     static ref ASTERISK_PATTERN: Regex = Regex::new(r"\*[^*\\]+\*").unwrap();
     static ref URL_PATTERN: Regex = Regex::new(r"https?://[^\s)]+").unwrap();
-    static ref INLINE_CODE_PATTERN: Regex = Regex::new(r"`[^`]+`").unwrap();
+    static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
 }
 
 /// Rule MD049: Emphasis style should be consistent
@@ -30,9 +30,7 @@ impl MD049EmphasisStyle {
 
     fn detect_style(&self, content: &str) -> Option<EmphasisStyle> {
         // Find the first occurrence of either style
-
         let first_asterisk = ASTERISK_PATTERN.find(content);
-
         let first_underscore = UNDERSCORE_PATTERN.find(content);
 
         match (first_asterisk, first_underscore) {
@@ -76,12 +74,41 @@ impl MD049EmphasisStyle {
     }
 
     fn is_in_inline_code(&self, text: &str, pos: usize) -> bool {
-        for code_match in INLINE_CODE_PATTERN.find_iter(text) {
-            if pos >= code_match.start() && pos < code_match.end() {
-                return true;
+        let mut in_code = false;
+        let mut code_start = 0;
+        let mut backtick_count = 0;
+        let mut current_backticks = 0;
+
+        for (i, c) in text.chars().enumerate() {
+            if c == '`' {
+                if !in_code {
+                    // Start counting backticks for potential code span start
+                    current_backticks = 1;
+                    code_start = i;
+                } else if i > 0 && text.chars().nth(i - 1) == Some('`') {
+                    // Continue counting backticks
+                    current_backticks += 1;
+                } else if current_backticks == backtick_count {
+                    // Found matching end backticks
+                    if pos >= code_start && pos <= i {
+                        return true;
+                    }
+                    in_code = false;
+                    current_backticks = 1;
+                    code_start = i;
+                }
+            } else {
+                if current_backticks > 0 && !in_code {
+                    // Just finished counting backticks at start of potential code span
+                    backtick_count = current_backticks;
+                    in_code = true;
+                }
+                current_backticks = 0;
             }
         }
-        false
+
+        // Check if we're still in a code span at the end
+        in_code && pos >= code_start
     }
 
     fn convert_style(
@@ -112,7 +139,7 @@ impl Rule for MD049EmphasisStyle {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
 
@@ -129,7 +156,19 @@ impl Rule for MD049EmphasisStyle {
             EmphasisStyle::Consistent => unreachable!(),
         };
 
+        let mut in_code_block = false;
         for (line_num, line) in content.lines().enumerate() {
+            // Handle code block transitions
+            if CODE_BLOCK_PATTERN.find(line).is_some() {
+                in_code_block = !in_code_block;
+                continue;
+            }
+
+            // Skip lines in code blocks
+            if in_code_block {
+                continue;
+            }
+
             for m in emphasis_regex.find_iter(line) {
                 // Skip this match if it's escaped or within a URL/code
                 if self.is_escaped(line, m.start())
@@ -139,7 +178,6 @@ impl Rule for MD049EmphasisStyle {
                     continue;
                 }
 
-                let _text = &line[m.start() + 1..m.end() - 1];
                 let expected_style = match target_style {
                     EmphasisStyle::Asterisk => EmphasisStyle::Asterisk,
                     EmphasisStyle::Underscore => EmphasisStyle::Underscore,
@@ -171,7 +209,7 @@ impl Rule for MD049EmphasisStyle {
                     ),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
+                        range: line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
                         replacement: self.convert_style(m.as_str(), found_style, expected_style),
                     }),
                 });
@@ -182,8 +220,6 @@ impl Rule for MD049EmphasisStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-
         let target_style = match self.style {
             EmphasisStyle::Consistent => self
                 .detect_style(content)
@@ -198,7 +234,6 @@ impl Rule for MD049EmphasisStyle {
         };
 
         // Store matches with their positions, filtering out URLs and code
-
         let matches: Vec<(usize, usize)> = emphasis_regex
             .find_iter(content)
             .filter(|m| {
@@ -210,10 +245,8 @@ impl Rule for MD049EmphasisStyle {
             .collect();
 
         // Process matches in reverse order to maintain correct indices
-
         let mut result = content.to_string();
         for (start, end) in matches.into_iter().rev() {
-            let _text = &result[start + 1..end - 1];
             let replacement = self.convert_style(
                 &result[start..end],
                 if emphasis_regex.as_str() == UNDERSCORE_PATTERN.as_str() {
