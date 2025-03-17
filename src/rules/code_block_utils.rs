@@ -86,14 +86,16 @@ impl CodeBlockUtils {
     /// 
     /// # Examples
     /// ```
-    /// // Returns Some("rust")
+    /// use rumdl::rules::code_block_utils::CodeBlockUtils;
+    ///
     /// let specifier = CodeBlockUtils::get_language_specifier("```rust");
-    /// 
-    /// // Returns Some("python")
+    /// assert_eq!(specifier, Some("rust".to_string()));
+    ///
     /// let specifier = CodeBlockUtils::get_language_specifier("~~~python");
-    /// 
-    /// // Returns None - no language specified
+    /// assert_eq!(specifier, Some("python".to_string()));
+    ///
     /// let specifier = CodeBlockUtils::get_language_specifier("```");
+    /// assert_eq!(specifier, None);
     /// ```
     pub fn get_language_specifier(line: &str) -> Option<String> {
         if FENCED_CODE_BLOCK_START.is_match(line) || ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line) {
@@ -128,9 +130,11 @@ impl CodeBlockUtils {
     /// 
     /// # Examples
     /// ```
-    /// let content = "Regular text\n```\nCode block\n```\nMore text";
+    /// use rumdl::rules::code_block_utils::CodeBlockUtils;
+    ///
+    /// let content = "Some text\n```rust\nlet x = 1;\n```\nMore text";
     /// let in_code_block = CodeBlockUtils::identify_code_block_lines(content);
-    /// // in_code_block = [false, false, true, false, false]
+    /// assert_eq!(in_code_block, vec![false, true, true, true, false]);
     /// ```
     pub fn identify_code_block_lines(content: &str) -> Vec<bool> {
         let lines: Vec<&str> = content.lines().collect();

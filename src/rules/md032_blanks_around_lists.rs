@@ -3,6 +3,12 @@ use crate::rules::code_block_utils::CodeBlockUtils;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use lazy_static::lazy_static;
 use regex::Regex;
+use crate::utils::range_utils::LineIndex;
+
+lazy_static! {
+    static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)\s").unwrap();
+    static ref LIST_CONTENT_REGEX: Regex = Regex::new(r"^\s{2,}").unwrap();
+}
 
 /// Rule MD032: Lists should be surrounded by blank lines
 ///
@@ -58,7 +64,7 @@ use regex::Regex;
 /// - **Front Matter**: YAML front matter is detected and skipped
 /// - **Code Blocks**: Lists inside code blocks are ignored
 /// - **List Content**: Indented content belonging to list items is properly recognized as part of the list
-/// - **Document Boundaries**: Lists at the beginning or end of a document have adjusted requirements
+/// - **Document Boundaries**: Lists at the beginning or end of the document have adjusted requirements
 ///
 /// ## Fix Behavior
 ///
@@ -73,12 +79,6 @@ use regex::Regex;
 /// - Fast path checks before applying more expensive regex operations
 /// - Efficient list item detection
 /// - Pre-computation of code block lines to avoid redundant processing
-///
-lazy_static! {
-    static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)\s").unwrap();
-    static ref LIST_CONTENT_REGEX: Regex = Regex::new(r"^\s{2,}").unwrap();
-}
-
 #[derive(Debug, Default)]
 pub struct MD032BlanksAroundLists;
 

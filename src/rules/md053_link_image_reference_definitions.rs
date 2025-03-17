@@ -35,8 +35,8 @@ lazy_static! {
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
 }
 
-// Define a type alias for code block cache
 type CodeBlockCache = RefCell<HashMap<u64, Vec<bool>>>;
+type DefinitionCache = RefCell<HashMap<u64, Vec<(String, usize, usize)>>>;
 
 /// Rule MD053: Link and image reference definitions should be needed
 ///
@@ -52,7 +52,7 @@ type CodeBlockCache = RefCell<HashMap<u64, Vec<bool>>>;
 /// - **Shortcut reference links**: `[reference]` (must be defined elsewhere)
 /// - **Reference definitions**: `[reference]: URL "Optional Title"`
 /// - **Multi-line reference definitions**: 
-///   ```
+///   ```markdown
 ///   [reference]: URL
 ///      "Optional title continued on next line"
 ///   ```
@@ -91,16 +91,16 @@ type CodeBlockCache = RefCell<HashMap<u64, Vec<bool>>>;
 #[derive(Debug, Clone)]
 pub struct MD053LinkImageReferenceDefinitions {
     ignored_definitions: HashSet<String>,
-    cache: CodeBlockCache,
-    content_cache: RefCell<HashMap<u64, Vec<(String, usize, usize)>>>,
-    reference_cache: RefCell<HashMap<u64, Vec<(String, usize, usize)>>>,
+    code_block_cache: CodeBlockCache,
+    content_cache: DefinitionCache,
+    reference_cache: DefinitionCache,
 }
 
 impl Default for MD053LinkImageReferenceDefinitions {
     fn default() -> Self {
         Self {
             ignored_definitions: HashSet::new(),
-            cache: CodeBlockCache::new(HashMap::new()),
+            code_block_cache: RefCell::new(HashMap::new()),
             content_cache: RefCell::new(HashMap::new()),
             reference_cache: RefCell::new(HashMap::new()),
         }
@@ -117,7 +117,7 @@ impl MD053LinkImageReferenceDefinitions {
 
         Self {
             ignored_definitions: ignored_set,
-            cache: CodeBlockCache::new(HashMap::new()),
+            code_block_cache: RefCell::new(HashMap::new()),
             content_cache: RefCell::new(HashMap::new()),
             reference_cache: RefCell::new(HashMap::new()),
         }
@@ -530,7 +530,7 @@ impl MD053LinkImageReferenceDefinitions {
         let hash = Self::content_hash(content);
 
         // First check if we already have this content cached
-        let cache = self.cache.borrow();
+        let cache = self.content_cache.borrow();
         if let Some(cached) = cache.get(&hash) {
             return cached.clone();
         }
@@ -550,7 +550,7 @@ impl MD053LinkImageReferenceDefinitions {
             .collect();
 
         // Update the cache with the computed definitions
-        self.cache.borrow_mut().insert(hash, definitions.clone());
+        self.content_cache.borrow_mut().insert(hash, definitions.clone());
 
         definitions
     }

@@ -1,6 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::{Heading, HeadingStyle, HeadingUtils};
-use crate::utils::range_utils::LineIndex;
 
 /// Rule MD002: First heading should be a top-level heading
 ///
