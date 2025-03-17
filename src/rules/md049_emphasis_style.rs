@@ -1,130 +1,206 @@
-use crate::utils::range_utils::LineIndex;
-
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"_[^_\\]+_").unwrap();
-    static ref ASTERISK_PATTERN: Regex = Regex::new(r"\*[^*\\]+\*").unwrap();
+    // Fancy regex patterns with lookbehind assertions
+    static ref UNDERSCORE_PATTERN: FancyRegex = FancyRegex::new(r"(?<!\\)_([^\s_][^\n_]*?[^\s_])(?<!\\)_").unwrap();
+    static ref ASTERISK_PATTERN: FancyRegex = FancyRegex::new(r"(?<!\\)\*([^\s\*][^\n\*]*?[^\s\*])(?<!\\)\*").unwrap();
+    
+    // Code block detection
+    static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(```|~~~)").unwrap();
+    static ref CODE_SPAN_PATTERN: Regex = Regex::new(r"`+").unwrap();
+    
+    // URL detection
+    static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r"\[.*?\]\(.*?\)").unwrap();
+    static ref MARKDOWN_LINK_URL_PART: Regex = Regex::new(r"\[.*?\]\(([^)]+)").unwrap();
     static ref URL_PATTERN: Regex = Regex::new(r"https?://[^\s)]+").unwrap();
-    static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
 }
 
-/// Rule MD049: Emphasis style should be consistent
+/// Emphasis style for MD049
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum EmphasisStyle {
+    /// Use consistent style based on first occurrence
+    Consistent,
+    /// Use asterisks for emphasis
+    Asterisk,
+    /// Use underscores for emphasis
+    Underscore,
+}
+
+impl Default for EmphasisStyle {
+    fn default() -> Self {
+        EmphasisStyle::Consistent
+    }
+}
+
+impl From<&str> for EmphasisStyle {
+    fn from(s: &str) -> Self {
+        match s {
+            "asterisk" => EmphasisStyle::Asterisk,
+            "underscore" => EmphasisStyle::Underscore,
+            _ => EmphasisStyle::Consistent,
+        }
+    }
+}
+
+/// MD049 - Emphasis style should be consistent
+///
+/// This rule is triggered when the style for emphasis is inconsistent:
+/// - Asterisks: `*text*`
+/// - Underscores: `_text_`
+///
+/// This rule is focused on regular emphasis, not strong emphasis.
+#[derive(Debug, Default, Clone)]
 pub struct MD049EmphasisStyle {
     style: EmphasisStyle,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EmphasisStyle {
-    Asterisk,
-    Underscore,
-    Consistent,
-}
-
 impl MD049EmphasisStyle {
+    /// Create a new instance of MD049EmphasisStyle
     pub fn new(style: EmphasisStyle) -> Self {
-        Self { style }
+        MD049EmphasisStyle { style }
     }
 
-    fn detect_style(&self, content: &str) -> Option<EmphasisStyle> {
-        // Find the first occurrence of either style
-        let first_asterisk = ASTERISK_PATTERN.find(content);
-        let first_underscore = UNDERSCORE_PATTERN.find(content);
+    /// Determine if the content is a URL or part of a Markdown link
+    fn is_url(&self, content: &str, full_content: &str, start_pos: usize, end_pos: usize) -> bool {
+        // Check for standard URL patterns
+        if content.contains("http://") || content.contains("https://") || content.contains("ftp://") {
+            return true;
+        }
 
-        match (first_asterisk, first_underscore) {
-            (Some(a), Some(u)) => {
-                // Whichever pattern appears first determines the style
-                if a.start() < u.start() {
-                    Some(EmphasisStyle::Asterisk)
-                } else {
-                    Some(EmphasisStyle::Underscore)
+        // Check if this position is inside a Markdown link URL
+        let slice_up_to_end = &full_content[..end_pos];
+        
+        // Look for link patterns that might contain this position
+        for captures in MARKDOWN_LINK_URL_PART.captures_iter(slice_up_to_end) {
+            if let Some(url_match) = captures.get(1) {
+                let url_start = url_match.start();
+                let url_end = url_match.end();
+                
+                // If our emphasized text is within a URL part of a link, skip it
+                if start_pos >= url_start && end_pos <= url_end {
+                    return true;
                 }
             }
-            (Some(_), None) => Some(EmphasisStyle::Asterisk),
-            (None, Some(_)) => Some(EmphasisStyle::Underscore),
-            (None, None) => None,
         }
+        
+        // Check if the position is within an explicit URL
+        for url_match in URL_PATTERN.find_iter(full_content) {
+            if start_pos >= url_match.start() && end_pos <= url_match.end() {
+                return true;
+            }
+        }
+
+        false
     }
 
-    fn is_escaped(&self, text: &str, pos: usize) -> bool {
-        if pos == 0 {
-            return false;
+    /// Detect all code blocks in the content
+    fn detect_code_blocks(&self, content: &str) -> Vec<(usize, usize)> {
+        let mut blocks = Vec::new();
+        let mut in_code_block = false;
+        let mut code_block_start = 0;
+        
+        // Find fenced code blocks
+        for (i, line) in content.lines().enumerate() {
+            let line_start = if i == 0 {
+                0
+            } else {
+                content.lines().take(i).map(|l| l.len() + 1).sum()
+            };
+            
+            if CODE_BLOCK_PATTERN.is_match(line.trim()) {
+                if !in_code_block {
+                    code_block_start = line_start;
+                    in_code_block = true;
+                } else {
+                    let code_block_end = line_start + line.len();
+                    blocks.push((code_block_start, code_block_end));
+                    in_code_block = false;
+                }
+            }
         }
-
-        let mut backslash_count = 0;
-        for c in text[..pos].chars().rev() {
-            if c == '\\' {
-                backslash_count += 1;
+        
+        // Handle unclosed code blocks
+        if in_code_block {
+            blocks.push((code_block_start, content.len()));
+        }
+        
+        // Find inline code spans
+        let mut i = 0;
+        while i < content.len() {
+            if let Some(m) = CODE_SPAN_PATTERN.find_at(content, i) {
+                let backtick_length = m.end() - m.start();
+                let start = m.start();
+                
+                // Find matching closing backticks
+                if let Some(end_pos) = content[m.end()..].find(&"`".repeat(backtick_length)) {
+                    let end = m.end() + end_pos + backtick_length;
+                    blocks.push((start, end));
+                    i = end;
+                } else {
+                    i = m.end();
+                }
             } else {
                 break;
             }
         }
-        backslash_count % 2 == 1
+        
+        blocks.sort_by(|a, b| a.0.cmp(&b.0));
+        blocks
+    }
+    
+    /// Check if a position is within a code block or code span
+    fn is_in_code_block_or_span(&self, blocks: &[(usize, usize)], pos: usize) -> bool {
+        blocks.iter().any(|&(start, end)| pos >= start && pos < end)
     }
 
-    fn is_in_url(&self, text: &str, pos: usize) -> bool {
-        for url_match in URL_PATTERN.find_iter(text) {
-            if pos >= url_match.start() && pos < url_match.end() {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn is_in_inline_code(&self, text: &str, pos: usize) -> bool {
-        let mut in_code = false;
-        let mut code_start = 0;
-        let mut backtick_count = 0;
-        let mut current_backticks = 0;
-
-        for (i, c) in text.chars().enumerate() {
-            if c == '`' {
-                if !in_code {
-                    // Start counting backticks for potential code span start
-                    current_backticks = 1;
-                    code_start = i;
-                } else if i > 0 && text.chars().nth(i - 1) == Some('`') {
-                    // Continue counting backticks
-                    current_backticks += 1;
-                } else if current_backticks == backtick_count {
-                    // Found matching end backticks
-                    if pos >= code_start && pos <= i {
-                        return true;
+    /// Determine the target emphasis style based on the content and configured style
+    fn get_target_style(&self, content: &str) -> EmphasisStyle {
+        match self.style {
+            EmphasisStyle::Consistent => {
+                // Find the first emphasis marker to determine the style
+                if let Ok(asterisk_matches) = ASTERISK_PATTERN.find_iter(content).collect::<Result<Vec<_>, _>>() {
+                    if let Ok(underscore_matches) = UNDERSCORE_PATTERN.find_iter(content).collect::<Result<Vec<_>, _>>() {
+                        if !asterisk_matches.is_empty() && !underscore_matches.is_empty() {
+                            // Compare positions of first matches
+                            let first_asterisk = asterisk_matches[0].start();
+                            let first_underscore = underscore_matches[0].start();
+                            
+                            if first_asterisk < first_underscore {
+                                EmphasisStyle::Asterisk
+                            } else {
+                                EmphasisStyle::Underscore
+                            }
+                        } else if !asterisk_matches.is_empty() {
+                            EmphasisStyle::Asterisk
+                        } else if !underscore_matches.is_empty() {
+                            EmphasisStyle::Underscore
+                        } else {
+                            // No emphasis found, default to asterisk
+                            EmphasisStyle::Asterisk
+                        }
+                    } else {
+                        // If underscore regex fails, default to asterisks
+                        EmphasisStyle::Asterisk
                     }
-                    in_code = false;
-                    current_backticks = 1;
-                    code_start = i;
+                } else {
+                    // If asterisk regex fails, check underscores
+                    if let Ok(underscore_matches) = UNDERSCORE_PATTERN.find_iter(content).collect::<Result<Vec<_>, _>>() {
+                        if !underscore_matches.is_empty() {
+                            EmphasisStyle::Underscore
+                        } else {
+                            // No emphasis found, default to asterisk
+                            EmphasisStyle::Asterisk
+                        }
+                    } else {
+                        // Both regexes failed, default to asterisk
+                        EmphasisStyle::Asterisk
+                    }
                 }
-            } else {
-                if current_backticks > 0 && !in_code {
-                    // Just finished counting backticks at start of potential code span
-                    backtick_count = current_backticks;
-                    in_code = true;
-                }
-                current_backticks = 0;
             }
-        }
-
-        // Check if we're still in a code span at the end
-        in_code && pos >= code_start
-    }
-
-    fn convert_style(
-        &self,
-        text: &str,
-        found_style: EmphasisStyle,
-        expected_style: EmphasisStyle,
-    ) -> String {
-        match (found_style, expected_style) {
-            (EmphasisStyle::Asterisk, EmphasisStyle::Underscore) => {
-                format!("_{}_", &text[1..text.len() - 1])
-            }
-            (EmphasisStyle::Underscore, EmphasisStyle::Asterisk) => {
-                format!("*{}*", &text[1..text.len() - 1])
-            }
-            _ => unreachable!(),
+            style => style,
         }
     }
 }
@@ -139,128 +215,193 @@ impl Rule for MD049EmphasisStyle {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let line_index = LineIndex::new(content.to_string());
-
         let mut warnings = Vec::new();
-
-        let target_style = match self.style {
-            EmphasisStyle::Consistent => self
-                .detect_style(content)
-                .unwrap_or(EmphasisStyle::Asterisk),
-            _ => self.style,
-        };
-
-        let emphasis_regex = match target_style {
-            EmphasisStyle::Asterisk => &*UNDERSCORE_PATTERN,
-            EmphasisStyle::Underscore => &*ASTERISK_PATTERN,
-            EmphasisStyle::Consistent => unreachable!(),
-        };
-
-        let mut in_code_block = false;
-        for (line_num, line) in content.lines().enumerate() {
-            // Handle code block transitions
-            if CODE_BLOCK_PATTERN.find(line).is_some() {
-                in_code_block = !in_code_block;
-                continue;
-            }
-
-            // Skip lines in code blocks
-            if in_code_block {
-                continue;
-            }
-
-            for m in emphasis_regex.find_iter(line) {
-                // Skip this match if it's escaped or within a URL/code
-                if self.is_escaped(line, m.start())
-                    || self.is_in_url(line, m.start())
-                    || self.is_in_inline_code(line, m.start())
-                {
-                    continue;
-                }
-
-                let expected_style = match target_style {
-                    EmphasisStyle::Asterisk => EmphasisStyle::Asterisk,
-                    EmphasisStyle::Underscore => EmphasisStyle::Underscore,
-                    EmphasisStyle::Consistent => unreachable!(),
-                };
-                let found_style = if emphasis_regex.as_str() == UNDERSCORE_PATTERN.as_str() {
-                    EmphasisStyle::Underscore
-                } else if emphasis_regex.as_str() == ASTERISK_PATTERN.as_str() {
-                    EmphasisStyle::Asterisk
-                } else {
-                    unreachable!()
-                };
-
-                warnings.push(LintWarning {
-                    line: line_num + 1,
-                    column: m.start() + 1,
-                    message: format!(
-                        "Emphasis style should be {} ({})",
-                        if expected_style == EmphasisStyle::Asterisk {
-                            "asterisk"
-                        } else {
-                            "underscore"
-                        },
-                        if expected_style == EmphasisStyle::Asterisk {
-                            "*"
-                        } else {
-                            "_"
+        
+        // Determine emphasis style
+        let target_style = self.get_target_style(content);
+        
+        // Detect code blocks and spans
+        let code_blocks = self.detect_code_blocks(content);
+        
+        // Process emphasis based on target style
+        if target_style == EmphasisStyle::Asterisk {
+            // Look for underscores to convert to asterisks
+            if let Ok(matches) = UNDERSCORE_PATTERN.find_iter(content).collect::<Result<Vec<_>, _>>() {
+                for m in matches {
+                    let start_pos = m.start();
+                    let end_pos = m.end();
+                    
+                    // Skip if in code block or URL
+                    if self.is_in_code_block_or_span(&code_blocks, start_pos) ||
+                       self.is_url(&content[start_pos..end_pos], content, start_pos, end_pos) {
+                        continue;
+                    }
+                    
+                    // Get line and column information
+                    let mut line_num = 1;
+                    let mut col_num = 1;
+                    for (i, c) in content.chars().enumerate() {
+                        if i == start_pos {
+                            break;
                         }
-                    ),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
-                        replacement: self.convert_style(m.as_str(), found_style, expected_style),
-                    }),
-                });
+                        if c == '\n' {
+                            line_num += 1;
+                            col_num = 1;
+                        } else {
+                            col_num += 1;
+                        }
+                    }
+                    
+                    warnings.push(LintWarning {
+                        line: line_num,
+                        column: col_num,
+                        message: "Emphasis should use asterisks (*) instead of underscores (_)".to_string(),
+                        fix: None,
+                        severity: Severity::Warning,
+                    });
+                }
+            }
+        } else {
+            // Look for asterisks to convert to underscores
+            if let Ok(matches) = ASTERISK_PATTERN.find_iter(content).collect::<Result<Vec<_>, _>>() {
+                for m in matches {
+                    let start_pos = m.start();
+                    let end_pos = m.end();
+                    
+                    // Skip if in code block or URL
+                    if self.is_in_code_block_or_span(&code_blocks, start_pos) ||
+                       self.is_url(&content[start_pos..end_pos], content, start_pos, end_pos) {
+                        continue;
+                    }
+                    
+                    // Get line and column information
+                    let mut line_num = 1;
+                    let mut col_num = 1;
+                    for (i, c) in content.chars().enumerate() {
+                        if i == start_pos {
+                            break;
+                        }
+                        if c == '\n' {
+                            line_num += 1;
+                            col_num = 1;
+                        } else {
+                            col_num += 1;
+                        }
+                    }
+                    
+                    warnings.push(LintWarning {
+                        line: line_num,
+                        column: col_num,
+                        message: "Emphasis should use underscores (_) instead of asterisks (*)".to_string(),
+                        fix: None,
+                        severity: Severity::Warning,
+                    });
+                }
             }
         }
-
+        
         Ok(warnings)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let target_style = match self.style {
-            EmphasisStyle::Consistent => self
-                .detect_style(content)
-                .unwrap_or(EmphasisStyle::Asterisk),
-            _ => self.style,
-        };
-
-        let emphasis_regex = match target_style {
-            EmphasisStyle::Asterisk => &*UNDERSCORE_PATTERN,
-            EmphasisStyle::Underscore => &*ASTERISK_PATTERN,
-            EmphasisStyle::Consistent => unreachable!(),
-        };
-
-        // Store matches with their positions, filtering out URLs and code
-        let matches: Vec<(usize, usize)> = emphasis_regex
-            .find_iter(content)
-            .filter(|m| {
-                !self.is_escaped(content, m.start())
-                    && !self.is_in_url(content, m.start())
-                    && !self.is_in_inline_code(content, m.start())
-            })
-            .map(|m| (m.start(), m.end()))
-            .collect();
-
-        // Process matches in reverse order to maintain correct indices
         let mut result = content.to_string();
-        for (start, end) in matches.into_iter().rev() {
-            let replacement = self.convert_style(
-                &result[start..end],
-                if emphasis_regex.as_str() == UNDERSCORE_PATTERN.as_str() {
-                    EmphasisStyle::Underscore
-                } else if emphasis_regex.as_str() == ASTERISK_PATTERN.as_str() {
-                    EmphasisStyle::Asterisk
-                } else {
-                    unreachable!()
-                },
-                target_style,
-            );
-            result.replace_range(start..end, &replacement);
+        
+        // Determine emphasis style
+        let target_style = self.get_target_style(content);
+        
+        // Detect code blocks and spans
+        let code_blocks = self.detect_code_blocks(content);
+        
+        // Process emphasis based on target style
+        if target_style == EmphasisStyle::Asterisk {
+            // Convert underscores to asterisks
+            // Find all matches first
+            let underscore_matches = match UNDERSCORE_PATTERN.find_iter(content).collect::<Result<Vec<_>, _>>() {
+                Ok(matches) => matches,
+                Err(_) => return Ok(result),
+            };
+            
+            // Create a list of replacements to make
+            let mut replacements = Vec::new();
+            for m in &underscore_matches {
+                let start_pos = m.start();
+                let end_pos = m.end();
+                
+                // Skip if in code block or URL
+                if self.is_in_code_block_or_span(&code_blocks, start_pos) ||
+                   self.is_url(&content[start_pos..end_pos], content, start_pos, end_pos) {
+                    continue;
+                }
+                
+                // Extract the content between the emphasis markers
+                let content_between = &content[start_pos + 1..end_pos - 1];
+                
+                // Add to list of replacements
+                replacements.push((start_pos, end_pos, format!("*{}*", content_between)));
+            }
+            
+            // Sort replacements in reverse order to avoid index shifts
+            replacements.sort_by(|a, b| b.0.cmp(&a.0));
+            
+            // Apply all replacements
+            for (start, end, replacement) in replacements {
+                result.replace_range(start..end, &replacement);
+            }
+        } else {
+            // Convert asterisks to underscores
+            // Find all matches first
+            let asterisk_matches = match ASTERISK_PATTERN.find_iter(content).collect::<Result<Vec<_>, _>>() {
+                Ok(matches) => matches,
+                Err(_) => return Ok(result),
+            };
+            
+            // Create a list of replacements to make
+            let mut replacements = Vec::new();
+            for m in &asterisk_matches {
+                let start_pos = m.start();
+                let end_pos = m.end();
+                
+                // Skip if in code block or URL
+                if self.is_in_code_block_or_span(&code_blocks, start_pos) ||
+                   self.is_url(&content[start_pos..end_pos], content, start_pos, end_pos) {
+                    continue;
+                }
+                
+                // Extract the content between the emphasis markers
+                let content_between = &content[start_pos + 1..end_pos - 1];
+                
+                // Add to list of replacements
+                replacements.push((start_pos, end_pos, format!("_{}_", content_between)));
+            }
+            
+            // Sort replacements in reverse order to avoid index shifts
+            replacements.sort_by(|a, b| b.0.cmp(&a.0));
+            
+            // Apply all replacements
+            for (start, end, replacement) in replacements {
+                result.replace_range(start..end, &replacement);
+            }
         }
-
+        
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_name() {
+        let rule = MD049EmphasisStyle::default();
+        assert_eq!(rule.name(), "MD049");
+    }
+
+    #[test]
+    fn test_style_from_str() {
+        assert_eq!(EmphasisStyle::from("asterisk"), EmphasisStyle::Asterisk);
+        assert_eq!(EmphasisStyle::from("underscore"), EmphasisStyle::Underscore);
+        assert_eq!(EmphasisStyle::from("other"), EmphasisStyle::Consistent);
+    }
+}
+

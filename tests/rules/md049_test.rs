@@ -146,29 +146,160 @@ fn test_inline_code_with_underscores() {
     // Test inline code with underscores
     let content = "Use the `function_name()` in your code and _emphasize_ important parts.";
     let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1, "Should detect one emphasis to fix");
 
-    // Based on our debug output, we've confirmed this should either detect 0 or 1 warnings,
-    // and the critical behavior is that inline code should not be modified.
     let fixed = rule.fix(content).unwrap();
-
-    // Important test assertions:
-    // 1. Inline code with underscores should be preserved
     assert!(
         fixed.contains("`function_name()`"),
         "Inline code should not be modified"
     );
+    assert!(
+        fixed.contains("*emphasize*"),
+        "Emphasis should be converted to asterisks"
+    );
+}
 
-    // 2. If the rule finds an emphasis marker to fix, it should use asterisk style
-    if !result.is_empty() {
-        assert!(
-            fixed.contains("*emphasize*"),
-            "Emphasis should be converted to asterisks"
-        );
-    } else {
-        // If no warnings, the content should be unchanged
-        assert_eq!(
-            fixed, content,
-            "Content should be unchanged if no issues detected"
-        );
-    }
+#[test]
+fn test_multiple_backticks() {
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+
+    // Test double backticks
+    let content = "Use ``code with `backtick` inside`` and _emphasis_.";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1, "Should detect one emphasis to fix");
+
+    let fixed = rule.fix(content).unwrap();
+    assert!(
+        fixed.contains("``code with `backtick` inside``"),
+        "Double backtick code should not be modified"
+    );
+    assert!(
+        fixed.contains("*emphasis*"),
+        "Emphasis should be converted to asterisks"
+    );
+
+    // Test triple backticks
+    let content = "Use ```code with `backticks` and ``more`` inside``` and _emphasis_.";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1, "Should detect one emphasis to fix");
+
+    let fixed = rule.fix(content).unwrap();
+    assert!(
+        fixed.contains("```code with `backticks` and ``more`` inside```"),
+        "Triple backtick code should not be modified"
+    );
+    assert!(
+        fixed.contains("*emphasis*"),
+        "Emphasis should be converted to asterisks"
+    );
+}
+
+#[test]
+fn test_code_blocks() {
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+
+    // Test code blocks with emphasis-like content
+    let content = "Before _emphasis_\n```\nSome _code_ here\n```\nAfter _emphasis_";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
+
+    let fixed = rule.fix(content).unwrap();
+    assert!(
+        fixed.contains("Before *emphasis*"),
+        "Emphasis before code block should be fixed"
+    );
+    assert!(
+        fixed.contains("Some _code_ here"),
+        "Content in code block should not be modified"
+    );
+    assert!(
+        fixed.contains("After *emphasis*"),
+        "Emphasis after code block should be fixed"
+    );
+
+    // Test with tildes
+    let content = "Before _emphasis_\n~~~\nSome _code_ here\n~~~\nAfter _emphasis_";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
+
+    let fixed = rule.fix(content).unwrap();
+    assert!(
+        fixed.contains("Before *emphasis*"),
+        "Emphasis before code block should be fixed"
+    );
+    assert!(
+        fixed.contains("Some _code_ here"),
+        "Content in code block should not be modified"
+    );
+    assert!(
+        fixed.contains("After *emphasis*"),
+        "Emphasis after code block should be fixed"
+    );
+}
+
+#[test]
+fn test_environment_variables() {
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+
+    // Test environment variables in backticks
+    let content = "Set `GITLAB_URL` and `CI_PROJECT_ID` variables and _note_ the values.";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1, "Should detect one emphasis to fix");
+
+    let fixed = rule.fix(content).unwrap();
+    assert!(
+        fixed.contains("`GITLAB_URL`"),
+        "Environment variable should not be modified"
+    );
+    assert!(
+        fixed.contains("`CI_PROJECT_ID`"),
+        "Environment variable should not be modified"
+    );
+    assert!(
+        fixed.contains("*note*"),
+        "Emphasis should be converted to asterisks"
+    );
+}
+
+#[test]
+fn test_nested_code_and_emphasis() {
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+
+    // Test complex nesting
+    let content = "1. First step with _emphasis_\n   ```bash\n   echo \"some _code_\"\n   ```\n2. Second step with _emphasis_";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
+
+    let fixed = rule.fix(content).unwrap();
+    assert!(
+        fixed.contains("First step with *emphasis*"),
+        "First emphasis should be fixed"
+    );
+    assert!(
+        fixed.contains("echo \"some _code_\""),
+        "Code block content should not be modified"
+    );
+    assert!(
+        fixed.contains("Second step with *emphasis*"),
+        "Second emphasis should be fixed"
+    );
+
+    // Test with indented code and emphasis
+    let content = "1. First step with _emphasis_\n    ```\n    some _code_\n    ```\n   And _more_ text";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
+
+    let fixed = rule.fix(content).unwrap();
+    assert!(
+        fixed.contains("First step with *emphasis*"),
+        "First emphasis should be fixed"
+    );
+    assert!(
+        fixed.contains("some _code_"),
+        "Code block content should not be modified"
+    );
+    assert!(
+        fixed.contains("And *more* text"),
+        "Second emphasis should be fixed"
+    );
 }
