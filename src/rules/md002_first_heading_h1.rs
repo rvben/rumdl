@@ -1,6 +1,79 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::{Heading, HeadingStyle, HeadingUtils};
+use crate::utils::range_utils::LineIndex;
 
+/// Rule MD002: First heading should be a top-level heading
+///
+/// This rule enforces that the first heading in a document is a top-level heading (typically h1),
+/// which establishes the main topic or title of the document.
+///
+/// ## Purpose
+///
+/// - **Document Structure**: Ensures proper document hierarchy with a single top-level heading
+/// - **Accessibility**: Improves screen reader navigation by providing a clear document title
+/// - **SEO**: Helps search engines identify the primary topic of the document
+/// - **Readability**: Provides users with a clear understanding of the document's main subject
+///
+/// ## Configuration Options
+///
+/// The rule supports customizing the required level for the first heading:
+///
+/// ```yaml
+/// MD002:
+///   level: 1  # The heading level required for the first heading (default: 1)
+/// ```
+///
+/// Setting `level: 2` would require the first heading to be an h2 instead of h1.
+///
+/// ## Examples
+///
+/// ### Correct (with default configuration)
+///
+/// ```markdown
+/// # Document Title
+/// 
+/// ## Section 1
+/// 
+/// Content here...
+/// 
+/// ## Section 2
+/// 
+/// More content...
+/// ```
+///
+/// ### Incorrect (with default configuration)
+///
+/// ```markdown
+/// ## Introduction
+/// 
+/// Content here...
+/// 
+/// # Main Title
+/// 
+/// More content...
+/// ```
+///
+/// ## Behavior
+///
+/// This rule:
+/// - Ignores front matter (YAML metadata at the beginning of the document)
+/// - Works with both ATX (`#`) and Setext (underlined) heading styles
+/// - Only examines the first heading it encounters
+/// - Does not apply to documents with no headings
+///
+/// ## Fix Behavior
+///
+/// When applying automatic fixes, this rule:
+/// - Changes the level of the first heading to match the configured level
+/// - Preserves the original heading style (ATX, closed ATX, or Setext)
+/// - Maintains indentation and other formatting
+///
+/// ## Rationale
+///
+/// Having a single top-level heading establishes the document's primary topic and creates
+/// a logical structure. This follows semantic HTML principles where each page should have
+/// a single `<h1>` element that defines its main subject.
+///
 #[derive(Debug)]
 pub struct MD002FirstHeadingH1 {
     pub level: usize,
@@ -164,9 +237,7 @@ impl Rule for MD002FirstHeadingH1 {
                 let mut result = Vec::new();
 
                 // Copy lines before the heading
-                for i in 0..line_num {
-                    result.push(lines[i].to_string());
-                }
+                result.extend(lines.iter().take(line_num).map(|line| line.to_string()));
 
                 // Replace the heading with the correct level
                 match heading.style {
@@ -200,9 +271,7 @@ impl Rule for MD002FirstHeadingH1 {
                 }
 
                 // Copy remaining lines
-                for i in (line_num + 1)..lines.len() {
-                    result.push(lines[i].to_string());
-                }
+                result.extend(lines.iter().skip(line_num + 1).map(|line| line.to_string()));
 
                 // Preserve trailing newline if original had it
                 let result_str = if content.ends_with('\n') {

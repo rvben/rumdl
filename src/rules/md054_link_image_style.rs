@@ -15,7 +15,50 @@ lazy_static! {
     static ref REFERENCE_DEF_RE: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap();
 }
 
-/// Configuration for link and image styles
+/// Rule MD054: Link and image style should be consistent
+///
+/// This rule is triggered when different link or image styles are used in the same document.
+/// Markdown supports various styles for links and images, and this rule enforces consistency.
+///
+/// ## Supported Link Styles
+///
+/// - **Autolink**: `<https://example.com>`
+/// - **Inline**: `[link text](https://example.com)`
+/// - **URL Inline**: Special case of inline links where the URL itself is also the link text: `[https://example.com](https://example.com)`
+/// - **Shortcut**: `[link text]` (requires a reference definition elsewhere in the document)
+/// - **Collapsed**: `[link text][]` (requires a reference definition with the same name)
+/// - **Full**: `[link text][reference]` (requires a reference definition for the reference)
+///
+/// ## Configuration Options
+///
+/// You can configure which link styles are allowed. By default, all styles are allowed:
+///
+/// ```yaml
+/// MD054:
+///   autolink: true    # Allow autolink style
+///   inline: true      # Allow inline style
+///   url_inline: true  # Allow URL inline style
+///   shortcut: true    # Allow shortcut style
+///   collapsed: true   # Allow collapsed style
+///   full: true        # Allow full style
+/// ```
+///
+/// To enforce a specific style, set only that style to `true` and all others to `false`.
+///
+/// ## Unicode Support
+///
+/// This rule fully supports Unicode characters in link text and URLs, including:
+/// - Combining characters (e.g., café)
+/// - Zero-width joiners (e.g., family emojis: 👨‍👩‍👧‍👦)
+/// - Right-to-left text (e.g., Arabic, Hebrew)
+/// - Emojis and other special characters
+///
+/// ## Rationale
+///
+/// Consistent link styles improve document readability and maintainability. Different link
+/// styles have different advantages (e.g., inline links are self-contained, reference links
+/// keep the content cleaner), but mixing styles can create confusion.
+///
 #[derive(Debug)]
 pub struct MD054LinkImageStyle {
     pub autolink: bool,

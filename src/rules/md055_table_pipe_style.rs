@@ -2,6 +2,75 @@ use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
+/// Rule MD055: Table pipe style should be consistent
+///
+/// This rule enforces consistent use of leading and trailing pipe characters in Markdown tables,
+/// which improves readability and ensures uniform document styling.
+///
+/// ## Purpose
+///
+/// - **Consistency**: Ensures uniform table formatting throughout documents
+/// - **Readability**: Well-formatted tables are easier to read and understand
+/// - **Maintainability**: Consistent table syntax makes documents easier to maintain
+/// - **Compatibility**: Some Markdown processors handle different table styles differently
+///
+/// ## Configuration Options
+///
+/// The rule supports the following configuration options:
+///
+/// ```yaml
+/// MD055:
+///   style: "consistent"  # Can be "consistent", "leading_and_trailing", or "no_leading_or_trailing"
+/// ```
+///
+/// ### Style Options
+///
+/// - **consistent**: All tables must use the same style (default)
+/// - **leading_and_trailing**: All tables must have both leading and trailing pipes
+/// - **no_leading_or_trailing**: Tables must not have leading or trailing pipes
+///
+/// ## Examples
+///
+/// ### Leading and Trailing Pipes
+///
+/// ```markdown
+/// | Header 1 | Header 2 | Header 3 |
+/// |----------|----------|----------|
+/// | Cell 1   | Cell 2   | Cell 3   |
+/// | Cell 4   | Cell 5   | Cell 6   |
+/// ```
+///
+/// ### No Leading or Trailing Pipes
+///
+/// ```markdown
+/// Header 1 | Header 2 | Header 3
+/// ---------|----------|---------
+/// Cell 1   | Cell 2   | Cell 3
+/// Cell 4   | Cell 5   | Cell 6
+/// ```
+///
+/// ## Behavior Details
+///
+/// - The rule analyzes each table in the document to determine its pipe style
+/// - With "consistent" style, the first table's style is used as the standard for all others
+/// - The rule handles both the header row, separator row, and content rows
+/// - Tables inside code blocks are ignored
+///
+/// ## Fix Behavior
+///
+/// When applying automatic fixes, this rule:
+/// - Adds or removes leading and trailing pipes as needed
+/// - Preserves the content and alignment of table cells
+/// - Maintains proper spacing around pipe characters
+/// - Updates both header and content rows to match the required style
+///
+/// ## Performance Considerations
+///
+/// The rule includes performance optimizations:
+/// - Efficient table detection with quick checks before detailed analysis
+/// - Smart line-by-line processing to avoid redundant operations
+/// - Optimized string manipulation for pipe character handling
+///
 /// Enforces consistent use of leading and trailing pipe characters in tables
 pub struct MD055TablePipeStyle {
     pub style: String,
@@ -89,8 +158,7 @@ impl MD055TablePipeStyle {
 
         let mut has_delimiter_row = false;
 
-        for i in 0..lines.len() {
-            let line = lines[i];
+        for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
             // Skip lines in code blocks
@@ -235,16 +303,14 @@ impl Rule for MD055TablePipeStyle {
 
         let tables = self.identify_tables(&lines);
 
-        for table in tables {
+        for _table in tables {
             let mut table_styles = Vec::new();
 
             // First pass: collect all styles used in this table (excluding delimiter rows)
-            for &line_idx in &table {
+            for (line_idx, line) in lines.iter().enumerate() {
                 if self.is_in_code_block(&lines, line_idx) {
                     continue;
                 }
-
-                let line = lines[line_idx];
 
                 if let Some(style) = self.determine_pipe_style(line) {
                     table_styles.push((line_idx, style));
@@ -273,12 +339,10 @@ impl Rule for MD055TablePipeStyle {
             };
 
             // Second pass: check all rows against the expected style
-            for &line_idx in &table {
+            for (line_idx, line) in lines.iter().enumerate() {
                 if self.is_in_code_block(&lines, line_idx) {
                     continue;
                 }
-
-                let line = lines[line_idx];
 
                 // For delimiter rows, we need to check if they match the expected style
                 if self.is_delimiter_row(line) {

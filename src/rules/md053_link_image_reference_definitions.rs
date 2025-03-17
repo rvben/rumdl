@@ -36,16 +36,64 @@ lazy_static! {
 }
 
 // Define a type alias for code block cache
-type CodeBlockCache = RefCell<HashMap<u64, Vec<(String, usize, usize)>>>;
+type CodeBlockCache = RefCell<HashMap<u64, Vec<bool>>>;
 
 /// Rule MD053: Link and image reference definitions should be needed
 ///
-/// This rule checks that all link and image reference definitions are used at least
-/// once in the document.
+/// This rule is triggered when a link or image reference definition is declared but not used
+/// anywhere in the document. Unused reference definitions can create confusion and clutter.
+///
+/// ## Supported Reference Formats
+///
+/// This rule handles the following reference formats:
+///
+/// - **Full reference links/images**: `[text][reference]` or `![text][reference]`
+/// - **Collapsed reference links/images**: `[text][]` or `![text][]`
+/// - **Shortcut reference links**: `[reference]` (must be defined elsewhere)
+/// - **Reference definitions**: `[reference]: URL "Optional Title"`
+/// - **Multi-line reference definitions**: 
+///   ```
+///   [reference]: URL
+///      "Optional title continued on next line"
+///   ```
+///
+/// ## Configuration Options
+///
+/// The rule supports the following configuration options:
+///
+/// ```yaml
+/// MD053:
+///   ignored_definitions: []  # List of reference definitions to ignore (never report as unused)
+/// ```
+///
+/// ## Performance Optimizations
+///
+/// This rule implements various performance optimizations for handling large documents:
+///
+/// 1. **Caching**: The rule caches parsed definitions and references based on content hashing
+/// 2. **Efficient Reference Matching**: Uses HashMaps for O(1) lookups of definitions
+/// 3. **Smart Code Block Handling**: Efficiently skips references inside code blocks/spans
+/// 4. **Lazy Evaluation**: Only processes necessary portions of the document
+///
+/// ## Edge Cases Handled
+///
+/// - **Case insensitivity**: References are matched case-insensitively
+/// - **Escaped characters**: Properly processes escaped characters in references
+/// - **Unicode support**: Handles non-ASCII characters in references and URLs
+/// - **Code blocks**: Ignores references inside code blocks and spans
+/// - **Special characters**: Properly handles references with special characters
+///
+/// ## Fix Behavior
+///
+/// When fixing issues, this rule removes unused reference definitions while preserving
+/// the document's structure, including handling proper blank line formatting around
+/// the removed definitions.
 #[derive(Debug, Clone)]
 pub struct MD053LinkImageReferenceDefinitions {
     ignored_definitions: HashSet<String>,
     cache: CodeBlockCache,
+    content_cache: RefCell<HashMap<u64, Vec<(String, usize, usize)>>>,
+    reference_cache: RefCell<HashMap<u64, Vec<(String, usize, usize)>>>,
 }
 
 impl Default for MD053LinkImageReferenceDefinitions {
@@ -53,6 +101,8 @@ impl Default for MD053LinkImageReferenceDefinitions {
         Self {
             ignored_definitions: HashSet::new(),
             cache: CodeBlockCache::new(HashMap::new()),
+            content_cache: RefCell::new(HashMap::new()),
+            reference_cache: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -68,6 +118,8 @@ impl MD053LinkImageReferenceDefinitions {
         Self {
             ignored_definitions: ignored_set,
             cache: CodeBlockCache::new(HashMap::new()),
+            content_cache: RefCell::new(HashMap::new()),
+            reference_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -235,21 +287,19 @@ impl MD053LinkImageReferenceDefinitions {
                 if ref_text.is_empty() {
                     // Empty reference like [text][] uses text as the reference
                     if let Some(text_capture) = cap.get(1) {
-                        let text = text_capture.as_str().trim();
-                        if !text.is_empty() {
+                        let text_ref = text_capture.as_str().trim().to_lowercase();
+                        if !text_ref.is_empty() {
                             if is_in_code {
-                                code_block_usages.insert(text.to_lowercase());
+                                code_block_usages.insert(text_ref);
                             } else {
-                                usages.insert(text.to_lowercase());
+                                usages.insert(text_ref);
                             }
                         }
                     }
+                } else if is_in_code {
+                    code_block_usages.insert(ref_text.to_lowercase());
                 } else {
-                    if is_in_code {
-                        code_block_usages.insert(ref_text.to_lowercase());
-                    } else {
-                        usages.insert(ref_text.to_lowercase());
-                    }
+                    usages.insert(ref_text.to_lowercase());
                 }
             }
         }
@@ -265,21 +315,19 @@ impl MD053LinkImageReferenceDefinitions {
                 if ref_text.is_empty() {
                     // Empty reference like ![text][] uses text as the reference
                     if let Some(text_capture) = cap.get(1) {
-                        let text = text_capture.as_str().trim();
-                        if !text.is_empty() {
+                        let text_ref = text_capture.as_str().trim().to_lowercase();
+                        if !text_ref.is_empty() {
                             if is_in_code {
-                                code_block_usages.insert(text.to_lowercase());
+                                code_block_usages.insert(text_ref);
                             } else {
-                                usages.insert(text.to_lowercase());
+                                usages.insert(text_ref);
                             }
                         }
                     }
+                } else if is_in_code {
+                    code_block_usages.insert(ref_text.to_lowercase());
                 } else {
-                    if is_in_code {
-                        code_block_usages.insert(ref_text.to_lowercase());
-                    } else {
-                        usages.insert(ref_text.to_lowercase());
-                    }
+                    usages.insert(ref_text.to_lowercase());
                 }
             }
         }
@@ -383,8 +431,7 @@ impl MD053LinkImageReferenceDefinitions {
 
                     // Check if the definition continues to the next line
                     // A continued definition line starts with whitespace and has non-whitespace content
-                    for j in i + 1..lines.len() {
-                        let next_line = lines[j];
+                    for (j, next_line) in lines.iter().enumerate().skip(i + 1) {
                         if next_line.starts_with(" ")
                             && !next_line.trim().is_empty()
                             && !REFERENCE_DEFINITION_REGEX.is_match(next_line)

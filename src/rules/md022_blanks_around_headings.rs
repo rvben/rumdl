@@ -2,7 +2,78 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils;
 use crate::utils::range_utils::LineIndex;
 
-/// Rule MD022: Blanks around headings
+/// Rule MD022: Headings should be surrounded by blank lines
+///
+/// This rule enforces consistent spacing around headings to improve document readability
+/// and visual structure.
+///
+/// ## Purpose
+///
+/// - **Readability**: Blank lines create visual separation, making headings stand out
+/// - **Parsing**: Many Markdown parsers require blank lines around headings for proper rendering
+/// - **Consistency**: Creates a uniform document style throughout
+/// - **Focus**: Helps readers identify and focus on section transitions
+///
+/// ## Configuration Options
+///
+/// The rule supports customizing the number of blank lines required:
+///
+/// ```yaml
+/// MD022:
+///   lines_above: 1  # Number of blank lines required above headings (default: 1)
+///   lines_below: 1  # Number of blank lines required below headings (default: 1)
+/// ```
+///
+/// ## Examples
+///
+/// ### Correct (with default configuration)
+///
+/// ```markdown
+/// Regular paragraph text.
+///
+/// # Heading 1
+///
+/// Content under heading 1.
+///
+/// ## Heading 2
+///
+/// More content here.
+/// ```
+///
+/// ### Incorrect (with default configuration)
+///
+/// ```markdown
+/// Regular paragraph text.
+/// # Heading 1
+/// Content under heading 1.
+/// ## Heading 2
+/// More content here.
+/// ```
+///
+/// ## Special Cases
+///
+/// This rule handles several special cases:
+///
+/// - **First Heading**: The first heading in a document doesn't require blank lines above
+///   if it appears at the very start of the document
+/// - **Front Matter**: YAML front matter is detected and skipped
+/// - **Code Blocks**: Headings inside code blocks are ignored
+/// - **Document Start/End**: Adjusts requirements for headings at the beginning or end of a document
+///
+/// ## Fix Behavior
+///
+/// When applying automatic fixes, this rule:
+/// - Adds the required number of blank lines above headings
+/// - Adds the required number of blank lines below headings
+/// - Preserves document structure and existing content
+///
+/// ## Performance Considerations
+///
+/// The rule is optimized for performance with:
+/// - Efficient line counting algorithms
+/// - Proper handling of front matter
+/// - Smart code block detection
+///
 #[derive(Debug)]
 pub struct MD022BlanksAroundHeadings {
     lines_above: usize,
@@ -14,13 +85,6 @@ impl MD022BlanksAroundHeadings {
         Self {
             lines_above,
             lines_below,
-        }
-    }
-
-    pub fn default() -> Self {
-        Self {
-            lines_above: 1,
-            lines_below: 1,
         }
     }
 
@@ -247,9 +311,7 @@ impl MD022BlanksAroundHeadings {
 
         // Add front matter if present
         if is_front_matter {
-            for i in 0..start_index {
-                result.push(lines[i].to_string());
-            }
+            result.extend(lines.iter().take(start_index).map(|line| line.to_string()));
         }
 
         // Process each line
@@ -315,6 +377,15 @@ impl MD022BlanksAroundHeadings {
         }
 
         Ok(fixed)
+    }
+}
+
+impl Default for MD022BlanksAroundHeadings {
+    fn default() -> Self {
+        Self {
+            lines_above: 1,
+            lines_below: 1,
+        }
     }
 }
 

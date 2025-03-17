@@ -16,7 +16,56 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 
 /// Rule MD044: Proper names should have the correct capitalization
 ///
-/// This rule is triggered when proper names are not capitalized correctly.
+/// This rule is triggered when proper names are not capitalized correctly in the document.
+/// For example, if you have defined "JavaScript" as a proper name, the rule will flag any
+/// occurrences of "javascript" or "Javascript" as violations.
+///
+/// ## Purpose
+///
+/// Ensuring consistent capitalization of proper names improves document quality and 
+/// professionalism. This is especially important for technical documentation where 
+/// product names, programming languages, and technologies often have specific 
+/// capitalization conventions.
+///
+/// ## Configuration Options
+///
+/// The rule supports the following configuration options:
+///
+/// ```yaml
+/// MD044:
+///   names: []                # List of proper names to check for correct capitalization
+///   code_blocks_excluded: true  # Whether to exclude code blocks from checking
+/// ```
+///
+/// Example configuration:
+///
+/// ```yaml
+/// MD044:
+///   names: ["JavaScript", "Node.js", "TypeScript"]
+///   code_blocks_excluded: true
+/// ```
+///
+/// ## Performance Optimizations
+///
+/// This rule implements several performance optimizations:
+///
+/// 1. **Regex Caching**: Pre-compiles and caches regex patterns for each proper name
+/// 2. **Content Caching**: Caches results based on content hashing for repeated checks
+/// 3. **Efficient Text Processing**: Uses optimized algorithms to avoid redundant text processing
+/// 4. **Smart Code Block Detection**: Efficiently identifies and optionally excludes code blocks
+///
+/// ## Edge Cases Handled
+///
+/// - **Word Boundaries**: Only matches complete words, not substrings within other words
+/// - **Case Sensitivity**: Properly handles case-specific matching
+/// - **Code Blocks**: Optionally excludes code blocks where capitalization may be intentionally different
+/// - **Markdown Formatting**: Handles proper names within Markdown formatting elements
+///
+/// ## Fix Behavior
+///
+/// When fixing issues, this rule replaces incorrect capitalization with the correct form
+/// as defined in the configuration.
+///
 #[derive(Clone)]
 pub struct MD044ProperNames {
     names: HashSet<String>,
@@ -75,14 +124,23 @@ impl MD044ProperNames {
     fn find_name_violations(&self, content: &str) -> Vec<WarningPosition> {
         // Check if we have cached results
         let hash = fast_hash(content);
-        let cache_result = self.content_cache.borrow().get(&hash).cloned();
-
-        if let Some(cached) = cache_result {
-            return cached;
+        {
+            // Use a separate scope for borrowing to minimize lock time
+            let cache = self.content_cache.borrow();
+            if let Some(cached) = cache.get(&hash) {
+                return cached.clone();
+            }
         }
 
         let mut violations = Vec::new();
         let mut in_code_block = false;
+        
+        // Pre-compile and prepare regex patterns before the line loop
+        let patterns: Vec<(&String, Regex)> = self
+            .names
+            .iter()
+            .map(|name| (name, self.get_compiled_regex(name)))
+            .collect();
 
         for (line_num, line) in content.lines().enumerate() {
             // Handle code blocks
@@ -95,12 +153,11 @@ impl MD044ProperNames {
                 continue;
             }
 
-            for name in &self.names {
-                let regex = self.get_compiled_regex(name);
-
+            // Use the pre-compiled patterns for better performance
+            for (name, regex) in &patterns {
                 for cap in regex.find_iter(line) {
                     let found_name = &line[cap.start()..cap.end()];
-                    if found_name != name {
+                    if found_name != **name {
                         violations.push((line_num + 1, cap.start() + 1, found_name.to_string()));
                     }
                 }

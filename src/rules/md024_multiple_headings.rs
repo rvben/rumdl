@@ -177,16 +177,9 @@ impl Rule for MD024MultipleHeadings {
                     }
                 }
 
-                // Skip the next line if this is a setext heading
-                if heading_level == 1
-                    && i + 1 < content_lines.len()
-                    && SETEXT_HEADING_1.is_match(content_lines[i + 1])
-                {
-                    i += 1;
-                } else if heading_level == 2
-                    && i + 1 < content_lines.len()
-                    && SETEXT_HEADING_2.is_match(content_lines[i + 1])
-                {
+                // If this is a setext heading (level 1 or 2), skip the underline
+                if (heading_level == 1 && i + 1 < content_lines.len() && SETEXT_HEADING_1.is_match(content_lines[i + 1])) ||
+                   (heading_level == 2 && i + 1 < content_lines.len() && SETEXT_HEADING_2.is_match(content_lines[i + 1])) {
                     i += 1;
                 }
             }

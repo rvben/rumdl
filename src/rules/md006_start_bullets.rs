@@ -199,11 +199,11 @@ impl Rule for MD006StartBullets {
         while i < lines.len() {
             if let Some(replacement) = line_replacements.get(&i) {
                 // Check if this replacement includes a blank line
-                if replacement.starts_with('\n') {
+                if let Some(stripped) = replacement.strip_prefix('\n') {
                     // Add a blank line
                     fixed_lines.push(String::new());
                     // Then add the actual content (without the leading newline)
-                    fixed_lines.push(replacement[1..].to_string());
+                    fixed_lines.push(stripped.to_string());
                 } else {
                     fixed_lines.push(replacement.clone());
                 }

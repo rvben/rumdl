@@ -91,7 +91,7 @@ impl Rule for MD043RequiredHeadings {
 
         if actual_headings != self.headings {
             let lines: Vec<&str> = content.lines().collect();
-            for i in 0..lines.len() {
+            for (i, _) in lines.iter().enumerate() {
                 if self.is_heading(content, i) {
                     warnings.push(LintWarning {
                         line: i + 1,

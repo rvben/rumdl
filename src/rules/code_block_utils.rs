@@ -72,15 +72,31 @@ impl CodeBlockUtils {
         INDENTED_CODE_BLOCK.is_match(line)
     }
 
-    /// Get the language specifier from a code block start line
+    /// Extracts the language specifier from a fenced code block start line
+    /// 
+    /// This function parses the line that starts a fenced code block (using either ``` or ~~~)
+    /// and extracts the language specifier that follows the fence markers.
+    /// 
+    /// # Parameters
+    /// * `line` - The line of text that potentially contains a code block start with language specifier
+    /// 
+    /// # Returns
+    /// * `Some(String)` - The language specifier if found
+    /// * `None` - If the line is not a code block start or has no language specifier
+    /// 
+    /// # Examples
+    /// ```
+    /// // Returns Some("rust")
+    /// let specifier = CodeBlockUtils::get_language_specifier("```rust");
+    /// 
+    /// // Returns Some("python")
+    /// let specifier = CodeBlockUtils::get_language_specifier("~~~python");
+    /// 
+    /// // Returns None - no language specified
+    /// let specifier = CodeBlockUtils::get_language_specifier("```");
+    /// ```
     pub fn get_language_specifier(line: &str) -> Option<String> {
-        if FENCED_CODE_BLOCK_START.is_match(line) {
-            let trimmed = line.trim_start();
-            let after_fence = &trimmed[3..].trim_start();
-            if !after_fence.is_empty() {
-                return Some(after_fence.to_string());
-            }
-        } else if ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line) {
+        if FENCED_CODE_BLOCK_START.is_match(line) || ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line) {
             let trimmed = line.trim_start();
             let after_fence = &trimmed[3..].trim_start();
             if !after_fence.is_empty() {
@@ -91,7 +107,31 @@ impl CodeBlockUtils {
     }
 
     /// Identify which lines in the content are in code blocks
-    /// Returns a vector of booleans, where each element indicates if the corresponding line is in a code block
+    /// 
+    /// This function analyzes Markdown content and determines which lines are part of code blocks,
+    /// including both fenced code blocks (``` or ~~~) and indented code blocks.
+    /// 
+    /// # Algorithm
+    /// - Iterates through each line of content
+    /// - Tracks state for fenced code blocks (toggled by fence delimiters)
+    /// - Detects indented code blocks (4 spaces or 1 tab)
+    /// - Handles nested code blocks appropriately
+    /// 
+    /// # Parameters
+    /// * `content` - The full Markdown content to analyze
+    /// 
+    /// # Returns
+    /// A vector of boolean values with the same length as the number of lines in the input content.
+    /// Each element indicates whether the corresponding line is inside a code block:
+    /// * `true` - The line is inside a code block
+    /// * `false` - The line is not inside a code block
+    /// 
+    /// # Examples
+    /// ```
+    /// let content = "Regular text\n```\nCode block\n```\nMore text";
+    /// let in_code_block = CodeBlockUtils::identify_code_block_lines(content);
+    /// // in_code_block = [false, false, true, false, false]
+    /// ```
     pub fn identify_code_block_lines(content: &str) -> Vec<bool> {
         let lines: Vec<&str> = content.lines().collect();
         let mut in_code_block = vec![false; lines.len()];

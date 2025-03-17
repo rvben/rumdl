@@ -3,6 +3,57 @@ use crate::rules::heading_utils::HeadingUtils;
 use crate::utils::range_utils::LineIndex;
 use crate::HeadingStyle;
 
+/// Rule MD001: Heading levels should only increment by one level at a time
+///
+/// This rule enforces a fundamental principle of document structure: heading levels
+/// should increase by exactly one level at a time to maintain a proper document hierarchy.
+///
+/// ## Purpose
+///
+/// Proper heading structure creates a logical document outline and improves:
+/// - Readability for humans
+/// - Accessibility for screen readers
+/// - Navigation in rendered documents
+/// - Automatic generation of tables of contents
+///
+/// ## Examples
+///
+/// ### Correct Heading Structure
+/// ```markdown
+/// # Heading 1
+/// ## Heading 2
+/// ### Heading 3
+/// ## Another Heading 2
+/// ```
+///
+/// ### Incorrect Heading Structure
+/// ```markdown
+/// # Heading 1
+/// ### Heading 3 (skips level 2)
+/// #### Heading 4
+/// ```
+///
+/// ## Behavior
+///
+/// This rule:
+/// - Tracks the heading level throughout the document
+/// - Validates that each new heading is at most one level deeper than the previous heading
+/// - Allows heading levels to decrease by any amount (e.g., going from ### to #)
+/// - Works with both ATX (`#`) and Setext (underlined) heading styles
+///
+/// ## Fix Behavior
+///
+/// When applying automatic fixes, this rule:
+/// - Changes the level of non-compliant headings to be one level deeper than the previous heading
+/// - Preserves the original heading style (ATX or Setext)
+/// - Maintains indentation and other formatting
+///
+/// ## Rationale
+///
+/// Skipping heading levels (e.g., from `h1` to `h3`) can confuse readers and screen readers
+/// by creating gaps in the document structure. Consistent heading increments create a proper
+/// hierarchical outline essential for well-structured documents.
+///
 #[derive(Debug, Default)]
 pub struct MD001HeadingIncrement;
 
@@ -23,7 +74,7 @@ impl Rule for MD001HeadingIncrement {
 
         let lines: Vec<&str> = content.lines().collect();
 
-        for line_num in 0..lines.len() {
+        for (line_num, _) in lines.iter().enumerate() {
             if let Some(heading) = HeadingUtils::parse_heading(content, line_num) {
                 if prev_level > 0 && heading.level > prev_level + 1 {
                     let indentation = HeadingUtils::get_indentation(lines[line_num]);
