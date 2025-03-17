@@ -171,7 +171,7 @@ fn test_mixed_code_blocks() {
 fn test_edge_cases() {
     // Test for empty content
     let empty = "";
-    let empty_index = LineIndex::new(empty.to_string());
+    let _empty_index = LineIndex::new(empty.to_string());
 
     // Test for single line content
     let single_line = "Just one line";

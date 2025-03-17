@@ -169,7 +169,7 @@ impl Drop for ScopedTimer {
 #[macro_export]
 macro_rules! time_section {
     ($section:expr, $block:block) => {{
-        let _timer = crate::profiling::ScopedTimer::new($section);
+        let _timer = $crate::profiling::ScopedTimer::new($section);
         $block
     }};
 }
@@ -178,7 +178,7 @@ macro_rules! time_section {
 #[macro_export]
 macro_rules! time_function {
     ($section:expr, $func:expr) => {{
-        let _timer = crate::profiling::ScopedTimer::new($section);
+        let _timer = $crate::profiling::ScopedTimer::new($section);
         $func
     }};
 }

@@ -89,11 +89,9 @@ impl ListUtils {
 
         // Quick literal check for unordered list markers
         let first_char = trimmed.chars().next().unwrap();
-        if first_char == '*' || first_char == '+' || first_char == '-' {
-            if trimmed.len() > 1 {
-                let second_char = trimmed.chars().nth(1).unwrap();
-                return second_char.is_whitespace();
-            }
+        if (first_char == '*' || first_char == '+' || first_char == '-') && trimmed.len() > 1 {
+            let second_char = trimmed.chars().nth(1).unwrap();
+            return second_char.is_whitespace();
         }
 
         false

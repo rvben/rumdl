@@ -166,13 +166,9 @@ impl HeadingUtilsNew {
             }
 
             // Check for Setext heading
-            if line_num + 1 < lines.len() {
-                if Self::is_setext_heading(lines[line_num], Some(lines[line_num + 1])) {
-                    if let Some(heading) =
-                        Self::parse_setext_heading(lines[line_num], Some(lines[line_num + 1]))
-                    {
-                        return Some((heading, line_num));
-                    }
+            if line_num + 1 < lines.len() && Self::is_setext_heading(lines[line_num], Some(lines[line_num + 1])) {
+                if let Some(heading) = Self::parse_setext_heading(lines[line_num], Some(lines[line_num + 1])) {
+                    return Some((heading, line_num));
                 }
             }
 
@@ -197,15 +193,11 @@ impl HeadingUtilsNew {
             }
 
             // Check for Setext heading
-            if line_num + 1 < lines.len() {
-                if Self::is_setext_heading(lines[line_num], Some(lines[line_num + 1])) {
-                    if let Some(heading) =
-                        Self::parse_setext_heading(lines[line_num], Some(lines[line_num + 1]))
-                    {
-                        headings.push((heading, line_num));
-                        // Skip the underline
-                        line_num += 1;
-                    }
+            if line_num + 1 < lines.len() && Self::is_setext_heading(lines[line_num], Some(lines[line_num + 1])) {
+                if let Some(heading) = Self::parse_setext_heading(lines[line_num], Some(lines[line_num + 1])) {
+                    headings.push((heading, line_num));
+                    // Skip the underline
+                    line_num += 1;
                 }
             }
 

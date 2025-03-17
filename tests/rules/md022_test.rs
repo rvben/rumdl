@@ -4,17 +4,17 @@ use rumdl::utils::range_utils::LineIndex;
 
 #[test]
 fn test_valid_headings() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Heading 1\n\nSome content here.\n\n## Heading 2\n\nMore content here.\n\n### Heading 3\n\nFinal content.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
     assert!(result.is_empty());
 }
 
 #[test]
 fn test_invalid_headings() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Heading 1\nSome content here.\n## Heading 2\nMore content here.\n### Heading 3\nFinal content.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
     // We only check for non-empty result, not specific count
     // This ensures a principled implementation that correcty identifies issues
     // without requiring specific warning counts
@@ -23,34 +23,34 @@ fn test_invalid_headings() {
 
 #[test]
 fn test_first_heading() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "# First Heading\n\nSome content.\n\n## Second Heading\n\nMore content.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
     assert!(result.is_empty());
 }
 
 #[test]
 fn test_code_block() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Real Heading\n\nSome content.\n\n```markdown\n# Not a heading\n## Also not a heading\n```\n\n# Another Heading\n\nMore content.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
     // Check that we don't get warnings for headings in code blocks
     assert!(result.is_empty());
 }
 
 #[test]
 fn test_front_matter() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "---\ntitle: Test\n---\n\n# First Heading\n\nContent here.\n\n## Second Heading\n\nMore content.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
     assert!(result.is_empty());
 }
 
 #[test]
 fn test_fix_headings() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Heading 1\nSome content here.\n## Heading 2\nMore content here.\n### Heading 3\nFinal content.";
-    let fixed = rule.fix(content).unwrap();
+    let fixed = _rule.fix(content).unwrap();
 
     // Only test that blank lines were added as required by spec
     assert!(fixed != content);
@@ -68,17 +68,17 @@ fn test_fix_headings() {
 
 #[test]
 fn test_fix_mixed_headings() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     // Create a case that clearly violates the blank line rules around headings
     // Here, all the headings need blank lines either above or below
     let content = "Text before.\n# Heading 1\nSome content here.\nText here\n## Heading 2\nMore content here.\nText here\n### Heading 3\nFinal content.";
 
     // Run check to confirm there are warnings
-    let warnings = rule.check(content).unwrap();
+    let warnings = _rule.check(content).unwrap();
     assert!(!warnings.is_empty());
 
     // Fix the content
-    let fixed = rule.fix(content).unwrap();
+    let fixed = _rule.fix(content).unwrap();
     assert_ne!(fixed, content);
 
     // Instead of checking specific formatting, verify the fixed content follows the rule requirements
@@ -98,7 +98,7 @@ fn test_fix_mixed_headings() {
     assert!(fixed.contains("### Heading 3"));
 
     // Run check on the fixed content - it should have no warnings
-    let fixed_warnings = rule.check(&fixed).unwrap();
+    let fixed_warnings = _rule.check(&fixed).unwrap();
     assert!(
         fixed_warnings.is_empty(),
         "Fixed content should have no warnings"
@@ -107,16 +107,16 @@ fn test_fix_mixed_headings() {
 
 #[test]
 fn test_custom_blank_lines() {
-    let rule = MD022BlanksAroundHeadings::new(2, 2);
+    let _rule = MD022BlanksAroundHeadings::new(2, 2);
     let content = "# Heading 1\nSome content here.\n## Heading 2\nMore content here.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
 
     // Verify we get warnings about blank lines
     assert!(!result.is_empty());
     assert!(result.iter().any(|w| w.message.contains("2 blank lines")));
 
     // Run the fix
-    let fixed = rule.fix(content).unwrap();
+    let fixed = _rule.fix(content).unwrap();
 
     // Test that blank lines have been added according to custom requirements
     assert!(fixed != content);
@@ -140,16 +140,16 @@ fn test_custom_blank_lines() {
 
 #[test]
 fn test_blanks_around_setext_headings() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "Heading 1\n=========\nSome content.\nHeading 2\n---------\nMore content.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
     // Each setext heading has 2 warnings (missing space below + missing space above for second heading)
     // First heading: missing space below = 1 warning
     // Second heading: missing space above + missing space below = 2 warnings
     // Total = 3 warnings
     assert!(!result.is_empty());
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = _rule.fix(content).unwrap();
     // Verify the fix added newlines correctly
     assert_eq!(
         fixed,
@@ -159,14 +159,14 @@ fn test_blanks_around_setext_headings() {
 
 #[test]
 fn test_empty_content_headings() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "#\nSome content.\n##\nMore content.\n###\nFinal content.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
 
     // Verify we get warnings (without checking exact count)
     assert!(!result.is_empty());
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = _rule.fix(content).unwrap();
 
     // Test that fix produces a different result
     assert!(fixed != content);
@@ -188,14 +188,14 @@ fn test_empty_content_headings() {
 
 #[test]
 fn test_no_blanks_between_headings() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Heading 1\n## Heading 2\n### Heading 3\nContent here.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
 
     // Verify we get warnings (without checking exact count)
     assert!(!result.is_empty());
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = _rule.fix(content).unwrap();
 
     // Test that blank lines have been added
     assert!(fixed != content);
@@ -214,10 +214,10 @@ fn test_no_blanks_between_headings() {
 
 #[test]
 fn test_indented_headings() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content =
         "  # Heading 1\nContent 1.\n    ## Heading 2\nContent 2.\n      ### Heading 3\nContent 3.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
 
     // Verify we get warnings (without checking exact count)
     assert!(!result.is_empty());
@@ -229,7 +229,7 @@ fn test_indented_headings() {
         .count();
     assert!(indentation_warnings > 0);
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = _rule.fix(content).unwrap();
 
     // Test that blank lines have been added
     assert!(fixed != content);
@@ -250,7 +250,7 @@ fn test_indented_headings() {
 
 #[test]
 fn test_code_block_detection() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Real Heading\n\nSome content.\n\n```markdown\n# Not a heading\n## Also not a heading\n```\n\n# Another Heading\n\nMore content.";
     let index = LineIndex::new(content.to_string());
 
@@ -277,11 +277,11 @@ fn test_line_index() {
 
 #[test]
 fn test_preserve_code_blocks() {
-    let rule = MD022BlanksAroundHeadings::default();
+    let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Real Heading\n\nSome content.\n\n```markdown\n# Not a heading\n## Also not a heading\n```\n\n# Another Heading\n\nMore content.";
-    let result = rule.check(content).unwrap();
+    let result = _rule.check(content).unwrap();
     assert!(result.is_empty());
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = _rule.fix(content).unwrap();
     assert_eq!(fixed, content);
 }

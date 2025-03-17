@@ -107,7 +107,7 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
 
     rules.push(Box::new(MD009TrailingSpaces::default()));
     rules.push(Box::new(MD010NoHardTabs::default()));
-    rules.push(Box::new(MD011ReversedLink::default()));
+    rules.push(Box::new(MD011ReversedLink {}));
     rules.push(Box::new(MD012NoMultipleBlanks::default()));
 
     // Configure MD013 from config if available
@@ -137,29 +137,29 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     rules.push(Box::new(MD015NoMissingSpaceAfterListMarker::default()));
     rules.push(Box::new(MD016NoMultipleSpaceAfterListMarker::default()));
     rules.push(Box::new(MD017NoEmphasisAsHeading::default()));
-    rules.push(Box::new(MD018NoMissingSpaceAtx::default()));
-    rules.push(Box::new(MD019NoMultipleSpaceAtx::default()));
-    rules.push(Box::new(MD020NoMissingSpaceClosedAtx::default()));
-    rules.push(Box::new(MD021NoMultipleSpaceClosedAtx::default()));
+    rules.push(Box::new(MD018NoMissingSpaceAtx {}));
+    rules.push(Box::new(MD019NoMultipleSpaceAtx {}));
+    rules.push(Box::new(MD020NoMissingSpaceClosedAtx {}));
+    rules.push(Box::new(MD021NoMultipleSpaceClosedAtx {}));
     rules.push(Box::new(MD022BlanksAroundHeadings::default()));
-    rules.push(Box::new(MD023HeadingStartLeft::default()));
+    rules.push(Box::new(MD023HeadingStartLeft {}));
     rules.push(Box::new(MD024MultipleHeadings::default()));
     rules.push(Box::new(MD025SingleTitle::default()));
     rules.push(Box::new(MD026NoTrailingPunctuation::default()));
-    rules.push(Box::new(MD027MultipleSpacesBlockquote::default()));
-    rules.push(Box::new(MD028NoBlanksBlockquote::default()));
+    rules.push(Box::new(MD027MultipleSpacesBlockquote {}));
+    rules.push(Box::new(MD028NoBlanksBlockquote {}));
     rules.push(Box::new(MD029OrderedListPrefix::default()));
     rules.push(Box::new(MD030ListMarkerSpace::default()));
-    rules.push(Box::new(MD031BlanksAroundFences::default()));
-    rules.push(Box::new(MD032BlanksAroundLists::default()));
+    rules.push(Box::new(MD031BlanksAroundFences {}));
+    rules.push(Box::new(MD032BlanksAroundLists {}));
     rules.push(Box::new(MD033NoInlineHtml::default()));
-    rules.push(Box::new(MD034NoBareUrls::default()));
+    rules.push(Box::new(MD034NoBareUrls {}));
     rules.push(Box::new(MD035HRStyle::default()));
-    rules.push(Box::new(MD036NoEmphasisOnlyFirst::default()));
-    rules.push(Box::new(MD037SpacesAroundEmphasis::default()));
-    rules.push(Box::new(MD038NoSpaceInCode::default()));
-    rules.push(Box::new(MD039NoSpaceInLinks::default()));
-    rules.push(Box::new(MD040FencedCodeLanguage::default()));
+    rules.push(Box::new(MD036NoEmphasisOnlyFirst {}));
+    rules.push(Box::new(MD037SpacesAroundEmphasis {}));
+    rules.push(Box::new(MD038NoSpaceInCode {}));
+    rules.push(Box::new(MD039NoSpaceInLinks {}));
+    rules.push(Box::new(MD040FencedCodeLanguage {}));
     rules.push(Box::new(MD041FirstLineHeading::default()));
     rules.push(Box::new(MD042NoEmptyLinks::new()));
     rules.push(Box::new(MD043RequiredHeadings::new(Vec::new())));
@@ -181,7 +181,7 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     };
     rules.push(md046);
 
-    rules.push(Box::new(MD047FileEndNewline::default()));
+    rules.push(Box::new(MD047FileEndNewline {}));
 
     // Configure MD048 from config if available
     let md048 = {
@@ -303,11 +303,7 @@ fn process_file(
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(err) => {
-            eprintln!(
-                "{}: {}",
-                "Error reading file".red().bold(),
-                format!("{}: {}", path, err)
-            );
+            eprintln!("{}: {}: {}", "Error reading file".red().bold(), path, err);
             return (false, 0, 0);
         }
     };
@@ -420,7 +416,7 @@ fn process_file(
             if warning.fix.is_some() {
                 rule_to_warnings
                     .entry(rule_name)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(warning);
             }
         }
@@ -507,7 +503,7 @@ fn debug_gitignore_test(path: &str, verbose: bool) {
         .git_global(true)
         .git_ignore(true)
         .git_exclude(true)
-        .add_custom_ignore_filename(".gitignore")
+                .add_custom_ignore_filename(".gitignore")
         .build();
 
     // Check if the file is in the walker's output
@@ -516,16 +512,14 @@ fn debug_gitignore_test(path: &str, verbose: bool) {
         .canonicalize()
         .unwrap_or_else(|_| file_path.to_path_buf());
 
-    for entry_result in walker {
-        if let Ok(entry) = entry_result {
-            let entry_canonical = entry
-                .path()
-                .canonicalize()
-                .unwrap_or_else(|_| entry.path().to_path_buf());
-            if entry_canonical == canonical_path {
-                found_in_walker = true;
-                break;
-            }
+    for entry in walker.flatten() {
+        let entry_canonical = entry
+            .path()
+            .canonicalize()
+            .unwrap_or_else(|_| entry.path().to_path_buf());
+        if entry_canonical == canonical_path {
+            found_in_walker = true;
+            break;
         }
     }
 
@@ -565,15 +559,13 @@ fn debug_gitignore_test(path: &str, verbose: bool) {
             .build();
 
         let mut count = 0;
-        for entry_result in walker {
-            if let Ok(entry) = entry_result {
-                if entry.file_type().map_or(false, |ft| ft.is_file()) {
-                    println!("  - {}", entry.path().display());
-                    count += 1;
-                    if count >= 10 {
-                        println!("  ... and more");
-                        break;
-                    }
+        for entry in walker.flatten() {
+            if entry.file_type().map_or(false, |ft| ft.is_file()) {
+                println!("  - {}", entry.path().display());
+                count += 1;
+                if count >= 10 {
+                    println!("  ... and more");
+                    break;
                 }
             }
         }
@@ -721,16 +713,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Check if the file is in the walker's output
                 let mut found_in_walker = false;
 
-                for entry_result in walker {
-                    if let Ok(entry) = entry_result {
-                        let entry_canonical = entry
-                            .path()
-                            .canonicalize()
-                            .unwrap_or_else(|_| entry.path().to_path_buf());
-                        if entry_canonical == canonical_path {
-                            found_in_walker = true;
-                            break;
-                        }
+                for entry in walker.flatten() {
+                    let entry_canonical = entry
+                        .path()
+                        .canonicalize()
+                        .unwrap_or_else(|_| entry.path().to_path_buf());
+                    if entry_canonical == canonical_path {
+                        found_in_walker = true;
+                        break;
                     }
                 }
 
@@ -766,70 +756,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .add_custom_ignore_filename(".gitignore")
                     .build();
 
-                for entry_result in walker {
-                    if let Ok(entry) = entry_result {
-                        // Only process Markdown files
-                        if entry.file_type().map_or(false, |ft| ft.is_file())
-                            && entry.path().extension().map_or(false, |ext| ext == "md")
-                        {
-                            let file_path = entry.path().to_string_lossy().to_string();
+                for entry in walker.flatten() {
+                    // Only process Markdown files
+                    if entry.file_type().map_or(false, |ft| ft.is_file())
+                        && entry.path().extension().map_or(false, |ext| ext == "md")
+                    {
+                        let file_path = entry.path().to_string_lossy().to_string();
 
-                            // Check if file is excluded based on patterns
-                            let excluded = rumdl::should_exclude(&file_path, &exclude_patterns);
+                        // Check if file is excluded based on patterns
+                        let excluded = rumdl::should_exclude(&file_path, &exclude_patterns);
 
-                            if excluded {
-                                if cli.verbose {
-                                    println!("Skipping excluded file: {}", file_path);
-                                }
-                                continue;
+                        if excluded {
+                            if cli.verbose {
+                                println!("Skipping excluded file: {}", file_path);
                             }
+                            continue;
+                        }
 
-                            total_files_processed += 1;
-                            let (file_has_issues, issues_found, issues_fixed) =
-                                process_file(&file_path, &rules, cli.fix, cli.verbose);
-                            if file_has_issues {
-                                has_issues = true;
-                                files_with_issues += 1;
-                                total_issues_found += issues_found;
-                                total_issues_fixed += issues_fixed;
-                            }
+                        total_files_processed += 1;
+                        let (file_has_issues, issues_found, issues_fixed) =
+                            process_file(&file_path, &rules, cli.fix, cli.verbose);
+                        if file_has_issues {
+                            has_issues = true;
+                            files_with_issues += 1;
+                            total_issues_found += issues_found;
+                            total_issues_fixed += issues_fixed;
                         }
                     }
                 }
             } else {
                 // Use walkdir if respect_gitignore is disabled
-                match WalkDir::new(path)
+                let dir_iter = WalkDir::new(path)
                     .follow_links(true)
                     .into_iter()
                     .filter_map(|e| e.ok())
                     .filter(|e| {
                         e.file_type().is_file()
                             && e.path().extension().map_or(false, |ext| ext == "md")
-                    }) {
-                    dir_iter => {
-                        for entry in dir_iter {
-                            let file_path = entry.path().to_string_lossy().to_string();
+                    });
 
-                            // Check if file is excluded based on patterns
-                            let excluded = rumdl::should_exclude(&file_path, &exclude_patterns);
+                for entry in dir_iter {
+                    let file_path = entry.path().to_string_lossy().to_string();
 
-                            if excluded {
-                                if cli.verbose {
-                                    println!("Skipping excluded file: {}", file_path);
-                                }
-                                continue;
-                            }
+                    // Check if file is excluded based on patterns
+                    let excluded = rumdl::should_exclude(&file_path, &exclude_patterns);
 
-                            total_files_processed += 1;
-                            let (file_has_issues, issues_found, issues_fixed) =
-                                process_file(&file_path, &rules, cli.fix, cli.verbose);
-                            if file_has_issues {
-                                has_issues = true;
-                                files_with_issues += 1;
-                                total_issues_found += issues_found;
-                                total_issues_fixed += issues_fixed;
-                            }
+                    if excluded {
+                        if cli.verbose {
+                            println!("Skipping excluded file: {}", file_path);
                         }
+                        continue;
+                    }
+
+                    total_files_processed += 1;
+                    let (file_has_issues, issues_found, issues_fixed) =
+                        process_file(&file_path, &rules, cli.fix, cli.verbose);
+                    if file_has_issues {
+                        has_issues = true;
+                        files_with_issues += 1;
+                        total_issues_found += issues_found;
+                        total_issues_fixed += issues_fixed;
                     }
                 }
             }

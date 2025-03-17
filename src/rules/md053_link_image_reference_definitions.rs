@@ -4,7 +4,8 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use crate::utils::fast_hash;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 
 lazy_static! {
     // Link reference format: [text][reference]
@@ -38,6 +39,7 @@ lazy_static! {
 ///
 /// This rule checks that all link and image reference definitions are used at least
 /// once in the document.
+#[derive(Debug, Clone)]
 pub struct MD053LinkImageReferenceDefinitions {
     ignored_definitions: HashSet<String>,
     cache: RefCell<HashMap<u64, Vec<(String, usize, usize)>>>,
@@ -66,24 +68,69 @@ impl MD053LinkImageReferenceDefinitions {
         }
     }
 
-    // Find all code blocks in the content to avoid processing references within them
+    /// Find all code blocks in the content.
+    ///
+    /// This method returns a vector of ranges representing the start and end
+    /// line indexes of each code block in the content.
+    /// 
+    /// The code block detection is robust and handles both fenced code blocks (```...```)
+    /// and indented code blocks.
     fn find_code_blocks(&self, content: &str) -> Vec<(usize, usize)> {
-        let mut code_blocks = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-        let mut in_code_block = false;
-        let mut start_line = 0;
-
-        for (i, line) in lines.iter().enumerate() {
-            if CODE_BLOCK_START_REGEX.is_match(line) && !in_code_block {
-                in_code_block = true;
-                start_line = i;
-            } else if CODE_BLOCK_END_REGEX.is_match(line) && in_code_block {
-                code_blocks.push((start_line, i));
-                in_code_block = false;
-            }
+        // Use lazy_static to compile these patterns only once
+        lazy_static! {
+            static ref FENCED_START: Regex = Regex::new(r"^(```|~~~)").unwrap();
+            static ref INDENTED_CODE: Regex = Regex::new(r"^( {4}|\t)").unwrap();
         }
 
-        // Handle unclosed code blocks
+        let lines: Vec<&str> = content.lines().collect();
+        let mut code_blocks = Vec::new();
+        let mut in_code_block = false;
+        let mut start_line = 0;
+        let mut fence_char = '\0';
+        let mut fence_count = 0;
+        let mut skip_to = 0;
+
+        for (i, line) in lines.iter().enumerate() {
+            // Skip lines that were already processed as part of an indented code block
+            if i < skip_to {
+                continue;
+            }
+
+            let trimmed = line.trim();
+            
+            // Quick check before using regex
+            if !in_code_block && !trimmed.is_empty() && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
+                in_code_block = true;
+                start_line = i;
+                fence_char = trimmed.chars().next().unwrap();
+                fence_count = trimmed.chars().take_while(|&c| c == fence_char).count();
+            } else if in_code_block && !trimmed.is_empty() {
+                let potential_end = trimmed.starts_with(&fence_char.to_string().repeat(fence_count));
+                if potential_end && (trimmed.len() == fence_count || !trimmed.chars().nth(fence_count).unwrap().is_ascii_alphanumeric()) {
+                    code_blocks.push((start_line, i));
+                    in_code_block = false;
+                    fence_char = '\0';
+                    fence_count = 0;
+                }
+            } else if !in_code_block && !trimmed.is_empty() {
+                // Check for indented code block with a simple string operation first
+                if line.starts_with("    ") || line.starts_with('\t') {
+                    let mut j = i;
+                    while j < lines.len() && (lines[j].starts_with("    ") || lines[j].starts_with('\t') || lines[j].trim().is_empty()) {
+                        j += 1;
+                    }
+                    
+                    // Only add if it's at least 2 lines (including blank lines) to avoid false positives
+                    if j > i + 1 {
+                        code_blocks.push((i, j - 1));
+                        // Mark where to continue processing
+                        skip_to = j;
+                    }
+                }
+            }
+        }
+        
+        // Handle unclosed code blocks at the end of the document
         if in_code_block {
             code_blocks.push((start_line, lines.len() - 1));
         }
@@ -91,27 +138,48 @@ impl MD053LinkImageReferenceDefinitions {
         code_blocks
     }
 
-    // Check if a line is inside a code block
-    fn is_in_code_block(&self, line_idx: usize, code_blocks: &[(usize, usize)]) -> bool {
-        for &(start, end) in code_blocks {
-            if line_idx >= start && line_idx <= end {
-                return true;
-            }
-        }
-        false
-    }
-
-    // Check if a line range overlaps with any code block
+    /// Check if a line range is inside a code block.
+    ///
+    /// This method determines if the given line range (start to end) is completely
+    /// contained within any code block in the content.
+    /// 
+    /// This is used to avoid flagging unused references that are defined inside code blocks.
     fn is_inside_code_block(&self, start: usize, end: usize, code_blocks: &[(usize, usize)]) -> bool {
-        for &(block_start, block_end) in code_blocks {
-            if start <= block_end && end >= block_start {
-                return true;
-            }
-        }
-        false
+        code_blocks.iter().any(|(block_start, block_end)| {
+            *block_start <= start && *block_end >= end
+        })
     }
 
-    // Find all reference usages in the content, accounting for code blocks
+    /// Check if a line is inside a code block.
+    /// 
+    /// This method determines if the given line index is contained within any code block.
+    /// Used to track references within code blocks separately.
+    fn is_in_code_block(&self, line_idx: usize, code_blocks: &[(usize, usize)]) -> bool {
+        code_blocks.iter().any(|(start, end)| {
+            *start <= line_idx && *end >= line_idx
+        })
+    }
+
+    /// Unescape a reference string by removing backslashes before special characters.
+    ///
+    /// This allows matching references like `[example\-reference]` with definitions like
+    /// `[example-reference]: http://example.com`
+    /// 
+    /// Returns the unescaped reference string.
+    fn unescape_reference(reference: &str) -> String {
+        // Remove backslashes before special characters
+        reference.replace("\\", "")
+    }
+
+    /// Find all link and image reference usages in the content.
+    ///
+    /// This method returns a tuple containing:
+    /// - A HashSet of all reference IDs found in usage (not in code blocks)
+    /// - A HashSet of all reference IDs found in code blocks (these are tracked separately
+    ///   because references used only in code blocks should still be considered unused
+    ///   according to standard Markdown linting practice)
+    ///
+    /// References in code blocks are tracked but not counted as valid usages.
     fn find_usages(&self, content: &str) -> (HashSet<String>, HashSet<String>) {
         let mut usages = HashSet::new();
         let mut code_block_usages = HashSet::new();
@@ -279,74 +347,76 @@ impl MD053LinkImageReferenceDefinitions {
         (usages, code_block_usages)
     }
     
-    // Helper method to unescape backslashes in reference definitions
-    fn unescape_reference(reference: &str) -> String {
-        // Remove backslash escapes e.g., "foo\-bar" becomes "foo-bar"
-        reference.replace("\\", "")
-    }
-
     // Find all reference definitions in the content
     fn find_definitions(&self, content: &str) -> HashMap<String, Vec<(usize, usize)>> {
-        let mut definitions = HashMap::new();
+        let mut definitions: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
         let lines: Vec<&str> = content.lines().collect();
-        let mut i = 0;
         
-        while i < lines.len() {
-            if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(lines[i]) {
+        for (i, line) in lines.iter().enumerate() {
+            if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line) {
                 if let Some(ref_capture) = caps.get(1) {
                     let ref_text = ref_capture.as_str().trim();
-                    let ref_key = ref_text.to_lowercase();
-                    let unescaped_key = Self::unescape_reference(ref_text).to_lowercase();
                     
-                    // Get the end of the definition, handling multi-line definitions
+                    // If this is a multi-line definition, find where it ends
                     let mut end_line = i;
-                    while end_line + 1 < lines.len() && CONTINUATION_REGEX.is_match(lines[end_line + 1]) {
-                        end_line += 1;
+                    
+                    // Check if the definition continues to the next line
+                    // A continued definition line starts with whitespace and has non-whitespace content
+                    for j in i+1..lines.len() {
+                        let next_line = lines[j];
+                        if next_line.starts_with(" ") && !next_line.trim().is_empty() && 
+                           !REFERENCE_DEFINITION_REGEX.is_match(next_line) {
+                            end_line = j;
+                        } else {
+                            break;
+                        }
                     }
                     
-                    // Store both the original and unescaped versions of the reference key
-                    definitions.entry(ref_key.clone()).or_insert_with(Vec::new).push((i, end_line));
+                    // Add both the original and unescaped forms to enable matching both
+                    let key = ref_text.to_lowercase();
+                    let range_entry = (i, end_line);
                     
-                    // If the unescaped key is different, store it as an alias
-                    if unescaped_key != ref_key {
-                        definitions.entry(unescaped_key).or_insert_with(Vec::new).push((i, end_line));
+                    if let Some(ranges) = definitions.get_mut(&key) {
+                        ranges.push(range_entry);
+                    } else {
+                        definitions.insert(key, vec![range_entry]);
+                    }
+                    
+                    // Also add the unescaped version for matching escaped references
+                    let unescaped_key = Self::unescape_reference(ref_text).to_lowercase();
+                    if unescaped_key != ref_text.to_lowercase() {
+                        if let Some(ranges) = definitions.get_mut(&unescaped_key) {
+                            // Only add if the range isn't already there
+                            if !ranges.contains(&range_entry) {
+                                ranges.push(range_entry);
+                            }
+                        } else {
+                            definitions.insert(unescaped_key, vec![range_entry]);
+                        }
                     }
                 }
             }
-            i += 1;
         }
         
         definitions
     }
 
-    // Get cached definitions for the given content.
-    ///
-    /// This method uses a cache to store the definitions for each content hash.
-    /// If the definitions for the given content are already cached, they are returned.
-    /// Otherwise, the definitions are computed, cached, and then returned.
-    fn get_cached_definitions(&self, content: &str) -> Vec<(String, usize, usize)> {
-        let hash = fast_hash(content);
-        self.cache
-            .borrow_mut()
-            .entry(hash)
-            .or_insert_with(|| {
-                self.find_definitions(content)
-                    .into_iter()
-                    .flat_map(|(s, e_vec)| {
-                        e_vec
-                            .into_iter()
-                            .map(move |(start, end)| (s.clone(), start, end))
-                    })
-                    .collect()
-            })
-            .clone()
+    /// Compute a hash of the given content for caching purposes.
+    /// This uses the DefaultHasher for better performance than the previous fast_hash implementation.
+    fn content_hash(content: &str) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        content.hash(&mut hasher);
+        hasher.finish()
     }
 
     /// Get unused references with their line ranges.
     ///
     /// This method uses the cached definitions to improve performance.
+    /// 
+    /// Note: References that are only used inside code blocks are still considered unused,
+    /// as code blocks are treated as examples or documentation rather than actual content.
     fn get_unused_references(&self, content: &str) -> Vec<(String, usize, usize)> {
-        let (usages, _) = self.find_usages(content);
+        let (usages, _code_block_usages) = self.find_usages(content);
         let cached_definitions = self.get_cached_definitions(content);
         let code_blocks = self.find_code_blocks(content);
         
@@ -361,6 +431,7 @@ impl MD053LinkImageReferenceDefinitions {
                 let unescaped_key = Self::unescape_reference(key).to_lowercase();
                 
                 // Check if the reference is used (either in its original or unescaped form)
+                // References used only in code blocks are considered unused
                 let is_used = usages.contains(key) || usages.contains(&unescaped_key);
                 let is_ignored = self.ignored_definitions.contains(key) || 
                                 self.ignored_definitions.contains(&unescaped_key);
@@ -376,6 +447,39 @@ impl MD053LinkImageReferenceDefinitions {
             .collect::<Vec<_>>();
         
         unused
+    }
+
+    // Get cached definitions for the given content.
+    ///
+    /// This method uses a cache to store the definitions for each content hash.
+    /// If the definitions for the given content are already cached, they are returned.
+    /// Otherwise, the definitions are computed, cached, and then returned.
+    fn get_cached_definitions(&self, content: &str) -> Vec<(String, usize, usize)> {
+        let hash = Self::content_hash(content);
+        
+        // First check if we already have this content cached
+        let cache = self.cache.borrow();
+        if let Some(cached) = cache.get(&hash) {
+            return cached.clone();
+        }
+        
+        // If not cached, release the borrow and compute the definitions
+        drop(cache);
+        
+        // Compute the definitions
+        let definitions: Vec<(String, usize, usize)> = self.find_definitions(content)
+            .into_iter()
+            .flat_map(|(s, e_vec)| {
+                e_vec
+                    .into_iter()
+                    .map(move |(start, end)| (s.clone(), start, end))
+            })
+            .collect();
+            
+        // Update the cache with the computed definitions
+        self.cache.borrow_mut().insert(hash, definitions.clone());
+        
+        definitions
     }
 
     /// Helper method to clean up document structure after removing lines
@@ -446,35 +550,47 @@ impl Rule for MD053LinkImageReferenceDefinitions {
             return Ok(content.to_string());
         }
 
-        // Split the content into lines
-        let lines: Vec<&str> = content.lines().collect();
+        // Split the content into lines - directly get owned strings to avoid clone during push
+        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
         // Create a set of line numbers to remove (unused references)
-        let mut to_remove = std::collections::HashSet::new();
+        // Use a more efficient data structure for faster lookups
+        let mut to_remove = std::collections::HashSet::with_capacity(unused_refs.len() * 2);
         for (_, start, end) in &unused_refs {
             for line in *start..=*end {
                 to_remove.insert(line);
             }
         }
 
-        // Build the result, skipping unused definitions
-        let mut result = Vec::with_capacity(lines.len());
-        for (i, line) in lines.iter().enumerate() {
-            if !to_remove.contains(&i) {
-                result.push((*line).to_string());
+        // If there are many lines and few to remove, use this approach
+        if to_remove.len() < lines.len() / 10 {
+            // Build the result, skipping unused definitions
+            // Pre-allocate the result vector to the maximum expected size
+            let mut result = Vec::with_capacity(lines.len() - to_remove.len());
+            for (i, line) in lines.into_iter().enumerate() {
+                if !to_remove.contains(&i) {
+                    result.push(line);
+                }
             }
-        }
-
-        // Clean up formatting issues created by removals
-        self.clean_up_document_structure(&mut result);
-
-        // Join the lines with newlines
-        let output = if !result.is_empty() {
-            result.join("\n")
+            
+            // Clean up formatting issues created by removals
+            self.clean_up_document_structure(&mut result);
+            
+            // Join the lines with newlines - avoid empty check which is unnecessary
+            Ok(result.join("\n"))
         } else {
-            "".to_string()
-        };
-
-        Ok(output)
+            // If there are many lines to remove, this alternative approach might be faster
+            let mut result: Vec<String> = lines
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, line)| if !to_remove.contains(&i) { Some(line) } else { None })
+                .collect();
+                
+            // Clean up formatting issues created by removals
+            self.clean_up_document_structure(&mut result);
+            
+            // Join the lines with newlines
+            Ok(result.join("\n"))
+        }
     }
 }
