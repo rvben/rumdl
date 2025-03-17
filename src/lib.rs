@@ -145,19 +145,11 @@ fn normalize_gitignore_pattern(pattern: &str) -> String {
 /// This function checks if a file should be excluded based on a list of glob patterns.
 pub fn should_exclude(file_path: &str, exclude_patterns: &[String]) -> bool {
     // Normalize the file path by removing leading ./ if present
-    let normalized_path = if file_path.starts_with("./") {
-        &file_path[2..]
-    } else {
-        file_path
-    };
+    let normalized_path = file_path.strip_prefix("./").unwrap_or(file_path);
 
     for pattern in exclude_patterns {
         // Normalize the pattern by removing leading ./ if present
-        let normalized_pattern = if pattern.starts_with("./") {
-            &pattern[2..]
-        } else {
-            pattern
-        };
+        let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
 
         // Handle directory patterns (ending with /)
         if normalized_pattern.ends_with('/') {

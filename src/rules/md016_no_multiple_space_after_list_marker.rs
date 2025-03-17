@@ -4,17 +4,9 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::code_block_utils::CodeBlockUtils;
 use crate::rules::list_utils::ListUtils;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MD016NoMultipleSpaceAfterListMarker {
     pub allow_multiple_spaces: bool,
-}
-
-impl Default for MD016NoMultipleSpaceAfterListMarker {
-    fn default() -> Self {
-        Self {
-            allow_multiple_spaces: false,
-        }
-    }
 }
 
 impl MD016NoMultipleSpaceAfterListMarker {
@@ -59,10 +51,7 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
                     severity: Severity::Warning,
                     line: line_num + 1,
                     column: 1,
-                    message: if line
-                        .trim_start()
-                        .starts_with(|c| c == '*' || c == '+' || c == '-')
-                    {
+                    message: if line.trim_start().starts_with(['*', '+', '-']) {
                         "Multiple spaces after unordered list marker".to_string()
                     } else {
                         "Multiple spaces after ordered list marker".to_string()

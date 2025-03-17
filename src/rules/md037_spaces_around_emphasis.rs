@@ -190,7 +190,7 @@ impl Rule for MD037SpacesAroundEmphasis {
         let mut fixed_lines = Vec::new();
         let mut code_block_state = CodeBlockState::new();
 
-        for (_i, line) in lines.iter().enumerate() {
+        for line in lines.iter() {
             // Track code blocks
             if FENCED_CODE_BLOCK_START.is_match(line) {
                 code_block_state.in_fenced_code = true;

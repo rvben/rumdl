@@ -55,7 +55,7 @@ And a full reference: [Unicode 汉字][unicode-ref]
     let rule_restricted = MD054LinkImageStyle::new(true, false, true, true, true, true);
     let result = rule_restricted.check(content_mixed).unwrap();
     assert!(
-        result.len() > 0,
+        !result.is_empty(),
         "Restricted styles with Unicode should generate warnings"
     );
 
@@ -106,7 +106,7 @@ fn test_unicode_images() {
 
     let result = rule_restricted.check(content_mixed).unwrap();
     assert!(
-        result.len() > 0,
+        !result.is_empty(),
         "Restricted styles with Unicode images should generate warnings"
     );
 }

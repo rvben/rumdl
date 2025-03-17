@@ -15,7 +15,7 @@ pub struct MD021NoMultipleSpaceClosedAtx;
 
 impl MD021NoMultipleSpaceClosedAtx {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     fn is_closed_atx_heading_with_multiple_spaces(&self, line: &str) -> bool {

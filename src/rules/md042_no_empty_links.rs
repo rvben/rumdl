@@ -8,6 +8,12 @@ use regex::Regex;
 /// This rule is triggered when a link has no content (text) or destination (URL).
 pub struct MD042NoEmptyLinks;
 
+impl Default for MD042NoEmptyLinks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MD042NoEmptyLinks {
     pub fn new() -> Self {
         Self

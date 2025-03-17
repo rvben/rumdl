@@ -19,7 +19,7 @@ pub struct MD020NoMissingSpaceClosedAtx;
 
 impl MD020NoMissingSpaceClosedAtx {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     fn is_closed_atx_heading_without_space(&self, line: &str) -> bool {

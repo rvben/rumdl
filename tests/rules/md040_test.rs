@@ -3,7 +3,7 @@ use rumdl::rules::MD040FencedCodeLanguage;
 
 #[test]
 fn test_valid_code_blocks() {
-    let rule = MD040FencedCodeLanguage::default();
+    let rule = MD040FencedCodeLanguage;
     let content = "```rust\nfn main() {}\n```\n```python\nprint('hello')\n```";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
@@ -11,7 +11,7 @@ fn test_valid_code_blocks() {
 
 #[test]
 fn test_missing_language() {
-    let rule = MD040FencedCodeLanguage::default();
+    let rule = MD040FencedCodeLanguage;
     let content = "```\nsome code\n```";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -21,7 +21,7 @@ fn test_missing_language() {
 
 #[test]
 fn test_multiple_code_blocks() {
-    let rule = MD040FencedCodeLanguage::default();
+    let rule = MD040FencedCodeLanguage;
     let content = "```rust\nfn main() {}\n```\n```\nsome code\n```\n```python\nprint('hello')\n```";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -34,7 +34,7 @@ fn test_multiple_code_blocks() {
 
 #[test]
 fn test_empty_code_block() {
-    let rule = MD040FencedCodeLanguage::default();
+    let rule = MD040FencedCodeLanguage;
     let content = "```\n```";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -44,7 +44,7 @@ fn test_empty_code_block() {
 
 #[test]
 fn test_indented_code_block() {
-    let rule = MD040FencedCodeLanguage::default();
+    let rule = MD040FencedCodeLanguage;
     let content = "  ```\n  some code\n  ```";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -54,7 +54,7 @@ fn test_indented_code_block() {
 
 #[test]
 fn test_mixed_code_blocks() {
-    let rule = MD040FencedCodeLanguage::default();
+    let rule = MD040FencedCodeLanguage;
     let content = "```rust\nfn main() {}\n```\nSome text\n```\nmore code\n```\n```js\nconsole.log('hi');\n```";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -64,7 +64,7 @@ fn test_mixed_code_blocks() {
 
 #[test]
 fn test_preserve_whitespace() {
-    let rule = MD040FencedCodeLanguage::default();
+    let rule = MD040FencedCodeLanguage;
     let content = "```   \nsome code\n```";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);

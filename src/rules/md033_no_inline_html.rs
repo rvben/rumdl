@@ -12,17 +12,9 @@ lazy_static! {
     static ref CODE_FENCE_START: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MD033NoInlineHtml {
     allowed_elements: Vec<String>,
-}
-
-impl Default for MD033NoInlineHtml {
-    fn default() -> Self {
-        Self {
-            allowed_elements: Vec::new(),
-        }
-    }
 }
 
 impl MD033NoInlineHtml {

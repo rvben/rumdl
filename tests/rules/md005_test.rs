@@ -3,7 +3,7 @@ use rumdl::rules::MD005ListIndent;
 
 #[test]
 fn test_valid_unordered_list() {
-    let rule = MD005ListIndent::default();
+    let rule = MD005ListIndent;
     let content = "\
 * Item 1
 * Item 2
@@ -16,7 +16,7 @@ fn test_valid_unordered_list() {
 
 #[test]
 fn test_valid_ordered_list() {
-    let rule = MD005ListIndent::default();
+    let rule = MD005ListIndent;
     let content = "\
 1. Item 1
 2. Item 2
@@ -29,7 +29,7 @@ fn test_valid_ordered_list() {
 
 #[test]
 fn test_invalid_unordered_indent() {
-    let rule = MD005ListIndent::default();
+    let rule = MD005ListIndent;
     let content = "\
 * Item 1
  * Item 2
@@ -42,7 +42,7 @@ fn test_invalid_unordered_indent() {
 
 #[test]
 fn test_invalid_ordered_indent() {
-    let rule = MD005ListIndent::default();
+    let rule = MD005ListIndent;
     let content = "\
 1. Item 1
  2. Item 2
@@ -55,7 +55,7 @@ fn test_invalid_ordered_indent() {
 
 #[test]
 fn test_mixed_list_types() {
-    let rule = MD005ListIndent::default();
+    let rule = MD005ListIndent;
     let content = "\
 * Item 1
   1. Nested ordered
@@ -67,7 +67,7 @@ fn test_mixed_list_types() {
 
 #[test]
 fn test_multiple_levels() {
-    let rule = MD005ListIndent::default();
+    let rule = MD005ListIndent;
     let content = "\
 * Level 1
    * Level 2
@@ -86,7 +86,7 @@ fn test_multiple_levels() {
 
 #[test]
 fn test_empty_lines() {
-    let rule = MD005ListIndent::default();
+    let rule = MD005ListIndent;
     let content = "\
 * Item 1
 
@@ -99,7 +99,7 @@ fn test_empty_lines() {
 
 #[test]
 fn test_no_lists() {
-    let rule = MD005ListIndent::default();
+    let rule = MD005ListIndent;
     let content = "\
 Just some text
 More text
@@ -110,7 +110,7 @@ Even more text";
 
 #[test]
 fn test_complex_nesting() {
-    let rule = MD005ListIndent::default();
+    let rule = MD005ListIndent;
     let content = "\
 * Level 1
   * Level 2
@@ -125,7 +125,7 @@ fn test_complex_nesting() {
 
 #[test]
 fn test_invalid_complex_nesting() {
-    let rule = MD005ListIndent::default();
+    let rule = MD005ListIndent;
     let content = "\
 * Level 1
    * Level 2

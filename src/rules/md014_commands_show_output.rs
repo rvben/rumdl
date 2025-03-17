@@ -108,7 +108,6 @@ impl MD014CommandsShowOutput {
         block_start
             .trim_start()
             .trim_start_matches("```")
-            .trim_start()
             .split_whitespace()
             .next()
             .unwrap_or("")

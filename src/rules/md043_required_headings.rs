@@ -115,15 +115,13 @@ impl Rule for MD043RequiredHeadings {
         }
 
         let mut result = String::new();
-        let mut heading_idx = 0;
 
         // Add required headings
-        for heading in &self.headings {
-            if heading_idx > 0 {
+        for (idx, heading) in self.headings.iter().enumerate() {
+            if idx > 0 {
                 result.push_str("\n\n");
             }
             result.push_str(&format!("# {}", heading));
-            heading_idx += 1;
         }
 
         Ok(result)

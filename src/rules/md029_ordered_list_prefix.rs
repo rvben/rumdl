@@ -84,7 +84,7 @@ impl Rule for MD029OrderedListPrefix {
         }
 
         // Quick check if there are any numbered lists at all
-        if !content.contains(|c: char| c.is_digit(10) && c != '0') || !content.contains(". ") {
+        if !content.contains(|c: char| c.is_ascii_digit() && c != '0') || !content.contains(". ") {
             return Ok(vec![]);
         }
 
@@ -117,7 +117,7 @@ impl Rule for MD029OrderedListPrefix {
                         warnings.push(LintWarning {
                             line: line_num + 1,
                             column: indentation + 1,
-                            message: format!("List item prefix should be 1 for style 'one'"),
+                            message: "List item prefix should be 1 for style 'one'".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: line_index
@@ -137,7 +137,7 @@ impl Rule for MD029OrderedListPrefix {
                         warnings.push(LintWarning {
                             line: line_num + 1,
                             column: indentation + 1,
-                            message: format!("List item prefix should be 0 for style 'zero'"),
+                            message: "List item prefix should be 0 for style 'zero'".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: line_index

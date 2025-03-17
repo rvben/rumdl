@@ -33,6 +33,12 @@ lazy_static! {
 /// This rule is triggered when a reference link or image uses a reference that isn't defined.
 pub struct MD052ReferenceLinkImages;
 
+impl Default for MD052ReferenceLinkImages {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MD052ReferenceLinkImages {
     pub fn new() -> Self {
         Self
@@ -157,10 +163,10 @@ impl MD052ReferenceLinkImages {
                             if !references.contains(&lowercase_text) {
                                 // Check if we've already reported this reference on this line
                                 let key = format!("{}:{}", line_num + 1, lowercase_text);
-                                if !reported_refs.contains_key(&key) {
+                                reported_refs.entry(key).or_insert_with(|| {
                                     undefined.push((line_num + 1, match_start, text));
-                                    reported_refs.insert(key, true);
-                                }
+                                    true
+                                });
                             }
                         }
                     } else {
@@ -169,10 +175,10 @@ impl MD052ReferenceLinkImages {
                         if !references.contains(&lowercase_ref) {
                             // Check if we've already reported this reference on this line
                             let key = format!("{}:{}", line_num + 1, lowercase_ref);
-                            if !reported_refs.contains_key(&key) {
+                            reported_refs.entry(key).or_insert_with(|| {
                                 undefined.push((line_num + 1, match_start, ref_text));
-                                reported_refs.insert(key, true);
-                            }
+                                true
+                            });
                         }
                     }
                 }
@@ -222,10 +228,10 @@ impl MD052ReferenceLinkImages {
                     if !references.contains(&lowercase_ref) {
                         // Check if we've already reported this reference on this line
                         let key = format!("{}:{}", line_num + 1, lowercase_ref);
-                        if !reported_refs.contains_key(&key) {
+                        reported_refs.entry(key).or_insert_with(|| {
                             undefined.push((line_num + 1, match_start, ref_text));
-                            reported_refs.insert(key, true);
-                        }
+                            true
+                        });
                     }
                 }
             }
@@ -253,10 +259,10 @@ impl MD052ReferenceLinkImages {
                             if !references.contains(&lowercase_text) {
                                 // Check if we've already reported this reference on this line
                                 let key = format!("{}:{}", line_num + 1, lowercase_text);
-                                if !reported_refs.contains_key(&key) {
+                                reported_refs.entry(key).or_insert_with(|| {
                                     undefined.push((line_num + 1, match_start, text));
-                                    reported_refs.insert(key, true);
-                                }
+                                    true
+                                });
                             }
                         }
                     } else {
@@ -265,10 +271,10 @@ impl MD052ReferenceLinkImages {
                         if !references.contains(&lowercase_ref) {
                             // Check if we've already reported this reference on this line
                             let key = format!("{}:{}", line_num + 1, lowercase_ref);
-                            if !reported_refs.contains_key(&key) {
+                            reported_refs.entry(key).or_insert_with(|| {
                                 undefined.push((line_num + 1, match_start, ref_text));
-                                reported_refs.insert(key, true);
-                            }
+                                true
+                            });
                         }
                     }
                 }

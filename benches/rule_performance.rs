@@ -1,13 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rumdl::rule::Rule;
 use rumdl::rules::{
-    MD013LineLength, 
-    MD015NoMissingSpaceAfterListMarker,
-    MD033NoInlineHtml, 
-    MD037SpacesAroundEmphasis, 
-    MD044ProperNames,
-    MD051LinkFragments,
-    MD053LinkImageReferenceDefinitions
+    MD013LineLength, MD015NoMissingSpaceAfterListMarker, MD033NoInlineHtml,
+    MD037SpacesAroundEmphasis, MD044ProperNames, MD051LinkFragments,
+    MD053LinkImageReferenceDefinitions,
 };
 
 /// Benchmark MD013 rule on a large content with long lines
@@ -70,7 +66,7 @@ fn bench_md037(c: &mut Criterion) {
         }
     }
 
-    let rule = MD037SpacesAroundEmphasis::default();
+    let rule = MD037SpacesAroundEmphasis;
 
     c.bench_function("MD037 check 500 emphasis markers", |b| {
         b.iter(|| rule.check(black_box(&content)))
@@ -86,22 +82,35 @@ fn bench_md044(c: &mut Criterion) {
     let mut content = String::with_capacity(50_000);
     // Generate content with names that should be consistently capitalized
     let proper_names = vec![
-        "JavaScript".to_string(), 
-        "TypeScript".to_string(), 
-        "GitHub".to_string(), 
-        "VS Code".to_string(), 
-        "Docker".to_string(), 
-        "Kubernetes".to_string()
+        "JavaScript".to_string(),
+        "TypeScript".to_string(),
+        "GitHub".to_string(),
+        "VS Code".to_string(),
+        "Docker".to_string(),
+        "Kubernetes".to_string(),
     ];
-    let incorrect_names = ["javascript", "typescript", "github", "vs code", "docker", "kubernetes"];
-    
+    let incorrect_names = [
+        "javascript",
+        "typescript",
+        "github",
+        "vs code",
+        "docker",
+        "kubernetes",
+    ];
+
     for i in 0..500 {
         if i % 2 == 0 {
             let name_idx = i % proper_names.len();
-            content.push_str(&format!("Line {} mentions {} correctly\n", i, proper_names[name_idx]));
+            content.push_str(&format!(
+                "Line {} mentions {} correctly\n",
+                i, proper_names[name_idx]
+            ));
         } else {
             let name_idx = i % incorrect_names.len();
-            content.push_str(&format!("Line {} mentions {} incorrectly\n", i, incorrect_names[name_idx]));
+            content.push_str(&format!(
+                "Line {} mentions {} incorrectly\n",
+                i, incorrect_names[name_idx]
+            ));
         }
     }
 
@@ -120,21 +129,27 @@ fn bench_md044(c: &mut Criterion) {
 /// Benchmark MD051 link fragments rule
 fn bench_md051(c: &mut Criterion) {
     let mut content = String::with_capacity(50_000);
-    
+
     // Add 100 headings
     for i in 1..101 {
         content.push_str(&format!("## Heading {}\n\n", i));
     }
-    
+
     // Add 500 links, some with valid and some with invalid fragments
     for i in 0..500 {
         if i % 3 == 0 {
             // Valid link
             let heading_number = (i % 100) + 1;
-            content.push_str(&format!("This is a [valid link](#heading-{})\n", heading_number));
+            content.push_str(&format!(
+                "This is a [valid link](#heading-{})\n",
+                heading_number
+            ));
         } else {
             // Invalid link
-            content.push_str(&format!("This is an [invalid link](#non-existent-heading-{})\n", i));
+            content.push_str(&format!(
+                "This is an [invalid link](#non-existent-heading-{})\n",
+                i
+            ));
         }
     }
 
@@ -148,7 +163,7 @@ fn bench_md051(c: &mut Criterion) {
 /// Benchmark MD053 link image reference definitions with caching
 fn bench_md053(c: &mut Criterion) {
     let mut content = String::with_capacity(50_000);
-    
+
     // Add reference definitions
     content.push_str("## Reference Definitions\n\n");
     for i in 0..200 {
@@ -160,11 +175,14 @@ fn bench_md053(c: &mut Criterion) {
             content.push_str(&format!("[unused{}]: https://example.com/unused{}\n", i, i));
         }
     }
-    
+
     // Add reference usages
     content.push_str("\n## Content with References\n\n");
     for i in 0..100 {
-        content.push_str(&format!("This is a paragraph with a [link][ref{}] reference.\n", i));
+        content.push_str(&format!(
+            "This is a paragraph with a [link][ref{}] reference.\n",
+            i
+        ));
     }
 
     let rule = MD053LinkImageReferenceDefinitions::default();
@@ -172,8 +190,8 @@ fn bench_md053(c: &mut Criterion) {
     // First call to benchmark cold cache
     c.bench_function("MD053 check cold cache", |b| {
         b.iter_with_setup(
-            || MD053LinkImageReferenceDefinitions::default(), // Create a new instance for each iteration
-            |r| r.check(black_box(&content))
+            MD053LinkImageReferenceDefinitions::default, // Create a new instance for each iteration
+            |r| r.check(black_box(&content)),
         )
     });
 
@@ -182,21 +200,21 @@ fn bench_md053(c: &mut Criterion) {
         // First, prime the cache
         let primed_rule = rule.clone();
         let _ = primed_rule.check(&content);
-        
+
         // Then benchmark with warm cache
         b.iter(|| primed_rule.check(black_box(&content)))
     });
-    
+
     c.bench_function("MD053 fix unused references", |b| {
         b.iter(|| rule.fix(black_box(&content)))
     });
 }
 
 criterion_group!(
-    benches, 
-    bench_md013, 
+    benches,
+    bench_md013,
     bench_md015,
-    bench_md033, 
+    bench_md033,
     bench_md037,
     bench_md044,
     bench_md051,

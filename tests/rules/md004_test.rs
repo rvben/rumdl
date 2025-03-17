@@ -308,7 +308,7 @@ fn test_performance_md004() {
             }
         }
 
-        content.push_str("\n"); // Add spacing between top-level items
+        content.push('\n'); // Add spacing between top-level items
     }
 
     // Measure performance
@@ -330,5 +330,5 @@ fn test_performance_md004() {
     println!("Found {} warnings", result.len());
 
     // We expect many warnings due to mixed markers
-    assert!(result.len() > 0);
+    assert!(!result.is_empty());
 }

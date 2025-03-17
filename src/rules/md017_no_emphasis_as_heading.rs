@@ -11,17 +11,9 @@ lazy_static! {
     static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s*)```").unwrap();
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MD017NoEmphasisAsHeading {
     pub allow_emphasis_headings: bool,
-}
-
-impl Default for MD017NoEmphasisAsHeading {
-    fn default() -> Self {
-        Self {
-            allow_emphasis_headings: false,
-        }
-    }
 }
 
 impl MD017NoEmphasisAsHeading {

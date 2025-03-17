@@ -136,7 +136,7 @@ impl Rule for MD023HeadingStartLeft {
                             line: i + 1,
                             column: 1,
                             severity: Severity::Warning,
-                            message: format!("Setext heading underline should not be indented"),
+                            message: "Setext heading underline should not be indented".to_string(),
                             fix: Some(Fix {
                                 range: _line_index.line_col_to_byte_range(i + 1, 1),
                                 replacement: fixed_underline,

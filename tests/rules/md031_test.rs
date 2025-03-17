@@ -3,7 +3,7 @@ use rumdl::rules::MD031BlanksAroundFences;
 
 #[test]
 fn test_valid_fenced_blocks() {
-    let rule = MD031BlanksAroundFences::default();
+    let rule = MD031BlanksAroundFences;
     let content = "Text before\n\n```\ncode block\n```\n\nText after";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
@@ -11,7 +11,7 @@ fn test_valid_fenced_blocks() {
 
 #[test]
 fn test_no_blank_before() {
-    let rule = MD031BlanksAroundFences::default();
+    let rule = MD031BlanksAroundFences;
     let content = "Text before\n```\ncode block\n```\n\nText after";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -21,7 +21,7 @@ fn test_no_blank_before() {
 
 #[test]
 fn test_no_blank_after() {
-    let rule = MD031BlanksAroundFences::default();
+    let rule = MD031BlanksAroundFences;
     let content = "Text before\n\n```\ncode block\n```\nText after";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -31,7 +31,7 @@ fn test_no_blank_after() {
 
 #[test]
 fn test_fix_missing_blanks() {
-    let rule = MD031BlanksAroundFences::default();
+    let rule = MD031BlanksAroundFences;
     let content = "Text before\n```\ncode block\n```\nText after";
     let result = rule.fix(content).unwrap();
     assert_eq!(result, "Text before\n\n```\ncode block\n```\n\nText after");

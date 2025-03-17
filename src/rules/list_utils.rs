@@ -58,7 +58,7 @@ impl ListUtils {
                     let second_char = trimmed.chars().nth(1).unwrap();
                     return second_char.is_whitespace();
                 }
-                return false;
+                false
             }
             '0'..='9' => {
                 // Check for ordered list pattern using a literal search first
@@ -69,9 +69,9 @@ impl ListUtils {
                         return after_dot.starts_with(' ');
                     }
                 }
-                return false;
+                false
             }
-            _ => return false,
+            _ => false,
         }
     }
 

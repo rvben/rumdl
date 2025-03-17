@@ -8,6 +8,12 @@ use regex::Regex;
 /// This rule is triggered when an image is missing alternate text (alt text).
 pub struct MD045NoAltText;
 
+impl Default for MD045NoAltText {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MD045NoAltText {
     pub fn new() -> Self {
         Self

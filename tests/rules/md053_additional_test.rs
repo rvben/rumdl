@@ -100,7 +100,8 @@ fn test_case_difference_between_usage_and_definition() {
 #[test]
 fn test_references_separated_by_content() {
     let rule = MD053LinkImageReferenceDefinitions::new(vec![]);
-    let content = "[link][id]\n\nLots of content here...\nMore content...\n\n[id]: http://example.com";
+    let content =
+        "[link][id]\n\nLots of content here...\nMore content...\n\n[id]: http://example.com";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
 }
@@ -181,7 +182,7 @@ fn test_performance_with_many_references() {
     }
 
     // Use only 50 of them
-    content.push_str("\n");
+    content.push('\n');
     for i in 1..51 {
         content.push_str(&format!("[link{}][ref{}]\n", i, i));
     }
@@ -389,7 +390,7 @@ fn test_multiline_content_with_multiple_references() {
     content.push_str("Another paragraph with ![image][id3].\n\n");
     content.push_str("* List item with [item][id4]\n");
     content.push_str("* Another item with [shortcut][]\n\n");
-    
+
     // Add definitions, some used and some unused
     content.push_str("[id1]: http://example1.com\n");
     content.push_str("[id2]: http://example2.com\n");
@@ -398,11 +399,11 @@ fn test_multiline_content_with_multiple_references() {
     content.push_str("[shortcut]: http://shortcut.com\n");
     content.push_str("[unused1]: http://unused1.com\n");
     content.push_str("[unused2]: http://unused2.com\n");
-    
+
     // Check that only unused references are detected
     let result = rule.check(&content).unwrap();
     assert_eq!(result.len(), 2);
-    
+
     // Fix should remove only unused references
     let fixed = rule.fix(&content).unwrap();
     assert!(!fixed.contains("[unused1]"));

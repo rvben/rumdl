@@ -1,5 +1,5 @@
-use crate::utils::range_utils::LineIndex;
 use crate::utils::fast_hash;
+use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
@@ -45,7 +45,7 @@ impl MD044ProperNames {
     // Create a regex-safe version of the name for word boundary matches
     fn create_safe_pattern(&self, name: &str) -> String {
         // Create variations of the name with and without dots
-        let variations = vec![name.to_lowercase(), name.to_lowercase().replace(".", "")];
+        let variations = [name.to_lowercase(), name.to_lowercase().replace(".", "")];
 
         // Create a pattern that matches any of the variations with word boundaries
         let pattern = variations
@@ -61,7 +61,7 @@ impl MD044ProperNames {
     fn get_compiled_regex(&self, name: &str) -> Regex {
         let pattern = self.create_safe_pattern(name);
         let mut cache = self.regex_cache.borrow_mut();
-        
+
         if let Some(regex) = cache.get(&pattern) {
             regex.clone()
         } else {
@@ -76,7 +76,7 @@ impl MD044ProperNames {
         // Check if we have cached results
         let hash = fast_hash(content);
         let cache_result = self.content_cache.borrow().get(&hash).cloned();
-        
+
         if let Some(cached) = cache_result {
             return cached;
         }
@@ -101,18 +101,16 @@ impl MD044ProperNames {
                 for cap in regex.find_iter(line) {
                     let found_name = &line[cap.start()..cap.end()];
                     if found_name != name {
-                        violations.push((
-                            line_num + 1,
-                            cap.start() + 1,
-                            found_name.to_string(),
-                        ));
+                        violations.push((line_num + 1, cap.start() + 1, found_name.to_string()));
                     }
                 }
             }
         }
 
         // Store in cache
-        self.content_cache.borrow_mut().insert(hash, violations.clone());
+        self.content_cache
+            .borrow_mut()
+            .insert(hash, violations.clone());
         violations
     }
 
@@ -144,24 +142,24 @@ impl Rule for MD044ProperNames {
 
         let line_index = LineIndex::new(content.to_string());
         let violations = self.find_name_violations(content);
-        
+
         let warnings = violations
             .into_iter()
             .filter_map(|(line, column, found_name)| {
-                if let Some(proper_name) = self.get_proper_name_for(&found_name) {
-                    Some(LintWarning {
+                self.get_proper_name_for(&found_name)
+                    .map(|proper_name| LintWarning {
                         line,
                         column,
-                        message: format!("Proper name '{}' should be '{}'", found_name, proper_name),
+                        message: format!(
+                            "Proper name '{}' should be '{}'",
+                            found_name, proper_name
+                        ),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range(line, column),
                             replacement: proper_name,
                         }),
                     })
-                } else {
-                    None
-                }
             })
             .collect();
 

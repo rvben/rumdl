@@ -3,7 +3,7 @@ use rumdl::rules::MD006StartBullets;
 
 #[test]
 fn test_valid_unordered_list() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 * Item 1
 * Item 2
@@ -16,7 +16,7 @@ fn test_valid_unordered_list() {
 
 #[test]
 fn test_valid_nested_list() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 * Item 1
   * Item 2
@@ -28,7 +28,7 @@ fn test_valid_nested_list() {
 
 #[test]
 fn test_invalid_indented_list() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 Some text here.
 
@@ -51,7 +51,7 @@ Some text here.
 
 #[test]
 fn test_mixed_list_styles() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 * Item 1
   * Nested item
@@ -66,7 +66,7 @@ fn test_mixed_list_styles() {
 
 #[test]
 fn test_multiple_lists() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 * First list item
 * Second list item
@@ -93,7 +93,7 @@ Some text here
 
 #[test]
 fn test_empty_lines() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 * Item 1
 
@@ -106,7 +106,7 @@ fn test_empty_lines() {
 
 #[test]
 fn test_no_lists() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 Just some text
 More text
@@ -117,7 +117,7 @@ Even more text";
 
 #[test]
 fn test_code_blocks_ignored() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 ```markdown
   * This indented item is inside a code block

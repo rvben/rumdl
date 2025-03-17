@@ -96,7 +96,7 @@ mod performance_tests {
         );
 
         // Test MD037 performance
-        let emphasis_rule = MD037SpacesAroundEmphasis::default();
+        let emphasis_rule = MD037SpacesAroundEmphasis;
         let start = Instant::now();
         let emphasis_result = emphasis_rule.check(&content).unwrap();
         let emphasis_duration = start.elapsed();
@@ -107,7 +107,7 @@ mod performance_tests {
         );
 
         // Add a basic assertion to ensure the test is meaningful
-        assert!(html_result.len() > 0, "Should have detected HTML tags");
+        assert!(!html_result.is_empty(), "Should have detected HTML tags");
         assert_eq!(
             emphasis_result.len(),
             0,

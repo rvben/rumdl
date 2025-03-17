@@ -142,8 +142,8 @@ impl Rule for MD026NoTrailingPunctuation {
 
         for (line_num, line) in lines.iter().enumerate() {
             // Skip lines in code blocks or front matter
-            if HeadingUtils::is_in_code_block(&content, line_num)
-                || FrontMatterUtils::is_in_front_matter(&content, line_num)
+            if HeadingUtils::is_in_code_block(content, line_num)
+                || FrontMatterUtils::is_in_front_matter(content, line_num)
             {
                 continue;
             }
@@ -263,8 +263,8 @@ impl Rule for MD026NoTrailingPunctuation {
             }
 
             // Skip lines in code blocks or front matter
-            if HeadingUtils::is_in_code_block(&content, i)
-                || FrontMatterUtils::is_in_front_matter(&content, i)
+            if HeadingUtils::is_in_code_block(content, i)
+                || FrontMatterUtils::is_in_front_matter(content, i)
             {
                 output_lines.push(line.to_string());
                 continue;

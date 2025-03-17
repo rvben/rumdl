@@ -21,6 +21,12 @@ pub struct Profiler {
     active_timers: HashMap<String, Instant>,
 }
 
+impl Default for Profiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Profiler {
     /// Create a new profiler instance
     pub fn new() -> Self {

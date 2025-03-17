@@ -1,7 +1,5 @@
 use clap::{Parser, Subcommand};
 use colored::*;
-use glob;
-use ignore;
 use rumdl::md046_code_block_style::CodeBlockStyle;
 use rumdl::md048_code_fence_style::CodeFenceStyle;
 use rumdl::md049_emphasis_style::EmphasisStyle;
@@ -88,12 +86,12 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     };
 
     // Add implemented rules
-    rules.push(Box::new(MD001HeadingIncrement::default()));
+    rules.push(Box::new(MD001HeadingIncrement));
     rules.push(Box::new(MD002FirstHeadingH1::default()));
     rules.push(Box::new(MD003HeadingStyle::default()));
     rules.push(Box::new(MD004UnorderedListStyle::default()));
-    rules.push(Box::new(MD005ListIndent::default()));
-    rules.push(Box::new(MD006StartBullets::default()));
+    rules.push(Box::new(MD005ListIndent));
+    rules.push(Box::new(MD006StartBullets));
     rules.push(Box::new(MD007ULIndent::default()));
 
     // Configure MD008 from config if available
@@ -391,14 +389,12 @@ fn process_file(
                 fix_indicator
             );
         }
-    } else {
-        if verbose {
-            println!(
-                "{} No issues found in {}",
-                "✓".green(),
-                path.blue().underline()
-            );
-        }
+    } else if verbose {
+        println!(
+            "{} No issues found in {}",
+            "✓".green(),
+            path.blue().underline()
+        );
     }
 
     // Apply fixes in a single pass if requested
@@ -414,10 +410,7 @@ fn process_file(
 
         for (rule_name, _, warning) in &all_warnings {
             if warning.fix.is_some() {
-                rule_to_warnings
-                    .entry(rule_name)
-                    .or_default()
-                    .push(warning);
+                rule_to_warnings.entry(rule_name).or_default().push(warning);
             }
         }
 
@@ -503,7 +496,7 @@ fn debug_gitignore_test(path: &str, verbose: bool) {
         .git_global(true)
         .git_ignore(true)
         .git_exclude(true)
-                .add_custom_ignore_filename(".gitignore")
+        .add_custom_ignore_filename(".gitignore")
         .build();
 
     // Check if the file is in the walker's output

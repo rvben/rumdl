@@ -21,6 +21,12 @@ lazy_static! {
 /// This only applies to internal document links, not to external URLs.
 pub struct MD051LinkFragments;
 
+impl Default for MD051LinkFragments {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MD051LinkFragments {
     pub fn new() -> Self {
         Self

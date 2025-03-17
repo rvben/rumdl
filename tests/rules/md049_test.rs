@@ -159,7 +159,7 @@ fn test_inline_code_with_underscores() {
     );
 
     // 2. If the rule finds an emphasis marker to fix, it should use asterisk style
-    if result.len() > 0 {
+    if !result.is_empty() {
         assert!(
             fixed.contains("*emphasize*"),
             "Emphasis should be converted to asterisks"

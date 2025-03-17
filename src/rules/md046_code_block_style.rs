@@ -80,19 +80,20 @@ impl Rule for MD046CodeBlockStyle {
                         }),
                     });
                 }
-            } else if self.is_indented_code_block(line) && !in_fenced_block {
-                if target_style == CodeBlockStyle::Fenced {
-                    warnings.push(LintWarning {
-                        line: line_num + 1,
-                        column: 1,
-                        message: "Code block style should be fenced".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(line_num + 1, 1),
-                            replacement: "```\n".to_string() + line.trim_start(),
-                        }),
-                    });
-                }
+            } else if self.is_indented_code_block(line)
+                && !in_fenced_block
+                && target_style == CodeBlockStyle::Fenced
+            {
+                warnings.push(LintWarning {
+                    line: line_num + 1,
+                    column: 1,
+                    message: "Code block style should be fenced".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: _line_index.line_col_to_byte_range(line_num + 1, 1),
+                        replacement: "```\n".to_string() + line.trim_start(),
+                    }),
+                });
             }
         }
 

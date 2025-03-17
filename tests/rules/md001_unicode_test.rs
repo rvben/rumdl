@@ -3,7 +3,7 @@ use rumdl::rules::MD001HeadingIncrement;
 
 #[test]
 pub fn test_md001_unicode_valid() {
-    let rule = MD001HeadingIncrement::default();
+    let rule = MD001HeadingIncrement;
     let content = "# Heading with café\n## Heading with 汉字\n### Heading with emoji 🔥\n";
     let result = rule.check(content).unwrap();
     assert!(
@@ -14,7 +14,7 @@ pub fn test_md001_unicode_valid() {
 
 #[test]
 pub fn test_md001_unicode_invalid() {
-    let rule = MD001HeadingIncrement::default();
+    let rule = MD001HeadingIncrement;
     let content = "# Heading with café\n### Heading with 汉字\n";
     let result = rule.check(content).unwrap();
     assert_eq!(
@@ -31,7 +31,7 @@ pub fn test_md001_unicode_invalid() {
 
 #[test]
 pub fn test_md001_unicode_fix() {
-    let rule = MD001HeadingIncrement::default();
+    let rule = MD001HeadingIncrement;
     let content = "# Café heading\n### 汉字 heading\n";
     let result = rule.fix(content).unwrap();
     assert_eq!(
@@ -42,7 +42,7 @@ pub fn test_md001_unicode_fix() {
 
 #[test]
 pub fn test_md001_unicode_multiple_violations() {
-    let rule = MD001HeadingIncrement::default();
+    let rule = MD001HeadingIncrement;
     let content = "# café\n### 汉字\n##### 🔥\n";
     let result = rule.check(content).unwrap();
     assert_eq!(
@@ -56,7 +56,7 @@ pub fn test_md001_unicode_multiple_violations() {
 
 #[test]
 pub fn test_md001_unicode_atx_and_setext() {
-    let rule = MD001HeadingIncrement::default();
+    let rule = MD001HeadingIncrement;
     let content = "# Heading café\nHeading 汉字\n---------\n### Heading 🔥\n";
     let result = rule.check(content).unwrap();
     assert!(
@@ -67,7 +67,7 @@ pub fn test_md001_unicode_atx_and_setext() {
 
 #[test]
 pub fn test_md001_unicode_complex() {
-    let rule = MD001HeadingIncrement::default();
+    let rule = MD001HeadingIncrement;
     let content = "# 汉字 café 🔥\n## مرحبا こんにちは\n### Mixed Unicode: ñáéíóú привет שלום\n";
     let result = rule.check(content).unwrap();
     assert!(

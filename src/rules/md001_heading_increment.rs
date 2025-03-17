@@ -29,7 +29,7 @@ impl Rule for MD001HeadingIncrement {
                     let indentation = HeadingUtils::get_indentation(lines[line_num]);
                     let mut fixed_heading = heading.clone();
                     fixed_heading.level = prev_level + 1;
-                    let style = prev_style.unwrap_or(heading.style.clone());
+                    let style = prev_style.unwrap_or(heading.style);
                     let replacement = HeadingUtils::convert_heading_style(&fixed_heading, &style);
                     warnings.push(LintWarning {
                         line: line_num + 1,
@@ -69,10 +69,10 @@ impl Rule for MD001HeadingIncrement {
                     let indentation = HeadingUtils::get_indentation(line);
                     let mut fixed_heading = heading.clone();
                     fixed_heading.level = prev_level + 1;
-                    let style = prev_style.unwrap_or(fixed_heading.style.clone());
+                    let style = prev_style.unwrap_or(fixed_heading.style);
                     let replacement = HeadingUtils::convert_heading_style(&fixed_heading, &style);
                     result.push_str(&format!("{}{}\n", " ".repeat(indentation), replacement));
-                    prev_level = prev_level + 1;
+                    prev_level += 1;
                 } else {
                     result.push_str(line);
                     result.push('\n');

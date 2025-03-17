@@ -23,7 +23,7 @@ impl MD002FirstHeadingH1 {
         let mut line_num = 0;
 
         // Skip front matter if present
-        if content.starts_with("---\n") || (lines.len() > 0 && lines[0] == "---") {
+        if content.starts_with("---\n") || (!lines.is_empty() && lines[0] == "---") {
             line_num += 1;
             while line_num < lines.len() && lines[line_num] != "---" {
                 line_num += 1;
@@ -42,12 +42,12 @@ impl MD002FirstHeadingH1 {
             if line.trim_start().starts_with('#') {
                 let trimmed = line.trim_start();
                 let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-                if hash_count >= 1 && hash_count <= 6 {
+                if (1..=6).contains(&hash_count) {
                     let after_hash = &trimmed[hash_count..];
                     if after_hash.is_empty() || after_hash.starts_with(' ') {
                         let text = after_hash
                             .trim_start()
-                            .trim_end_matches(|c| c == '#' || c == ' ')
+                            .trim_end_matches(['#', ' '])
                             .to_string();
                         let style = if after_hash.trim_end().ends_with('#') {
                             HeadingStyle::AtxClosed

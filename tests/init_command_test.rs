@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod init_command_tests {
     use assert_cmd::prelude::*;
-    use predicates;
+
     use rumdl::config;
     use std::fs;
     use std::process::Command;

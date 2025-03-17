@@ -90,16 +90,18 @@ impl MD013LineLength {
         // Setext headings (check for underline on next line)
         if current_line + 1 < lines.len() {
             let next = lines[current_line + 1].trim();
-            if next.len() > 0 && next.chars().all(|c| c == '=' || c == '-') {
+            if !next.is_empty() && next.chars().all(|c| c == '=' || c == '-') {
                 return true;
             }
         }
 
         // Check if current line is a setext underline
-        if line.trim().len() > 0 && line.trim().chars().all(|c| c == '=' || c == '-') {
-            if current_line > 0 && !lines[current_line - 1].trim().is_empty() {
-                return true;
-            }
+        if !line.trim().is_empty()
+            && line.trim().chars().all(|c| c == '=' || c == '-')
+            && current_line > 0
+            && !lines[current_line - 1].trim().is_empty()
+        {
+            return true;
         }
 
         false
@@ -127,7 +129,7 @@ impl MD013LineLength {
 
         // Code blocks with long strings
         if Self::is_in_code_block(lines, current_line)
-            && line.trim().len() > 0
+            && !line.trim().is_empty()
             && !line.contains(' ')
             && !line.contains('\t')
         {

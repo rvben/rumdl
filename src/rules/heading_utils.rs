@@ -342,7 +342,7 @@ pub fn extract_heading_text(lines: &[&str], index: usize, level: usize) -> Strin
     }
 
     // ATX heading
-    if level >= 1 && level <= 6 {
+    if (1..=6).contains(&level) {
         if let Some(caps) = ATX_HEADING.captures(line) {
             if let Some(text) = caps.get(4) {
                 return text.as_str().trim_end().to_string();

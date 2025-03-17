@@ -3,9 +3,9 @@ use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 
 lazy_static! {
     // Link reference format: [text][reference]
@@ -16,7 +16,7 @@ lazy_static! {
         Regex::new(r"!\[([^\]]*)\]\s*\[([^\]]*)\]").unwrap();
 
     // Shortcut reference links: [reference] - must not be followed by a colon to avoid matching definitions
-    static ref SHORTCUT_REFERENCE_REGEX: FancyRegex = 
+    static ref SHORTCUT_REFERENCE_REGEX: FancyRegex =
         FancyRegex::new(r"(?<!\!)\[([^\]]+)\](?!\s*[\[(:])").unwrap();
 
     // Empty reference links: [text][] or ![text][]
@@ -26,7 +26,7 @@ lazy_static! {
     // Link/image reference definition format: [reference]: URL
     static ref REFERENCE_DEFINITION_REGEX: Regex =
         Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap();
-    
+
     // Multi-line reference definition continuation pattern
     static ref CONTINUATION_REGEX: Regex = Regex::new(r"^\s+(.+)$").unwrap();
 
@@ -35,6 +35,9 @@ lazy_static! {
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
 }
 
+// Define a type alias for code block cache
+type CodeBlockCache = RefCell<HashMap<u64, Vec<(String, usize, usize)>>>;
+
 /// Rule MD053: Link and image reference definitions should be needed
 ///
 /// This rule checks that all link and image reference definitions are used at least
@@ -42,14 +45,14 @@ lazy_static! {
 #[derive(Debug, Clone)]
 pub struct MD053LinkImageReferenceDefinitions {
     ignored_definitions: HashSet<String>,
-    cache: RefCell<HashMap<u64, Vec<(String, usize, usize)>>>,
+    cache: CodeBlockCache,
 }
 
 impl Default for MD053LinkImageReferenceDefinitions {
     fn default() -> Self {
         Self {
             ignored_definitions: HashSet::new(),
-            cache: RefCell::new(HashMap::new()),
+            cache: CodeBlockCache::new(HashMap::new()),
         }
     }
 }
@@ -64,7 +67,7 @@ impl MD053LinkImageReferenceDefinitions {
 
         Self {
             ignored_definitions: ignored_set,
-            cache: RefCell::new(HashMap::new()),
+            cache: CodeBlockCache::new(HashMap::new()),
         }
     }
 
@@ -72,7 +75,7 @@ impl MD053LinkImageReferenceDefinitions {
     ///
     /// This method returns a vector of ranges representing the start and end
     /// line indexes of each code block in the content.
-    /// 
+    ///
     /// The code block detection is robust and handles both fenced code blocks (```...```)
     /// and indented code blocks.
     fn find_code_blocks(&self, content: &str) -> Vec<(usize, usize)> {
@@ -97,16 +100,27 @@ impl MD053LinkImageReferenceDefinitions {
             }
 
             let trimmed = line.trim();
-            
+
             // Quick check before using regex
-            if !in_code_block && !trimmed.is_empty() && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
+            if !in_code_block
+                && !trimmed.is_empty()
+                && (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
+            {
                 in_code_block = true;
                 start_line = i;
                 fence_char = trimmed.chars().next().unwrap();
                 fence_count = trimmed.chars().take_while(|&c| c == fence_char).count();
             } else if in_code_block && !trimmed.is_empty() {
-                let potential_end = trimmed.starts_with(&fence_char.to_string().repeat(fence_count));
-                if potential_end && (trimmed.len() == fence_count || !trimmed.chars().nth(fence_count).unwrap().is_ascii_alphanumeric()) {
+                let potential_end =
+                    trimmed.starts_with(&fence_char.to_string().repeat(fence_count));
+                if potential_end
+                    && (trimmed.len() == fence_count
+                        || !trimmed
+                            .chars()
+                            .nth(fence_count)
+                            .unwrap()
+                            .is_ascii_alphanumeric())
+                {
                     code_blocks.push((start_line, i));
                     in_code_block = false;
                     fence_char = '\0';
@@ -116,10 +130,14 @@ impl MD053LinkImageReferenceDefinitions {
                 // Check for indented code block with a simple string operation first
                 if line.starts_with("    ") || line.starts_with('\t') {
                     let mut j = i;
-                    while j < lines.len() && (lines[j].starts_with("    ") || lines[j].starts_with('\t') || lines[j].trim().is_empty()) {
+                    while j < lines.len()
+                        && (lines[j].starts_with("    ")
+                            || lines[j].starts_with('\t')
+                            || lines[j].trim().is_empty())
+                    {
                         j += 1;
                     }
-                    
+
                     // Only add if it's at least 2 lines (including blank lines) to avoid false positives
                     if j > i + 1 {
                         code_blocks.push((i, j - 1));
@@ -129,7 +147,7 @@ impl MD053LinkImageReferenceDefinitions {
                 }
             }
         }
-        
+
         // Handle unclosed code blocks at the end of the document
         if in_code_block {
             code_blocks.push((start_line, lines.len() - 1));
@@ -142,29 +160,34 @@ impl MD053LinkImageReferenceDefinitions {
     ///
     /// This method determines if the given line range (start to end) is completely
     /// contained within any code block in the content.
-    /// 
+    ///
     /// This is used to avoid flagging unused references that are defined inside code blocks.
-    fn is_inside_code_block(&self, start: usize, end: usize, code_blocks: &[(usize, usize)]) -> bool {
-        code_blocks.iter().any(|(block_start, block_end)| {
-            *block_start <= start && *block_end >= end
-        })
+    fn is_inside_code_block(
+        &self,
+        start: usize,
+        end: usize,
+        code_blocks: &[(usize, usize)],
+    ) -> bool {
+        code_blocks
+            .iter()
+            .any(|(block_start, block_end)| *block_start <= start && *block_end >= end)
     }
 
     /// Check if a line is inside a code block.
-    /// 
+    ///
     /// This method determines if the given line index is contained within any code block.
     /// Used to track references within code blocks separately.
     fn is_in_code_block(&self, line_idx: usize, code_blocks: &[(usize, usize)]) -> bool {
-        code_blocks.iter().any(|(start, end)| {
-            *start <= line_idx && *end >= line_idx
-        })
+        code_blocks
+            .iter()
+            .any(|(start, end)| *start <= line_idx && *end >= line_idx)
     }
 
     /// Unescape a reference string by removing backslashes before special characters.
     ///
     /// This allows matching references like `[example\-reference]` with definitions like
     /// `[example-reference]: http://example.com`
-    /// 
+    ///
     /// Returns the unescaped reference string.
     fn unescape_reference(reference: &str) -> String {
         // Remove backslashes before special characters
@@ -193,7 +216,7 @@ impl MD053LinkImageReferenceDefinitions {
                 if let Some(ref_capture) = caps.get(1) {
                     // First add the definition with escaped characters (original form)
                     definitions.insert((i, ref_capture.as_str().trim().to_lowercase()));
-                    
+
                     // Also add the unescaped version of the definition
                     let unescaped = Self::unescape_reference(ref_capture.as_str().trim());
                     definitions.insert((i, unescaped.to_lowercase()));
@@ -206,9 +229,9 @@ impl MD053LinkImageReferenceDefinitions {
             if let Some(ref_capture) = cap.get(2) {
                 let ref_text = ref_capture.as_str().trim();
                 let line_idx = content[..ref_capture.start()].matches('\n').count();
-                
+
                 let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
-                
+
                 if ref_text.is_empty() {
                     // Empty reference like [text][] uses text as the reference
                     if let Some(text_capture) = cap.get(1) {
@@ -236,9 +259,9 @@ impl MD053LinkImageReferenceDefinitions {
             if let Some(ref_capture) = cap.get(2) {
                 let ref_text = ref_capture.as_str().trim();
                 let line_idx = content[..ref_capture.start()].matches('\n').count();
-                
+
                 let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
-                
+
                 if ref_text.is_empty() {
                     // Empty reference like ![text][] uses text as the reference
                     if let Some(text_capture) = cap.get(1) {
@@ -263,26 +286,24 @@ impl MD053LinkImageReferenceDefinitions {
 
         // Process shortcut references using FancyRegex
         let matches = SHORTCUT_REFERENCE_REGEX.find_iter(content);
-        for m_result in matches {
-            if let Ok(m) = m_result {
-                // Extract line number for code block check
-                let line_idx = content[..m.start()].matches('\n').count();
-                
-                // Skip if this match is actually a definition
-                let ref_text = &content[m.start()+1..m.end()-1].trim().to_lowercase();
-                if definitions.contains(&(line_idx, ref_text.clone())) {
-                    continue;
-                }
-                
-                let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
-                
-                // Extract the reference text from [reference]
-                if !ref_text.is_empty() {
-                    if is_in_code {
-                        code_block_usages.insert(ref_text.to_string());
-                    } else {
-                        usages.insert(ref_text.to_string());
-                    }
+        for m in matches.flatten() {
+            // Extract line number for code block check
+            let line_idx = content[..m.start()].matches('\n').count();
+
+            // Skip if this match is actually a definition
+            let ref_text = &content[m.start() + 1..m.end() - 1].trim().to_lowercase();
+            if definitions.contains(&(line_idx, ref_text.clone())) {
+                continue;
+            }
+
+            let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
+
+            // Extract the reference text from [reference]
+            if !ref_text.is_empty() {
+                if is_in_code {
+                    code_block_usages.insert(ref_text.to_string());
+                } else {
+                    usages.insert(ref_text.to_string());
                 }
             }
         }
@@ -318,7 +339,7 @@ impl MD053LinkImageReferenceDefinitions {
                 }
             }
         }
-        
+
         // Add a second pass to find nested references in link and image references
         // This finds cases like [![alt][img]][link] where [link] is the outer reference
         for cap in LINK_REFERENCE_REGEX.captures_iter(content) {
@@ -326,7 +347,7 @@ impl MD053LinkImageReferenceDefinitions {
                 let full_text = full_match.as_str();
                 let line_idx = content[..full_match.start()].matches('\n').count();
                 let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
-                
+
                 // This regex finds the outer reference pattern in cases like [text][ref]
                 let outer_ref_regex = Regex::new(r"\]\s*\[([^\]]+)\]$").unwrap();
                 if let Some(outer_cap) = outer_ref_regex.captures(full_text) {
@@ -343,45 +364,47 @@ impl MD053LinkImageReferenceDefinitions {
                 }
             }
         }
-        
+
         (usages, code_block_usages)
     }
-    
+
     // Find all reference definitions in the content
     fn find_definitions(&self, content: &str) -> HashMap<String, Vec<(usize, usize)>> {
         let mut definitions: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         for (i, line) in lines.iter().enumerate() {
             if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line) {
                 if let Some(ref_capture) = caps.get(1) {
                     let ref_text = ref_capture.as_str().trim();
-                    
+
                     // If this is a multi-line definition, find where it ends
                     let mut end_line = i;
-                    
+
                     // Check if the definition continues to the next line
                     // A continued definition line starts with whitespace and has non-whitespace content
-                    for j in i+1..lines.len() {
+                    for j in i + 1..lines.len() {
                         let next_line = lines[j];
-                        if next_line.starts_with(" ") && !next_line.trim().is_empty() && 
-                           !REFERENCE_DEFINITION_REGEX.is_match(next_line) {
+                        if next_line.starts_with(" ")
+                            && !next_line.trim().is_empty()
+                            && !REFERENCE_DEFINITION_REGEX.is_match(next_line)
+                        {
                             end_line = j;
                         } else {
                             break;
                         }
                     }
-                    
+
                     // Add both the original and unescaped forms to enable matching both
                     let key = ref_text.to_lowercase();
                     let range_entry = (i, end_line);
-                    
+
                     if let Some(ranges) = definitions.get_mut(&key) {
                         ranges.push(range_entry);
                     } else {
                         definitions.insert(key, vec![range_entry]);
                     }
-                    
+
                     // Also add the unescaped version for matching escaped references
                     let unescaped_key = Self::unescape_reference(ref_text).to_lowercase();
                     if unescaped_key != ref_text.to_lowercase() {
@@ -397,7 +420,7 @@ impl MD053LinkImageReferenceDefinitions {
                 }
             }
         }
-        
+
         definitions
     }
 
@@ -412,41 +435,43 @@ impl MD053LinkImageReferenceDefinitions {
     /// Get unused references with their line ranges.
     ///
     /// This method uses the cached definitions to improve performance.
-    /// 
+    ///
     /// Note: References that are only used inside code blocks are still considered unused,
     /// as code blocks are treated as examples or documentation rather than actual content.
     fn get_unused_references(&self, content: &str) -> Vec<(String, usize, usize)> {
         let (usages, _code_block_usages) = self.find_usages(content);
         let cached_definitions = self.get_cached_definitions(content);
         let code_blocks = self.find_code_blocks(content);
-        
+
         // Create a map to track which definition was used
         let mut used_definitions = HashMap::new();
-        
+
         // Find which definitions are unused
-        let unused = cached_definitions
+
+        cached_definitions
             .into_iter()
             .filter(|(key, start, end)| {
                 let original_key = key.clone();
                 let unescaped_key = Self::unescape_reference(key).to_lowercase();
-                
+
                 // Check if the reference is used (either in its original or unescaped form)
                 // References used only in code blocks are considered unused
                 let is_used = usages.contains(key) || usages.contains(&unescaped_key);
-                let is_ignored = self.ignored_definitions.contains(key) || 
-                                self.ignored_definitions.contains(&unescaped_key);
+                let is_ignored = self.ignored_definitions.contains(key)
+                    || self.ignored_definitions.contains(&unescaped_key);
                 let is_in_code_block = self.is_inside_code_block(*start, *end, &code_blocks);
-                
+
                 // Track which definition was used to avoid duplication in results
                 if is_used {
                     used_definitions.insert(original_key.clone(), true);
                 }
-                
-                !is_used && !is_ignored && !is_in_code_block && !used_definitions.contains_key(&original_key)
+
+                !is_used
+                    && !is_ignored
+                    && !is_in_code_block
+                    && !used_definitions.contains_key(&original_key)
             })
-            .collect::<Vec<_>>();
-        
-        unused
+            .collect::<Vec<_>>()
     }
 
     // Get cached definitions for the given content.
@@ -456,18 +481,19 @@ impl MD053LinkImageReferenceDefinitions {
     /// Otherwise, the definitions are computed, cached, and then returned.
     fn get_cached_definitions(&self, content: &str) -> Vec<(String, usize, usize)> {
         let hash = Self::content_hash(content);
-        
+
         // First check if we already have this content cached
         let cache = self.cache.borrow();
         if let Some(cached) = cache.get(&hash) {
             return cached.clone();
         }
-        
+
         // If not cached, release the borrow and compute the definitions
         drop(cache);
-        
+
         // Compute the definitions
-        let definitions: Vec<(String, usize, usize)> = self.find_definitions(content)
+        let definitions: Vec<(String, usize, usize)> = self
+            .find_definitions(content)
             .into_iter()
             .flat_map(|(s, e_vec)| {
                 e_vec
@@ -475,10 +501,10 @@ impl MD053LinkImageReferenceDefinitions {
                     .map(move |(start, end)| (s.clone(), start, end))
             })
             .collect();
-            
+
         // Update the cache with the computed definitions
         self.cache.borrow_mut().insert(hash, definitions.clone());
-        
+
         definitions
     }
 
@@ -487,7 +513,7 @@ impl MD053LinkImageReferenceDefinitions {
         // Clean up consecutive empty lines
         let mut i = 1;
         while i < lines.len() {
-            if lines[i].trim().is_empty() && lines[i-1].trim().is_empty() {
+            if lines[i].trim().is_empty() && lines[i - 1].trim().is_empty() {
                 lines.remove(i);
             } else {
                 i += 1;
@@ -520,9 +546,9 @@ impl Rule for MD053LinkImageReferenceDefinitions {
     /// This implementation uses caching for improved performance on large documents.
     fn check(&self, content: &str) -> LintResult {
         let unused_refs = self.get_unused_references(content);
-        
+
         let mut warnings = Vec::new();
-        
+
         // Create warnings for unused references
         for (definition, start, _) in unused_refs {
             warnings.push(LintWarning {
@@ -533,7 +559,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                 fix: None,
             });
         }
-        
+
         Ok(warnings)
     }
 
@@ -572,10 +598,10 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                     result.push(line);
                 }
             }
-            
+
             // Clean up formatting issues created by removals
             self.clean_up_document_structure(&mut result);
-            
+
             // Join the lines with newlines - avoid empty check which is unnecessary
             Ok(result.join("\n"))
         } else {
@@ -583,12 +609,18 @@ impl Rule for MD053LinkImageReferenceDefinitions {
             let mut result: Vec<String> = lines
                 .into_iter()
                 .enumerate()
-                .filter_map(|(i, line)| if !to_remove.contains(&i) { Some(line) } else { None })
+                .filter_map(|(i, line)| {
+                    if !to_remove.contains(&i) {
+                        Some(line)
+                    } else {
+                        None
+                    }
+                })
                 .collect();
-                
+
             // Clean up formatting issues created by removals
             self.clean_up_document_structure(&mut result);
-            
+
             // Join the lines with newlines
             Ok(result.join("\n"))
         }

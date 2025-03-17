@@ -142,7 +142,7 @@ impl Rule for MD012NoMultipleBlanks {
 
         let mut code_block_blanks = Vec::new();
 
-        for (_i, &line) in lines.iter().enumerate() {
+        for &line in lines.iter() {
             // Track code blocks and front matter
             if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
                 // Handle accumulated blank lines before code block
@@ -154,7 +154,7 @@ impl Rule for MD012NoMultipleBlanks {
                     blank_count = 0;
                 } else {
                     // Add accumulated blank lines inside code block
-                    result.extend(code_block_blanks.drain(..));
+                    result.append(&mut code_block_blanks);
                 }
                 in_code_block = !in_code_block;
                 result.push(line);
@@ -175,7 +175,7 @@ impl Rule for MD012NoMultipleBlanks {
                 if line.trim().is_empty() {
                     code_block_blanks.push(line);
                 } else {
-                    result.extend(code_block_blanks.drain(..));
+                    result.append(&mut code_block_blanks);
                     result.push(line);
                 }
             } else if in_front_matter {

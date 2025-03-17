@@ -90,8 +90,8 @@ impl Rule for MD025SingleTitle {
 
         for (i, line) in lines.iter().enumerate() {
             // Don't modify lines in code blocks or front matter
-            if HeadingUtils::is_in_code_block(&content, i)
-                || FrontMatterUtils::is_in_front_matter(&content, i)
+            if HeadingUtils::is_in_code_block(content, i)
+                || FrontMatterUtils::is_in_front_matter(content, i)
             {
                 result.push_str(line);
             } else {

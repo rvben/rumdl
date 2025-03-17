@@ -14,7 +14,7 @@ pub struct MD019NoMultipleSpaceAtx;
 
 impl MD019NoMultipleSpaceAtx {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     fn is_atx_heading_with_multiple_spaces(&self, line: &str) -> bool {

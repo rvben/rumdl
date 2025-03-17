@@ -40,7 +40,7 @@ fn test_code_block_included() {
     let content = "# JavaScript Guide\n\n```javascript\nconst x = 'javascript';\n```";
     let result = rule.check(content).unwrap();
     assert!(
-        result.len() > 0,
+        !result.is_empty(),
         "Should detect 'javascript' in the code block"
     );
     let fixed = rule.fix(content).unwrap();
@@ -79,7 +79,7 @@ fn test_multiple_occurrences() {
     }
 
     // The important part is that it finds the occurrences, the exact count may vary
-    assert!(result.len() > 0, "Should detect multiple improper names");
+    assert!(!result.is_empty(), "Should detect multiple improper names");
 
     let fixed = rule.fix(content).unwrap();
     println!("Original content: '{}'", content);

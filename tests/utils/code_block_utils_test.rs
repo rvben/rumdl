@@ -30,12 +30,12 @@ fn test_is_in_code_block() {
     // Test empty content
     let content = "";
     let cbinfo = CodeBlockInfo::new(content);
-    assert_eq!(cbinfo.is_in_code_block(0), false);
+    assert!(!cbinfo.is_in_code_block(0));
 
     // Test out of bounds line number
     let content = "Just one line";
     let cbinfo = CodeBlockInfo::new(content);
-    assert_eq!(cbinfo.is_in_code_block(1), false); // Line 2 doesn't exist
+    assert!(!cbinfo.is_in_code_block(1)); // Line 2 doesn't exist
 }
 
 #[test]

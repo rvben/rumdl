@@ -15,11 +15,11 @@ impl MD005ListIndent {
 
         // Check for unordered list markers
         if let Some(c) = trimmed.chars().next() {
-            if c == '*' || c == '-' || c == '+' {
-                if trimmed.len() > 1 && trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace())
-                {
-                    return Some((indentation, c, 1)); // 1 char marker
-                }
+            if (c == '*' || c == '-' || c == '+')
+                && trimmed.len() > 1
+                && trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace())
+            {
+                return Some((indentation, c, 1)); // 1 char marker
             }
         }
 
@@ -151,7 +151,7 @@ impl Rule for MD005ListIndent {
             }
 
             // Get or create the indent->level map for this list
-            let level_map = list_level_map.entry(*list_id).or_insert_with(HashMap::new);
+            let level_map = list_level_map.entry(*list_id).or_default();
 
             // If it's the first item in this list, it's level 1
             if level_map.is_empty() {
@@ -237,7 +237,7 @@ impl Rule for MD005ListIndent {
 
             level_groups
                 .entry((list_id, *level))
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((*line_num, *indent));
         }
 

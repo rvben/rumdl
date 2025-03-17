@@ -14,7 +14,7 @@ pub struct MD018NoMissingSpaceAtx;
 
 impl MD018NoMissingSpaceAtx {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     fn is_atx_heading_without_space(&self, line: &str) -> bool {

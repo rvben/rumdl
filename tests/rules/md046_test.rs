@@ -42,7 +42,7 @@ fn test_mixed_blocks_prefer_indented() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
     let content = "# Mixed blocks\n\n```\nfenced block\n```\n\n    indented block";
     let result = rule.check(content).unwrap();
-    assert!(result.len() > 0, "Should detect inconsistent code blocks");
+    assert!(!result.is_empty(), "Should detect inconsistent code blocks");
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
     assert!(
@@ -60,7 +60,7 @@ fn test_consistent_style_fenced_first() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "# Mixed blocks\n\n```\nfenced block\n```\n\n    indented block";
     let result = rule.check(content).unwrap();
-    assert!(result.len() > 0, "Should detect inconsistent code blocks");
+    assert!(!result.is_empty(), "Should detect inconsistent code blocks");
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
     assert!(
@@ -78,7 +78,7 @@ fn test_consistent_style_indented_first() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "# Mixed blocks\n\n    indented block\n\n```\nfenced block\n```";
     let result = rule.check(content).unwrap();
-    assert!(result.len() > 0, "Should detect inconsistent code blocks");
+    assert!(!result.is_empty(), "Should detect inconsistent code blocks");
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
     assert!(
@@ -120,7 +120,7 @@ fn test_convert_indented_preserves_content() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "    let x = 42;\n    println!(\"{}\", x);";
     let result = rule.check(content).unwrap();
-    assert!(result.len() > 0, "Should detect indented code blocks");
+    assert!(!result.is_empty(), "Should detect indented code blocks");
     let fixed = rule.fix(content).unwrap();
     assert!(
         fixed.contains("```\nlet x = 42;\nprintln!"),

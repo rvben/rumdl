@@ -142,14 +142,20 @@ impl MD056TableColumnCount {
             cells.push(part.trim());
         }
 
-        // Too many cells, remove excess
-        if current_count > expected_count {
-            cells.truncate(expected_count);
-        }
-        // Too few cells, add empty ones
-        else if current_count < expected_count {
-            while cells.len() < expected_count {
-                cells.push("");
+        // Adjust cell count to match expected count
+        match current_count.cmp(&expected_count) {
+            std::cmp::Ordering::Greater => {
+                // Too many cells, remove excess
+                cells.truncate(expected_count);
+            }
+            std::cmp::Ordering::Less => {
+                // Too few cells, add empty ones
+                while cells.len() < expected_count {
+                    cells.push("");
+                }
+            }
+            std::cmp::Ordering::Equal => {
+                // Perfect number of cells, no adjustment needed
             }
         }
 

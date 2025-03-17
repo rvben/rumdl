@@ -3,7 +3,7 @@ use rumdl::rules::MD006StartBullets;
 
 #[test]
 fn test_unicode_list_items() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 * Item with Unicode café
 * Item with emoji 🔥
@@ -19,7 +19,7 @@ fn test_unicode_list_items() {
 
 #[test]
 fn test_unicode_indented_list() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 Some Unicode text here 汉字.
 
@@ -46,7 +46,7 @@ Some Unicode text here 汉字.
 
 #[test]
 fn test_unicode_multiple_lists() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 * First Unicode list item café
 * Second Unicode list item 汉字
@@ -77,7 +77,7 @@ Some Unicode text here こんにちは
 
 #[test]
 fn test_unicode_lists_with_blank_lines() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 * Unicode item 1 café
 
@@ -93,7 +93,7 @@ fn test_unicode_lists_with_blank_lines() {
 
 #[test]
 fn test_unicode_code_blocks() {
-    let rule = MD006StartBullets::default();
+    let rule = MD006StartBullets;
     let content = "\
 ```markdown
   * This indented Unicode item café is inside a code block

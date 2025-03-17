@@ -94,10 +94,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
                     severity: Severity::Warning,
                     line: line_num + 1,
                     column: 1,
-                    message: if line
-                        .trim_start()
-                        .starts_with(|c| c == '*' || c == '+' || c == '-')
-                    {
+                    message: if line.trim_start().starts_with(['*', '+', '-']) {
                         "Missing space after unordered list marker".to_string()
                     } else {
                         "Missing space after ordered list marker".to_string()
