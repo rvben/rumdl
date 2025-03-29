@@ -391,7 +391,7 @@ impl Default for MD022BlanksAroundHeadings {
 
 impl Rule for MD022BlanksAroundHeadings {
     fn name(&self) -> &'static str {
-        "blanks-around-headings"
+        "MD022"
     }
 
     fn description(&self) -> &'static str {
