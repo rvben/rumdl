@@ -39,6 +39,10 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub exclude: Vec<String>,
 
+    /// List of file/directory patterns to include for linting (if empty, include all non-excluded files)
+    #[serde(default)]
+    pub include: Vec<String>,
+
     /// Whether to respect .gitignore files
     #[serde(default)]
     pub respect_gitignore: bool,
@@ -96,6 +100,13 @@ pub fn create_default_config(path: &str) -> Result<(), ConfigError> {
 
 # List of rules to enable exclusively (if provided, only these rules will run)
 # enable = ["MD001", "MD003", "MD004"]
+
+# List of file/directory patterns to include for linting (if provided, only these will be linted)
+# include = [
+#    "docs/*.md",
+#    "src/**/*.md",
+#    "README.md"
+# ]
 
 # List of file/directory patterns to exclude from linting
 exclude = [

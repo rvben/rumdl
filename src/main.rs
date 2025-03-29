@@ -9,6 +9,7 @@ use rumdl::rules::*;
 use std::fs;
 use std::path::Path;
 use std::process;
+use ignore::WalkBuilder;
 use walkdir::WalkDir;
 
 mod config;
@@ -43,6 +44,10 @@ struct Cli {
     /// Exclude specific files or directories (comma-separated glob patterns)
     #[arg(long)]
     exclude: Option<String>,
+
+    /// Include only specific files or directories (comma-separated glob patterns)
+    #[arg(long)]
+    include: Option<String>,
 
     /// Respect .gitignore files when scanning directories
     #[arg(long)]
@@ -264,13 +269,14 @@ fn list_available_rules() {
 
     // Create a temporary instance of all rules to get their names and descriptions
     let rules = get_rules(&Cli {
-        paths: Vec::new(),
+        paths: vec![],
         config: None,
         fix: false,
         list_rules: true,
         disable: None,
         enable: None,
         exclude: None,
+        include: None,
         respect_gitignore: false,
         debug_gitignore: false,
         verbose: false,
@@ -570,7 +576,15 @@ fn debug_gitignore_test(path: &str, verbose: bool) {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _timer = rumdl::profiling::ScopedTimer::new("main");
 
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    // Load config early to use its values
+    let config = config::load_config(cli.config.as_deref()).unwrap_or_else(|_| config::Config::default());
+
+    // Use config value for respect_gitignore if not set in CLI
+    if !cli.respect_gitignore {
+        cli.respect_gitignore = config.global.respect_gitignore;
+    }
 
     if cli.list_rules {
         list_available_rules();
@@ -632,16 +646,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Process exclude patterns from CLI and config
     let mut exclude_patterns = Vec::new();
-    let mut respect_gitignore = cli.respect_gitignore;
 
     // Add exclude patterns from config
-    if let Ok(config) = config::load_config(cli.config.as_deref()) {
-        exclude_patterns.extend(config.global.exclude.clone());
-
-        // Check if respect_gitignore is set in config (and not overridden in CLI)
-        if config.global.respect_gitignore && !cli.respect_gitignore {
-            respect_gitignore = true;
-        }
+    if let Ok(ref loaded_config) = config::load_config(cli.config.as_deref()) {
+        exclude_patterns.extend(loaded_config.global.exclude.clone());
     }
 
     // Add exclude patterns from CLI (overrides config)
@@ -653,12 +661,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     exclude_patterns.sort();
     exclude_patterns.dedup();
 
-    if cli.verbose && !exclude_patterns.is_empty() {
-        println!("Excluding the following patterns:");
-        for pattern in &exclude_patterns {
-            println!("  - {}", pattern);
+    // Process include patterns from CLI and config
+    let mut include_patterns = Vec::new();
+
+    // Add include patterns from CLI (overrides config) or from config if no CLI patterns
+    if let Some(include_str) = &cli.include {
+        include_patterns.extend(include_str.split(',').map(|s| s.trim().to_string()));
+    } else if let Ok(ref loaded_config) = config::load_config(cli.config.as_deref()) {
+        include_patterns.extend(loaded_config.global.include.clone());
+    }
+
+    // Remove duplicates from include_patterns
+    include_patterns.sort();
+    include_patterns.dedup();
+
+    if cli.verbose {
+        if !exclude_patterns.is_empty() {
+            println!("Excluding the following patterns:");
+            for pattern in &exclude_patterns {
+                println!("  - {}", pattern);
+            }
+            println!();
         }
-        println!();
+
+        if !include_patterns.is_empty() {
+            println!("Including only the following patterns:");
+            for pattern in &include_patterns {
+                println!("  - {}", pattern);
+            }
+            println!();
+        }
     }
 
     for path_str in &cli.paths {
@@ -676,105 +708,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if path.is_file() {
             // Check if file is excluded based on patterns
-            let excluded = rumdl::should_exclude(path_str, &exclude_patterns);
+            let excluded = rumdl::should_exclude(path_str, &exclude_patterns, cli.respect_gitignore);
+            // Check if file should be included based on patterns
+            let included = rumdl::should_include(path_str, &include_patterns);
 
-            if excluded {
+            if excluded || !included {
                 if cli.verbose {
-                    println!("Skipping excluded file: {}", path_str);
+                    if excluded {
+                        println!("Skipping excluded file: {}", path_str);
+                    } else if !included {
+                        println!("Skipping file not matching include patterns: {}", path_str);
+                    }
                 }
                 continue;
             }
 
             // Check if file should be ignored by gitignore when respect_gitignore is enabled
-            if respect_gitignore {
-                use ignore::WalkBuilder;
-
-                let file_path = Path::new(path_str);
-                let canonical_path = file_path
-                    .canonicalize()
-                    .unwrap_or_else(|_| file_path.to_path_buf());
-
-                // Create a walker that respects .gitignore files
-                let walker = WalkBuilder::new(".")
-                    .hidden(true)
-                    .git_global(true)
-                    .git_ignore(true)
-                    .git_exclude(true)
-                    .add_custom_ignore_filename(".gitignore")
-                    .build();
-
-                // Check if the file is in the walker's output
-                let mut found_in_walker = false;
-
-                for entry in walker.flatten() {
-                    let entry_canonical = entry
-                        .path()
-                        .canonicalize()
-                        .unwrap_or_else(|_| entry.path().to_path_buf());
-                    if entry_canonical == canonical_path {
-                        found_in_walker = true;
-                        break;
-                    }
-                }
-
-                if !found_in_walker {
-                    if cli.verbose {
-                        println!("Skipping file ignored by gitignore: {}", path_str);
-                    }
-                    continue;
-                }
-            }
-
-            total_files_processed += 1;
-            let (file_has_issues, issues_found, issues_fixed) =
-                process_file(path_str, &rules, cli.fix, cli.verbose);
-            if file_has_issues {
-                has_issues = true;
-                files_with_issues += 1;
-                total_issues_found += issues_found;
-                total_issues_fixed += issues_fixed;
-            }
-        } else if path.is_dir() {
-            // Process directory recursively
-            // If respect_gitignore is enabled, use the ignore crate's WalkBuilder
-            if respect_gitignore {
-                use ignore::WalkBuilder;
-
+            if cli.respect_gitignore {
                 // Create a walker that respects .gitignore files
                 let walker = WalkBuilder::new(path)
+                    .follow_links(true)
                     .hidden(true)
                     .git_global(true)
                     .git_ignore(true)
                     .git_exclude(true)
                     .add_custom_ignore_filename(".gitignore")
-                    .build();
+                    .build()
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.file_type().map_or(false, |ft| ft.is_file())
+                            && e.path().extension().map_or(false, |ext| ext == "md")
+                    });
 
-                for entry in walker.flatten() {
-                    // Only process Markdown files
-                    if entry.file_type().map_or(false, |ft| ft.is_file())
-                        && entry.path().extension().map_or(false, |ext| ext == "md")
-                    {
-                        let file_path = entry.path().to_string_lossy().to_string();
+                for entry in walker {
+                    let file_path = entry.path().to_string_lossy();
 
-                        // Check if file is excluded based on patterns
-                        let excluded = rumdl::should_exclude(&file_path, &exclude_patterns);
+                    // Check if file is excluded based on patterns
+                    let excluded = rumdl::should_exclude(&file_path, &exclude_patterns, cli.respect_gitignore);
+                    // Check if file should be included based on patterns
+                    let included = rumdl::should_include(&file_path, &include_patterns);
 
-                        if excluded {
-                            if cli.verbose {
+                    if excluded || !included {
+                        if cli.verbose {
+                            if excluded {
                                 println!("Skipping excluded file: {}", file_path);
+                            } else if !included {
+                                println!("Skipping file not matching include patterns: {}", file_path);
                             }
-                            continue;
                         }
+                        continue;
+                    }
 
-                        total_files_processed += 1;
-                        let (file_has_issues, issues_found, issues_fixed) =
-                            process_file(&file_path, &rules, cli.fix, cli.verbose);
-                        if file_has_issues {
-                            has_issues = true;
-                            files_with_issues += 1;
-                            total_issues_found += issues_found;
-                            total_issues_fixed += issues_fixed;
-                        }
+                    total_files_processed += 1;
+                    let (file_has_issues, issues_found, issues_fixed) =
+                        process_file(&file_path, &rules, cli.fix, cli.verbose);
+                    if file_has_issues {
+                        has_issues = true;
+                        files_with_issues += 1;
+                        total_issues_found += issues_found;
+                        total_issues_fixed += issues_fixed;
                     }
                 }
             } else {
@@ -789,14 +782,110 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
 
                 for entry in dir_iter {
-                    let file_path = entry.path().to_string_lossy().to_string();
+                    let file_path = entry.path().to_string_lossy();
 
                     // Check if file is excluded based on patterns
-                    let excluded = rumdl::should_exclude(&file_path, &exclude_patterns);
+                    let excluded = rumdl::should_exclude(&file_path, &exclude_patterns, cli.respect_gitignore);
+                    // Check if file should be included based on patterns
+                    let included = rumdl::should_include(&file_path, &include_patterns);
 
-                    if excluded {
+                    if excluded || !included {
                         if cli.verbose {
-                            println!("Skipping excluded file: {}", file_path);
+                            if excluded {
+                                println!("Skipping excluded file: {}", file_path);
+                            } else if !included {
+                                println!("Skipping file not matching include patterns: {}", file_path);
+                            }
+                        }
+                        continue;
+                    }
+
+                    total_files_processed += 1;
+                    let (file_has_issues, issues_found, issues_fixed) =
+                        process_file(&file_path, &rules, cli.fix, cli.verbose);
+                    if file_has_issues {
+                        has_issues = true;
+                        files_with_issues += 1;
+                        total_issues_found += issues_found;
+                        total_issues_fixed += issues_fixed;
+                    }
+                }
+            }
+        } else if path.is_dir() {
+            // Process directory recursively
+            // If respect_gitignore is enabled, use the ignore crate's WalkBuilder
+            if cli.respect_gitignore {
+                // Create a walker that respects .gitignore files
+                let walker = WalkBuilder::new(path)
+                    .follow_links(true)
+                    .hidden(true)
+                    .git_global(true)
+                    .git_ignore(true)
+                    .git_exclude(true)
+                    .add_custom_ignore_filename(".gitignore")
+                    .build()
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.file_type().map_or(false, |ft| ft.is_file())
+                            && e.path().extension().map_or(false, |ext| ext == "md")
+                    });
+
+                for entry in walker {
+                    let file_path = entry.path().to_string_lossy();
+
+                    // Check if file is excluded based on patterns
+                    let excluded = rumdl::should_exclude(&file_path, &exclude_patterns, cli.respect_gitignore);
+                    // Check if file should be included based on patterns
+                    let included = rumdl::should_include(&file_path, &include_patterns);
+
+                    if excluded || !included {
+                        if cli.verbose {
+                            if excluded {
+                                println!("Skipping excluded file: {}", file_path);
+                            } else if !included {
+                                println!("Skipping file not matching include patterns: {}", file_path);
+                            }
+                        }
+                        continue;
+                    }
+
+                    total_files_processed += 1;
+                    let (file_has_issues, issues_found, issues_fixed) =
+                        process_file(&file_path, &rules, cli.fix, cli.verbose);
+                    if file_has_issues {
+                        has_issues = true;
+                        files_with_issues += 1;
+                        total_issues_found += issues_found;
+                        total_issues_fixed += issues_fixed;
+                    }
+                }
+            } else {
+                // Use walkdir if respect_gitignore is disabled
+                let dir_iter = WalkDir::new(path)
+                    .follow_links(true)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.file_type().is_file()
+                            && e.path().extension().map_or(false, |ext| ext == "md")
+                    });
+
+                for entry in dir_iter {
+                    let file_path = entry.path().to_string_lossy();
+
+                    // Check if file is excluded based on patterns
+                    let excluded = rumdl::should_exclude(&file_path, &exclude_patterns, cli.respect_gitignore);
+                    // Check if file should be included based on patterns
+                    let included = rumdl::should_include(&file_path, &include_patterns);
+
+                    if excluded || !included {
+                        if cli.verbose {
+                            if excluded {
+                                println!("Skipping excluded file: {}", file_path);
+                            } else if !included {
+                                println!("Skipping file not matching include patterns: {}", file_path);
+                            }
                         }
                         continue;
                     }

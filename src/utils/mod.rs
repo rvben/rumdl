@@ -1,4 +1,5 @@
 pub mod range_utils;
+pub mod code_block_utils;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

@@ -12,13 +12,15 @@ pub mod python;
 pub use rules::heading_utils::{Heading, HeadingStyle};
 pub use rules::*;
 
+use globset::GlobBuilder;
+use std::path::{Path, PathBuf};
+
 /// Collect patterns from .gitignore files
 ///
 /// This function reads the closest .gitignore file and returns a list of patterns
 /// that can be used to exclude files from linting.
 pub fn collect_gitignore_patterns(start_dir: &str) -> Vec<String> {
     use std::fs;
-    use std::path::Path;
 
     let mut patterns = Vec::new();
 
@@ -140,35 +142,215 @@ fn normalize_gitignore_pattern(pattern: &str) -> String {
     }
 }
 
+/// Match a path against a gitignore pattern
+fn matches_gitignore_pattern(path: &str, pattern: &str) -> bool {
+    // Handle directory patterns (ending with / or no glob chars)
+    if pattern.ends_with('/') || !pattern.contains('*') {
+        let dir_pattern = pattern.trim_end_matches('/');
+        // For directory patterns, we want to match the entire path component
+        let path_components: Vec<&str> = path.split('/').collect();
+        let pattern_components: Vec<&str> = dir_pattern.split('/').collect();
+
+        // Check if any path component matches the pattern
+        path_components.windows(pattern_components.len()).any(|window| {
+            window.iter().zip(pattern_components.iter()).all(|(p, pat)| {
+                p == pat
+            })
+        })
+    } else {
+        // Use globset for glob patterns
+        if let Ok(glob_result) = GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+        {
+            let matcher = glob_result.compile_matcher();
+            matcher.is_match(path)
+        } else {
+            // If glob compilation fails, treat it as a literal string
+            path.contains(pattern)
+        }
+    }
+}
+
 /// Should exclude a file based on patterns
 ///
 /// This function checks if a file should be excluded based on a list of glob patterns.
-pub fn should_exclude(file_path: &str, exclude_patterns: &[String]) -> bool {
-    // Normalize the file path by removing leading ./ if present
-    let normalized_path = file_path.strip_prefix("./").unwrap_or(file_path);
+pub fn should_exclude(file_path: &str, exclude_patterns: &[String], respect_gitignore: bool) -> bool {
+    // Convert to absolute path
+    let path = Path::new(file_path);
+    let absolute_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(path)
+    };
 
+    // Get the path relative to the current directory
+    let relative_path = if let Ok(current_dir) = std::env::current_dir() {
+        if let Ok(stripped) = absolute_path.strip_prefix(&current_dir) {
+            stripped.to_path_buf()
+        } else {
+            absolute_path.clone()
+        }
+    } else {
+        absolute_path.clone()
+    };
+
+    // Convert to string for pattern matching
+    let normalized_path = relative_path.to_string_lossy();
+    let normalized_path_str = normalized_path.as_ref();
+
+    // If respect_gitignore is true, check .gitignore patterns first
+    if respect_gitignore {
+        let gitignore_patterns = collect_gitignore_patterns(file_path);
+        for pattern in &gitignore_patterns {
+            let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+            if matches_gitignore_pattern(normalized_path_str, normalized_pattern) {
+                return true;
+            }
+        }
+    }
+
+    // Then check explicit exclude patterns
     for pattern in exclude_patterns {
         // Normalize the pattern by removing leading ./ if present
         let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
 
-        // Handle directory patterns (ending with /)
-        if normalized_pattern.ends_with('/') {
-            if normalized_path.starts_with(normalized_pattern) {
-                return true;
+        // Handle directory patterns (ending with / or no glob chars)
+        if normalized_pattern.ends_with('/') || !normalized_pattern.contains('*') {
+            let dir_pattern = normalized_pattern.trim_end_matches('/');
+            // For directory patterns, we want to match the entire path component
+            let path_components: Vec<&str> = normalized_path_str.split('/').collect();
+            let pattern_components: Vec<&str> = dir_pattern.split('/').collect();
+
+            // Check if pattern components match at any position in the path
+            for i in 0..=path_components.len().saturating_sub(pattern_components.len()) {
+                let mut matches = true;
+                for (j, pattern_part) in pattern_components.iter().enumerate() {
+                    if path_components.get(i + j) != Some(pattern_part) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if matches {
+                    return true;
+                }
+            }
+
+            // If it's not a directory pattern (no /), also try as a literal string
+            if !normalized_pattern.contains('/') {
+                if normalized_path_str.contains(dir_pattern) {
+                    return true;
+                }
             }
             continue;
         }
 
-        // Handle glob patterns
-        match glob::Pattern::new(normalized_pattern) {
-            Ok(glob) => {
-                if glob.matches(normalized_path) {
+        // Try to create a glob pattern
+        let glob_result = GlobBuilder::new(normalized_pattern)
+            .literal_separator(true)  // Make sure * doesn't match /
+            .build()
+            .and_then(|glob| Ok(glob.compile_matcher()));
+
+        match glob_result {
+            Ok(matcher) => {
+                if matcher.is_match(normalized_path_str) {
                     return true;
                 }
             }
             Err(_) => {
-                // For invalid glob patterns, fall back to simple substring matching
-                if normalized_path.contains(normalized_pattern) {
+                // If pattern is invalid as a glob, treat it as a literal string
+                if normalized_path_str.contains(normalized_pattern) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Determines if a file should be included based on patterns
+///
+/// This function checks if a file should be included based on a list of glob patterns.
+/// If include_patterns is empty, all files are included.
+pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
+    // If no include patterns are specified, include everything
+    if include_patterns.is_empty() {
+        return true;
+    }
+
+    // Convert to absolute path
+    let path = Path::new(file_path);
+    let absolute_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(path)
+    };
+
+    // Get the path relative to the current directory
+    let relative_path = if let Ok(current_dir) = std::env::current_dir() {
+        if let Ok(stripped) = absolute_path.strip_prefix(&current_dir) {
+            stripped.to_path_buf()
+        } else {
+            absolute_path.clone()
+        }
+    } else {
+        absolute_path.clone()
+    };
+
+    // Convert to string for pattern matching
+    let normalized_path = relative_path.to_string_lossy();
+    let normalized_path_str = normalized_path.as_ref();
+
+    for pattern in include_patterns {
+        // Normalize the pattern by removing leading ./ if present
+        let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+
+        // Handle directory patterns (ending with / or no glob chars)
+        if normalized_pattern.ends_with('/') || !normalized_pattern.contains('*') {
+            let dir_pattern = normalized_pattern.trim_end_matches('/');
+            // For directory patterns, we want to match the entire path component
+            let path_components: Vec<&str> = normalized_path_str.split('/').collect();
+            let pattern_components: Vec<&str> = dir_pattern.split('/').collect();
+
+            // Check if pattern components match at any position in the path
+            for i in 0..=path_components.len().saturating_sub(pattern_components.len()) {
+                let mut matches = true;
+                for (j, pattern_part) in pattern_components.iter().enumerate() {
+                    if path_components.get(i + j) != Some(pattern_part) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if matches {
+                    return true;
+                }
+            }
+
+            // If it's not a directory pattern (no /), also try as a literal string
+            if !normalized_pattern.contains('/') {
+                if normalized_path_str.contains(dir_pattern) {
+                    return true;
+                }
+            }
+            continue;
+        }
+
+        // Try to create a glob pattern
+        let glob_result = GlobBuilder::new(normalized_pattern)
+            .literal_separator(true)  // Make sure * doesn't match /
+            .build()
+            .and_then(|glob| Ok(glob.compile_matcher()));
+
+        match glob_result {
+            Ok(matcher) => {
+                if matcher.is_match(normalized_path_str) {
+                    return true;
+                }
+            }
+            Err(_) => {
+                // If pattern is invalid as a glob, treat it as a literal string
+                if normalized_path_str.contains(normalized_pattern) {
                     return true;
                 }
             }

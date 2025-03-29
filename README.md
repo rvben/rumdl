@@ -110,6 +110,12 @@ rumdl --enable MD001,MD003 README.md
 
 # Exclude specific files/directories
 rumdl --exclude "node_modules,dist" .
+
+# Include only specific files/directories
+rumdl --include "docs/*.md,README.md" .
+
+# Combine include and exclude patterns
+rumdl --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
 ```
 
 ## Rules
@@ -151,6 +157,7 @@ rumdl <command> [options]
 - `-d, --disable <rules>`: Disable specific rules (comma-separated)
 - `-e, --enable <rules>`: Enable only specific rules (comma-separated)
 - `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
+- `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
 - `--respect-gitignore`: Respect .gitignore files when scanning directories
 - `-v, --verbose`: Show detailed output
 
@@ -176,6 +183,14 @@ disable = ["MD013", "MD033"]
 
 # List of rules to enable exclusively (if provided, only these rules will run)
 # enable = ["MD001", "MD003", "MD004"]
+
+# List of file/directory patterns to include for linting (if provided, only these will be linted)
+include = [
+    # Documentation files
+    "docs/**/*.md",
+    "README.md",
+    "CONTRIBUTING.md",
+]
 
 # List of file/directory patterns to exclude from linting
 exclude = [

@@ -22,7 +22,7 @@ name = "rumdl"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5.34", features = ["derive"] }
 regex = "1.10.3"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_yaml = "0.9.32"
@@ -35,7 +35,8 @@ toml = "0.8.20"
 glob = "0.3.2"
 ignore = "0.4.23"
 pyo3 = { version = "0.24.0", features = ["extension-module", "abi3-py37"], optional = true }
-once_cell = "1.18.0"
+once_cell = "1.21.3"
+globset = "0.4.14"
 
 [features]
 default = ["profiling"]
@@ -45,7 +46,7 @@ python = ["pyo3"]
 [dev-dependencies]
 assert_cmd = "2.0.13"
 predicates = "3.1.0"
-tempfile = "3.10.1"
+tempfile = "3.19.1"
 ignore = "0.4.23"
 walkdir = "2.5.0"
 glob = "0.3.2"

@@ -1,11 +1,11 @@
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::cell::RefCell;
-use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 
 lazy_static! {
     // Link reference format: [text][reference]
@@ -35,7 +35,6 @@ lazy_static! {
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
 }
 
-type CodeBlockCache = RefCell<HashMap<u64, Vec<bool>>>;
 type DefinitionCache = RefCell<HashMap<u64, Vec<(String, usize, usize)>>>;
 
 /// Rule MD053: Link and image reference definitions should be needed
@@ -88,21 +87,16 @@ type DefinitionCache = RefCell<HashMap<u64, Vec<(String, usize, usize)>>>;
 /// When fixing issues, this rule removes unused reference definitions while preserving
 /// the document's structure, including handling proper blank line formatting around
 /// the removed definitions.
-#[derive(Debug, Clone)]
 pub struct MD053LinkImageReferenceDefinitions {
     ignored_definitions: HashSet<String>,
-    code_block_cache: CodeBlockCache,
     content_cache: DefinitionCache,
-    reference_cache: DefinitionCache,
 }
 
 impl Default for MD053LinkImageReferenceDefinitions {
     fn default() -> Self {
         Self {
             ignored_definitions: HashSet::new(),
-            code_block_cache: RefCell::new(HashMap::new()),
             content_cache: RefCell::new(HashMap::new()),
-            reference_cache: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -110,16 +104,9 @@ impl Default for MD053LinkImageReferenceDefinitions {
 impl MD053LinkImageReferenceDefinitions {
     /// Create a new instance of the MD053 rule
     pub fn new(ignored_definitions: Vec<String>) -> Self {
-        let mut ignored_set = HashSet::new();
-        for def in ignored_definitions {
-            ignored_set.insert(def.to_lowercase());
-        }
-
         Self {
-            ignored_definitions: ignored_set,
-            code_block_cache: RefCell::new(HashMap::new()),
+            ignored_definitions: ignored_definitions.into_iter().map(|s| s.to_lowercase()).collect(),
             content_cache: RefCell::new(HashMap::new()),
-            reference_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -494,17 +481,17 @@ impl MD053LinkImageReferenceDefinitions {
         let mut used_definitions = HashMap::new();
 
         // Find which definitions are unused
-
         cached_definitions
             .into_iter()
             .filter(|(key, start, end)| {
                 let original_key = key.clone();
                 let unescaped_key = Self::unescape_reference(key).to_lowercase();
+                let key_lower = key.to_lowercase();
 
                 // Check if the reference is used (either in its original or unescaped form)
                 // References used only in code blocks are considered unused
                 let is_used = usages.contains(key) || usages.contains(&unescaped_key);
-                let is_ignored = self.ignored_definitions.contains(key)
+                let is_ignored = self.ignored_definitions.contains(&key_lower)
                     || self.ignored_definitions.contains(&unescaped_key);
                 let is_in_code_block = self.is_inside_code_block(*start, *end, &code_blocks);
 
