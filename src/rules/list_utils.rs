@@ -1,13 +1,14 @@
 use lazy_static::lazy_static;
 use regex::Regex;
+use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
     // Optimized list detection patterns with anchors and non-capturing groups
     static ref UNORDERED_LIST_PATTERN: Regex = Regex::new(r"^(\s*)([*+-])(\s+)").unwrap();
     static ref ORDERED_LIST_PATTERN: Regex = Regex::new(r"^(\s*)(\d+\.)(\s+)").unwrap();
 
-    // Patterns for lists without proper spacing
-    static ref UNORDERED_LIST_NO_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)([*+-])([^\s])").unwrap();
+    // Patterns for lists without proper spacing - now excluding emphasis markers
+    static ref UNORDERED_LIST_NO_SPACE_PATTERN: FancyRegex = FancyRegex::new(r"^(\s*)(?:(?<!\*)\*(?!\*)|[+-])([^\s\*])").unwrap();
     static ref ORDERED_LIST_NO_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)(\d+\.)([^\s])").unwrap();
 
     // Patterns for lists with multiple spaces
@@ -123,7 +124,18 @@ impl ListUtils {
 
     /// Check if a line is a list item without proper spacing after the marker
     pub fn is_list_item_without_space(line: &str) -> bool {
-        UNORDERED_LIST_NO_SPACE_PATTERN.is_match(line)
+        // Skip lines that start with double asterisks (bold text)
+        if line.trim_start().starts_with("**") {
+            return false;
+        }
+
+        // Skip lines that are part of emphasis/bold text
+        if line.trim_start().matches('*').count() >= 2 {
+            return false;
+        }
+
+        // Handle potential regex errors gracefully
+        UNORDERED_LIST_NO_SPACE_PATTERN.is_match(line).unwrap_or(false)
             || ORDERED_LIST_NO_SPACE_PATTERN.is_match(line)
     }
 
@@ -203,27 +215,24 @@ impl ListUtils {
         indentation >= min_indent && !Self::is_list_item(line)
     }
 
-    /// Fix a list item without space after the marker
+    /// Fix a list item without proper spacing
     pub fn fix_list_item_without_space(line: &str) -> String {
-        if let Some(captures) = UNORDERED_LIST_NO_SPACE_PATTERN.captures(line) {
-            let leading_space = captures.get(1).map_or("", |m| m.as_str());
+        // Handle unordered list items
+        if let Ok(Some(captures)) = UNORDERED_LIST_NO_SPACE_PATTERN.captures(line) {
+            let indentation = captures.get(1).map_or("", |m| m.as_str());
             let marker = captures.get(2).map_or("", |m| m.as_str());
             let content = captures.get(3).map_or("", |m| m.as_str());
-
-            // Insert a space after the marker
-            return format!("{}{} {}", leading_space, marker, content);
+            return format!("{}{} {}", indentation, marker, content);
         }
 
+        // Handle ordered list items
         if let Some(captures) = ORDERED_LIST_NO_SPACE_PATTERN.captures(line) {
-            let leading_space = captures.get(1).map_or("", |m| m.as_str());
+            let indentation = captures.get(1).map_or("", |m| m.as_str());
             let marker = captures.get(2).map_or("", |m| m.as_str());
             let content = captures.get(3).map_or("", |m| m.as_str());
-
-            // Insert a space after the marker
-            return format!("{}{} {}", leading_space, marker, content);
+            return format!("{}{} {}", indentation, marker, content);
         }
 
-        // Return the original line if no pattern matched
         line.to_string()
     }
 

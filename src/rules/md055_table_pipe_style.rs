@@ -1,6 +1,6 @@
 use crate::utils::range_utils::LineIndex;
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::code_block_utils::CodeBlockUtils;
 
 /// Rule MD055: Table pipe style should be consistent
 ///
@@ -118,168 +118,45 @@ impl MD055TablePipeStyle {
         }
     }
 
-    /// Check if a line is within a code block
-    fn is_in_code_block(&self, lines: &[&str], line_index: usize) -> bool {
-        let mut in_code_block = false;
-
-        let mut code_fence = None;
-
-        for (_i, line) in lines.iter().enumerate().take(line_index + 1) {
-            let trimmed = line.trim();
-
-            // Check for code fence markers
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                if !in_code_block {
-                    // Start of a code block
-                    in_code_block = true;
-                    code_fence = Some(if trimmed.starts_with("```") {
-                        "```"
-                    } else {
-                        "~~~"
-                    });
-                } else if let Some(fence) = code_fence {
-                    // End of a code block if the fence type matches
-                    if trimmed.starts_with(fence) {
-                        in_code_block = false;
-                        code_fence = None;
-                    }
-                }
-            }
-        }
-
-        in_code_block
-    }
-
-    /// Identify table sections (groups of lines that form a table)
-    fn identify_tables(&self, lines: &[&str]) -> Vec<Vec<usize>> {
-        let mut tables = Vec::new();
-
-        let mut current_table_start: Option<usize> = None;
-
-        let mut has_delimiter_row = false;
-
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-
-            // Skip lines in code blocks
-            if self.is_in_code_block(lines, i) {
-                // If we were tracking a table, end it
-                if let Some(start) = current_table_start {
-                    if has_delimiter_row && i - start >= 2 {
-                        tables.push((start..i).collect());
-                    }
-                    current_table_start = None;
-                    has_delimiter_row = false;
-                }
-                continue;
-            }
-
-            // Check if this is a potential table row
-            if trimmed.contains('|') {
-                // Check if this is a delimiter row (contains only |, -, :, and whitespace)
-                let is_delimiter = self.is_delimiter_row(line);
-
-                if is_delimiter {
-                    has_delimiter_row = true;
-                }
-
-                // If we're not already tracking a table, start a new one
-                if current_table_start.is_none() {
-                    current_table_start = Some(i);
-                }
-            } else if trimmed.is_empty() {
-                // Empty line - end the current table if we have one
-                if let Some(start) = current_table_start {
-                    if has_delimiter_row && i - start >= 2 {
-                        tables.push((start..i).collect());
-                    }
-                    current_table_start = None;
-                    has_delimiter_row = false;
-                }
-            }
-        }
-
-        // Handle case where table extends to EOF
-        if let Some(start) = current_table_start {
-            if has_delimiter_row && lines.len() - start >= 2 {
-                tables.push((start..lines.len()).collect());
-            }
-        }
-
-        tables
-    }
-
-    /// Check if a line is a delimiter row
+    /// Check if a line is a delimiter row (contains only |, -, :, and whitespace)
     fn is_delimiter_row(&self, line: &str) -> bool {
         let trimmed = line.trim();
-        trimmed.contains('|')
-            && trimmed
-                .chars()
-                .all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
+        !trimmed.is_empty() && trimmed.chars().all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
     }
 
-    /// Fix a table row to match the desired style
+    /// Fix a table row to match the target style
     fn fix_table_row(&self, line: &str, target_style: &str) -> String {
         let trimmed = line.trim();
-
-        // If the line is not a table row, return it unchanged
-        if !trimmed.contains('|') {
+        
+        // Don't modify empty lines or delimiter rows
+        if trimmed.is_empty() || self.is_delimiter_row(line) {
             return line.to_string();
         }
 
-        // Get the leading whitespace to preserve indentation
-
-        let leading_whitespace = line
-            .chars()
-            .take_while(|c| c.is_whitespace())
-            .collect::<String>();
-
-        let result = match target_style {
+        match target_style {
             "leading_and_trailing" => {
-                let mut result = trimmed.to_string();
-                if !result.starts_with('|') {
-                    result = format!("| {}", result);
+                let mut result = String::new();
+                if !trimmed.starts_with('|') {
+                    result.push('|');
                 }
-                if !result.ends_with('|') {
-                    result = format!("{} |", result);
-                }
-                result
-            }
-            "leading_only" => {
-                let mut result = trimmed.to_string();
-                if !result.starts_with('|') {
-                    result = format!("| {}", result);
-                }
-                if result.ends_with('|') {
-                    result = result[..result.len() - 1].trim_end().to_string();
-                }
-                result
-            }
-            "trailing_only" => {
-                let mut result = trimmed.to_string();
-                if result.starts_with('|') {
-                    result = result[1..].trim_start().to_string();
-                }
-                if !result.ends_with('|') {
-                    result = format!("{} |", result);
+                result.push_str(trimmed);
+                if !trimmed.ends_with('|') {
+                    result.push('|');
                 }
                 result
             }
             "no_leading_or_trailing" => {
                 let mut result = trimmed.to_string();
                 if result.starts_with('|') {
-                    result = result[1..].trim_start().to_string();
+                    result = result[1..].to_string();
                 }
                 if result.ends_with('|') {
-                    result = result[..result.len() - 1].trim_end().to_string();
+                    result.pop();
                 }
-                result
+                result.trim().to_string()
             }
-            _ => trimmed.to_string(),
-        };
-
-        // Preserve the original indentation
-        format!("{}{}", leading_whitespace, result)
+            _ => line.to_string(),
+        }
     }
 }
 
@@ -289,115 +166,80 @@ impl Rule for MD055TablePipeStyle {
     }
 
     fn description(&self) -> &'static str {
-        "Table pipe style"
+        "Table pipe style should be consistent"
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
-
+        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-
         let lines: Vec<&str> = content.lines().collect();
 
-        // Identify tables in the content
+        // Use CodeBlockUtils to properly detect code blocks
+        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
-        let tables = self.identify_tables(&lines);
+        // Track table state
+        let mut in_table = false;
+        let mut table_style = None;
+        let mut current_table_start = None;
 
-        for _table in tables {
-            let mut table_styles = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            let line_start = if i == 0 {
+                0
+            } else {
+                content.lines().take(i).map(|l| l.len() + 1).sum()
+            };
 
-            // First pass: collect all styles used in this table (excluding delimiter rows)
-            for (line_idx, line) in lines.iter().enumerate() {
-                if self.is_in_code_block(&lines, line_idx) {
-                    continue;
-                }
-
-                if let Some(style) = self.determine_pipe_style(line) {
-                    table_styles.push((line_idx, style));
-                }
-            }
-
-            if table_styles.is_empty() {
+            // Skip if this line is in a code block
+            if code_blocks.iter().any(|(start, end)| line_start >= *start && line_start < *end) {
                 continue;
             }
 
-            // Determine the expected style based on configuration or first row
-            let expected_style = match self.style.as_str() {
-                "consistent" => {
-                    // If no style is configured, use the style of the first row
-                    if let Some((_, style)) = table_styles.first() {
-                        *style
-                    } else {
-                        continue;
-                    }
-                }
-                "leading_and_trailing" => "leading_and_trailing",
-                "leading_only" => "leading_only",
-                "trailing_only" => "trailing_only",
-                "no_leading_or_trailing" => "no_leading_or_trailing",
-                _ => continue, // Invalid style configuration
-            };
+            let trimmed = line.trim();
 
-            // Second pass: check all rows against the expected style
-            for (line_idx, line) in lines.iter().enumerate() {
-                if self.is_in_code_block(&lines, line_idx) {
+            // Check for table start/end
+            if trimmed.contains('|') {
+                if !in_table {
+                    in_table = true;
+                    current_table_start = Some(i);
+                }
+
+                // Skip delimiter rows for style checks
+                if self.is_delimiter_row(line) {
                     continue;
                 }
 
-                // For delimiter rows, we need to check if they match the expected style
-                if self.is_delimiter_row(line) {
-                    let trimmed = line.trim();
-                    let has_leading = trimmed.starts_with('|');
-                    let has_trailing = trimmed.ends_with('|');
+                let line_style = self.determine_pipe_style(line);
+                
+                if let Some(style) = line_style {
+                    // For "consistent" mode, use the first table's style
+                    if table_style.is_none() && self.style == "consistent" {
+                        table_style = Some(style);
+                    }
 
-                    let matches_style = match expected_style {
-                        "leading_and_trailing" => has_leading && has_trailing,
-                        "leading_only" => has_leading && !has_trailing,
-                        "trailing_only" => !has_leading && has_trailing,
-                        "no_leading_or_trailing" => !has_leading && !has_trailing,
-                        _ => true,
+                    let target_style = if self.style == "consistent" {
+                        table_style.unwrap_or("leading_and_trailing")
+                    } else {
+                        &self.style
                     };
 
-                    if !matches_style {
+                    if style != target_style {
                         warnings.push(LintWarning {
-                            message: format!(
-                                "Table pipe style for delimiter row is not consistent with {}",
-                                if self.style == "consistent" {
-                                    "the first row"
-                                } else {
-                                    "the configured style"
-                                }
-                            ),
-                            line: line_idx + 1,
+                            line: i + 1,
                             column: 1,
+                            message: format!("Table pipe style should be {}", target_style.replace('_', " ")),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range(line_idx + 1, 1),
-                                replacement: self.fix_table_row(line, expected_style),
+                                range: line_index.line_col_to_byte_range(i + 1, 1),
+                                replacement: self.fix_table_row(line, target_style),
                             }),
                         });
                     }
-                } else if let Some(style) = self.determine_pipe_style(line) {
-                    if style != expected_style {
-                        warnings.push(LintWarning {
-                            message: format!(
-                                "Table pipe style '{}' is not consistent with {}",
-                                style,
-                                if self.style == "consistent" {
-                                    "the first row"
-                                } else {
-                                    "the configured style"
-                                }
-                            ),
-                            line: line_idx + 1,
-                            column: 1,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range(line_idx + 1, 1),
-                                replacement: self.fix_table_row(line, expected_style),
-                            }),
-                        });
-                    }
+                }
+            } else if trimmed.is_empty() {
+                // Reset table state on empty line
+                in_table = false;
+                if current_table_start.is_none() {
+                    table_style = None;
                 }
             }
         }
@@ -406,33 +248,62 @@ impl Rule for MD055TablePipeStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-
-        let warnings = self.check(content)?;
-        if warnings.is_empty() {
-            return Ok(content.to_string());
-        }
-
         let lines: Vec<&str> = content.lines().collect();
-
-        let mut result = Vec::with_capacity(lines.len());
+        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
+        
+        let mut result = String::new();
+        let mut table_style = None;
+        let mut in_table = false;
 
         for (i, line) in lines.iter().enumerate() {
-            let warning_idx = warnings.iter().position(|w| w.line == i + 1);
-            if let Some(idx) = warning_idx {
-                if let Some(fix) = &warnings[idx].fix {
-                    result.push(fix.replacement.clone());
-                    continue;
-                }
+            let line_start = if i == 0 {
+                0
+            } else {
+                content.lines().take(i).map(|l| l.len() + 1).sum()
+            };
+
+            // Don't modify lines in code blocks
+            if code_blocks.iter().any(|(start, end)| line_start >= *start && line_start < *end) {
+                result.push_str(line);
+                result.push('\n');
+                continue;
             }
-            result.push(line.to_string());
+
+            let trimmed = line.trim();
+
+            if trimmed.contains('|') {
+                if !in_table {
+                    in_table = true;
+                }
+
+                if let Some(style) = self.determine_pipe_style(line) {
+                    // For "consistent" mode, use the first table's style
+                    if table_style.is_none() && self.style == "consistent" {
+                        table_style = Some(style);
+                    }
+
+                    let target_style = if self.style == "consistent" {
+                        table_style.unwrap_or("leading_and_trailing")
+                    } else {
+                        &self.style
+                    };
+
+                    result.push_str(&self.fix_table_row(line, target_style));
+                } else {
+                    result.push_str(line);
+                }
+            } else {
+                if trimmed.is_empty() {
+                    in_table = false;
+                    if !in_table {
+                        table_style = None;
+                    }
+                }
+                result.push_str(line);
+            }
+            result.push('\n');
         }
 
-        // Preserve the original line endings
-        if content.ends_with('\n') {
-            Ok(result.join("\n") + "\n")
-        } else {
-            Ok(result.join("\n"))
-        }
+        Ok(result)
     }
 }
