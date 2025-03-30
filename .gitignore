@@ -1,6 +1,4 @@
 target/
 **/__pycache__
 **/*.egg-info
-*.md
-**/*.md
 cov-report

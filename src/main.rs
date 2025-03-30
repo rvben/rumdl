@@ -1,15 +1,15 @@
 use clap::{Parser, Subcommand};
 use colored::*;
-use rumdl::md046_code_block_style::CodeBlockStyle;
-use rumdl::md048_code_fence_style::CodeFenceStyle;
-use rumdl::md049_emphasis_style::EmphasisStyle;
-use rumdl::md050_strong_style::StrongStyle;
-use rumdl::rule::{LintWarning, Rule};
+use ignore::WalkBuilder;
 use rumdl::rules::*;
+use rumdl::rules::md046_code_block_style::CodeBlockStyle;
+use rumdl::rules::md048_code_fence_style::CodeFenceStyle;
+use rumdl::rules::md049_emphasis_style::EmphasisStyle;
+use rumdl::rules::md050_strong_style::StrongStyle;
+use rumdl::rule::{LintWarning, Rule};
 use std::fs;
 use std::path::Path;
 use std::process;
-use ignore::WalkBuilder;
 use walkdir::WalkDir;
 
 mod config;
@@ -247,6 +247,7 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     rules.push(md055);
     
     rules.push(Box::new(MD056TableColumnCount));
+    rules.push(Box::new(MD057ExistingRelativeLinks::new()));
     rules.push(Box::new(MD058BlanksAroundTables));
 
     // Filter rules based on configuration and command-line options
@@ -324,11 +325,64 @@ fn process_file(
     let mut total_fixed = 0;
     let mut all_warnings: Vec<(&'static str, &Box<dyn Rule>, LintWarning)> = Vec::new();
 
+    // Special handling for MD057 rule - create a new instance with the file path
+    // Check for MD057 link existence warnings separately
+    let path_obj = std::path::Path::new(path);
+    let md057_rule = MD057ExistingRelativeLinks::new().with_path(path_obj);
+    
+    // Check MD057 separately with the path set
+    match md057_rule.check(&content) {
+        Ok(warnings) => {
+            if !warnings.is_empty() {
+                // Filter out warnings for lines where the rule is disabled
+                let filtered_warnings: Vec<LintWarning> = warnings
+                    .into_iter()
+                    .filter(|warning| {
+                        !rumdl::rule::is_rule_disabled_at_line(
+                            &content,
+                            md057_rule.name(),
+                            warning.line - 1,
+                        )
+                    })
+                    .collect();
+
+                if !filtered_warnings.is_empty() {
+                    has_warnings = true;
+                    total_warnings += filtered_warnings.len();
+
+                    for warning in filtered_warnings {
+                        // Use a reference to the temporary md057_rule for the all_warnings collection
+                        // This is safe because we're only using it for reporting, not for long-term storage
+                        all_warnings.push((md057_rule.name(), 
+                            // This is a bit of a hack, but it works because we only use the rule to get its name
+                            // in the reporting logic
+                            rules.iter().find(|r| r.name() == "MD057").unwrap_or(&rules[0]), 
+                            warning));
+                    }
+                }
+            }
+        }
+        Err(err) => {
+            eprintln!(
+                "{}: {} on file {}: {}",
+                "Error".red().bold(),
+                md057_rule.name().yellow(),
+                path.blue().underline(),
+                err
+            );
+        }
+    }
+
     {
         let _timer = rumdl::profiling::ScopedTimer::new(&format!("check_rules:{}", path));
 
         // Collect all warnings first
         for rule in rules {
+            // Skip MD057 rule as we've already processed it separately
+            if rule.name() == "MD057" {
+                continue;
+            }
+            
             let _rule_timer =
                 rumdl::profiling::ScopedTimer::new(&format!("rule:{}:{}", rule.name(), path));
 

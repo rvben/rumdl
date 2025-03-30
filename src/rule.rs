@@ -58,6 +58,21 @@ pub trait Rule {
     }
 }
 
+/// Extension trait to add downcasting capabilities to Rule
+pub trait RuleExt {
+    fn downcast_ref<T: 'static>(&self) -> Option<&T>;
+}
+
+impl<R: Rule + 'static> RuleExt for Box<R> {
+    fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        if std::any::TypeId::of::<R>() == std::any::TypeId::of::<T>() {
+            unsafe { Some(&*(self.as_ref() as *const _ as *const T)) }
+        } else {
+            None
+        }
+    }
+}
+
 /// Check if a rule is disabled at a specific line via inline comments
 pub fn is_rule_disabled_at_line(content: &str, rule_name: &str, line_num: usize) -> bool {
     let lines: Vec<&str> = content.lines().collect();

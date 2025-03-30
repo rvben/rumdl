@@ -132,3 +132,7 @@ pub use md022_blanks_around_headings::MD022BlanksAroundHeadings;
 
 mod md023_heading_start_left;
 pub use md023_heading_start_left::MD023HeadingStartLeft;
+
+mod md057_existing_relative_links;
+
+pub use md057_existing_relative_links::MD057ExistingRelativeLinks;
