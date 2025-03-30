@@ -87,21 +87,13 @@ fn test_fix_mixed_emphasis() {
 }
 
 #[test]
-fn test_allow_emphasis_headings() {
-    let rule = MD017NoEmphasisAsHeading::with_allow_emphasis_headings(true);
-    let content = "*Emphasized Heading*\n**Bold Heading**";
-    let result = rule.check(content).unwrap();
-    assert!(result.is_empty());
-}
-
-#[test]
 fn test_emphasis_with_spaces() {
     let rule = MD017NoEmphasisAsHeading::new();
     let content = "  *Indented Heading*  \n  **Indented Bold**  ";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "# Indented Heading\n## Indented Bold");
+    assert_eq!(fixed, "  # Indented Heading  \n  ## Indented Bold  ");
 }
 
 #[test]

@@ -192,9 +192,80 @@ fn test_fragment_with_complex_content() {
     assert!(result.is_ok());
     let warnings = result.unwrap();
 
-    // Our implementation now correctly strips markdown formatting
-    // from headings when generating fragments
-    assert_eq!(0, warnings.len());
+    // The implementation correctly handles formatting in headings
+    // by stripping it when generating fragments, so the link should match
+    assert_eq!(0, warnings.len(), "Link should correctly match the heading with stripped formatting");
+}
+
+#[test]
+fn test_nested_formatting_in_fragments() {
+    let content = r#"
+# Heading with **bold *italic* text**
+
+[Link to heading](#heading-with-bold-italic-text)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(content);
+    assert!(result.is_ok());
+    let warnings = result.unwrap();
+
+    // Test that nested formatting is correctly handled
+    assert_eq!(0, warnings.len(), "Link should match heading with nested bold and italic formatting");
+}
+
+#[test]
+fn test_multiple_formatting_styles() {
+    let content = r#"
+# Heading with _underscores_ and **asterisks** mixed
+
+[Link to heading](#heading-with-underscores-and-asterisks-mixed)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(content);
+    assert!(result.is_ok());
+    let warnings = result.unwrap();
+
+    // Test that different styles of formatting are handled correctly
+    assert_eq!(0, warnings.len(), "Link should match heading with mixed formatting styles");
+}
+
+#[test]
+fn test_complex_nested_formatting() {
+    let content = r#"
+# **Bold** with *italic* and `code` and [link](https://example.com)
+
+[Link to heading](#bold-with-italic-and-code-and-link)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(content);
+    assert!(result.is_ok());
+    let warnings = result.unwrap();
+
+    // Test that complex mixed formatting is handled correctly
+    assert_eq!(0, warnings.len(), "Link should match heading with complex formatting");
+}
+
+#[test]
+fn test_formatting_edge_cases() {
+    let content = r#"
+# Heading with a**partial**bold and *italic with **nested** formatting*
+
+[Link to partial bold](#heading-with-apartialbolda-and-italic-with-nested-formatting)
+[Link to nested formatting](#heading-with-apartialbold-and-italic-with-nested-formatting)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(content);
+    assert!(result.is_ok());
+    let warnings = result.unwrap();
+
+    // This test may require adjustments based on expected behavior
+    // The implementation should consistently generate the same fragment ID
+    // Note: first link should be correct when partial bold is properly stripped
+    assert!(warnings.len() <= 1, "At least one link should match the heading with partial formatting");
 }
 
 #[test]

@@ -40,40 +40,25 @@ impl MD036NoEmphasisOnlyFirst {
             return None;
         }
 
-        // Quick check: lines must start and end with emphasis markers
-        let first_char = line.chars().next().unwrap();
-        let last_char = line.chars().last().unwrap();
-        if (first_char != '*' && first_char != '_') || (last_char != '*' && last_char != '_') {
-            return None;
-        }
-
-        // Check for blank lines before and after (if not at start/end)
-        let lines: Vec<&str> = content.lines().collect();
-        let prev_blank = line_num == 0 || lines[line_num - 1].trim().is_empty();
-        let next_blank = line_num + 1 >= lines.len() || lines[line_num + 1].trim().is_empty();
-        if !prev_blank || !next_blank {
-            return None;
-        }
-
-        // Now check specific patterns
+        // Check specific patterns directly without additional requirements
         // Check for *emphasis* pattern (entire line)
         if let Some(caps) = RE_ASTERISK_SINGLE.captures(line) {
-            return Some((1, caps.get(1).unwrap().as_str().trim().to_string()));
+            return Some((1, caps.get(1).unwrap().as_str().to_string()));
         }
 
         // Check for _emphasis_ pattern (entire line)
         if let Some(caps) = RE_UNDERSCORE_SINGLE.captures(line) {
-            return Some((1, caps.get(1).unwrap().as_str().trim().to_string()));
+            return Some((1, caps.get(1).unwrap().as_str().to_string()));
         }
 
         // Check for **strong** pattern (entire line)
         if let Some(caps) = RE_ASTERISK_DOUBLE.captures(line) {
-            return Some((2, caps.get(1).unwrap().as_str().trim().to_string()));
+            return Some((2, caps.get(1).unwrap().as_str().to_string()));
         }
 
         // Check for __strong__ pattern (entire line)
         if let Some(caps) = RE_UNDERSCORE_DOUBLE.captures(line) {
-            return Some((2, caps.get(1).unwrap().as_str().trim().to_string()));
+            return Some((2, caps.get(1).unwrap().as_str().to_string()));
         }
 
         None
@@ -167,6 +152,7 @@ impl Rule for MD036NoEmphasisOnlyFirst {
 
         let mut result = String::with_capacity(content.len());
         let lines: Vec<&str> = content.lines().collect();
+        let ends_with_newline = content.ends_with('\n');
 
         for i in 0..lines.len() {
             let line = lines[i];
@@ -177,6 +163,9 @@ impl Rule for MD036NoEmphasisOnlyFirst {
             }
 
             if i < lines.len() - 1 {
+                result.push('\n');
+            } else if ends_with_newline {
+                // Preserve newline at end of file
                 result.push('\n');
             }
         }

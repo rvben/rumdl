@@ -70,18 +70,16 @@ impl Rule for MD001HeadingIncrement {
         let _line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
         let mut prev_level = 0;
-        let mut prev_style = None;
 
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, _) in lines.iter().enumerate() {
-            if let Some(heading) = HeadingUtils::parse_heading(content, line_num) {
+            if let Some(heading) = HeadingUtils::parse_heading(content, line_num + 1) {
                 if prev_level > 0 && heading.level > prev_level + 1 {
                     let indentation = HeadingUtils::get_indentation(lines[line_num]);
                     let mut fixed_heading = heading.clone();
                     fixed_heading.level = prev_level + 1;
-                    let style = prev_style.unwrap_or(heading.style);
-                    let replacement = HeadingUtils::convert_heading_style(&fixed_heading, &style);
+                    let replacement = HeadingUtils::convert_heading_style(&heading.text, fixed_heading.level, heading.style);
                     warnings.push(LintWarning {
                         line: line_num + 1,
                         column: indentation + 1,
@@ -98,7 +96,6 @@ impl Rule for MD001HeadingIncrement {
                     });
                 }
                 prev_level = heading.level;
-                prev_style = Some(heading.style);
             }
         }
 
@@ -106,50 +103,50 @@ impl Rule for MD001HeadingIncrement {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-        let mut result = String::new();
+        let mut fixed_lines = Vec::new();
         let mut prev_level = 0;
-        let mut prev_style = None;
-
+        let mut i = 0;
         let lines: Vec<&str> = content.lines().collect();
-        let mut line_num = 0;
-        while line_num < lines.len() {
-            let line = lines[line_num];
-            if let Some(heading) = HeadingUtils::parse_heading(content, line_num) {
-                if prev_level > 0 && heading.level > prev_level + 1 {
-                    let indentation = HeadingUtils::get_indentation(line);
-                    let mut fixed_heading = heading.clone();
-                    fixed_heading.level = prev_level + 1;
-                    let style = prev_style.unwrap_or(fixed_heading.style);
-                    let replacement = HeadingUtils::convert_heading_style(&fixed_heading, &style);
-                    result.push_str(&format!("{}{}\n", " ".repeat(indentation), replacement));
-                    prev_level += 1;
-                } else {
-                    result.push_str(line);
-                    result.push('\n');
-                    prev_level = heading.level;
-                }
-                prev_style = Some(heading.style);
+        let ends_with_newline = content.ends_with('\n');
 
-                // Skip the next line if this was a setext heading
+        while i < lines.len() {
+            if let Some(heading) = HeadingUtils::parse_heading(content, i + 1) {
+                let indentation = HeadingUtils::get_indentation(lines[i]);
+                let mut fixed_heading = heading.clone();
+                
+                // Only increment if the level is greater than the previous level
+                if heading.level > prev_level + 1 {
+                    fixed_heading.level = prev_level + 1;
+                    let replacement = HeadingUtils::convert_heading_style(&heading.text, fixed_heading.level, heading.style);
+                    fixed_lines.push(format!("{}{}", " ".repeat(indentation), replacement));
+                } else {
+                    fixed_lines.push(lines[i].to_string());
+                }
+                
+                prev_level = if heading.level > prev_level + 1 {
+                    prev_level + 1
+                } else {
+                    heading.level
+                };
+
                 if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
-                    line_num += 1;
-                    if line_num < lines.len() {
-                        result.push_str(lines[line_num]);
-                        result.push('\n');
+                    if i + 1 < lines.len() {
+                        fixed_lines.push(lines[i + 1].to_string());
                     }
+                    i += 2; // Skip the underline line
+                } else {
+                    i += 1;
                 }
             } else {
-                result.push_str(line);
-                result.push('\n');
+                fixed_lines.push(lines[i].to_string());
+                i += 1;
             }
-            line_num += 1;
         }
 
-        if !content.ends_with('\n') {
-            result.pop();
+        let mut result = fixed_lines.join("\n");
+        if ends_with_newline {
+            result.push('\n');
         }
-
         Ok(result)
     }
 }

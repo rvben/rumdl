@@ -32,21 +32,21 @@ fn test_strong_only() {
 #[test]
 fn test_emphasis_in_code_block() {
     let rule = MD036NoEmphasisOnlyFirst;
-    let content = "```\n*Emphasized*\n```\n*Emphasized*";
+    let content = "```\n*Emphasized*\n```\n\n*Emphasized*";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "```\n*Emphasized*\n```\n# Emphasized");
+    assert_eq!(fixed, "```\n*Emphasized*\n```\n\n# Emphasized");
 }
 
 #[test]
 fn test_multiple_emphasis() {
     let rule = MD036NoEmphasisOnlyFirst;
-    let content = "*First emphasis*\nNormal line\n_Second emphasis_";
+    let content = "\n*First emphasis*\n\nNormal line\n\n_Second emphasis_\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "# First emphasis\nNormal line\n# Second emphasis");
+    assert_eq!(fixed, "\n# First emphasis\n\nNormal line\n\n# Second emphasis\n");
 }
 
 #[test]
@@ -76,9 +76,9 @@ fn test_mixed_emphasis() {
 #[test]
 fn test_emphasis_with_punctuation() {
     let rule = MD036NoEmphasisOnlyFirst;
-    let content = "*Hello with punctuation!*\n*Hi there!*";
+    let content = "\n*Hello with punctuation!*\n\n*Hi there!*\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "# Hello with punctuation!\n# Hi there!");
+    assert_eq!(fixed, "\n# Hello with punctuation!\n\n# Hi there!\n");
 }

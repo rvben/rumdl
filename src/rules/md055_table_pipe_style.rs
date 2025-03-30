@@ -144,55 +144,59 @@ impl MD055TablePipeStyle {
             let row_content = trimmed.trim_start_matches('|').trim_end_matches('|').trim().to_string();
             
             // Apply the appropriate style
-            if target_style == "leading_and_trailing" {
-                // Add leading and trailing pipes if missing
-                return format!("{}| {} |", leading_whitespace, row_content);
-            } else if target_style == "no_leading_or_trailing" {
-                // Remove leading and trailing pipes
-                return format!("{}{}", leading_whitespace, row_content);
-            } else {
-                // Handle other styles if needed
-                return format!("{}{}", leading_whitespace, trimmed);
+            match target_style {
+                "leading_and_trailing" => format!("{}| {} |", leading_whitespace, row_content),
+                "no_leading_or_trailing" => format!("{}{}", leading_whitespace, row_content),
+                "leading_only" => format!("{}| {}", leading_whitespace, row_content),
+                "trailing_only" => format!("{}{} |", leading_whitespace, row_content),
+                _ => format!("{}| {} |", leading_whitespace, row_content), // Default to leading_and_trailing
             }
-        }
-
-        // Split the line by pipes to get cells
-        let parts: Vec<&str> = trimmed.split('|').collect();
-        let mut cells = Vec::new();
-        
-        let has_leading_pipe = trimmed.starts_with('|');
-        let has_trailing_pipe = trimmed.ends_with('|');
-        
-        // Process the cells correctly, accounting for leading/trailing pipes
-        for (i, part) in parts.iter().enumerate() {
-            // Skip empty leading part if there's a leading pipe
-            if i == 0 && part.trim().is_empty() && has_leading_pipe {
-                continue;
-            }
+        } else {
+            // Split the line by pipes to get cells
+            let parts: Vec<&str> = trimmed.split('|').collect();
+            let mut cells = Vec::new();
             
-            // Skip empty trailing part if there's a trailing pipe
-            if i == parts.len() - 1 && part.trim().is_empty() && has_trailing_pipe {
-                continue;
-            }
+            let has_leading_pipe = trimmed.starts_with('|');
+            let has_trailing_pipe = trimmed.ends_with('|');
             
-            cells.push(part.trim());
-        }
+            // Process the cells correctly, accounting for leading/trailing pipes
+            for (i, part) in parts.iter().enumerate() {
+                // Skip empty leading part if there's a leading pipe
+                if i == 0 && part.trim().is_empty() && has_leading_pipe {
+                    continue;
+                }
+                
+                // Skip empty trailing part if there's a trailing pipe
+                if i == parts.len() - 1 && part.trim().is_empty() && has_trailing_pipe {
+                    continue;
+                }
+                
+                cells.push(part.trim());
+            }
 
-        // Rebuild the table row with the target style
-        let mut result = String::new();
-        
-        if target_style == "leading_and_trailing" {
-            result.push('|');
-            result.push(' ');
-            result.push_str(&cells.join(" | "));
-            result.push(' ');
-            result.push('|');
-        } else if target_style == "no_leading_or_trailing" {
-            result.push_str(&cells.join(" | "));
+            // Rebuild the table row with the target style
+            let result = match target_style {
+                "leading_and_trailing" => {
+                    format!("| {} |", cells.join(" | "))
+                },
+                "no_leading_or_trailing" => {
+                    cells.join(" | ")
+                },
+                "leading_only" => {
+                    format!("| {}", cells.join(" | "))
+                },
+                "trailing_only" => {
+                    format!("{} |", cells.join(" | "))
+                },
+                _ => {
+                    // Default to leading_and_trailing if an unsupported style is provided
+                    format!("| {} |", cells.join(" | "))
+                }
+            };
+            
+            // Reapply the original indentation
+            format!("{}{}", leading_whitespace, result)
         }
-        
-        // Reapply the original indentation
-        format!("{}{}", leading_whitespace, result)
     }
 }
 
@@ -220,9 +224,9 @@ impl Rule for MD055TablePipeStyle {
 
         // Get the configured style explicitly and validate it
         let configured_style = match self.style.as_str() {
-            "leading_and_trailing" | "no_leading_or_trailing" | "consistent" => self.style.as_str(),
+            "leading_and_trailing" | "no_leading_or_trailing" | "leading_only" | "trailing_only" | "consistent" => self.style.as_str(),
             _ => {
-                // Invalid style provided, default to "leading_and_trailing" and log a warning
+                // Invalid style provided, default to "leading_and_trailing"
                 "leading_and_trailing"
             }
         };
@@ -324,9 +328,9 @@ impl Rule for MD055TablePipeStyle {
         
         // Use the configured style but validate it first
         let configured_style = match self.style.as_str() {
-            "leading_and_trailing" | "no_leading_or_trailing" | "consistent" => self.style.as_str(),
+            "leading_and_trailing" | "no_leading_or_trailing" | "leading_only" | "trailing_only" | "consistent" => self.style.as_str(),
             _ => {
-                // Invalid style provided, default to "leading_and_trailing" and log a warning
+                // Invalid style provided, default to "leading_and_trailing"
                 "leading_and_trailing"
             }
         };
@@ -356,37 +360,23 @@ impl Rule for MD055TablePipeStyle {
 
                 // Check if this is a delimiter row
                 let is_delimiter = self.is_delimiter_row(line);
-                if is_delimiter {
-                    
-                    // Determine the target style
-                    let target_style = if configured_style == "consistent" {
-                        table_style.unwrap_or("leading_and_trailing")
-                    } else {
-                        configured_style
-                    };
-                    
-                    // Apply the fix to the delimiter row
-                    let fixed_row = self.fix_table_row(line, target_style);
-                    result.push_str(&fixed_row);
-                } else {
-                    if let Some(style) = self.determine_pipe_style(line) {
-                        // For "consistent" mode, use the first table's style
-                        if table_style.is_none() && configured_style == "consistent" {
-                            table_style = Some(style);
-                        }
-
-                        let target_style = if configured_style == "consistent" {
-                            table_style.unwrap_or("leading_and_trailing")
-                        } else {
-                            configured_style
-                        };
-
-                        let fixed_row = self.fix_table_row(line, target_style);
-                        result.push_str(&fixed_row);
-                    } else {
-                        result.push_str(line);
+                
+                // Process the line regardless of whether it's a delimiter row
+                if let Some(style) = self.determine_pipe_style(line) {
+                    // For "consistent" mode, use the first table's style
+                    if table_style.is_none() && configured_style == "consistent" {
+                        table_style = Some(style);
                     }
                 }
+                
+                let target_style = if configured_style == "consistent" {
+                    table_style.unwrap_or("leading_and_trailing")
+                } else {
+                    configured_style
+                };
+
+                let fixed_row = self.fix_table_row(line, target_style);
+                result.push_str(&fixed_row);
             } else {
                 if trimmed.is_empty() {
                     in_table = false;

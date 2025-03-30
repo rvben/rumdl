@@ -106,22 +106,23 @@ impl MD024MultipleHeadings {
         }
     }
 
-    /// Get the heading signature based on configuration
-    fn get_heading_signature(&self, text: &str, level: usize) -> String {
-        // Convert text to lowercase for case-insensitive comparison
-        let normalized_text = text.trim().to_lowercase();
-
-        if self.allow_different_nesting {
-            // When allow_different_nesting is true, we only compare by text content
-            // This means headings with the same text will be flagged as duplicates
-            // regardless of their level
-            normalized_text
+    /// Gets a unique signature for a heading based on its text and level
+    fn get_heading_signature(&self, text: &str, level: u32) -> String {
+        // If we're ignoring case, convert to lowercase
+        let text = if self.allow_different_nesting {
+            text.to_lowercase()
         } else {
-            // When allow_different_nesting is false, we consider both text AND level
-            // This means headings are only considered duplicates if they have the same
-            // content AND the same level
-            format!("{}:{}", level, normalized_text)
-        }
+            text.to_string()
+        };
+
+        // If we're ignoring level, use a fixed level
+        let level = if self.allow_different_nesting {
+            1
+        } else {
+            level
+        };
+
+        format!("{}:{}", level, text)
     }
 }
 
@@ -156,10 +157,10 @@ impl Rule for MD024MultipleHeadings {
             // Check if this line is a heading
             if is_heading(&content_lines, i, &code_block_state) {
                 let heading_level = get_heading_level(&content_lines, i);
-                let heading_text = extract_heading_text(&content_lines, i, heading_level);
+                let heading_text = extract_heading_text(&content_lines, i);
 
                 // Skip empty headings
-                if !heading_text.trim().is_empty() {
+                if !heading_text.is_empty() {
                     let signature = self.get_heading_signature(&heading_text, heading_level);
 
                     // Check if we've seen this heading before

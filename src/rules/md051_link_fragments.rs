@@ -17,13 +17,13 @@ lazy_static! {
     static ref EXTERNAL_URL_REGEX: FancyRegex = FancyRegex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap();
     static ref INLINE_CODE_REGEX: FancyRegex = FancyRegex::new(r"`[^`]+`").unwrap();
     
-    static ref BOLD_ASTERISK_REGEX: Regex = Regex::new(r"\*\*[^*]+?\*\*").unwrap();
-    static ref BOLD_UNDERSCORE_REGEX: Regex = Regex::new(r"__[^_]+?__").unwrap();
-    static ref ITALIC_ASTERISK_REGEX: Regex = Regex::new(r"\*[^*]+?\*").unwrap();
-    static ref ITALIC_UNDERSCORE_REGEX: Regex = Regex::new(r"_[^_]+?_").unwrap();
+    static ref BOLD_ASTERISK_REGEX: Regex = Regex::new(r"\*\*(.+?)\*\*").unwrap();
+    static ref BOLD_UNDERSCORE_REGEX: Regex = Regex::new(r"__(.+?)__").unwrap();
+    static ref ITALIC_ASTERISK_REGEX: Regex = Regex::new(r"\*([^*]+?)\*").unwrap();
+    static ref ITALIC_UNDERSCORE_REGEX: Regex = Regex::new(r"_([^_]+?)_").unwrap();
     
     static ref LINK_TEXT_REGEX: FancyRegex = FancyRegex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap();
-    static ref STRIKETHROUGH_REGEX: Regex = Regex::new(r"~~[^~]+~~").unwrap();
+    static ref STRIKETHROUGH_REGEX: Regex = Regex::new(r"~~(.+?)~~").unwrap();
 }
 
 /// Rule MD051: Link fragments should exist
@@ -103,41 +103,39 @@ impl MD051LinkFragments {
     fn heading_to_fragment(&self, heading: &str) -> String {
         let mut stripped = heading.to_string();
 
-        // Remove inline code - collect matches first
-        if let Ok(captures) = INLINE_CODE_REGEX.captures_iter(&stripped).collect::<Result<Vec<_>, _>>() {
-            let replacements: Vec<_> = captures
-                .iter()
-                .filter_map(|cap| cap.get(0).map(|m| m.as_str().to_string()))
-                .collect();
-            for code in replacements {
-                stripped = stripped.replace(&code, "");
+        // Handle code spans more thoroughly
+        if let Ok(captures) = INLINE_CODE_REGEX.captures_iter(&stripped.clone()).collect::<Result<Vec<_>, _>>() {
+            for cap in captures {
+                if let Some(code_match) = cap.get(0) {
+                    // Extract the code content (without the backticks)
+                    let code_text = &code_match.as_str()[1..code_match.as_str().len() - 1];
+                    // Replace the entire code span with just the text
+                    stripped = stripped.replace(code_match.as_str(), code_text);
+                }
             }
         }
 
-        // Remove emphasis (bold and italic) - using separate patterns
-        stripped = BOLD_ASTERISK_REGEX.replace_all(&stripped, "").to_string();
-        stripped = BOLD_UNDERSCORE_REGEX.replace_all(&stripped, "").to_string();
-        stripped = ITALIC_ASTERISK_REGEX.replace_all(&stripped, "").to_string();
-        stripped = ITALIC_UNDERSCORE_REGEX.replace_all(&stripped, "").to_string();
+        // Manual approach for nested formatting
+        // First, handle bold formatting with capture groups
+        stripped = BOLD_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = BOLD_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
+        
+        // Then handle italic formatting
+        stripped = ITALIC_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = ITALIC_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
 
-        // Remove links, keeping only the text - collect matches first
-        if let Ok(captures) = LINK_TEXT_REGEX.captures_iter(&stripped).collect::<Result<Vec<_>, _>>() {
-            let replacements: Vec<_> = captures
-                .iter()
-                .filter_map(|cap| {
-                    Some((
-                        cap.get(0)?.as_str().to_string(),
-                        cap.get(1)?.as_str().to_string()
-                    ))
-                })
-                .collect();
-            for (full, text) in replacements {
-                stripped = stripped.replace(&full, &text);
+        // Handle links more thoroughly
+        if let Ok(captures) = LINK_TEXT_REGEX.captures_iter(&stripped.clone()).collect::<Result<Vec<_>, _>>() {
+            for cap in captures {
+                if let (Some(full_match), Some(text_match)) = (cap.get(0), cap.get(1)) {
+                    // Replace the entire link with just the link text
+                    stripped = stripped.replace(full_match.as_str(), text_match.as_str());
+                }
             }
         }
 
         // Remove strikethrough
-        stripped = STRIKETHROUGH_REGEX.replace_all(&stripped, "").to_string();
+        stripped = STRIKETHROUGH_REGEX.replace_all(&stripped, "$1").to_string();
 
         // Convert to lowercase and replace spaces/non-alphanumeric chars with hyphens
         let fragment = stripped

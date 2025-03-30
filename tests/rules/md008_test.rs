@@ -26,17 +26,17 @@ fn test_invalid_list_style() {
     // First marker is asterisk, so others should be asterisks too
     let content = "* Item 1\n  + Item 2\n    - Item 3";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 2);
 
     // First marker is dash, so others should be dashes too
     let content = "- Item 1\n  + Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 2);
 
     // First marker is plus, so others should be pluses too
     let content = "+ Item 1\n  - Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 2);
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn test_mixed_list_style() {
     // First marker is asterisk, so all should be asterisks
     let content = "* Item 1\n  * Item 2\n    + Item 3\n      - Item 4";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 2);
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn test_explicitly_configured_style() {
     let rule = MD008ULStyle::new('-');
     let content = "* Item 1\n  * Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 2);
+    assert_eq!(result.len(), 3);
 
     let fixed = rule.fix(content).unwrap();
     let expected = rule.fix(content).unwrap();

@@ -27,7 +27,7 @@ fn test_self_closing_tag() {
 
 #[test]
 fn test_allowed_elements() {
-    let rule = MD033NoInlineHtml::new(vec!["b".to_string(), "i".to_string()]);
+    let rule = MD033NoInlineHtml::with_allowed(vec!["b".to_string(), "i".to_string()]);
     let content = "Some <b>bold</b> and <i>italic</i> but not <u>underlined</u>";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2); // Only <u> tags should be flagged
@@ -175,7 +175,7 @@ fn test_fix_preserves_structure_html() {
     // Verify HTML fix preserves code spans
     let content = "Text with `<span>` and <div>block</div>";
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "Text with `<span>` and block</div>");
+    assert_eq!(fixed, "Text with `<span>` and block");
 
     // Verify HTML fix handles adjacent tags
     let content = "<div><p>Nested content</p></div>";

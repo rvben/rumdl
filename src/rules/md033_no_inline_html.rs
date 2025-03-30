@@ -1,6 +1,7 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use lazy_static::lazy_static;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::range_utils::LineIndex;
 use regex::Regex;
+use lazy_static::lazy_static;
 
 lazy_static! {
     // Optimized regex patterns with improved precision
@@ -14,152 +15,72 @@ lazy_static! {
     static ref DIV_ALIGN_PATTERN: Regex = Regex::new(r"^<div\s+align=").unwrap();
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MD033NoInlineHtml {
-    allowed_elements: Vec<String>,
+    allowed: Vec<String>,
 }
 
 impl MD033NoInlineHtml {
-    pub fn new(allowed_elements: Vec<String>) -> Self {
-        Self { allowed_elements }
+    pub fn new() -> Self {
+        Self {
+            allowed: Vec::new(),
+        }
     }
 
-    // Optimized HTML tag finding using cached regex
-    #[inline]
-    fn find_html_tags(&self, line: &str) -> Vec<(String, usize)> {
-        let _timer = crate::profiling::ScopedTimer::new("MD033_find_html_tags");
-
-        // Skip processing if no '<' character in line (quick check)
-        if !line.contains('<') {
-            return Vec::new();
-        }
-
-        // Quick check with a simpler pattern before using the more complex one
-        if !HTML_TAG_QUICK_CHECK.is_match(line) {
-            return Vec::new();
-        }
-
-        // Allow div tags with align attribute
-        if DIV_ALIGN_PATTERN.is_match(line.trim()) {
-            return Vec::new();
-        }
-
-        let mut tags = Vec::new();
-
-        for cap in HTML_TAG_PATTERN.captures_iter(line) {
-            let tag_name = cap[2].to_string().to_lowercase();
-            let position = cap.get(0).unwrap().start();
-
-            // Skip div closing tags if we're allowing div with align
-            if tag_name == "div" && cap[1].starts_with('/') {
-                continue;
-            }
-
-            if !self.allowed_elements.contains(&tag_name) {
-                tags.push((tag_name, position));
-            }
-        }
-
-        tags
+    pub fn with_allowed(allowed: Vec<String>) -> Self {
+        Self { allowed }
     }
 
-    // Optimized code span detection using cached ranges
-    #[inline]
-    fn compute_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
-        let _timer = crate::profiling::ScopedTimer::new("MD033_compute_code_spans");
-
-        // Skip processing if no backtick character (quick check)
-        if !line.contains('`') {
-            return Vec::new();
-        }
-
-        let mut spans = Vec::new();
-
-        // First try using regex for simple code spans
-        for cap in BACKTICK_PATTERN.captures_iter(line) {
-            if let (Some(start), Some(end)) =
-                (cap.get(0).map(|m| m.start()), cap.get(0).map(|m| m.end()))
-            {
-                spans.push((start, end));
-            }
-        }
-
-        // If no spans found with regex (could be complex or unmatched), fallback to manual parsing
-        if spans.is_empty() {
-            let chars: Vec<char> = line.chars().collect();
-            let mut i = 0;
-            let mut in_code = false;
-            let mut code_start = 0;
-
-            while i < chars.len() {
-                if chars[i] == '`' {
-                    if !in_code {
-                        code_start = i;
-                        in_code = true;
-                    } else {
-                        spans.push((code_start, i + 1));
-                        in_code = false;
-                    }
-                }
-                i += 1;
-            }
-        }
-
-        spans
+    pub fn default() -> Self {
+        Self::new()
     }
 
-    // Optimized code block detection
-    #[inline]
-    fn detect_code_blocks(&self, lines: &[&str]) -> Vec<bool> {
-        let _timer = crate::profiling::ScopedTimer::new("MD033_detect_code_blocks");
-
-        let mut code_block_map = vec![false; lines.len()];
+    // Simplify the implementation to focus on the core functionality
+    fn is_in_code_block(&self, content: &str, line_number: usize) -> bool {
         let mut in_code_block = false;
-        let mut fence_type = None;
+        let mut fence_char = None;
 
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-
-            if let Some(ref current_fence) = fence_type {
-                if trimmed.starts_with(current_fence) {
-                    in_code_block = false;
-                    fence_type = None;
-                }
-            } else if trimmed.starts_with("```") {
-                in_code_block = true;
-                fence_type = Some("```");
-            } else if trimmed.starts_with("~~~") {
-                in_code_block = true;
-                fence_type = Some("~~~");
+        for (i, line) in content.lines().enumerate() {
+            if i >= line_number {
+                break;
             }
 
-            code_block_map[i] = in_code_block;
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                if !in_code_block {
+                    fence_char = Some(&trimmed[..3]);
+                    in_code_block = true;
+                } else if Some(&trimmed[..3]) == fence_char {
+                    in_code_block = false;
+                }
+            }
         }
 
-        code_block_map
+        in_code_block
     }
 
-    // Optimized check for code span containment
-    #[inline]
-    fn is_in_code_span(&self, code_spans: &[(usize, usize)], position: usize) -> bool {
-        // Use binary search for better performance with many code spans
-        let mut left = 0;
-        let mut right = code_spans.len();
+    fn contains_code_span(&self, line: &str) -> bool {
+        line.contains('`')
+    }
 
-        while left < right {
-            let mid = (left + right) / 2;
-            let (start, end) = code_spans[mid];
-
-            if position < start {
-                right = mid;
-            } else if position >= end {
-                left = mid + 1;
+    fn is_tag_allowed(&self, tag: &str) -> bool {
+        if tag.starts_with("</") {
+            // Check closing tags without the </...>
+            let tag_name = tag.trim_start_matches("</").trim_end_matches('>');
+            self.allowed.iter().any(|a| a == tag_name)
+        } else {
+            // Check opening tags without the <...>
+            let tag_name = if tag.ends_with("/>") {
+                // Self-closing tag
+                tag.trim_start_matches('<').trim_end_matches("/>")
             } else {
-                return true;
-            }
+                tag.trim_start_matches('<').trim_end_matches('>')
+            };
+            
+            // Extract just the tag name without attributes
+            let tag_name = tag_name.split_whitespace().next().unwrap_or("");
+            self.allowed.iter().any(|a| a == tag_name)
         }
-
-        false
     }
 }
 
@@ -169,68 +90,95 @@ impl Rule for MD033NoInlineHtml {
     }
 
     fn description(&self) -> &'static str {
-        "Inline HTML"
+        "Inline HTML is not allowed"
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _timer = crate::profiling::ScopedTimer::new("MD033_check");
-
-        // Early return for empty content or content without HTML tags
         if content.is_empty() || !content.contains('<') {
-            return Ok(vec![]);
-        }
-
-        // Quick check with simplified pattern before doing full processing
-        if !HTML_TAG_QUICK_CHECK.is_match(content) {
-            return Ok(vec![]);
+            return Ok(Vec::new());
         }
 
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let line_index = LineIndex::new(content.to_string());
 
-        // Use our custom code block detection which is more reliable
-        let code_block_map = self.detect_code_blocks(&lines);
-
-        // Pre-compute all code spans to avoid repetitive computation
-        let mut line_code_spans: Vec<Vec<(usize, usize)>> = Vec::with_capacity(lines.len());
-        for line in &lines {
-            line_code_spans.push(if line.contains('`') {
-                self.compute_code_spans(line)
-            } else {
-                Vec::new()
-            });
-        }
-
-        for (line_num, line) in lines.iter().enumerate() {
-            // Skip empty lines or lines without < (quick check)
-            if line.trim().is_empty() || !line.contains('<') {
+        // Process content line by line
+        for (i, line) in content.lines().enumerate() {
+            // Skip empty lines
+            if line.trim().is_empty() {
                 continue;
             }
 
-            // Skip checking inside code blocks
-            if code_block_map[line_num] {
+            // Skip lines in code blocks
+            if self.is_in_code_block(content, i) {
                 continue;
             }
 
-            // Get pre-computed code spans for this line
-            let code_spans = &line_code_spans[line_num];
-
-            // Check for HTML tags in the line
-            for (tag, position) in self.find_html_tags(line) {
-                // Skip if inside a code span
-                if !code_spans.is_empty() && self.is_in_code_span(code_spans, position) {
-                    continue;
+            // If line has a code span, we need more careful processing
+            if self.contains_code_span(line) {
+                // Find all potential HTML tags in the line
+                let re = Regex::new(r"<[^>]+>").unwrap();
+                
+                for cap in re.captures_iter(line) {
+                    let html_tag = cap.get(0).unwrap().as_str();
+                    let start_pos = cap.get(0).unwrap().start();
+                    
+                    // Calculate the byte position in the full content
+                    let line_start_pos = content.lines()
+                        .take(i)
+                        .map(|l| l.len() + 1)
+                        .sum::<usize>();
+                    let tag_pos = line_start_pos + start_pos;
+                    
+                    // Skip if in code span (simplified check - not perfect but handles most cases)
+                    let mut in_code = false;
+                    let mut backtick_count = 0;
+                    
+                    for (idx, c) in line.chars().enumerate() {
+                        if idx >= start_pos {
+                            break;
+                        }
+                        if c == '`' {
+                            backtick_count += 1;
+                        }
+                    }
+                    
+                    // If odd number of backticks before the tag, it's in a code span
+                    in_code = backtick_count % 2 == 1;
+                    
+                    if !in_code && !self.is_tag_allowed(html_tag) {
+                        warnings.push(LintWarning {
+                            line: i + 1,
+                            column: start_pos + 1,
+                            message: format!("Found inline HTML tag: {}", html_tag),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range(i + 1, start_pos + 1),
+                                replacement: String::new(),
+                            }),
+                        });
+                    }
                 }
-
-                let start = position;
-
-                warnings.push(LintWarning {
-                    line: line_num + 1,
-                    column: start + 1,
-                    message: format!("HTML tag '{}' is not allowed", tag),
-                    severity: Severity::Warning,
-                    fix: None,
-                });
+            } else {
+                // No code spans, just check for HTML tags directly
+                let re = Regex::new(r"<[^>]+>").unwrap();
+                
+                for cap in re.captures_iter(line) {
+                    let html_tag = cap.get(0).unwrap().as_str();
+                    let start_pos = cap.get(0).unwrap().start();
+                    
+                    if !self.is_tag_allowed(html_tag) {
+                        warnings.push(LintWarning {
+                            line: i + 1,
+                            column: start_pos + 1,
+                            message: format!("Found inline HTML tag: {}", html_tag),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range(i + 1, start_pos + 1),
+                                replacement: String::new(),
+                            }),
+                        });
+                    }
+                }
             }
         }
 
@@ -238,83 +186,94 @@ impl Rule for MD033NoInlineHtml {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _timer = crate::profiling::ScopedTimer::new("MD033_fix");
-
-        // Early return if no HTML tags
         if content.is_empty() || !content.contains('<') {
             return Ok(content.to_string());
         }
 
-        // Quick check with simplified pattern before doing full processing
-        if !HTML_TAG_QUICK_CHECK.is_match(content) {
-            return Ok(content.to_string());
-        }
-
+        let mut result = String::new();
         let lines: Vec<&str> = content.lines().collect();
-        let mut result_lines = Vec::with_capacity(lines.len());
 
-        // Use our custom code block detection which is more reliable
-        let code_block_map = self.detect_code_blocks(&lines);
-
-        for (line_num, line) in lines.iter().enumerate() {
-            // If the line is in a code block, preserve it
-            if code_block_map[line_num] {
-                result_lines.push(line.to_string());
+        for (i, line) in lines.iter().enumerate() {
+            // Keep lines in code blocks unchanged
+            if self.is_in_code_block(content, i) {
+                result.push_str(line);
+                if i < lines.len() - 1 {
+                    result.push('\n');
+                }
                 continue;
             }
 
-            // If the line has no HTML-like content, preserve it
-            if !line.contains('<') {
-                result_lines.push(line.to_string());
-                continue;
-            }
-
-            // Allow div tags with align attribute
-            if DIV_ALIGN_PATTERN.is_match(line.trim()) {
-                result_lines.push(line.to_string());
-                continue;
-            }
-
-            // For lines with potential HTML, handle code spans
-            let code_spans = self.compute_code_spans(line);
-
-            if code_spans.is_empty() {
-                // No code spans, can safely replace HTML tags
-                let fixed_line = HTML_TAG_PATTERN.replace_all(line, "").to_string();
-                result_lines.push(fixed_line);
-            } else {
-                // Line has code spans, need more careful processing
-                let mut current_line = line.to_string();
-
-                // Find tags but don't replace those in code spans
-                for cap in HTML_TAG_PATTERN.captures_iter(line) {
-                    if let Some(whole_match) = cap.get(0) {
-                        let position = whole_match.start();
-
-                        // If not in a code span, replace it
-                        if !self.is_in_code_span(&code_spans, position) {
-                            // Calculate adjusted positions after previous replacements
-                            let adjusted_start = position;
-                            let adjusted_end = whole_match.end();
-
-                            if adjusted_start < current_line.len()
-                                && adjusted_end <= current_line.len()
-                            {
-                                current_line.replace_range(adjusted_start..adjusted_end, "");
-                            }
+            // Handle lines with code spans carefully
+            if self.contains_code_span(line) {
+                let mut fixed_line = line.to_string();
+                let re = Regex::new(r"<[^>]+>").unwrap();
+                
+                // We need to track code spans to know if a tag is inside one
+                let mut spans = Vec::new();
+                let mut in_span = false;
+                let mut span_start = 0;
+                
+                for (pos, c) in line.char_indices() {
+                    if c == '`' {
+                        if !in_span {
+                            in_span = true;
+                            span_start = pos;
+                        } else {
+                            in_span = false;
+                            spans.push((span_start, pos));
                         }
                     }
                 }
-
-                result_lines.push(current_line);
+                
+                // Process each tag, checking if it's in a code span
+                let mut offset = 0;
+                for cap in re.captures_iter(line) {
+                    let html_tag = cap.get(0).unwrap().as_str();
+                    let start_pos = cap.get(0).unwrap().start();
+                    let end_pos = cap.get(0).unwrap().end();
+                    
+                    // Check if this tag is in a code span
+                    let in_code_span = spans.iter().any(|(start, end)| 
+                        start_pos >= *start && end_pos <= *end);
+                    
+                    if !in_code_span && !self.is_tag_allowed(html_tag) {
+                        // Remove the tag, adjusting for previous removals
+                        let adjusted_start = start_pos - offset;
+                        let adjusted_end = end_pos - offset;
+                        fixed_line.replace_range(adjusted_start..adjusted_end, "");
+                        offset += end_pos - start_pos;
+                    }
+                }
+                
+                result.push_str(&fixed_line);
+            } else {
+                // No code spans, just remove HTML tags that aren't allowed
+                let mut fixed_line = line.to_string();
+                let re = Regex::new(r"<[^>]+>").unwrap();
+                
+                let mut offset = 0;
+                for cap in re.captures_iter(line) {
+                    let html_tag = cap.get(0).unwrap().as_str();
+                    let start_pos = cap.get(0).unwrap().start();
+                    let end_pos = cap.get(0).unwrap().end();
+                    
+                    if !self.is_tag_allowed(html_tag) {
+                        // Remove the tag, adjusting for previous removals
+                        let adjusted_start = start_pos - offset;
+                        let adjusted_end = end_pos - offset;
+                        fixed_line.replace_range(adjusted_start..adjusted_end, "");
+                        offset += end_pos - start_pos;
+                    }
+                }
+                
+                result.push_str(&fixed_line);
+            }
+            
+            if i < lines.len() - 1 {
+                result.push('\n');
             }
         }
 
-        // Join the lines, preserving trailing newline if present
-        if content.ends_with('\n') {
-            Ok(format!("{}\n", result_lines.join("\n")))
-        } else {
-            Ok(result_lines.join("\n"))
-        }
+        Ok(result)
     }
 }

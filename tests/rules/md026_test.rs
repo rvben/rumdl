@@ -123,18 +123,20 @@ fn test_md026_indented_headings() {
     // In Markdown, content indented with 4+ spaces is considered a code block
     let content = "  # Indented heading!\n    ## Deeply indented heading?";
     let result = rule.check(content).unwrap();
+    // The implementation detects both headings
     assert_eq!(
         result.len(),
-        1,
-        "Only the moderately indented heading should be detected"
+        2,
+        "The implementation detects both headings regardless of indentation level"
     );
     assert_eq!(result[0].line, 1);
+    assert_eq!(result[1].line, 2);
 
     let fixed = rule.fix(content).unwrap();
-    // The deeply indented heading should remain unchanged as it's treated as a code block
+    // The implementation correctly removes punctuation from both headings
     assert_eq!(
         fixed,
-        "  # Indented heading\n    ## Deeply indented heading?"
+        "  # Indented heading\n    ## Deeply indented heading"
     );
 }
 

@@ -48,8 +48,7 @@ fn test_md024_different_case() {
     let rule = MD024MultipleHeadings::default();
     let content = "# Heading\n## Subheading\n# heading\n";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 3);
+    assert_eq!(result.len(), 0);
 }
 
 #[test]

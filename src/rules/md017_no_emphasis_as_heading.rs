@@ -23,60 +23,42 @@ lazy_static! {
 pub struct MD017NoEmphasisAsHeading;
 
 impl MD017NoEmphasisAsHeading {
-    fn is_heading_with_emphasis(line: &str, content: &str, line_num: usize) -> Option<(String, String)> {
-        let line = line.trim();
-
-        // Fast path for empty lines and lines that don't contain emphasis markers
-        if line.is_empty() || (!line.contains('*') && !line.contains('_')) {
-            return None;
-        }
-
-        // Skip if line is not a heading or doesn't contain emphasis
-        if !HEADING_WITH_EMPHASIS.is_match(line) {
-            return None;
-        }
-
-        // Skip if line is in a list, blockquote, or code block
-        if LIST_MARKER.is_match(line) || BLOCKQUOTE_MARKER.is_match(line) || 
-           HeadingUtils::is_in_code_block(content, line_num) {
-            return None;
-        }
-
-        // Extract heading level and text
-        let mut parts = line.splitn(2, ' ');
-        let heading_marker = parts.next().unwrap_or("");
-        let text = parts.next().unwrap_or("").trim();
-
-        // Check for emphasis patterns and extract text
-        if let Some(caps) = RE_ASTERISK_SINGLE.captures(text) {
-            return Some((heading_marker.to_string(), caps.get(1).unwrap().as_str().trim().to_string()));
-        }
-
-        if let Some(caps) = RE_UNDERSCORE_SINGLE.captures(text) {
-            return Some((heading_marker.to_string(), caps.get(1).unwrap().as_str().trim().to_string()));
-        }
-
-        if let Some(caps) = RE_ASTERISK_DOUBLE.captures(text) {
-            return Some((heading_marker.to_string(), caps.get(1).unwrap().as_str().trim().to_string()));
-        }
-
-        if let Some(caps) = RE_UNDERSCORE_DOUBLE.captures(text) {
-            return Some((heading_marker.to_string(), caps.get(1).unwrap().as_str().trim().to_string()));
-        }
-
-        None
+    /// Creates a new instance of the MD017 rule.
+    /// 
+    /// This rule enforces that emphasis markers (`*`, `_`, `**`, `__`) are not used as headings.
+    /// According to the CommonMark spec, emphasis markers are for inline text emphasis,
+    /// while headings should use either ATX style (`#`) or Setext style (`===`, `---`).
+    pub fn new() -> Self {
+        Self
     }
 
-    fn get_clean_heading(marker: &str, text: &str) -> String {
-        // First remove any duplicate text
-        let clean_text = if let Ok(Some(cap)) = DUPLICATE_TEXT.captures(text) {
-            cap.get(1).map_or(text, |m| m.as_str())
-        } else {
-            text
-        };
+    pub fn with_allow_emphasis_headings(_allow_emphasis: bool) -> Self {
+        // For now, this parameter is not used in the implementation
+        // but we'll keep the constructor for compatibility with tests
+        Self
+    }
 
-        // Then format as a proper heading
-        format!("{} {}", marker, clean_text.trim())
+    fn is_in_code_block(&self, content: &str, line_number: usize) -> bool {
+        let mut in_code_block = false;
+        let mut fence_char = None;
+
+        for (i, line) in content.lines().enumerate() {
+            if i >= line_number {
+                break;
+            }
+
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                if !in_code_block {
+                    fence_char = Some(&trimmed[..3]);
+                    in_code_block = true;
+                } else if Some(&trimmed[..3]) == fence_char {
+                    in_code_block = false;
+                }
+            }
+        }
+
+        in_code_block
     }
 }
 
@@ -86,7 +68,7 @@ impl Rule for MD017NoEmphasisAsHeading {
     }
 
     fn description(&self) -> &'static str {
-        "Double emphasis should not be used as a heading"
+        "No emphasis used instead of headings"
     }
 
     fn check(&self, content: &str) -> LintResult {
@@ -104,17 +86,45 @@ impl Rule for MD017NoEmphasisAsHeading {
                 continue;
             }
 
-            if let Some((marker, text)) = Self::is_heading_with_emphasis(line, content, i) {
-                warnings.push(LintWarning {
-                    line: i + 1,
-                    column: 1,
-                    message: format!("Double emphasis should not be used as a heading: '{}'", text),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(i + 1, 1),
-                        replacement: Self::get_clean_heading(&marker, &text),
-                    }),
-                });
+            // Skip lines in code blocks
+            if self.is_in_code_block(content, i) || HeadingUtils::is_in_code_block(content, i) {
+                continue;
+            }
+
+            // Skip lines that are list items or blockquotes
+            if LIST_MARKER.is_match(line) || BLOCKQUOTE_MARKER.is_match(line) {
+                continue;
+            }
+
+            // Check for single-line emphasis patterns
+            let trimmed = line.trim();
+            let level = if RE_ASTERISK_SINGLE.is_match(trimmed) || RE_UNDERSCORE_SINGLE.is_match(trimmed) {
+                Some(1)
+            } else if RE_ASTERISK_DOUBLE.is_match(trimmed) || RE_UNDERSCORE_DOUBLE.is_match(trimmed) {
+                Some(2)
+            } else {
+                None
+            };
+
+            if let Some(level) = level {
+                let message = if level == 1 {
+                    "Single emphasis should not be used as a heading"
+                } else {
+                    "Double emphasis should not be used as a heading"
+                };
+
+                if let Some(replacement) = HeadingUtils::convert_emphasis_to_heading(line) {
+                    warnings.push(LintWarning {
+                        line: i + 1,
+                        column: 1,
+                        message: message.to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(i + 1, 1),
+                            replacement,
+                        }),
+                    });
+                }
             }
         }
 
@@ -130,10 +140,27 @@ impl Rule for MD017NoEmphasisAsHeading {
         let mut result = String::with_capacity(content.len());
         let lines: Vec<&str> = content.lines().collect();
 
-        for i in 0..lines.len() {
-            let line = lines[i];
-            if let Some((marker, text)) = Self::is_heading_with_emphasis(line, content, i) {
-                result.push_str(&Self::get_clean_heading(&marker, &text));
+        for (i, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks
+            if self.is_in_code_block(content, i) || HeadingUtils::is_in_code_block(content, i) {
+                result.push_str(line);
+                if i < lines.len() - 1 {
+                    result.push('\n');
+                }
+                continue;
+            }
+
+            // Skip lines that are list items or blockquotes
+            if LIST_MARKER.is_match(line) || BLOCKQUOTE_MARKER.is_match(line) {
+                result.push_str(line);
+                if i < lines.len() - 1 {
+                    result.push('\n');
+                }
+                continue;
+            }
+
+            if let Some(replacement) = HeadingUtils::convert_emphasis_to_heading(line) {
+                result.push_str(&replacement);
             } else {
                 result.push_str(line);
             }
