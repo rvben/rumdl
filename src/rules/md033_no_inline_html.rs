@@ -10,6 +10,8 @@ lazy_static! {
     static ref HTML_TAG_QUICK_CHECK: Regex = Regex::new(r"</?[a-zA-Z]").unwrap();
     // Code fence patterns
     static ref CODE_FENCE_START: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
+    // Pattern to match div tags with align attribute
+    static ref DIV_ALIGN_PATTERN: Regex = Regex::new(r"^<div\s+align=").unwrap();
 }
 
 #[derive(Debug, Default)]
@@ -37,11 +39,21 @@ impl MD033NoInlineHtml {
             return Vec::new();
         }
 
+        // Allow div tags with align attribute
+        if DIV_ALIGN_PATTERN.is_match(line.trim()) {
+            return Vec::new();
+        }
+
         let mut tags = Vec::new();
 
         for cap in HTML_TAG_PATTERN.captures_iter(line) {
             let tag_name = cap[2].to_string().to_lowercase();
             let position = cap.get(0).unwrap().start();
+
+            // Skip div closing tags if we're allowing div with align
+            if tag_name == "div" && cap[1].starts_with('/') {
+                continue;
+            }
 
             if !self.allowed_elements.contains(&tag_name) {
                 tags.push((tag_name, position));
@@ -76,105 +88,78 @@ impl MD033NoInlineHtml {
         if spans.is_empty() {
             let chars: Vec<char> = line.chars().collect();
             let mut i = 0;
+            let mut in_code = false;
+            let mut code_start = 0;
 
             while i < chars.len() {
                 if chars[i] == '`' {
-                    let start_pos = i;
-                    i += 1;
-
-                    // Handle cases with multiple backticks
-                    while i < chars.len() && chars[i] == '`' {
-                        i += 1;
+                    if !in_code {
+                        code_start = i;
+                        in_code = true;
+                    } else {
+                        spans.push((code_start, i + 1));
+                        in_code = false;
                     }
-
-                    // Find the closing backticks
-                    let backtick_count = i - start_pos;
-                    let mut j = i;
-
-                    while j < chars.len() {
-                        if chars[j] == '`' {
-                            // Count consecutive backticks
-                            let _end_start = j;
-                            let mut end_count = 1;
-                            j += 1;
-
-                            while j < chars.len() && chars[j] == '`' {
-                                end_count += 1;
-                                j += 1;
-                            }
-
-                            // If we found matching backticks, record the code span
-                            if end_count == backtick_count {
-                                spans.push((start_pos, j));
-                                i = j; // Skip ahead
-                                break;
-                            }
-                        } else {
-                            j += 1;
-                        }
-                    }
-                } else {
-                    i += 1;
                 }
+                i += 1;
             }
         }
 
-        // Sort spans by start position to enable binary search
-        spans.sort_by_key(|span| span.0);
         spans
     }
 
-    // Check if position is inside any code span using binary search for better performance
+    // Optimized code block detection
     #[inline]
-    fn is_in_code_span(&self, code_spans: &[(usize, usize)], position: usize) -> bool {
-        // Binary search optimization for large number of spans
-        if code_spans.len() > 10 {
-            // Find the span that could potentially contain the position
-            match code_spans.binary_search_by(|span| {
-                if position < span.0 {
-                    std::cmp::Ordering::Greater
-                } else if position > span.1 {
-                    std::cmp::Ordering::Less
-                } else {
-                    std::cmp::Ordering::Equal
-                }
-            }) {
-                Ok(_) => return true, // Found exact match
-                Err(_) => {
-                    // Check adjacent spans
-                    for span in code_spans {
-                        if position > span.0 && position < span.1 {
-                            return true;
-                        }
-                    }
-                }
-            }
-            return false;
-        }
-
-        // For small number of spans, linear search is faster
-        code_spans
-            .iter()
-            .any(|(start, end)| position > *start && position < *end)
-    }
-
-    // Simple function to detect code blocks
     fn detect_code_blocks(&self, lines: &[&str]) -> Vec<bool> {
-        let mut in_code_block = false;
+        let _timer = crate::profiling::ScopedTimer::new("MD033_detect_code_blocks");
+
         let mut code_block_map = vec![false; lines.len()];
+        let mut in_code_block = false;
+        let mut fence_type = None;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
-            // Check for code fence markers
-            if CODE_FENCE_START.is_match(trimmed) {
-                in_code_block = !in_code_block;
+            if let Some(ref current_fence) = fence_type {
+                if trimmed.starts_with(current_fence) {
+                    in_code_block = false;
+                    fence_type = None;
+                }
+            } else if trimmed.starts_with("```") {
+                in_code_block = true;
+                fence_type = Some("```");
+            } else if trimmed.starts_with("~~~") {
+                in_code_block = true;
+                fence_type = Some("~~~");
             }
 
             code_block_map[i] = in_code_block;
         }
 
         code_block_map
+    }
+
+    // Optimized check for code span containment
+    #[inline]
+    fn is_in_code_span(&self, code_spans: &[(usize, usize)], position: usize) -> bool {
+        // Use binary search for better performance with many code spans
+        let mut left = 0;
+        let mut right = code_spans.len();
+
+        while left < right {
+            let mid = (left + right) / 2;
+            let (start, end) = code_spans[mid];
+
+            if position < start {
+                right = mid;
+            } else if position >= end {
+                left = mid + 1;
+            } else {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
@@ -280,6 +265,12 @@ impl Rule for MD033NoInlineHtml {
 
             // If the line has no HTML-like content, preserve it
             if !line.contains('<') {
+                result_lines.push(line.to_string());
+                continue;
+            }
+
+            // Allow div tags with align attribute
+            if DIV_ALIGN_PATTERN.is_match(line.trim()) {
                 result_lines.push(line.to_string());
                 continue;
             }

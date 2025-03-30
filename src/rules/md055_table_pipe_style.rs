@@ -128,35 +128,89 @@ impl MD055TablePipeStyle {
     fn fix_table_row(&self, line: &str, target_style: &str) -> String {
         let trimmed = line.trim();
         
-        // Don't modify empty lines or delimiter rows
-        if trimmed.is_empty() || self.is_delimiter_row(line) {
+        // Don't modify empty lines
+        if trimmed.is_empty() {
             return line.to_string();
         }
 
-        match target_style {
+        // Preserve leading whitespace
+        let leading_whitespace = line.chars()
+            .take_while(|c| c.is_whitespace())
+            .collect::<String>();
+
+        // Handle delimiter rows specially
+        if self.is_delimiter_row(line) {
+            let mut fixed = trimmed.to_string();
+            if target_style == "leading_and_trailing" {
+                if !fixed.starts_with('|') {
+                    fixed = format!("|{}", fixed);
+                }
+                if !fixed.ends_with('|') {
+                    fixed = format!("{}|", fixed);
+                }
+            } else if target_style == "no_leading_or_trailing" {
+                if fixed.starts_with('|') {
+                    fixed = fixed[1..].trim_start().to_string();
+                }
+                if fixed.ends_with('|') {
+                    fixed = fixed[..fixed.len() - 1].trim_end().to_string();
+                }
+            }
+            return format!("{}{}", leading_whitespace, fixed);
+        }
+
+        // If the line has been corrupted with multiple copies, extract the first valid row
+        let first_row = if let Some(idx) = trimmed.find('|') {
+            let mut cells = Vec::new();
+            let mut current_cell = String::new();
+            let mut in_cell = true;
+            let mut pipe_count = 0;
+            let mut found_valid_row = false;
+
+            for c in trimmed[idx..].chars() {
+                if c == '|' {
+                    pipe_count += 1;
+                    if in_cell {
+                        cells.push(current_cell.trim().to_string());
+                        current_cell.clear();
+                    }
+                    in_cell = !in_cell;
+                } else if in_cell {
+                    current_cell.push(c);
+                }
+
+                // If we've found a complete row (at least 2 pipes for 3 cells)
+                if pipe_count >= 2 && cells.len() >= 2 {
+                    found_valid_row = true;
+                    break;
+                }
+            }
+
+            if found_valid_row {
+                if !current_cell.is_empty() {
+                    cells.push(current_cell.trim().to_string());
+                }
+                cells.join(" | ")
+            } else {
+                trimmed.to_string()
+            }
+        } else {
+            trimmed.to_string()
+        };
+
+        // Rebuild the row with proper formatting
+        let fixed = match target_style {
             "leading_and_trailing" => {
-                let mut result = String::new();
-                if !trimmed.starts_with('|') {
-                    result.push('|');
-                }
-                result.push_str(trimmed);
-                if !trimmed.ends_with('|') {
-                    result.push('|');
-                }
-                result
+                format!("| {} |", first_row)
             }
             "no_leading_or_trailing" => {
-                let mut result = trimmed.to_string();
-                if result.starts_with('|') {
-                    result = result[1..].to_string();
-                }
-                if result.ends_with('|') {
-                    result.pop();
-                }
-                result.trim().to_string()
+                first_row
             }
-            _ => line.to_string(),
-        }
+            _ => first_row,
+        };
+
+        // Reapply the original indentation
+        format!("{}{}", leading_whitespace, fixed)
     }
 }
 
@@ -265,7 +319,9 @@ impl Rule for MD055TablePipeStyle {
             // Don't modify lines in code blocks
             if code_blocks.iter().any(|(start, end)| line_start >= *start && line_start < *end) {
                 result.push_str(line);
-                result.push('\n');
+                if i < lines.len() - 1 {
+                    result.push('\n');
+                }
                 continue;
             }
 
@@ -276,21 +332,31 @@ impl Rule for MD055TablePipeStyle {
                     in_table = true;
                 }
 
-                if let Some(style) = self.determine_pipe_style(line) {
-                    // For "consistent" mode, use the first table's style
-                    if table_style.is_none() && self.style == "consistent" {
-                        table_style = Some(style);
-                    }
-
-                    let target_style = if self.style == "consistent" {
-                        table_style.unwrap_or("leading_and_trailing")
+                // Check if this is a delimiter row
+                if self.is_delimiter_row(line) {
+                    // Apply the same style to delimiter rows
+                    if let Some(style) = table_style {
+                        result.push_str(&self.fix_table_row(line, style));
                     } else {
-                        &self.style
-                    };
-
-                    result.push_str(&self.fix_table_row(line, target_style));
+                        result.push_str(line);
+                    }
                 } else {
-                    result.push_str(line);
+                    if let Some(style) = self.determine_pipe_style(line) {
+                        // For "consistent" mode, use the first table's style
+                        if table_style.is_none() && self.style == "consistent" {
+                            table_style = Some(style);
+                        }
+
+                        let target_style = if self.style == "consistent" {
+                            table_style.unwrap_or("leading_and_trailing")
+                        } else {
+                            &self.style
+                        };
+
+                        result.push_str(&self.fix_table_row(line, target_style));
+                    } else {
+                        result.push_str(line);
+                    }
                 }
             } else {
                 if trimmed.is_empty() {
@@ -301,9 +367,24 @@ impl Rule for MD055TablePipeStyle {
                 }
                 result.push_str(line);
             }
+
+            if i < lines.len() - 1 {
+                result.push('\n');
+            }
+        }
+
+        // Preserve the original trailing newline if it existed
+        if content.ends_with('\n') && !result.ends_with('\n') {
             result.push('\n');
         }
 
         Ok(result)
     }
 }
+
+
+
+
+
+
+

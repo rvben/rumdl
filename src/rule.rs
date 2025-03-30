@@ -1,6 +1,18 @@
 use std::ops::Range;
 use thiserror::Error;
 
+// Macro to implement box_clone for Rule implementors
+#[macro_export]
+macro_rules! impl_rule_clone {
+    ($ty:ty) => {
+        impl $ty {
+            fn box_clone(&self) -> Box<dyn Rule> {
+                Box::new(self.clone())
+            }
+        }
+    };
+}
+
 #[derive(Debug, Error)]
 pub enum LintError {
     #[error("Invalid input: {0}")]
@@ -30,6 +42,11 @@ pub struct Fix {
 pub enum Severity {
     Error,
     Warning,
+}
+
+// Object-safe clone trait for Rule
+pub trait RuleClone {
+    fn clone_box(&self) -> Box<dyn Rule>;
 }
 
 pub trait Rule {

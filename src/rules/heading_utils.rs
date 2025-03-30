@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use regex::Regex;
+use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
     // Optimized regex patterns with more efficient non-capturing groups
@@ -11,6 +12,7 @@ lazy_static! {
     static ref FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*$").unwrap();
     static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
     static ref INDENTED_CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s{4,})").unwrap();
+    static ref DUPLICATE_HEADING: FancyRegex = FancyRegex::new(r"^(#{1,6}\s+)([^#\n]+?)(?:(?:\2)+|\*\*[^*\n]+\*\*|\*[^*\n]+\*|__[^_\n]+__|_[^_\n]+_)*$").unwrap();
 
     // Valid emphasis patterns at start of line that should not be confused with headings or lists
     static ref VALID_START_EMPHASIS: Regex = Regex::new(r"^(\s*)(\*\*[^*\s]|\*[^*\s]|__[^_\s]|_[^_\s])").unwrap();
@@ -99,6 +101,18 @@ impl HeadingUtils {
 
         let line = lines[line_num];
 
+        // Check for duplicated heading first
+        if let Ok(Some(cap)) = DUPLICATE_HEADING.captures(line) {
+            let hashes = cap.get(1).map_or("", |m| m.as_str());
+            let text = cap.get(2).map_or("", |m| m.as_str());
+            let level = hashes.trim_end().len();
+            return Some(Heading {
+                level,
+                text: text.to_string(),
+                style: HeadingStyle::Atx,
+            });
+        }
+
         // ATX style (#)
         if let Some(atx_heading) = Self::parse_atx_heading(line) {
             return Some(atx_heading);
@@ -155,6 +169,11 @@ impl HeadingUtils {
         }
     }
 
+    /// Get the indentation level of a line
+    pub fn get_indentation(line: &str) -> usize {
+        line.len() - line.trim_start().len()
+    }
+
     /// Convert a heading to a different style
     pub fn convert_heading_style(heading: &Heading, target_style: &HeadingStyle) -> String {
         match target_style {
@@ -202,19 +221,14 @@ impl HeadingUtils {
                         }
                     )
                 } else {
-                    let text = heading.text.clone(); // Keep original formatting
+                    // Use setext style for levels 1-2
+                    let text = heading.text.trim();
                     let underline_char = if heading.level == 1 { '=' } else { '-' };
-                    let underline = underline_char
-                        .to_string()
-                        .repeat(text.trim().chars().count().max(3));
+                    let underline = underline_char.to_string().repeat(text.len().max(3));
                     format!("{}\n{}", text, underline)
                 }
             }
         }
-    }
-
-    pub fn get_indentation(line: &str) -> usize {
-        line.len() - line.trim_start().len()
     }
 
     pub fn get_heading_text(line: &str) -> Option<String> {

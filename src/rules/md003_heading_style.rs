@@ -1,9 +1,39 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
+use lazy_static::lazy_static;
+use regex::Regex;
+use fancy_regex::Regex as FancyRegex;
 
-#[derive(Debug)]
+use crate::{
+    rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity},
+    rules::heading_utils::{HeadingStyle, HeadingUtils},
+    utils::range_utils::LineIndex,
+};
+
+lazy_static! {
+    static ref HEADING_PATTERN: Regex = Regex::new(r"^(#{1,6})(?:\s+(.+?))?(?:\s+#*)?$").unwrap();
+    
+    // Improved patterns for heading duplication detection
+    // This catches cases like: ## Heading## Heading, ## Heading **Heading**, etc.
+    static ref DUPLICATED_HEADING: FancyRegex = FancyRegex::new(
+        r"^(#{1,6}\s+)([^#\n.]+?)(?:\s*#{1,6}\s+\2|\s*\*\*\2\*\*|\s*\*\2\*|\s*__\2__|\s*_\2_)"
+    ).unwrap();
+    
+    // This handles duplications with punctuation: ## Heading.## Heading
+    static ref DUPLICATED_WITH_PUNCTUATION: FancyRegex = FancyRegex::new(
+        r"^(#{1,6}\s+)([^#\n]+?)(?:\.\s*#{1,6}\s+\2|\.\s*\*\*\2\*\*|\.\s*\*\2\*|\.\s*__\2__|\.\s*_\2_)"
+    ).unwrap();
+    
+    // This handles cases where multiple headings are chained together
+    static ref CHAINED_HEADINGS: FancyRegex = FancyRegex::new(
+        r"^(#{1,6}\s+)([^#\n]+?)(?:(#{1,6})\s+([^#\n]+?))+$"
+    ).unwrap();
+    
+    static ref EMPHASIS_PATTERN: Regex = Regex::new(r"\*\*[^*\n]+\*\*|\*[^*\n]+\*|__[^_\n]+__|_[^_\n]+_").unwrap();
+    static ref DUPLICATE_WORDS: FancyRegex = FancyRegex::new(r"(\b\w+\b)(?:\s+\1\b)+").unwrap();
+    static ref HEADING_WITH_EMPHASIS: Regex = Regex::new(r"^(#+\s+).*?(\*\*[^*]+\*\*|__[^_]+__)").unwrap();
+}
+
 pub struct MD003HeadingStyle {
-    pub style: HeadingStyle,
+    style: HeadingStyle,
 }
 
 impl Default for MD003HeadingStyle {
@@ -11,12 +41,6 @@ impl Default for MD003HeadingStyle {
         Self {
             style: HeadingStyle::Atx,
         }
-    }
-}
-
-impl MD003HeadingStyle {
-    pub fn new(style: HeadingStyle) -> Self {
-        Self { style }
     }
 }
 
@@ -32,127 +56,263 @@ impl Rule for MD003HeadingStyle {
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        let mut i = 0;
 
-        while i < lines.len() {
-            let remaining = &lines[i..].join("\n");
-            if let Some(heading) = HeadingUtils::parse_heading(remaining, 0) {
-                // For setext style, only check headings that could be setext (level 1-2)
-                let should_check = match self.style {
-                    HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
-                        // If target style is setext, only validate level 1-2 headings
-                        // and allow both setext1 and setext2 styles
-                        if heading.level <= 2 {
-                            !matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2)
-                        } else {
-                            false
-                        }
-                    }
-                    _ => heading.style != self.style,
-                };
+        for (i, line) in lines.iter().enumerate() {
+            // Skip if we're in a code block
+            if HeadingUtils::is_in_code_block(content, i) {
+                continue;
+            }
 
-                if should_check {
-                    let indentation = HeadingUtils::get_indentation(lines[i]);
+            // Check for various types of duplicated headings
+            if let Some(fixed_line) = self.detect_and_fix_duplicated_heading(line) {
+                warnings.push(LintWarning {
+                    line: i + 1,
+                    column: 1,
+                    message: "Duplicated heading text detected".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: LineIndex::new(content.to_string())
+                            .line_col_to_byte_range(i + 1, 1),
+                        replacement: fixed_line,
+                    }),
+                });
+                continue;
+            }
+
+            // Check if this line is a heading with inconsistent style
+            if let Some(heading) = HeadingUtils::parse_heading(content, i) {
+                if heading.style != self.style {
+                    let fixed_line = HeadingUtils::convert_heading_style(&heading, &self.style);
                     warnings.push(LintWarning {
                         line: i + 1,
-                        column: indentation + 1,
-                        message: format!("Heading style should be {:?}", self.style),
+                        column: 1,
+                        message: format!("Heading style should be {}", match self.style {
+                            HeadingStyle::Atx => "atx",
+                            HeadingStyle::AtxClosed => "atx_closed",
+                            HeadingStyle::Setext1 => "setext_1",
+                            HeadingStyle::Setext2 => "setext_2",
+                        }),
                         severity: Severity::Warning,
-                        fix: None,
+                        fix: Some(Fix {
+                            range: LineIndex::new(content.to_string())
+                                .line_col_to_byte_range(i + 1, 1),
+                            replacement: fixed_line,
+                        }),
                     });
                 }
-                // Skip the underline for setext headings
-                if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
-                    i += 1;
-                }
             }
-            i += 1;
         }
 
         Ok(warnings)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        if content.is_empty() {
-            return Ok(content.to_string());
-        }
-
+        let mut fixed_lines = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        let mut fixed_lines: Vec<String> = Vec::new();
-        let target_style = self.style;
-        let mut i = 0;
-        let mut in_front_matter = false;
 
-        // Process each line
-        while i < lines.len() {
-            let line = lines[i];
-
-            // Handle front matter
-            if i == 0 && line.trim() == "---" {
-                in_front_matter = true;
+        for (i, line) in lines.iter().enumerate() {
+            if HeadingUtils::is_in_code_block(content, i) {
                 fixed_lines.push(line.to_string());
-                i += 1;
                 continue;
             }
 
-            if in_front_matter {
-                fixed_lines.push(line.to_string());
-                if line.trim() == "---" {
-                    in_front_matter = false;
-                }
-                i += 1;
+            // First check for duplicated headings and fix them
+            if let Some(fixed_line) = self.detect_and_fix_duplicated_heading(line) {
+                fixed_lines.push(fixed_line);
                 continue;
             }
 
-            // Preserve blank lines
-            if line.trim().is_empty() {
-                fixed_lines.push(line.to_string());
-                i += 1;
-                continue;
-            }
-
-            let indentation = HeadingUtils::get_indentation(line);
-
-            // Check if current line is a heading
+            // Then handle style consistency
             if let Some(heading) = HeadingUtils::parse_heading(content, i) {
-                if matches!(target_style, HeadingStyle::Setext1 | HeadingStyle::Setext2)
-                    && heading.level <= 2
-                {
-                    // For setext headings
-                    let text = heading.text.trim();
-                    let underline_char = if heading.level == 1 { '=' } else { '-' };
-                    let underline = underline_char
-                        .to_string()
-                        .repeat(text.chars().count().max(3));
-
-                    // Add the heading text with indentation
-                    fixed_lines.push(format!("{}{}", " ".repeat(indentation), text));
-
-                    // Add the underline with same indentation
-                    fixed_lines.push(format!("{}{}", " ".repeat(indentation), underline));
-
-                    // Skip the underline for source setext headings
-                    if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
-                        i += 1;
-                    }
+                if heading.style != self.style {
+                    fixed_lines.push(HeadingUtils::convert_heading_style(&heading, &self.style));
                 } else {
-                    // For ATX or ATX Closed style
-                    let converted = HeadingUtils::convert_heading_style(&heading, &target_style);
-                    fixed_lines.push(format!("{}{}", " ".repeat(indentation), converted));
-
-                    // Skip the underline for source setext headings
-                    if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
-                        i += 1;
-                    }
+                    fixed_lines.push(line.to_string());
                 }
             } else {
-                // Not a heading, just copy the line
                 fixed_lines.push(line.to_string());
             }
-
-            i += 1;
         }
 
         Ok(fixed_lines.join("\n"))
+    }
+}
+
+impl MD003HeadingStyle {
+    /// Detect various types of duplicated headings and fix them
+    fn detect_and_fix_duplicated_heading(&self, line: &str) -> Option<String> {
+        // Simple duplication: ## Heading## Heading
+        if let Ok(Some(caps)) = DUPLICATED_HEADING.captures(line) {
+            let prefix = caps.get(1).unwrap().as_str();
+            let text = caps.get(2).unwrap().as_str().trim();
+            return Some(format!("{}{}", prefix, text));
+        }
+        
+        // Duplication with punctuation: ## Heading.## Heading
+        if let Ok(Some(caps)) = DUPLICATED_WITH_PUNCTUATION.captures(line) {
+            let prefix = caps.get(1).unwrap().as_str();
+            let text = caps.get(2).unwrap().as_str().trim();
+            return Some(format!("{}{}", prefix, text));
+        }
+        
+        // Chained headings: ## Heading## Another Heading
+        if let Ok(Some(caps)) = CHAINED_HEADINGS.captures(line) {
+            let prefix = caps.get(1).unwrap().as_str();
+            let text = caps.get(2).unwrap().as_str().trim();
+            return Some(format!("{}{}", prefix, text));
+        }
+        
+        // Handle complex cases with a combination of heading markers and emphasis
+        if self.has_mixed_heading_markers(line) {
+            return Some(self.clean_heading_markers(line));
+        }
+        
+        None
+    }
+    
+    /// Check if a line has mixed heading markers (combination of # and emphasis)
+    fn has_mixed_heading_markers(&self, line: &str) -> bool {
+        // Count # symbols after the initial heading marker
+        if !line.starts_with('#') {
+            return false;
+        }
+        
+        let parts: Vec<&str> = line.splitn(2, ' ').collect();
+        if parts.len() < 2 {
+            return false;
+        }
+        
+        let heading_text = parts[1];
+        
+        // Check for additional # symbols or emphasis markers
+        heading_text.contains('#') || 
+            heading_text.contains("**") || 
+            heading_text.contains('*') || 
+            heading_text.contains("__") || 
+            heading_text.contains('_')
+    }
+    
+    /// Clean a heading by removing duplicate markers and emphasis
+    fn clean_heading_markers(&self, line: &str) -> String {
+        if let Some(caps) = HEADING_PATTERN.captures(line) {
+            let level_marker = caps.get(1).unwrap().as_str();
+            let mut text = caps.get(2).map_or("", |m| m.as_str()).to_string();
+            
+            // Remove any emphasis markers - use a different approach to avoid borrowing issues
+            let mut cleaned_text = text.clone();
+            for pattern in &["**", "*", "__", "_"] {
+                // Handle each type of emphasis marker separately
+                while cleaned_text.contains(pattern) {
+                    let start_pos = cleaned_text.find(pattern).unwrap();
+                    let end_pos = cleaned_text[start_pos + pattern.len()..].find(pattern)
+                        .map(|pos| start_pos + pattern.len() + pos + pattern.len())
+                        .unwrap_or(cleaned_text.len());
+                    
+                    if end_pos <= start_pos + pattern.len() {
+                        // No matching end marker, break to avoid infinite loop
+                        break;
+                    }
+                    
+                    // Extract emphasized text without markers
+                    if end_pos < cleaned_text.len() {
+                        let before = &cleaned_text[0..start_pos];
+                        let emphasized = &cleaned_text[start_pos + pattern.len()..end_pos - pattern.len()];
+                        let after = &cleaned_text[end_pos..];
+                        cleaned_text = format!("{}{}{}", before, emphasized, after);
+                    } else {
+                        // Reached the end without finding closing marker
+                        break;
+                    }
+                }
+            }
+            text = cleaned_text;
+            
+            // Remove any extra # markers
+            text = text.replace('#', "");
+            
+            // Remove duplicate words
+            if let Ok(Some(_)) = DUPLICATE_WORDS.captures(&text) {
+                let words: Vec<&str> = text.split_whitespace().collect();
+                let mut unique_words = Vec::new();
+                
+                for word in words {
+                    if unique_words.is_empty() || unique_words.last().unwrap() != &word {
+                        unique_words.push(word);
+                    }
+                }
+                
+                text = unique_words.join(" ");
+            }
+            
+            // Clean up extra whitespace
+            text = text.trim().to_string();
+            
+            // Return cleaned heading
+            format!("{} {}", level_marker, text)
+        } else {
+            // If not a valid heading pattern, return unchanged
+            line.to_string()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_atx_heading_style() {
+        let rule = MD003HeadingStyle::default();
+        let content = "# Heading 1\n## Heading 2\nHeading 1\n=======\nHeading 2\n-------\n";
+        let result = rule.check(content).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 3);
+        assert_eq!(result[1].line, 5);
+    }
+
+    #[test]
+    fn test_setext_heading_style() {
+        let mut rule = MD003HeadingStyle::default();
+        rule.style = HeadingStyle::Setext1;
+        let content = "# Heading 1\n## Heading 2\nHeading 1\n=======\nHeading 2\n-------\n";
+        let result = rule.check(content).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[1].line, 2);
+    }
+
+    #[test]
+    fn test_fix_duplicated_headings() {
+        let rule = MD003HeadingStyle::default();
+        
+        // Test simple duplication
+        let content = "## Heading## Heading";
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "## Heading");
+        
+        // Test duplication with period
+        let content = "## Heading.## Heading";
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "## Heading");
+        
+        // Test duplication with emphasis
+        let content = "## Heading**Heading**";
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "## Heading");
+        
+        // Test complex duplication
+        let content = "## An extremely fast Markdown linter and formatter, written in Rust.## An extremely fast Markdown linter and formatter, written in Rust.**An extremely fast Markdown linter and formatter, written in Rust.**";
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "## An extremely fast Markdown linter and formatter, written in Rust");
+    }
+    
+    #[test]
+    fn test_heading_duplication_in_code_blocks() {
+        let rule = MD003HeadingStyle::default();
+        
+        // Test that duplication is not fixed in code blocks
+        let content = "```\n## Heading## Heading\n```";
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "```\n## Heading## Heading\n```");
     }
 }

@@ -93,6 +93,8 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     // Add implemented rules
     rules.push(Box::new(MD001HeadingIncrement));
     rules.push(Box::new(MD002FirstHeadingH1::default()));
+    rules.push(Box::new(MD017NoEmphasisAsHeading::default()));
+    rules.push(Box::new(MD036NoEmphasisOnlyFirst {}));
     rules.push(Box::new(MD003HeadingStyle::default()));
     rules.push(Box::new(MD004UnorderedListStyle::default()));
     rules.push(Box::new(MD005ListIndent));
@@ -139,7 +141,6 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     rules.push(Box::new(MD014CommandsShowOutput::default()));
     rules.push(Box::new(MD015NoMissingSpaceAfterListMarker::default()));
     rules.push(Box::new(MD016NoMultipleSpaceAfterListMarker::default()));
-    rules.push(Box::new(MD017NoEmphasisAsHeading::default()));
     rules.push(Box::new(MD018NoMissingSpaceAtx {}));
     rules.push(Box::new(MD019NoMultipleSpaceAtx {}));
     rules.push(Box::new(MD020NoMissingSpaceClosedAtx {}));
@@ -158,7 +159,6 @@ fn get_rules(opts: &Cli) -> Vec<Box<dyn Rule>> {
     rules.push(Box::new(MD033NoInlineHtml::default()));
     rules.push(Box::new(MD034NoBareUrls {}));
     rules.push(Box::new(MD035HRStyle::default()));
-    rules.push(Box::new(MD036NoEmphasisOnlyFirst {}));
     rules.push(Box::new(MD037SpacesAroundEmphasis {}));
     rules.push(Box::new(MD038NoSpaceInCode {}));
     rules.push(Box::new(MD039NoSpaceInLinks {}));
@@ -315,7 +315,7 @@ fn process_file(
     let mut has_warnings = false;
     let mut total_warnings = 0;
     let mut total_fixed = 0;
-    let mut all_warnings = Vec::new();
+    let mut all_warnings: Vec<(&'static str, &Box<dyn Rule>, LintWarning)> = Vec::new();
 
     {
         let _timer = rumdl::profiling::ScopedTimer::new(&format!("check_rules:{}", path));
@@ -410,33 +410,98 @@ fn process_file(
         let mut fixed_content = content.clone();
         let mut fixed_warnings = 0;
 
-        // Group all warnings by rule, then apply each rule's fixes in a single operation
-        let mut rule_to_warnings: std::collections::HashMap<&'static str, Vec<&LintWarning>> =
-            std::collections::HashMap::new();
-
-        for (rule_name, _, warning) in &all_warnings {
-            if warning.fix.is_some() {
-                rule_to_warnings.entry(rule_name).or_default().push(warning);
+        // Define a rule application order that reduces duplication issues
+        // Process emphasis and heading rules first, then other rules
+        let mut rule_priorities: Vec<&'static str> = vec![
+            // Process emphasis rules first
+            "MD017", // NoEmphasisAsHeading
+            "MD036", // NoEmphasisOnlyFirst
+            
+            // Then heading style rules 
+            "MD003", // HeadingStyle
+            
+            // Then all other rules
+        ];
+        
+        // Add remaining rules in their original order
+        for rule in rules {
+            let name = rule.name();
+            if !rule_priorities.contains(&name) {
+                rule_priorities.push(name);
             }
         }
-
-        // Apply fixes for each rule
-        for (rule_name, warnings) in rule_to_warnings {
-            // Find the rule by name
-            if let Some(rule) = rules.iter().find(|r| r.name() == rule_name) {
-                let _fix_timer =
-                    rumdl::profiling::ScopedTimer::new(&format!("fix_rule:{}:{}", rule_name, path));
-
-                match rule.fix(&fixed_content) {
-                    Ok(new_content) => {
-                        fixed_warnings += warnings.len();
-                        fixed_content = new_content;
+        
+        // Apply fixes in priority order
+        for rule_name in rule_priorities {
+            // Skip rules that don't exist in our loaded rules
+            let rule = match rules.iter().find(|r| r.name() == rule_name) {
+                Some(r) => r,
+                None => continue,
+            };
+            
+            // Skip rules with no warnings
+            let rule_warnings: Vec<&LintWarning> = all_warnings
+                .iter()
+                .filter_map(|(name, _, warning)| {
+                    if name == &rule_name && warning.fix.is_some() {
+                        Some(warning)
+                    } else {
+                        None
                     }
-                    Err(err) => {
+                })
+                .collect();
+                
+            if rule_warnings.is_empty() {
+                continue;
+            }
+            
+            // Apply the rule's fix
+            let _fix_timer = rumdl::profiling::ScopedTimer::new(&format!("fix_rule:{}:{}", rule_name, path));
+            
+            match rule.fix(&fixed_content) {
+                Ok(new_content) => {
+                    if new_content != fixed_content {
+                        fixed_content = new_content;
+                        fixed_warnings += rule_warnings.len();
+                        
+                        // After each significant rule, recheck all warnings to avoid duplicate fixes
+                        if rule_name == "MD017" || rule_name == "MD036" || rule_name == "MD003" {
+                            // Re-check for warnings with the updated content
+                            all_warnings.clear();
+                            let _check_timer = rumdl::profiling::ScopedTimer::new(&format!("recheck_rules:{}", path));
+                            
+                            for rule in rules {
+                                let _rule_timer = rumdl::profiling::ScopedTimer::new(&format!("rule:{}:{}", rule.name(), path));
+                                
+                                match rule.check(&fixed_content) {
+                                    Ok(warnings) => {
+                                        for warning in warnings {
+                                            all_warnings.push((rule.name(), rule, warning));
+                                        }
+                                    }
+                                    Err(err) => {
+                                        if verbose {
+                                            eprintln!(
+                                                "{} checking rule {} for {}: {}",
+                                                "Error".red().bold(),
+                                                rule.name().cyan(),
+                                                path.blue().underline(),
+                                                err
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    if verbose {
                         eprintln!(
-                            "  {} {}: {}",
-                            "Error fixing issues with".red().bold(),
-                            rule_name.yellow(),
+                            "{} applying fix for rule {} to {}: {}",
+                            "Error".red().bold(),
+                            rule_name.cyan(),
+                            path.blue().underline(),
                             err
                         );
                     }

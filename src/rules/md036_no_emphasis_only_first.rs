@@ -1,6 +1,6 @@
 use crate::utils::range_utils::LineIndex;
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rules::heading_utils::HeadingUtils;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -10,16 +10,18 @@ lazy_static! {
     static ref RE_UNDERSCORE_SINGLE: Regex = Regex::new(r"^\s*_([^_\n]+)_\s*$").unwrap();
     static ref RE_ASTERISK_DOUBLE: Regex = Regex::new(r"^\s*\*\*([^*\n]+)\*\*\s*$").unwrap();
     static ref RE_UNDERSCORE_DOUBLE: Regex = Regex::new(r"^\s*__([^_\n]+)__\s*$").unwrap();
-
-    // Add code block detection patterns
+    static ref LIST_MARKER: Regex = Regex::new(r"^\s*(?:[*+-]|\d+\.)\s+").unwrap();
+    static ref BLOCKQUOTE_MARKER: Regex = Regex::new(r"^\s*>").unwrap();
     static ref FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
+    static ref HEADING_MARKER: Regex = Regex::new(r"^#+\s").unwrap();
+    static ref HEADING_WITH_EMPHASIS: Regex = Regex::new(r"^(#+\s+).*(?:\*\*|\*|__|_)").unwrap();
 }
 
 #[derive(Debug, Default)]
 pub struct MD036NoEmphasisOnlyFirst;
 
 impl MD036NoEmphasisOnlyFirst {
-    fn is_entire_line_emphasized(line: &str) -> Option<(usize, String)> {
+    fn is_entire_line_emphasized(line: &str, content: &str, line_num: usize) -> Option<(usize, String)> {
         let line = line.trim();
 
         // Fast path for empty lines and lines that don't contain emphasis markers
@@ -27,13 +29,29 @@ impl MD036NoEmphasisOnlyFirst {
             return None;
         }
 
+        // Skip if line is already a heading (but not a heading with emphasis)
+        if HEADING_MARKER.is_match(line) && !HEADING_WITH_EMPHASIS.is_match(line) {
+            return None;
+        }
+
+        // Skip if line is in a list, blockquote, or code block
+        if LIST_MARKER.is_match(line) || BLOCKQUOTE_MARKER.is_match(line) || 
+           HeadingUtils::is_in_code_block(content, line_num) {
+            return None;
+        }
+
         // Quick check: lines must start and end with emphasis markers
-
         let first_char = line.chars().next().unwrap();
-
         let last_char = line.chars().last().unwrap();
-
         if (first_char != '*' && first_char != '_') || (last_char != '*' && last_char != '_') {
+            return None;
+        }
+
+        // Check for blank lines before and after (if not at start/end)
+        let lines: Vec<&str> = content.lines().collect();
+        let prev_blank = line_num == 0 || lines[line_num - 1].trim().is_empty();
+        let next_blank = line_num + 1 >= lines.len() || lines[line_num + 1].trim().is_empty();
+        if !prev_blank || !next_blank {
             return None;
         }
 
@@ -61,26 +79,42 @@ impl MD036NoEmphasisOnlyFirst {
         None
     }
 
-    fn precompute_code_blocks(content: &str) -> Vec<bool> {
-        let lines: Vec<&str> = content.lines().collect();
-
-        let mut in_code_block = false;
-
-        let mut result = vec![false; lines.len()];
-
-        for (i, line) in lines.iter().enumerate() {
-            if line.trim().starts_with("```") || line.trim().starts_with("~~~") {
-                in_code_block = !in_code_block;
-            }
-            result[i] = in_code_block;
-        }
-
-        result
-    }
-
     fn get_heading_for_emphasis(level: usize, text: &str) -> String {
         let prefix = "#".repeat(level);
-        format!("{} {}", prefix, text)
+        // Split long text into multiple lines if needed
+        let text = text.trim();
+        if text.len() > 80 {
+            let mut words = text.split_whitespace();
+            let mut current_line = String::new();
+            let mut result = String::new();
+            let mut first_line = true;
+
+            while let Some(word) = words.next() {
+                if current_line.len() + word.len() + 1 > 80 {
+                    if first_line {
+                        result.push_str(&format!("{} {}\n", prefix, current_line.trim()));
+                        first_line = false;
+                    } else {
+                        result.push_str(&format!("{}\n", current_line.trim()));
+                    }
+                    current_line = word.to_string();
+                } else {
+                    if !current_line.is_empty() {
+                        current_line.push(' ');
+                    }
+                    current_line.push_str(word);
+                }
+            }
+
+            if first_line {
+                result.push_str(&format!("{} {}", prefix, current_line.trim()));
+            } else {
+                result.push_str(&format!("{}", current_line.trim()));
+            }
+            result
+        } else {
+            format!("{} {}", prefix, text)
+        }
     }
 }
 
@@ -94,18 +128,13 @@ impl Rule for MD036NoEmphasisOnlyFirst {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
-
-        let mut warnings = Vec::new();
-
-        // Fast path for empty content
-        if content.is_empty() {
-            return Ok(warnings);
+        // Fast path for empty content or content without emphasis markers
+        if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
+            return Ok(Vec::new());
         }
 
-        // Pre-compute code block states for the entire document
-
-        let code_block_states = Self::precompute_code_blocks(content);
+        let mut warnings = Vec::new();
+        let line_index = LineIndex::new(content.to_string());
 
         for (i, line) in content.lines().enumerate() {
             // Skip obvious non-matches quickly
@@ -113,23 +142,15 @@ impl Rule for MD036NoEmphasisOnlyFirst {
                 continue;
             }
 
-            // Check if in code block using pre-computed state
-            if code_block_states[i] {
-                continue;
-            }
-
-            if let Some((level, text)) = Self::is_entire_line_emphasized(line) {
+            if let Some((level, text)) = Self::is_entire_line_emphasized(line, content, i) {
                 warnings.push(LintWarning {
                     line: i + 1,
                     column: 1,
                     message: format!("Emphasis used instead of a heading: '{}'", text),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(i + 1, 1),
-                        replacement: Self::get_heading_for_emphasis(
-                            level,
-                            &text.replace("*", "").replace("_", ""),
-                        ),
+                        range: line_index.line_col_to_byte_range(i + 1, 1),
+                        replacement: Self::get_heading_for_emphasis(level, &text),
                     }),
                 });
             }
@@ -139,26 +160,17 @@ impl Rule for MD036NoEmphasisOnlyFirst {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-        // Fast path for empty content
-        if content.is_empty() {
-            return Ok(String::new());
+        // Fast path for empty content or content without emphasis markers
+        if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
+            return Ok(content.to_string());
         }
 
         let mut result = String::with_capacity(content.len());
-
         let lines: Vec<&str> = content.lines().collect();
 
-        // Pre-compute code block states for the entire document
-
-        let code_block_states = Self::precompute_code_blocks(content);
-
         for i in 0..lines.len() {
-            // Fast path for lines that are in a code block or don't have emphasis markers
             let line = lines[i];
-            if code_block_states[i] || (!line.contains('*') && !line.contains('_')) {
-                result.push_str(line);
-            } else if let Some((level, text)) = Self::is_entire_line_emphasized(line) {
+            if let Some((level, text)) = Self::is_entire_line_emphasized(line, content, i) {
                 result.push_str(&Self::get_heading_for_emphasis(level, &text));
             } else {
                 result.push_str(line);
