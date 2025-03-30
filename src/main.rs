@@ -741,8 +741,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Only require paths if we're not running a subcommand
-    if cli.paths.is_empty() && cli.command.is_none() {
+    // Process include patterns from CLI and config
+    let mut include_patterns = Vec::new();
+
+    // Add include patterns from CLI (overrides config) or from config if no CLI patterns
+    if let Some(include_str) = &cli.include {
+        include_patterns.extend(include_str.split(',').map(|s| s.trim().to_string()));
+    } else if let Ok(ref loaded_config) = config::load_config(cli.config.as_deref()) {
+        include_patterns.extend(loaded_config.global.include.clone());
+    }
+
+    // Only require paths if we're not running a subcommand and no include patterns in config
+    if cli.paths.is_empty() && cli.command.is_none() && include_patterns.is_empty() {
         eprintln!(
             "{}: No paths provided. Please specify at least one file or directory to lint.",
             "Error".red().bold()
@@ -787,19 +797,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     exclude_patterns.sort();
     exclude_patterns.dedup();
 
-    // Process include patterns from CLI and config
-    let mut include_patterns = Vec::new();
-
-    // Add include patterns from CLI (overrides config) or from config if no CLI patterns
-    if let Some(include_str) = &cli.include {
-        include_patterns.extend(include_str.split(',').map(|s| s.trim().to_string()));
-    } else if let Ok(ref loaded_config) = config::load_config(cli.config.as_deref()) {
-        include_patterns.extend(loaded_config.global.include.clone());
-    }
-
     // Remove duplicates from include_patterns
     include_patterns.sort();
     include_patterns.dedup();
+
+    // User friendliness improvement: When CLI paths are provided, don't use include patterns for filtering
+    // Only apply include patterns when no CLI paths are provided
+    let use_include_patterns = cli.paths.is_empty();
 
     if cli.verbose {
         if !exclude_patterns.is_empty() {
@@ -810,12 +814,108 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!();
         }
 
-        if !include_patterns.is_empty() {
+        if !include_patterns.is_empty() && use_include_patterns {
             println!("Including only the following patterns:");
             for pattern in &include_patterns {
                 println!("  - {}", pattern);
             }
             println!();
+        }
+    }
+
+    // If no CLI paths are provided but include patterns exist, process the current directory
+    if cli.paths.is_empty() && !include_patterns.is_empty() {
+        // Use current directory as the path
+        let path_str = ".";
+        let path = Path::new(path_str);
+
+        // Process directory recursively
+        if cli.respect_gitignore {
+            // Create a walker that respects .gitignore files
+            let walker = WalkBuilder::new(path)
+                .follow_links(true)
+                .hidden(true)
+                .git_global(true)
+                .git_ignore(true)
+                .git_exclude(true)
+                .add_custom_ignore_filename(".gitignore")
+                .build()
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_type().map_or(false, |ft| ft.is_file())
+                        && e.path().extension().map_or(false, |ext| ext == "md")
+                });
+
+            for entry in walker {
+                let file_path = entry.path().to_string_lossy();
+
+                // Check if file is excluded based on patterns
+                let excluded = rumdl::should_exclude(&file_path, &exclude_patterns, cli.respect_gitignore);
+                // Check if file should be included based on patterns
+                let included = rumdl::should_include(&file_path, &include_patterns);
+
+                if excluded || !included {
+                    if cli.verbose {
+                        if excluded {
+                            println!("Skipping excluded file: {}", file_path);
+                        } else if !included {
+                            println!("Skipping file not matching include patterns: {}", file_path);
+                        }
+                    }
+                    continue;
+                }
+
+                total_files_processed += 1;
+                let (file_has_issues, issues_found, issues_fixed) =
+                    process_file(&file_path, &rules, cli.fix, cli.verbose);
+                if file_has_issues {
+                    has_issues = true;
+                    files_with_issues += 1;
+                    total_issues_found += issues_found;
+                    total_issues_fixed += issues_fixed;
+                }
+            }
+        } else {
+            // Use walkdir if respect_gitignore is disabled
+            let dir_iter = WalkDir::new(path)
+                .follow_links(true)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_type().is_file()
+                        && e.path().extension().map_or(false, |ext| ext == "md")
+                });
+
+            for entry in dir_iter {
+                let file_path = entry.path().to_string_lossy();
+
+                // Check if file is excluded based on patterns
+                let excluded = rumdl::should_exclude(&file_path, &exclude_patterns, cli.respect_gitignore);
+                // Check if file should be included based on patterns
+                let included = rumdl::should_include(&file_path, &include_patterns);
+
+                if excluded || !included {
+                    if cli.verbose {
+                        if excluded {
+                            println!("Skipping excluded file: {}", file_path);
+                        } else if !included {
+                            println!("Skipping file not matching include patterns: {}", file_path);
+                        }
+                    }
+                    continue;
+                }
+
+                total_files_processed += 1;
+                let (file_has_issues, issues_found, issues_fixed) =
+                    process_file(&file_path, &rules, cli.fix, cli.verbose);
+                if file_has_issues {
+                    has_issues = true;
+                    files_with_issues += 1;
+                    total_issues_found += issues_found;
+                    total_issues_fixed += issues_fixed;
+                }
+            }
         }
     }
 
@@ -835,8 +935,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if path.is_file() {
             // Check if file is excluded based on patterns
             let excluded = rumdl::should_exclude(path_str, &exclude_patterns, cli.respect_gitignore);
-            // Check if file should be included based on patterns
-            let included = rumdl::should_include(path_str, &include_patterns);
+            // Only apply include patterns when no CLI paths are provided directly
+            let included = if use_include_patterns {
+                rumdl::should_include(path_str, &include_patterns)
+            } else {
+                true
+            };
 
             if excluded || !included {
                 if cli.verbose {
@@ -872,8 +976,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Check if file is excluded based on patterns
                     let excluded = rumdl::should_exclude(&file_path, &exclude_patterns, cli.respect_gitignore);
-                    // Check if file should be included based on patterns
-                    let included = rumdl::should_include(&file_path, &include_patterns);
+                    // Only apply include patterns when no CLI paths are provided directly
+                    let included = if use_include_patterns {
+                        rumdl::should_include(&file_path, &include_patterns)
+                    } else {
+                        true
+                    };
 
                     if excluded || !included {
                         if cli.verbose {
@@ -912,8 +1020,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Check if file is excluded based on patterns
                     let excluded = rumdl::should_exclude(&file_path, &exclude_patterns, cli.respect_gitignore);
-                    // Check if file should be included based on patterns
-                    let included = rumdl::should_include(&file_path, &include_patterns);
+                    // Only apply include patterns when no CLI paths are provided directly
+                    let included = if use_include_patterns {
+                        rumdl::should_include(&file_path, &include_patterns)
+                    } else {
+                        true
+                    };
 
                     if excluded || !included {
                         if cli.verbose {
@@ -962,8 +1074,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Check if file is excluded based on patterns
                     let excluded = rumdl::should_exclude(&file_path, &exclude_patterns, cli.respect_gitignore);
-                    // Check if file should be included based on patterns
-                    let included = rumdl::should_include(&file_path, &include_patterns);
+                    // Only apply include patterns when no CLI paths are provided directly
+                    let included = if use_include_patterns {
+                        rumdl::should_include(&file_path, &include_patterns)
+                    } else {
+                        true
+                    };
 
                     if excluded || !included {
                         if cli.verbose {
@@ -1002,8 +1118,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Check if file is excluded based on patterns
                     let excluded = rumdl::should_exclude(&file_path, &exclude_patterns, cli.respect_gitignore);
-                    // Check if file should be included based on patterns
-                    let included = rumdl::should_include(&file_path, &include_patterns);
+                    // Only apply include patterns when no CLI paths are provided directly
+                    let included = if use_include_patterns {
+                        rumdl::should_include(&file_path, &include_patterns)
+                    } else {
+                        true
+                    };
 
                     if excluded || !included {
                         if cli.verbose {

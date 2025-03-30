@@ -1,6 +1,10 @@
 # rumdl configuration file
 
 [global]
+include = [
+    "docs/**/*.md",
+    "README.md"
+]
 # Globally disable specific rules
 disable = []
 

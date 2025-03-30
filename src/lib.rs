@@ -306,6 +306,22 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
         // Normalize the pattern by removing leading ./ if present
         let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
 
+        // Special case: If pattern has no slashes or wildcards, it only matches files in the root directory
+        if !normalized_pattern.contains('/') && !normalized_pattern.contains('*') {
+            // Get just the filename part of the path
+            let file_name = Path::new(normalized_path_str).file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            
+            // For root-only patterns, also check that the file is in the root directory
+            let is_in_root = !normalized_path_str.contains('/') || normalized_path_str.matches('/').count() == 1;
+            
+            if file_name == normalized_pattern && is_in_root {
+                return true;
+            }
+            continue;
+        }
+
         // Handle directory patterns (ending with / or no glob chars)
         if normalized_pattern.ends_with('/') || !normalized_pattern.contains('*') {
             let dir_pattern = normalized_pattern.trim_end_matches('/');
