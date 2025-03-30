@@ -128,6 +128,11 @@ impl HeadingUtils {
             let next_line = lines[line_num];
             let line_indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
             
+            // Skip empty lines - don't consider them as potential Setext headings
+            if line.trim().is_empty() {
+                return None;
+            }
+            
             if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
                 let underline_indent = captures.get(1).map_or("", |m| m.as_str());
                 if underline_indent == line_indentation {
@@ -505,5 +510,20 @@ mod tests {
         assert!(!HeadingUtils::is_in_code_block(content, 0));
         assert!(HeadingUtils::is_in_code_block(content, 2));
         assert!(!HeadingUtils::is_in_code_block(content, 4));
+    }
+
+    #[test]
+    fn test_empty_line_with_dashes() {
+        // Test that an empty line followed by dashes is not considered a heading
+        let content = "\n---";
+        
+        // Empty line is at index 0, dashes at index 1
+        assert_eq!(HeadingUtils::parse_heading(content, 1), None, 
+                   "Empty line followed by dashes should not be detected as a heading");
+        
+        // Also test with a regular horizontal rule
+        let content2 = "Some content\n\n---\nMore content";
+        assert_eq!(HeadingUtils::parse_heading(content2, 2), None,
+                   "Empty line followed by horizontal rule should not be detected as a heading");
     }
 }
