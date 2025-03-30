@@ -223,7 +223,6 @@ impl Rule for MD055TablePipeStyle {
             "leading_and_trailing" | "no_leading_or_trailing" | "consistent" => self.style.as_str(),
             _ => {
                 // Invalid style provided, default to "leading_and_trailing" and log a warning
-                eprintln!("DEBUG: Invalid style '{}' provided in config. Using 'leading_and_trailing' as fallback.", self.style);
                 "leading_and_trailing"
             }
         };
@@ -328,12 +327,9 @@ impl Rule for MD055TablePipeStyle {
             "leading_and_trailing" | "no_leading_or_trailing" | "consistent" => self.style.as_str(),
             _ => {
                 // Invalid style provided, default to "leading_and_trailing" and log a warning
-                eprintln!("DEBUG: Invalid style '{}' provided in config. Using 'leading_and_trailing' as fallback.", self.style);
                 "leading_and_trailing"
             }
         };
-        
-        eprintln!("DEBUG: Using configured style '{}'", configured_style);
 
         for (i, line) in lines.iter().enumerate() {
             let line_start = if i == 0 {
@@ -356,13 +352,11 @@ impl Rule for MD055TablePipeStyle {
             if trimmed.contains('|') {
                 if !in_table {
                     in_table = true;
-                    eprintln!("DEBUG: Found table at line {}", i+1);
                 }
 
                 // Check if this is a delimiter row
                 let is_delimiter = self.is_delimiter_row(line);
                 if is_delimiter {
-                    eprintln!("DEBUG: Line {} is a delimiter row: '{}'", i+1, line);
                     
                     // Determine the target style
                     let target_style = if configured_style == "consistent" {
@@ -373,15 +367,12 @@ impl Rule for MD055TablePipeStyle {
                     
                     // Apply the fix to the delimiter row
                     let fixed_row = self.fix_table_row(line, target_style);
-                    eprintln!("DEBUG: Fixed delimiter row: '{}' -> '{}'", line, fixed_row);
                     result.push_str(&fixed_row);
                 } else {
                     if let Some(style) = self.determine_pipe_style(line) {
-                        eprintln!("DEBUG: Line {} has style '{}': '{}'", i+1, style, line);
                         // For "consistent" mode, use the first table's style
                         if table_style.is_none() && configured_style == "consistent" {
                             table_style = Some(style);
-                            eprintln!("DEBUG: Set table style to '{}'", style);
                         }
 
                         let target_style = if configured_style == "consistent" {
@@ -389,10 +380,8 @@ impl Rule for MD055TablePipeStyle {
                         } else {
                             configured_style
                         };
-                        eprintln!("DEBUG: Target style is '{}'", target_style);
 
                         let fixed_row = self.fix_table_row(line, target_style);
-                        eprintln!("DEBUG: Fixed row: '{}' -> '{}'", line, fixed_row);
                         result.push_str(&fixed_row);
                     } else {
                         result.push_str(line);
@@ -400,9 +389,6 @@ impl Rule for MD055TablePipeStyle {
                 }
             } else {
                 if trimmed.is_empty() {
-                    if in_table {
-                        eprintln!("DEBUG: End of table at line {}", i+1);
-                    }
                     in_table = false;
                     if !in_table {
                         table_style = None;
@@ -419,14 +405,6 @@ impl Rule for MD055TablePipeStyle {
         // Preserve the original trailing newline if it existed
         if content.ends_with('\n') && !result.ends_with('\n') {
             result.push('\n');
-        }
-        
-        // Debug output - compare input and output
-        let changed = content != result;
-        eprintln!("DEBUG MD055 content changed: {}", changed);
-        
-        if !changed {
-            eprintln!("DEBUG: Input and output are the same, NO CHANGES MADE!");
         }
 
         Ok(result)

@@ -467,10 +467,6 @@ fn process_file(
             
             match rule.fix(&fixed_content) {
                 Ok(new_content) => {
-                    // Debug the content comparison
-                    eprintln!("DEBUG: Rule {} fix comparison - content changed: {}", 
-                        rule_name, new_content != fixed_content);
-                    
                     if new_content != fixed_content {
                         fixed_content = new_content;
                         fixed_warnings += rule_warnings.len();
@@ -504,9 +500,6 @@ fn process_file(
                                 }
                             }
                         }
-                    } else {
-                        // Debug when content doesn't change
-                        eprintln!("DEBUG: Rule {} fix did not change content", rule_name);
                     }
                 }
                 Err(err) => {

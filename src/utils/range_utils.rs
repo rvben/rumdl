@@ -81,16 +81,6 @@ impl LineIndex {
         let mut code_block_lines = HashSet::new();
         let lines: Vec<&str> = self.content.lines().collect();
 
-        // For debugging
-        let debug_mode = lines.len() > 12 && lines[6] == "nested code";
-
-        if debug_mode {
-            println!(
-                "DEBUG: Starting code block detection with {} lines",
-                lines.len()
-            );
-        }
-
         // Initialize block tracking
         let mut in_block = false;
         let mut active_fence_type = ' '; // '`' or '~'
@@ -104,13 +94,6 @@ impl LineIndex {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
             let indent = line.len() - trimmed.len();
-
-            if debug_mode {
-                println!(
-                    "DEBUG: Line {}: '{}', in_block: {}, in_markdown_block: {}",
-                    i, line, in_block, in_markdown_block
-                );
-            }
 
             // 1. Detect indented code blocks (independent of fenced code blocks)
             if line.starts_with("    ") || line.starts_with("\t") {
@@ -139,11 +122,6 @@ impl LineIndex {
                     nested_fence_start = None;
                     nested_fence_end = None;
 
-                    if debug_mode {
-                        println!("DEBUG: Opening code block at line {} with fence type {}, info_string: '{}'", 
-                                i, active_fence_type, info_string);
-                    }
-
                     code_block_lines.insert(i);
                 }
             } else {
@@ -162,9 +140,6 @@ impl LineIndex {
 
                     if !remaining.is_empty() {
                         nested_fence_start = Some(i);
-                        if debug_mode {
-                            println!("DEBUG: Detected nested fence opening at line {}", i);
-                        }
                     }
                 }
 
@@ -176,9 +151,6 @@ impl LineIndex {
                     && trimmed.trim_start_matches('`').trim().is_empty()
                 {
                     nested_fence_end = Some(i);
-                    if debug_mode {
-                        println!("DEBUG: Detected nested fence closing at line {}", i);
-                    }
                 }
 
                 // Check if this line matches the closing fence pattern for the outer block
@@ -209,23 +181,11 @@ impl LineIndex {
 
                     // Skip nested closing fences
                     if is_valid_closing_fence && !is_nested_closing {
-                        if debug_mode {
-                            println!("DEBUG: Closing outer code block at line {}", i);
-                        }
                         in_block = false;
                         in_markdown_block = false;
-                    } else if is_nested_closing && debug_mode {
-                        println!("DEBUG: Skipping nested closing fence at line {}", i);
                     }
                 }
             }
-        }
-
-        if debug_mode {
-            println!("DEBUG: Final code_block_lines: {:?}", code_block_lines);
-            let mut sorted_lines: Vec<_> = code_block_lines.iter().collect();
-            sorted_lines.sort();
-            println!("DEBUG: Sorted code block lines: {:?}", sorted_lines);
         }
 
         self.code_block_lines = Some(code_block_lines);

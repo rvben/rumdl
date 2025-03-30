@@ -285,3 +285,231 @@ fn test_preserve_code_blocks() {
     let fixed = _rule.fix(content).unwrap();
     assert_eq!(fixed, content);
 }
+
+#[test]
+fn test_fix_missing_blank_line_below() {
+    // This test specifically verifies the fix for missing blank lines below headings
+    let rule = MD022BlanksAroundHeadings::default();
+    
+    // Test case with only blank line issues below headings
+    let content = "# Heading 1\nContent without blank line\n\n## Heading 2\nMore content without blank line";
+    
+    // Verify the rule detects the issue
+    let warnings = rule.check(content).unwrap();
+    
+    // We should have warnings specifically about blank lines below headings
+    let below_warnings = warnings
+        .iter()
+        .filter(|w| w.message.contains("blank line below"))
+        .count();
+    assert!(below_warnings == 2, "Should have 2 warnings about missing blank lines below headings");
+    
+    // Fix the content
+    let fixed = rule.fix(content).unwrap();
+    
+    // The fixed content should be different
+    assert_ne!(fixed, content, "Fixed content should be different from original");
+    
+    // Verify the fixed content has blank lines below headings
+    let fixed_lines: Vec<&str> = fixed.lines().collect();
+    
+    // Find the heading positions
+    let heading1_pos = fixed_lines.iter().position(|&l| l == "# Heading 1").unwrap();
+    let heading2_pos = fixed_lines.iter().position(|&l| l == "## Heading 2").unwrap();
+    
+    // Check for blank lines below each heading
+    assert!(fixed_lines[heading1_pos + 1].trim().is_empty(), 
+            "There should be a blank line below Heading 1");
+    assert!(fixed_lines[heading2_pos + 1].trim().is_empty(), 
+            "There should be a blank line below Heading 2");
+    
+    // Verify the content is preserved
+    assert!(fixed.contains("Content without blank line"));
+    assert!(fixed.contains("More content without blank line"));
+    
+    // Re-check the fixed content - it should have no warnings
+    let fixed_warnings = rule.check(&fixed).unwrap();
+    assert!(fixed_warnings.is_empty(), "Fixed content should have no warnings");
+}
+
+#[test]
+fn test_fix_specific_blank_line_cases() {
+    // This test specifically verifies that different blank line configurations are fixed correctly
+    let rule = MD022BlanksAroundHeadings::default();
+    
+    // Test multiple cases with different spacing issues
+    let test_cases = [
+        // Case 1: Missing blank line below heading
+        (
+            "# Heading\nContent",
+            true,  // Should have warning
+            "# Heading\n\nContent"  // Expected fix
+        ),
+        // Case 2: Missing blank lines above and below
+        (
+            "Content above\n# Heading\nContent below",
+            true,  // Should have warning
+            "Content above\n\n# Heading\n\nContent below"  // Expected fix
+        ),
+        // Case 3: Multiple consecutive headings
+        (
+            "# Heading 1\n## Heading 2\n### Heading 3\nContent",
+            true,  // Should have warning
+            "# Heading 1\n\n## Heading 2\n\n### Heading 3\n\nContent"  // Expected fix
+        ),
+        // Case 4: Already properly formatted
+        (
+            "# Heading\n\nContent",
+            false,  // Should not have warning
+            "# Heading\n\nContent"  // Expected fix (same as original)
+        ),
+        // Case 5: Extra blank lines (should be preserved)
+        (
+            "# Heading\n\n\nContent",
+            false,  // Should not have warning
+            "# Heading\n\n\nContent"  // Expected fix (same as original)
+        ),
+    ];
+    
+    for (i, (content, should_have_warning, expected)) in test_cases.iter().enumerate() {
+        println!("Testing case {}", i + 1);
+        
+        // Verify warning detection
+        let warnings = rule.check(content).unwrap();
+        assert_eq!(!warnings.is_empty(), *should_have_warning, 
+                   "Case {}: Warning detection incorrect", i + 1);
+        
+        // Fix the content
+        let fixed = rule.fix(content).unwrap();
+        
+        // Normalize line endings and compare
+        let normalized_fixed = fixed.replace("\r\n", "\n");
+        let normalized_expected = expected.replace("\r\n", "\n");
+        
+        assert_eq!(normalized_fixed, normalized_expected, 
+                   "Case {}: Fix produced incorrect result", i + 1);
+        
+        // Re-check fixed content to verify it passes
+        let fixed_warnings = rule.check(&fixed).unwrap();
+        assert!(fixed_warnings.is_empty(), 
+                "Case {}: Fixed content should have no warnings", i + 1);
+    }
+}
+
+#[test]
+fn test_fix_with_various_content_types() {
+    // Test MD022 fix with different types of content
+    let rule = MD022BlanksAroundHeadings::default();
+    
+    // Complex content with multiple formatting issues
+    let content = "---\ntitle: Test\n---\n# First heading\nSome content\n```\n# Code block heading\n```\nMore content\n## Second heading\n- List item 1\n- List item 2\n### Third heading\nFinal content";
+    
+    // Verify warnings exist
+    let warnings = rule.check(content).unwrap();
+    assert!(!warnings.is_empty(), "Should detect blank line issues");
+    
+    // Fix the content
+    let fixed = rule.fix(content).unwrap();
+    
+    // Verify all major elements are preserved
+    assert!(fixed.contains("---\ntitle: Test\n---"));
+    assert!(fixed.contains("# First heading"));
+    assert!(fixed.contains("Some content"));
+    assert!(fixed.contains("```\n# Code block heading\n```"));
+    assert!(fixed.contains("More content"));
+    assert!(fixed.contains("## Second heading"));
+    assert!(fixed.contains("- List item 1\n- List item 2"));
+    assert!(fixed.contains("### Third heading"));
+    assert!(fixed.contains("Final content"));
+    
+    // Re-check the fixed content
+    let fixed_warnings = rule.check(&fixed).unwrap();
+    assert!(fixed_warnings.is_empty(), "Fixed content should have no warnings");
+    
+    // Verify front matter is handled correctly
+    assert!(fixed.contains("---\ntitle: Test\n---\n\n# First heading"));
+    
+    // Verify code blocks are preserved intact
+    assert!(fixed.contains("```\n# Code block heading\n```"));
+    
+    // Verify lists are properly formatted with blank lines
+    assert!(fixed.contains("## Second heading\n\n- List item 1"));
+}
+
+#[test]
+fn test_regression_fix_works() {
+    // This test specifically verifies the fix for the regression issue where 
+    // MD022 detected but didn't fix missing blank lines below headings
+    let rule = MD022BlanksAroundHeadings::default();
+    
+    // Simple case reproducing the exact issue: heading without blank line below
+    let content = "# Test Heading\nContent without blank line";
+    
+    // Verify it detects the issue
+    let warnings = rule.check(content).unwrap();
+    let below_warnings = warnings
+        .iter()
+        .filter(|w| w.message.contains("blank line below"))
+        .count();
+    assert_eq!(below_warnings, 1, "Should detect exactly 1 missing blank line below issue");
+    
+    // Verify the warnings have the fix field populated
+    assert!(warnings[0].fix.is_some(), "Warning should have fix information");
+    
+    // Verify the fix works
+    let fixed = rule.fix(content).unwrap();
+    assert_ne!(fixed, content, "Fixed content should be different");
+    
+    // Verify the specific formatting is correct
+    assert_eq!(fixed, "# Test Heading\n\nContent without blank line", 
+              "Fixed content should have blank line below heading");
+              
+    // Extra check: run the check on the fixed content
+    let fixed_warnings = rule.check(&fixed).unwrap();
+    assert!(fixed_warnings.is_empty(), "Fixed content should have no warnings");
+}
+
+#[test]
+fn test_multiple_consecutive_headings() {
+    // This test specifically verifies the fix for patterns with multiple consecutive headings
+    // where each heading needs blank lines between them
+    let rule = MD022BlanksAroundHeadings::default();
+    
+    // Test pattern with multiple consecutive headings
+    let content = "# Top Level\n\n## Second Level\n### Third Level\n## Another Second Level";
+    
+    // Verify it detects the issues with consecutive headings
+    let warnings = rule.check(content).unwrap();
+    assert!(!warnings.is_empty(), "Should detect issues with consecutive headings");
+    
+    // Verify we have at least one warning about consecutive headings
+    let consecutive_warnings = warnings
+        .iter()
+        .filter(|w| w.message.contains("Consecutive headings"))
+        .count();
+    assert!(consecutive_warnings > 0, "Should have warnings about consecutive headings");
+    
+    // Verify the fix works
+    let fixed = rule.fix(content).unwrap();
+    assert_ne!(fixed, content, "Fixed content should be different");
+    
+    // Verify the specific structure is correct with blank lines between all headings
+    let fixed_lines: Vec<&str> = fixed.lines().collect();
+    
+    // Find the heading positions
+    let heading1_pos = fixed_lines.iter().position(|&l| l == "## Second Level").unwrap();
+    let heading2_pos = fixed_lines.iter().position(|&l| l == "### Third Level").unwrap();
+    let heading3_pos = fixed_lines.iter().position(|&l| l == "## Another Second Level").unwrap();
+    
+    // Check there's a blank line between each consecutive heading
+    assert_eq!(heading2_pos - heading1_pos, 2, "Should be a blank line between Second Level and Third Level");
+    assert_eq!(heading3_pos - heading2_pos, 2, "Should be a blank line between Third Level and Another Second Level");
+    
+    // The fixed content should have the expected format
+    let expected = "# Top Level\n\n## Second Level\n\n### Third Level\n\n## Another Second Level\n";
+    assert_eq!(fixed, expected, "Fixed content structure is incorrect");
+    
+    // Extra check: run the check on the fixed content 
+    let fixed_warnings = rule.check(&fixed).unwrap();
+    assert!(fixed_warnings.is_empty(), "Fixed content should have no warnings");
+}

@@ -11,14 +11,13 @@
 
 ## An extremely fast Markdown linter and formatter, written in Rust
 
-[**Docs**](docs/RULES.md) | [**Rules**](docs/RULES.md) | [**Configuration**](#configuration)
+| [**Docs**](docs/RULES.md) | [**Rules**](docs/RULES.md) | [**Configuration**](#configuration) |
 
 </div>
 
 ## Table of Contents
 
 - [rumdl - An extremely fast Markdown linter, written in Rust](#rumdl---an-extremely-fast-markdown-linter-written-in-rust)
-  - [An extremely fast Markdown linter and formatter, written in Rust](#an-extremely-fast-markdown-linter-and-formatter-written-in-rust)
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
   - [Installation](#installation)
@@ -123,15 +122,15 @@ rumdl --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
 
 rumdl implements over 50 lint rules for Markdown files. Here are some key rule categories:
 
- Category | Description | Example Rules
-----------|-------------|--------------
-**Headings** | Proper heading structure and formatting | MD001, MD002, MD003
-**Lists** | Consistent list formatting and structure | MD004, MD005, MD007
-**Whitespace** | Proper spacing and line length | MD009, MD010, MD012
-**Code** | Code block formatting and language tags | MD040, MD046, MD048
-**Links** | Proper link and reference formatting | MD034, MD039, MD042
-**Images** | Image alt text and references | MD045, MD052
-**Style** | Consistent style across document | MD031, MD032, MD035
+|  Category | Description | Example Rules |
+|-----------|-------------|---------------|
+| **Headings** | Proper heading structure and formatting | MD001, MD002, MD003 |
+| **Lists** | Consistent list formatting and structure | MD004, MD005, MD007 |
+| **Whitespace** | Proper spacing and line length | MD009, MD010, MD012 |
+| **Code** | Code block formatting and language tags | MD040, MD046, MD048 |
+| **Links** | Proper link and reference formatting | MD034, MD039, MD042 |
+| **Images** | Image alt text and references | MD045, MD052 |
+| **Style** | Consistent style across document | MD031, MD032, MD035 |
 
 For a complete list of rules and their descriptions, see our [documentation](docs/RULES.md) or run:
 
