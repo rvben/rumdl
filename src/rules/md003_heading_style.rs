@@ -1,6 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
-use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -143,7 +142,7 @@ impl Rule for MD003HeadingStyle {
                     };
                     
                     // Convert to the target style
-                    let fixed = if target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2 {
+                    let _fixed = if target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2 {
                         let formatted = format!("{}{}", indentation, text.trim());
                         let underline_char = if target_style == HeadingStyle::Setext1 {
                             if level == 1 { '=' } else { '-' }

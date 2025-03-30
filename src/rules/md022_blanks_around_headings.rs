@@ -1,7 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::heading_utils::{is_heading, is_setext_heading_marker, HeadingUtils};
-use crate::utils::range_utils::LineIndex;
-use std::ops::Range;
+use crate::rules::heading_utils::{is_heading, is_setext_heading_marker};
 use lazy_static::lazy_static;
 use fancy_regex::Regex;
 
@@ -123,7 +121,7 @@ impl MD022BlanksAroundHeadings {
     }
 
     /// Determine if a line represents the start of a setext heading (requires looking at next line)
-    fn is_setext_heading_start(&self, lines: &[&str], index: usize) -> bool {
+    fn _is_setext_heading_start(&self, lines: &[&str], index: usize) -> bool {
         if index + 1 >= lines.len() {
             return false;
         }
@@ -142,7 +140,7 @@ impl MD022BlanksAroundHeadings {
     }
 
     /// Get the number of blank lines before a heading
-    fn blank_lines_before(&self, lines: &[&str], index: usize) -> usize {
+    fn _blank_lines_before(&self, lines: &[&str], index: usize) -> usize {
         let mut blank_count = 0;
         let mut i = index as isize - 1;
 
@@ -155,12 +153,12 @@ impl MD022BlanksAroundHeadings {
     }
 
     /// Get the number of blank lines after a heading
-    fn blank_lines_after(&self, lines: &[&str], index: usize) -> usize {
+    fn _blank_lines_after(&self, lines: &[&str], index: usize) -> usize {
         let mut blank_count = 0;
         let mut i = index + 1;
         
         // For setext headings, skip the underline and start counting after it
-        if self.is_setext_heading_start(lines, index) {
+        if self._is_setext_heading_start(lines, index) {
             i += 1;
         }
 
@@ -173,7 +171,7 @@ impl MD022BlanksAroundHeadings {
     }
 
     /// Check if we're inside front matter
-    fn is_in_front_matter(&self, lines: &[&str], index: usize) -> bool {
+    fn _is_in_front_matter(&self, lines: &[&str], index: usize) -> bool {
         let mut front_matter_started = false;
         let mut delimiter_count = 0;
 
@@ -196,7 +194,7 @@ impl MD022BlanksAroundHeadings {
     }
 
     /// Check if we're inside a code block
-    fn is_in_code_block(&self, lines: &[&str], index: usize) -> bool {
+    fn _is_in_code_block(&self, lines: &[&str], index: usize) -> bool {
         let mut in_code_block = false;
         let mut fence_char = None;
 
@@ -222,7 +220,7 @@ impl MD022BlanksAroundHeadings {
     }
 
     /// Checks for heading and returns its length (1 for ATX, 2 for setext)
-    fn get_heading_length(&self, lines: &[&str], index: usize) -> usize {
+    fn _get_heading_length(&self, lines: &[&str], index: usize) -> usize {
         if index >= lines.len() {
             return 0;
         }
@@ -235,7 +233,7 @@ impl MD022BlanksAroundHeadings {
         }
 
         // Check if it's a setext heading
-        if self.is_setext_heading_start(lines, index) {
+        if self._is_setext_heading_start(lines, index) {
             return 2;
         }
 
@@ -243,7 +241,7 @@ impl MD022BlanksAroundHeadings {
     }
 
     /// Fix a document by adding appropriate blank lines around headings
-    fn fix_content(&self, lines: &[&str]) -> String {
+    fn _fix_content(&self, lines: &[&str]) -> String {
         let mut result = Vec::new();
         let mut in_code_block = false;
         let mut fence_char = None;
@@ -347,11 +345,11 @@ impl MD022BlanksAroundHeadings {
                 
                 // Count existing blank lines below to skip them in further processing
                 let heading_end = if is_setext_marker { i } else { i };
-                let mut blank_lines_below = 0;
+                let mut _blank_lines_below = 0;
                 if heading_end < lines.len() - 1 {
                     for j in (heading_end + 1)..lines.len() {
                         if lines[j].trim().is_empty() {
-                            blank_lines_below += 1;
+                            _blank_lines_below += 1;
             } else {
                             break;
                         }
@@ -399,7 +397,7 @@ impl Rule for MD022BlanksAroundHeadings {
         let mut fence_char = None;
         let mut in_front_matter = false;
         let mut front_matter_start_detected = false;
-        let mut is_first_line = true;
+        let mut _is_first_line = true;
         let mut prev_heading_index: Option<usize> = None;
         
         for (i, line) in lines.iter().enumerate() {
@@ -414,7 +412,7 @@ impl Rule for MD022BlanksAroundHeadings {
                     in_front_matter = false;
                 }
                 // Otherwise it's just a horizontal rule, not front matter
-                is_first_line = false;
+                _is_first_line = false;
                 continue;
             }
             
@@ -442,7 +440,7 @@ impl Rule for MD022BlanksAroundHeadings {
                 continue;
             }
             
-            is_first_line = false;
+            _is_first_line = false;
             
             // Check if it's a heading
             if is_heading(line) || (i > 0 && is_setext_heading_marker(line) && is_heading(&format!("{} {}", lines[i-1], line))) {
@@ -515,10 +513,10 @@ impl Rule for MD022BlanksAroundHeadings {
                     
                     // If next line is a code fence, we don't need blank lines between
                     if !next_line_is_code_fence {
-                        let mut blank_lines_below = 0;
+                        let mut _blank_lines_below = 0;
                         for j in (heading_line + 1)..lines.len() {
                             if lines[j].trim().is_empty() {
-                                blank_lines_below += 1;
+                                _blank_lines_below += 1;
                             } else {
                                 break;
                             }
@@ -527,7 +525,7 @@ impl Rule for MD022BlanksAroundHeadings {
                         // If this is a setext heading, we need to check from the marker line
                         let effective_heading_line = if is_setext_heading_marker(line) { i } else { heading_line };
                         
-                        if effective_heading_line < lines.len() - 1 && blank_lines_below < self.lines_below {
+                        if effective_heading_line < lines.len() - 1 && _blank_lines_below < self.lines_below {
                             result.push(LintWarning {
                                 message: format!("Heading should have at least {} blank line(s) below.", self.lines_below),
                                 line: heading_display_line,
@@ -556,7 +554,7 @@ impl Rule for MD022BlanksAroundHeadings {
         }
         
         let lines: Vec<&str> = content.lines().collect();
-        let fixed = self.fix_content(&lines);
+        let fixed = self._fix_content(&lines);
         
         Ok(fixed)
     }
@@ -713,7 +711,7 @@ mod tests {
         // Check spacing
         let lines2: Vec<&str> = result2.lines().collect();
         let h1_pos2 = lines2.iter().position(|&l| l == "# Heading 1").unwrap();
-        let content_pos = lines2.iter().position(|&l| l == "Content under heading 1").unwrap();
+        let _content_pos = lines2.iter().position(|&l| l == "Content under heading 1").unwrap();
         assert!(lines2[h1_pos2 + 1].trim().is_empty(), "Should have a blank line after heading 1");
         
         // Case 3: Multiple consecutive headings with blank lines preserved

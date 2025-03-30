@@ -1,5 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule};
-use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
+use crate::rules::heading_utils::{HeadingStyle};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -218,7 +218,7 @@ impl Rule for MD002FirstHeadingH1 {
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
         let mut result = String::new();
-        let mut i = 0;
+        let mut _i = 0;
         let lines: Vec<&str> = content.lines().collect();
         let mut first_heading_fixed = false;
         let start_line = self.skip_front_matter(content);
@@ -228,11 +228,11 @@ impl Rule for MD002FirstHeadingH1 {
             result.push_str(line);
             result.push('\n');
         }
-        i = start_line;
+        _i = start_line;
 
-        while i < lines.len() {
+        while _i < lines.len() {
             if !first_heading_fixed {
-                if let Some((indent, text, level, style)) = self.parse_heading(content, i + 1) {
+                if let Some((indent, text, level, style)) = self.parse_heading(content, _i + 1) {
                     if level != self.level {
                         let fixed = match style {
                             HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
@@ -247,24 +247,24 @@ impl Rule for MD002FirstHeadingH1 {
                         };
                         result.push_str(&fixed);
                         if style == HeadingStyle::Setext1 || style == HeadingStyle::Setext2 {
-                            i += 1; // Skip the underline line
+                            _i += 1; // Skip the underline line
                         }
                     } else {
-                        result.push_str(lines[i]);
+                        result.push_str(lines[_i]);
                     }
                     first_heading_fixed = true;
                 } else {
-                    result.push_str(lines[i]);
+                    result.push_str(lines[_i]);
                 }
             } else {
-                result.push_str(lines[i]);
+                result.push_str(lines[_i]);
             }
             
             // Add newline if not at the end of the file
-            if i < lines.len() - 1 {
+            if _i < lines.len() - 1 {
                 result.push('\n');
             }
-            i += 1;
+            _i += 1;
         }
 
         // Preserve final newline if present in original

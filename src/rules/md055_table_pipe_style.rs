@@ -253,9 +253,9 @@ impl Rule for MD055TablePipeStyle {
                 }
 
                 // Check if this is a delimiter row
-                let is_delimiter = self.is_delimiter_row(line);
+                let _is_delimiter = self.is_delimiter_row(line);
                 
-                if !is_delimiter {
+                if !_is_delimiter {
                     // Only use normal rows to determine table style
                     let line_style = self.determine_pipe_style(line);
                     
@@ -275,7 +275,7 @@ impl Rule for MD055TablePipeStyle {
                 };
                 
                 // Check if this line needs fixing - handle both normal rows and delimiter rows
-                let current_style = if is_delimiter {
+                let current_style = if _is_delimiter {
                     // For delimiter rows, determine style directly
                     if trimmed.starts_with('|') && trimmed.ends_with('|') {
                         "leading_and_trailing"
@@ -359,7 +359,7 @@ impl Rule for MD055TablePipeStyle {
                 }
 
                 // Check if this is a delimiter row
-                let is_delimiter = self.is_delimiter_row(line);
+                let _is_delimiter = self.is_delimiter_row(line);
                 
                 // Process the line regardless of whether it's a delimiter row
                 if let Some(style) = self.determine_pipe_style(line) {

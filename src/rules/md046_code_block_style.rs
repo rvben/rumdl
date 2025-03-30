@@ -1,6 +1,5 @@
 use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::code_block_utils::CodeBlockUtils;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -204,7 +203,7 @@ impl Rule for MD046CodeBlockStyle {
                 
                 // Check if we need to start a new fenced block
                 let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1);
-                let next_line_is_indented = i < lines.len() - 1 && self.is_indented_code_block(&lines, i + 1);
+                let _next_line_is_indented = i < lines.len() - 1 && self.is_indented_code_block(&lines, i + 1);
                 
                 if !prev_line_is_indented {
                     // Start of a new indented block
@@ -305,8 +304,8 @@ impl Rule for MD046CodeBlockStyle {
                     }
                     
                     // Check if this is the end of the indented block
-                    let next_line_is_indented = i < lines.len() - 1 && self.is_indented_code_block(&lines, i + 1);
-                    if !next_line_is_indented && in_indented_block {
+                    let _next_line_is_indented = i < lines.len() - 1 && self.is_indented_code_block(&lines, i + 1);
+                    if !_next_line_is_indented && in_indented_block {
                         result.push_str("```\n");
                         in_indented_block = false;
                     }

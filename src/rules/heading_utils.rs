@@ -1,6 +1,5 @@
 use lazy_static::lazy_static;
 use regex::Regex;
-use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
     // Optimized regex patterns with more efficient non-capturing groups

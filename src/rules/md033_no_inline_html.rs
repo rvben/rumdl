@@ -127,25 +127,24 @@ impl Rule for MD033NoInlineHtml {
                         .take(i)
                         .map(|l| l.len() + 1)
                         .sum::<usize>();
-                    let tag_pos = line_start_pos + start_pos;
+                    let _tag_pos = line_start_pos + start_pos;
                     
                     // Skip if in code span (simplified check - not perfect but handles most cases)
-                    let mut in_code = false;
                     let mut backtick_count = 0;
                     
-                    for (idx, c) in line.chars().enumerate() {
-                        if idx >= start_pos {
-                            break;
-                        }
+                    // Count backticks before the tag to determine if we're in a code span
+                    for c in line[..start_pos].chars() {
                         if c == '`' {
                             backtick_count += 1;
                         }
                     }
                     
                     // If odd number of backticks before the tag, it's in a code span
-                    in_code = backtick_count % 2 == 1;
+                    if backtick_count % 2 == 1 {
+                        continue;
+                    }
                     
-                    if !in_code && !self.is_tag_allowed(html_tag) {
+                    if !self.is_tag_allowed(html_tag) {
                         warnings.push(LintWarning {
                             line: i + 1,
                             column: start_pos + 1,

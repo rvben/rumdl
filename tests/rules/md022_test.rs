@@ -148,7 +148,7 @@ fn test_blanks_around_setext_headings() {
     
     // First test that the rule generates warnings for malformatted setext headings
     let bad_content = "Some text\nHeading 1\n=========\nContent\nHeading 2\n---------\nMore content.";
-    let bad_result = _rule.check(bad_content).unwrap();
+    let _bad_result = _rule.check(bad_content).unwrap();
     
     // Then test that the fix produces valid content
     let fixed = _rule.fix(bad_content).unwrap();

@@ -1,7 +1,7 @@
 use rumdl::rule::Rule;
 use rumdl::MD015NoMissingSpaceAfterListMarker;
 use rumdl::MD053LinkImageReferenceDefinitions;
-use rumdl::rules::{MD003HeadingStyle, MD017NoEmphasisAsHeading, MD036NoEmphasisOnlyFirst};
+use rumdl::rules::{MD036NoEmphasisOnlyFirst};
 
 #[test]
 fn cross_rule_md015_md053() {
