@@ -26,3 +26,7 @@ style = "asterisk"
 [MD050]
 # Strong emphasis style (** or __)
 style = "asterisk"
+
+[MD055]
+# Table pipe style (leading_and_trailing or no_leading_or_trailing)
+style = "leading_and_trailing"

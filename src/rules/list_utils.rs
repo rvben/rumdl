@@ -129,6 +129,31 @@ impl ListUtils {
             return false;
         }
 
+        // Skip lines that have bold/emphasis markers (typically table cells with bold text)
+        if line.trim_start().contains("**") || line.trim_start().contains("__") {
+            return false;
+        }
+
+        // Skip lines that are part of a Markdown table (contain |)
+        if line.contains('|') {
+            return false;
+        }
+
+        // Skip lines that are horizontal rules or table delimiter rows
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            // Check for horizontal rules (only dashes and whitespace)
+            if trimmed.chars().all(|c| c == '-' || c.is_whitespace()) {
+                return false;
+            }
+            
+            // Check for table delimiter rows without pipes (e.g., in cases where pipes are optional)
+            // These have dashes and possibly colons for alignment
+            if trimmed.contains('-') && trimmed.chars().all(|c| c == '-' || c == ':' || c.is_whitespace()) {
+                return false;
+            }
+        }
+
         // Skip lines that are part of emphasis/bold text
         if line.trim_start().matches('*').count() >= 2 {
             return false;
@@ -274,5 +299,72 @@ impl ListUtils {
 
         // Return the original line if no pattern matched
         line.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_list_item_without_space() {
+        // Valid list item with space after marker
+        assert!(!ListUtils::is_list_item_without_space("- Item with space"));
+        assert!(!ListUtils::is_list_item_without_space("* Item with space"));
+        assert!(!ListUtils::is_list_item_without_space("+ Item with space"));
+        assert!(!ListUtils::is_list_item_without_space("1. Item with space"));
+
+        // Invalid list items without space after marker (should return true)
+        assert!(ListUtils::is_list_item_without_space("-No space"));
+        assert!(ListUtils::is_list_item_without_space("*No space"));
+        assert!(ListUtils::is_list_item_without_space("+No space"));
+        assert!(ListUtils::is_list_item_without_space("1.No space"));
+
+        // Not list items (should return false)
+        assert!(!ListUtils::is_list_item_without_space("Regular text"));
+        assert!(!ListUtils::is_list_item_without_space(""));
+        assert!(!ListUtils::is_list_item_without_space("    "));
+        assert!(!ListUtils::is_list_item_without_space("# Heading"));
+
+        // Bold/emphasis text that might be confused with list items (should return false)
+        assert!(!ListUtils::is_list_item_without_space("**Bold text**"));
+        assert!(!ListUtils::is_list_item_without_space("__Bold text__"));
+        assert!(!ListUtils::is_list_item_without_space("*Italic text*"));
+        assert!(!ListUtils::is_list_item_without_space("_Italic text_"));
+        
+        // Table cells with bold/emphasis (should return false)
+        assert!(!ListUtils::is_list_item_without_space("| **Heading** | Content |"));
+        assert!(!ListUtils::is_list_item_without_space("**Bold** | Normal"));
+        assert!(!ListUtils::is_list_item_without_space("| Cell 1 | **Bold** |"));
+        
+        // Horizontal rules (should return false)
+        assert!(!ListUtils::is_list_item_without_space("---"));
+        assert!(!ListUtils::is_list_item_without_space("----------"));
+        assert!(!ListUtils::is_list_item_without_space("   ---   "));
+        
+        // Table delimiter rows (should return false)
+        assert!(!ListUtils::is_list_item_without_space("|--------|---------|"));
+        assert!(!ListUtils::is_list_item_without_space("|:-------|:-------:|"));
+        assert!(!ListUtils::is_list_item_without_space("| ------ | ------- |"));
+        assert!(!ListUtils::is_list_item_without_space("---------|----------|"));
+        assert!(!ListUtils::is_list_item_without_space(":--------|:--------:"));
+    }
+
+    #[test]
+    fn test_is_list_item() {
+        // Valid list items
+        assert!(ListUtils::is_list_item("- Item"));
+        assert!(ListUtils::is_list_item("* Item"));
+        assert!(ListUtils::is_list_item("+ Item"));
+        assert!(ListUtils::is_list_item("1. Item"));
+        assert!(ListUtils::is_list_item("  - Indented item"));
+        
+        // Not list items
+        assert!(!ListUtils::is_list_item("Regular text"));
+        assert!(!ListUtils::is_list_item(""));
+        assert!(!ListUtils::is_list_item("    "));
+        assert!(!ListUtils::is_list_item("# Heading"));
+        assert!(!ListUtils::is_list_item("**Bold text**"));
+        assert!(!ListUtils::is_list_item("| Cell 1 | Cell 2 |"));
     }
 }
