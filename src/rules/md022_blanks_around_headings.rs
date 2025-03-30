@@ -249,6 +249,7 @@ impl MD022BlanksAroundHeadings {
         let mut front_matter_start_detected = false;
         let mut i = 0;
         
+        // Process the document line by line
         while i < lines.len() {
             let line = lines[i];
             
@@ -314,7 +315,7 @@ impl MD022BlanksAroundHeadings {
                     for j in (0..heading_line).rev() {
                         if lines[j].trim().is_empty() {
                             blank_lines_above += 1;
-                    } else {
+                        } else {
                             break;
                         }
                     }
@@ -322,11 +323,18 @@ impl MD022BlanksAroundHeadings {
                 
                 // Add blank lines before heading if needed
                 let needed_blanks_above = if is_first_heading && self.allowed_at_start { 0 } else { self.lines_above };
-                if heading_line > 0 && blank_lines_above < needed_blanks_above {
-                    // Add the missing blank lines
-                    for _ in 0..(needed_blanks_above - blank_lines_above) {
-                        result.push(String::new());
-                    }
+                
+                // Ensure we have the right number of blank lines before the heading
+                // First, remove trailing blank lines from the result
+                while !result.is_empty() && result.last().unwrap().trim().is_empty() && blank_lines_above > needed_blanks_above {
+                    result.pop();
+                    blank_lines_above -= 1;
+                }
+                
+                // Then add any needed blank lines
+                while blank_lines_above < needed_blanks_above {
+                    result.push(String::new());
+                    blank_lines_above += 1;
                 }
                 
                 // Add the heading line(s)
@@ -338,32 +346,31 @@ impl MD022BlanksAroundHeadings {
                     result.push(line.to_string());
                 }
                 
-                // Always add required blank lines after the heading
-                    for _ in 0..self.lines_below {
-                    result.push(String::new());
-                }
-                
                 // Count existing blank lines below to skip them in further processing
                 let heading_end = if is_setext_marker { i } else { i };
-                let mut _blank_lines_below = 0;
+                let mut blank_lines_below = 0;
                 if heading_end < lines.len() - 1 {
                     for j in (heading_end + 1)..lines.len() {
                         if lines[j].trim().is_empty() {
-                            _blank_lines_below += 1;
-            } else {
+                            blank_lines_below += 1;
+                        } else {
                             break;
                         }
                     }
                 }
                 
-                // Skip over the heading and any existing blank lines
+                // Add exactly the number of blank lines needed
+                for _ in 0..(self.lines_below - blank_lines_below.min(self.lines_below)) {
+                    result.push(String::new());
+                }
+                
+                // Skip over the heading and blank lines so we don't process them again
                 i = if is_setext_marker { i + 1 } else { i + 1 };
-                if i < lines.len() {
-                    let mut next_non_blank = i;
-                    while next_non_blank < lines.len() && lines[next_non_blank].trim().is_empty() {
-                        next_non_blank += 1;
-                    }
-                    i = next_non_blank;
+                i += blank_lines_below; // Skip existing blank lines
+                
+                // If we've reached the end of the document, break
+                if i >= lines.len() {
+                    break;
                 }
             } else {
                 result.push(line.to_string());
@@ -371,7 +378,23 @@ impl MD022BlanksAroundHeadings {
             }
         }
 
-        result.join("\n")
+        // Ensure the result doesn't have consecutive blank lines
+        let mut final_result = Vec::new();
+        let mut consecutive_blanks = 0;
+        
+        for line in result {
+            if line.trim().is_empty() {
+                consecutive_blanks += 1;
+                if consecutive_blanks <= self.lines_below {
+                    final_result.push(line);
+                }
+            } else {
+                consecutive_blanks = 0;
+                final_result.push(line);
+            }
+        }
+
+        final_result.join("\n")
     }
 }
 
@@ -399,6 +422,7 @@ impl Rule for MD022BlanksAroundHeadings {
         let mut front_matter_start_detected = false;
         let mut _is_first_line = true;
         let mut prev_heading_index: Option<usize> = None;
+        let mut processed_headings = std::collections::HashSet::new();
         
         for (i, line) in lines.iter().enumerate() {
             // Handle front matter - only consider it front matter if at the start
@@ -452,22 +476,27 @@ impl Rule for MD022BlanksAroundHeadings {
                     continue;
                 }
                 
+                // Skip if we've already processed this heading
+                if processed_headings.contains(&heading_line) {
+                    continue;
+                }
+                
+                processed_headings.insert(heading_line);
+                
+                // Track issues for this heading
+                let mut issues = Vec::new();
+                let mut fix_ranges = Vec::new();
+                let mut fix_replacements = Vec::new();
+                
                 // Check consecutive headings
                 if let Some(prev_idx) = prev_heading_index {
                     let blanks_between = heading_line - prev_idx - 1;
                     let required_blanks = self.lines_above.max(self.lines_below);
                     
                     if blanks_between < required_blanks {
-                        result.push(LintWarning {
-                            message: format!("Headings should be surrounded by blank lines. Expected at least {} blank line(s) between headings.", required_blanks),
-                            line: heading_display_line,
-                            column: 1,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: 0..0, // Insert at the beginning of the current heading
-                                replacement: "\n".repeat(required_blanks - blanks_between)
-                            }),
-                        });
+                        issues.push(format!("Headings should be surrounded by blank lines. Expected at least {} blank line(s) between headings.", required_blanks));
+                        fix_ranges.push(0..0); // Insert at the beginning of the current heading
+                        fix_replacements.push("\n".repeat(required_blanks - blanks_between));
                     }
                 }
                 
@@ -483,16 +512,9 @@ impl Rule for MD022BlanksAroundHeadings {
                     }
                     
                     if blank_lines_above < self.lines_above {
-                        result.push(LintWarning {
-                            message: format!("Heading should have at least {} blank line(s) above.", self.lines_above),
-                            line: heading_display_line,
-                            column: 1,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: 0..0, // Insert at the beginning of the current heading
-                                replacement: "\n".repeat(self.lines_above - blank_lines_above)
-                            }),
-                        });
+                        issues.push(format!("Heading should have at least {} blank line(s) above.", self.lines_above));
+                        fix_ranges.push(0..0); // Insert at the beginning of the current heading
+                        fix_replacements.push("\n".repeat(self.lines_above - blank_lines_above));
                     }
                 }
                 
@@ -513,10 +535,10 @@ impl Rule for MD022BlanksAroundHeadings {
                     
                     // If next line is a code fence, we don't need blank lines between
                     if !next_line_is_code_fence {
-                        let mut _blank_lines_below = 0;
+                        let mut blank_lines_below = 0;
                         for j in (heading_line + 1)..lines.len() {
                             if lines[j].trim().is_empty() {
-                                _blank_lines_below += 1;
+                                blank_lines_below += 1;
                             } else {
                                 break;
                             }
@@ -525,19 +547,31 @@ impl Rule for MD022BlanksAroundHeadings {
                         // If this is a setext heading, we need to check from the marker line
                         let effective_heading_line = if is_setext_heading_marker(line) { i } else { heading_line };
                         
-                        if effective_heading_line < lines.len() - 1 && _blank_lines_below < self.lines_below {
-                            result.push(LintWarning {
-                                message: format!("Heading should have at least {} blank line(s) below.", self.lines_below),
-                                line: heading_display_line,
-                                column: 1,
-                                severity: Severity::Warning,
-                                fix: Some(Fix {
-                                    range: line.len() as usize..line.len() as usize,
-                                    replacement: "\n".repeat(self.lines_below)
-                                }),
-                            });
+                        if effective_heading_line < lines.len() - 1 && blank_lines_below < self.lines_below {
+                            issues.push(format!("Heading should have at least {} blank line(s) below.", self.lines_below));
+                            fix_ranges.push(line.len() as usize..line.len() as usize);
+                            fix_replacements.push("\n".repeat(self.lines_below));
                         }
                     }
+                }
+                
+                // Combine all issues for this heading into one warning
+                if !issues.is_empty() {
+                    // Pick the first issue message and fix
+                    let message = issues[0].clone();
+                    let range = fix_ranges[0].clone();
+                    let replacement = fix_replacements.join("");
+                    
+                    result.push(LintWarning {
+                        message,
+                        line: heading_display_line,
+                        column: 1,
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range,
+                            replacement,
+                        }),
+                    });
                 }
                 
                 // Update previous heading index
@@ -553,9 +587,11 @@ impl Rule for MD022BlanksAroundHeadings {
             return Ok(content.to_string());
         }
         
+        // Use a consolidated fix that avoids adding multiple blank lines
         let lines: Vec<&str> = content.lines().collect();
         let fixed = self._fix_content(&lines);
         
+        // Just return the fixed content - the MD012 rule will handle consecutive blank lines
         Ok(fixed)
     }
 }
