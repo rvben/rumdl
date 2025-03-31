@@ -314,9 +314,69 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
 
         // Normalize the pattern by removing leading ./ if present
         let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+        
+        // Handle path traversal patterns (../ patterns)
+        if normalized_pattern.contains("../") {
+            // For path traversal patterns, we do a direct string comparison
+            // since these are explicitly addressing paths outside current directory
+            if normalized_path_str == normalized_pattern {
+                return true;
+            }
+            
+            // Try to normalize both paths for comparison
+            // This handles cases like "./docs/../src/file.md" matching "src/file.md"
+            if let Ok(normalized_pattern_path) = Path::new(normalized_pattern).canonicalize() {
+                if let Ok(normalized_file_path) = Path::new(normalized_path_str).canonicalize() {
+                    if normalized_pattern_path == normalized_file_path {
+                        return true;
+                    }
+                }
+            }
+            
+            // Another approach: try to resolve the pattern using path logic
+            if let Some(resolved_pattern) = normalize_path(normalized_pattern) {
+                // Compare with the file path directly
+                if normalized_path_str == resolved_pattern {
+                    return true;
+                }
+                
+                // Try as a glob pattern
+                let glob_result = GlobBuilder::new(&resolved_pattern)
+                    .literal_separator(true)
+                    .build()
+                    .and_then(|glob| Ok(glob.compile_matcher()));
+                    
+                if let Ok(matcher) = glob_result {
+                    if matcher.is_match(normalized_path_str) {
+                        return true;
+                    }
+                }
+            }
+            
+            // Try to create a glob pattern for traversal
+            match GlobBuilder::new(normalized_pattern)
+                .literal_separator(false) // Allow matching across directory boundaries
+                .build()
+                .and_then(|glob| Ok(glob.compile_matcher())) {
+                Ok(matcher) => {
+                    if matcher.is_match(normalized_path_str) {
+                        return true;
+                    }
+                },
+                Err(_) => {
+                    // If pattern is invalid as a glob, treat it as a literal string
+                    if normalized_path_str.contains(normalized_pattern) {
+                        return true;
+                    }
+                }
+            }
+            
+            continue;
+        }
 
         // Special case: If pattern has no slashes or wildcards, it only matches files in the root directory
-        if !normalized_pattern.contains('/') && !normalized_pattern.contains('*') {
+        if !normalized_pattern.contains('/') && !normalized_pattern.contains('*') && 
+           !normalized_pattern.contains('[') && !normalized_pattern.contains('{') {
             // For patterns without slashes, they should only match files directly in the root directory
             
             // 1. Get just the filename part of the path
@@ -335,7 +395,10 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
         }
 
         // Handle directory patterns (ending with / or no glob chars)
-        if normalized_pattern.ends_with('/') || !normalized_pattern.contains('*') {
+        if normalized_pattern.ends_with('/') || 
+           (!normalized_pattern.contains('*') && 
+            !normalized_pattern.contains('[') && 
+            !normalized_pattern.contains('{')) {
             let dir_pattern = normalized_pattern.trim_end_matches('/');
             // For directory patterns, we want to match the entire path component
             let path_components: Vec<&str> = normalized_path_str.split('/').collect();
@@ -364,7 +427,8 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
             continue;
         }
 
-        // Try to create a glob pattern
+        // Try to create a glob pattern for complex pattern matching
+        // First try with literal_separator=true (more strict)
         let glob_result = GlobBuilder::new(normalized_pattern)
             .literal_separator(true)  // Make sure * doesn't match /
             .build()
@@ -374,6 +438,24 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
             Ok(matcher) => {
                 if matcher.is_match(normalized_path_str) {
                     return true;
+                } else {
+                    // If the strict match failed, try with literal_separator=false for complex patterns
+                    if normalized_pattern.contains('[') || normalized_pattern.contains('{') {
+                        // For complex glob patterns, we need a more flexible match
+                        let flexible_glob_result = GlobBuilder::new(normalized_pattern)
+                            .literal_separator(false)  // Allow * to match /
+                            .build()
+                            .and_then(|glob| Ok(glob.compile_matcher()));
+                            
+                        match flexible_glob_result {
+                            Ok(flexible_matcher) => {
+                                if flexible_matcher.is_match(normalized_path_str) {
+                                    return true;
+                                }
+                            },
+                            Err(_) => {}
+                        }
+                    }
                 }
             }
             Err(_) => {
@@ -386,6 +468,25 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
     }
 
     false
+}
+
+// Helper function to normalize a path with ../ references
+fn normalize_path(path: &str) -> Option<String> {
+    let mut stack: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "." => continue,  // Current directory, just skip
+            ".." => {
+                stack.pop();  // Go up one directory
+            },
+            "" => continue,   // Empty part (from consecutive slashes)
+            _ => stack.push(part), // Normal directory or file
+        }
+    }
+    
+    // Rebuild the path
+    let normalized = stack.join("/");
+    Some(normalized)
 }
 
 /// Lint a Markdown file
