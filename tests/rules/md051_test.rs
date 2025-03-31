@@ -323,3 +323,34 @@ fn test_performance_md051() {
     assert!(result.len() >= 30);
     assert!(result.len() <= 40);
 }
+
+#[test]
+fn test_inline_code_spans() {
+    let rule = MD051LinkFragments::new();
+    
+    // Test links in inline code spans (these should be ignored)
+    let content = "# Real Heading\n\nThis is a real link: [Link](somepath#real-heading)\n\nThis is a code example: `[Example](#missing-section)`";
+
+    let result = rule.check(content).unwrap();
+    
+    // We should only have 0 warnings - the link in inline code should be ignored
+    assert_eq!(result.len(), 0, "Link in inline code span should be ignored");
+    
+    // Test with multiple code spans and mix of valid and invalid links
+    let content = "# Heading One\n\n`[Invalid](#missing)` and [Valid](#heading-one) and `[Another Invalid](#nowhere)`";
+    
+    let result = rule.check(content).unwrap();
+    
+    // Only the valid link should be checked, the ones in code spans should be ignored
+    assert_eq!(result.len(), 0, "Only links outside code spans should be checked");
+    
+    // Test with a fragment link in inline code followed by a real invalid link
+    let content = "# Heading One\n\n`[Example](#missing-section)` and [Invalid Link](#section-two)";
+    
+    let result = rule.check(content).unwrap();
+    
+    // Only the real invalid link should be caught
+    assert_eq!(result.len(), 1, "Only real invalid links should be caught");
+    assert_eq!(result[0].line, 3, "Warning should be on line 3");
+    assert!(result[0].message.contains("section-two"), "Warning should be about 'section-two'");
+}
