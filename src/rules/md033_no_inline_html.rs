@@ -13,6 +13,8 @@ lazy_static! {
     static ref CODE_FENCE_START: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
     // Pattern to match div tags with align attribute
     static ref DIV_ALIGN_PATTERN: Regex = Regex::new(r"^<div\s+align=").unwrap();
+    // Markdown link pattern - links like [text](<url>) should not be considered HTML
+    static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r"\[.*?\]\(<.*?>\)").unwrap();
 }
 
 #[derive(Debug)]
@@ -82,6 +84,28 @@ impl MD033NoInlineHtml {
             self.allowed.iter().any(|a| a == tag_name)
         }
     }
+    
+    // Check if a potential HTML tag is actually part of a markdown link
+    fn is_in_markdown_link(&self, line: &str, tag_start: usize) -> bool {
+        let before_tag = &line[..tag_start];
+        let after_tag_start = &line[tag_start..];
+        
+        // Check if there's a markdown link pattern that covers this position
+        if let Some(m) = MARKDOWN_LINK_PATTERN.find(line) {
+            // If the tag start position is within the markdown link range
+            return tag_start >= m.start() && tag_start < m.end();
+        }
+        
+        // Check for pattern [text](<url>)
+        // Look backwards for '[' followed by text and ']('
+        if before_tag.contains('[') && before_tag.ends_with("](") &&
+           // Look forward for closing ')'
+           after_tag_start.contains('>') && after_tag_start.contains(')') {
+            return true;
+        }
+        
+        false
+    }
 }
 
 impl Rule for MD033NoInlineHtml {
@@ -121,6 +145,11 @@ impl Rule for MD033NoInlineHtml {
                 for cap in re.captures_iter(line) {
                     let html_tag = cap.get(0).unwrap().as_str();
                     let start_pos = cap.get(0).unwrap().start();
+                    
+                    // Skip if this is part of a markdown link with angle brackets
+                    if self.is_in_markdown_link(line, start_pos) {
+                        continue;
+                    }
                     
                     // Calculate the byte position in the full content
                     let line_start_pos = content.lines()
@@ -164,6 +193,11 @@ impl Rule for MD033NoInlineHtml {
                 for cap in re.captures_iter(line) {
                     let html_tag = cap.get(0).unwrap().as_str();
                     let start_pos = cap.get(0).unwrap().start();
+                    
+                    // Skip if this is part of a markdown link with angle brackets
+                    if self.is_in_markdown_link(line, start_pos) {
+                        continue;
+                    }
                     
                     if !self.is_tag_allowed(html_tag) {
                         warnings.push(LintWarning {

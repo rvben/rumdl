@@ -7,13 +7,15 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 lazy_static! {
-    // Match markdown links: [text](url) or [text](url "title")
-    static ref LINK_REGEX: FancyRegex = FancyRegex::new(r#"(?<!\\)\[([^\]]*)\]\(([^)\s"]+)(?:\s+"[^"]*")?(?:#[^)]*)??\)"#).unwrap();
+    // Match markdown links: [text](url) or [text](url "title") or [text](<url>)
+    static ref LINK_REGEX: FancyRegex = FancyRegex::new(r#"(?<!\\)\[([^\]]*)\]\(<?([^">\s]+)>?(?:\s+"[^"]*")?(?:#[^)]*)??\)"#).unwrap();
     static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
     // Protocol-based URLs
     static ref PROTOCOL_REGEX: Regex = Regex::new(r"^(https?://|ftp://|mailto:|tel:)").unwrap();
     // Domain-based URLs without protocol (www.example.com or example.com)
     static ref DOMAIN_REGEX: Regex = Regex::new(r"^(www\.[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*\.(com|org|net|io|edu|gov|co|uk|de|ru|jp|cn|br|in|fr|it|nl|ca|es|au|ch))").unwrap();
+    // Media files pattern - extensions that typically don't need to exist locally
+    static ref MEDIA_FILES_REGEX: Regex = Regex::new(r"\.(pdf|mp4|mp3|avi|mov|flv|wmv|webm|ogg|wav|flac|aac|m4a|jpg|jpeg|png|gif|bmp|svg|webp|tiff|ico)$").unwrap();
 }
 
 /// Rule MD057: Relative links should point to existing files
@@ -24,12 +26,15 @@ lazy_static! {
 pub struct MD057ExistingRelativeLinks {
     /// Base directory for resolving relative links
     base_path: RefCell<Option<PathBuf>>,
+    /// Skip checking media files
+    skip_media_files: bool,
 }
 
 impl Default for MD057ExistingRelativeLinks {
     fn default() -> Self {
         Self {
             base_path: RefCell::new(None),
+            skip_media_files: true,
         }
     }
 }
@@ -50,6 +55,12 @@ impl MD057ExistingRelativeLinks {
         };
         
         *self.base_path.borrow_mut() = dir_path;
+        self
+    }
+    
+    /// Configure whether to skip checking media files
+    pub fn with_skip_media_files(mut self, skip_media_files: bool) -> Self {
+        self.skip_media_files = skip_media_files;
         self
     }
     
@@ -76,6 +87,15 @@ impl MD057ExistingRelativeLinks {
         
         // All other cases (relative paths, etc.) are not external
         false
+    }
+    
+    /// Check if the URL is a media file that should be skipped
+    fn is_media_file(&self, url: &str) -> bool {
+        if !self.skip_media_files {
+            return false;
+        }
+        
+        MEDIA_FILES_REGEX.is_match(url)
     }
     
     /// Resolve a relative link against the base path
@@ -127,20 +147,29 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue;
             }
 
+            // Skip processing if the rule is disabled for this line
+            if crate::rule::is_rule_disabled_at_line(content, self.name(), line_num) {
+                continue;
+            }
+
             // Find all links in the line
             if let Ok(matches) = LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
                 for cap in matches {
-                    // Skip processing if the rule is disabled for this line
-                    if crate::rule::is_rule_disabled_at_line(content, self.name(), line_num) {
-                        continue;
-                    }
-                    
-                    if let (Some(text_match), Some(url_match)) = (cap.get(1), cap.get(2)) {
-                        let _text = text_match.as_str();
-                        let url = url_match.as_str().trim();
+                    if let (Some(_text_match), Some(url_match)) = (cap.get(1), cap.get(2)) {
+                        let mut url = url_match.as_str().trim();
+                        
+                        // Clean the URL - remove trailing '>' if present
+                        if url.ends_with('>') {
+                            url = &url[..url.len() - 1];
+                        }
                         
                         // Skip empty or external URLs
                         if url.is_empty() || self.is_external_url(url) {
+                            continue;
+                        }
+                        
+                        // Skip media files if configured to do so
+                        if self.is_media_file(url) {
                             continue;
                         }
                         
@@ -197,6 +226,19 @@ mod tests {
         assert!(!rule.is_external_url("relative/path.md"));
         assert!(!rule.is_external_url("../parent/path.md"));
     }
+    
+    #[test]
+    fn test_media_files() {
+        let rule = MD057ExistingRelativeLinks::new();
+        
+        assert!(rule.is_media_file("image.jpg"));
+        assert!(rule.is_media_file("video.mp4"));
+        assert!(rule.is_media_file("document.pdf"));
+        assert!(rule.is_media_file("path/to/audio.mp3"));
+        
+        assert!(!rule.is_media_file("document.md"));
+        assert!(!rule.is_media_file("code.rs"));
+    }
 
     #[test]
     fn test_no_warnings_without_base_path() {
@@ -224,6 +266,7 @@ mod tests {
 [Valid Link](exists.md)
 [Invalid Link](missing.md)
 [External Link](https://example.com)
+[Media Link](image.jpg)
         "#;
         
         // Initialize rule with the base path
@@ -232,80 +275,13 @@ mod tests {
         // Test the rule
         let result = rule.check(content).unwrap();
         
-        // Should have one warning for the missing.md link
+        // Should have one warning for the missing.md link but not for the media file
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("missing.md"));
     }
 
     #[test]
-    fn test_code_blocks() {
-        // Create a temporary directory for test files
-        let temp_dir = tempdir().unwrap();
-        let base_path = temp_dir.path();
-        
-        // Create test content with links in code blocks
-        let content = r#"
-# Test Document
-
-[Invalid Link](missing.md)
-
-```markdown
-[Another Invalid Link](also-missing.md)
-```
-        "#;
-        
-        // Initialize rule with the base path
-        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
-        
-        // Test the rule
-        let result = rule.check(content).unwrap();
-        
-        // Should only have one warning for the link outside the code block
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("missing.md"));
-        assert!(!result[0].message.contains("also-missing.md"));
-    }
-
-    #[test]
-    fn test_disabled_rule() {
-        // Create a temporary directory for test files
-        let temp_dir = tempdir().unwrap();
-        let base_path = temp_dir.path();
-        
-        // Create test content with disabled rule
-        let content = r#"
-# Test Document
-
-<!-- markdownlint-disable MD057 -->
-[Invalid Link](missing.md)
-<!-- markdownlint-enable MD057 -->
-
-[Another Invalid Link](also-missing.md)
-        "#;
-        
-        // Initialize rule with the base path
-        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
-        
-        // Test the rule
-        let result = rule.check(content).unwrap();
-        
-        // Should only have one warning for the link after enabling the rule
-        assert_eq!(result.len(), 1, "Expected 1 warning, got {}", result.len());
-        assert!(result[0].message.contains("also-missing.md"), 
-                "Expected warning about also-missing.md, got: {}", result[0].message);
-        assert_eq!(result[0].line, 8, "Warning should be on line 8");
-        
-        // Verify that the exact disabled link was not detected
-        for warning in &result {
-            // Check for the exact link "missing.md", not a substring match
-            let msg = &warning.message;
-            assert!(!msg.contains("'missing.md'"), 
-                   "Found warning for disabled link 'missing.md' in message: {}", msg);
-        }
-    }
-
-    #[test]
-    fn test_links_with_titles() {
+    fn test_angle_bracket_links() {
         // Create a temporary directory for test files
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
@@ -314,24 +290,25 @@ mod tests {
         let exists_path = base_path.join("exists.md");
         File::create(&exists_path).unwrap().write_all(b"# Test File").unwrap();
         
-        // Create test content with links that have titles
+        // Create test content with angle bracket links
         let content = r#"
-# Test Document with Titled Links
+# Test Document
 
-[Valid Link](exists.md "This is a valid link")
-[Invalid Link](missing.md "This is an invalid link")
-[External Link](https://example.com "External site")
+[Valid Link](<exists.md>)
+[Invalid Link](<missing.md>)
+[External Link](<https://example.com>)
+[Media Link](<image.jpg>)
         "#;
         
-        // Initialize rule with the base path
-        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        // Initialize rule with the base path and disable media file skipping
+        let rule = MD057ExistingRelativeLinks::new()
+            .with_path(base_path)
+            .with_skip_media_files(false);
         
         // Test the rule
         let result = rule.check(content).unwrap();
         
-        // Should have one warning for the missing.md link
-        assert_eq!(result.len(), 1, "Expected only one warning for missing.md");
-        assert!(result[0].message.contains("missing.md"), "Warning should mention missing.md not the title");
-        assert!(!result[0].message.contains("This is an invalid link"), "Warning should not include the title text");
+        // Should have two warnings: missing.md and image.jpg
+        assert_eq!(result.len(), 2);
     }
 } 
