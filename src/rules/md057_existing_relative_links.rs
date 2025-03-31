@@ -146,6 +146,36 @@ impl MD057ExistingRelativeLinks {
             None
         }
     }
+    
+    /// Detect inline code spans in a line and return their ranges
+    fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
+        if !line.contains('`') {
+            return Vec::new();
+        }
+
+        let mut spans = Vec::new();
+        let mut in_code = false;
+        let mut code_start = 0;
+
+        for (i, c) in line.chars().enumerate() {
+            if c == '`' {
+                if !in_code {
+                    code_start = i;
+                    in_code = true;
+                } else {
+                    spans.push((code_start, i + 1)); // Include the closing backtick
+                    in_code = false;
+                }
+            }
+        }
+
+        spans
+    }
+    
+    /// Check if a position is within an inline code span
+    fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
+        spans.iter().any(|&(start, end)| pos >= start && pos < end)
+    }
 }
 
 impl Rule for MD057ExistingRelativeLinks {
@@ -197,11 +227,23 @@ impl Rule for MD057ExistingRelativeLinks {
             if crate::rule::is_rule_disabled_at_line(content, self.name(), line_num) {
                 continue;
             }
+            
+            // Detect inline code spans in this line
+            let inline_code_spans = self.compute_inline_code_spans(line);
 
             // Find all links in the line
             if let Ok(matches) = LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
                 for cap in matches {
-                    if let (Some(_text_match), Some(url_match)) = (cap.get(1), cap.get(2)) {
+                    if let (Some(full_match), Some(_text_match), Some(url_match)) = 
+                           (cap.get(0), cap.get(1), cap.get(2)) {
+                        // Skip links inside inline code spans
+                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
+                            if debug {
+                                println!("Skipping link inside inline code span");
+                            }
+                            continue;
+                        }
+                        
                         let mut url = url_match.as_str().trim();
                         
                         if debug {
@@ -465,5 +507,62 @@ mod tests {
         // Should warn about the missing media file
         assert_eq!(result_all.len(), 1, "Should have one warning when skip_media_files is false");
         assert!(result_all[0].message.contains("image.jpg"), "Warning should mention image.jpg");
+    }
+    
+    #[test]
+    fn test_inline_code_spans() {
+        // Create a temporary directory for test files
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+        
+        // Create test content with links in inline code spans
+        let content = r#"
+# Test Document
+
+This is a normal link: [Link](missing.md)
+
+This is a code span with a link: `[Link](another-missing.md)`
+
+Some more text with `inline code [Link](yet-another-missing.md) embedded`.
+
+    "#;
+        
+        // Initialize rule with the base path
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path.to_path_buf());
+        
+        // Test the rule
+        let result = rule.check(content).unwrap();
+        
+        // Should only have warning for the normal link, not for links in code spans
+        assert_eq!(result.len(), 1, "Should have exactly one warning");
+        assert!(result[0].message.contains("missing.md"), "Warning should be for missing.md");
+        assert!(!result.iter().any(|w| w.message.contains("another-missing.md")), 
+               "Should not warn about link in code span");
+        assert!(!result.iter().any(|w| w.message.contains("yet-another-missing.md")), 
+               "Should not warn about link in inline code");
+    }
+    
+    #[test]
+    fn test_compute_inline_code_spans() {
+        let rule = MD057ExistingRelativeLinks::new();
+        
+        // Test with no backticks
+        let spans = rule.compute_inline_code_spans("No code spans here");
+        assert!(spans.is_empty(), "Should have no spans when no backticks are present");
+        
+        // Test with a simple code span
+        let spans = rule.compute_inline_code_spans("Text with `code span` in it");
+        assert_eq!(spans.len(), 1, "Should detect one code span");
+        assert_eq!(spans[0], (10, 21), "Code span should be at the correct position");
+        
+        // Test with multiple code spans
+        let spans = rule.compute_inline_code_spans("Multiple `code` spans `in one` line");
+        assert_eq!(spans.len(), 2, "Should detect two code spans");
+        assert_eq!(spans[0], (9, 15), "First code span should be at the correct position");
+        assert_eq!(spans[1], (22, 30), "Second code span should be at the correct position");
+        
+        // Test with unbalanced backticks
+        let spans = rule.compute_inline_code_spans("Unbalanced `backtick");
+        assert!(spans.is_empty(), "Should not detect unbalanced backticks as spans");
     }
 } 

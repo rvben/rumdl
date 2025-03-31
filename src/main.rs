@@ -307,6 +307,16 @@ fn list_available_rules() {
     }
 }
 
+// Helper function to display paths without "./" prefix
+fn display_path(path: &str) -> &str {
+    if path.starts_with("./") {
+        &path[2..]
+    } else {
+        path
+    }
+}
+
+// Process a single file
 fn process_file(
     path: &str,
     rules: &[Box<dyn Rule>],
@@ -318,7 +328,12 @@ fn process_file(
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(err) => {
-            eprintln!("{}: {}: {}", "Error reading file".red().bold(), path, err);
+            eprintln!(
+                "{}: {}: {}",
+                "Error reading file".red().bold(),
+                display_path(path).blue().underline(),
+                err
+            );
             return (false, 0, 0);
         }
     };
@@ -370,7 +385,7 @@ fn process_file(
                 "{}: {} on file {}: {}",
                 "Error".red().bold(),
                 md057_rule.name().yellow(),
-                path.blue().underline(),
+                display_path(path).blue().underline(),
                 err
             );
         }
@@ -419,7 +434,7 @@ fn process_file(
                         "{}: {} on file {}: {}",
                         "Error".red().bold(),
                         rule.name().yellow(),
-                        path.blue().underline(),
+                        display_path(path).blue().underline(),
                         err
                     );
                 }
@@ -451,7 +466,7 @@ fn process_file(
 
             println!(
                 "{}:{}:{}: {} {} {}",
-                path.blue().underline(),
+                display_path(path).blue().underline(),
                 warning.line.to_string().cyan(),
                 warning.column.to_string().cyan(),
                 format!("[{}]", rule_name).yellow(),
@@ -461,9 +476,9 @@ fn process_file(
         }
     } else if verbose {
         println!(
-            "{} No issues found in {}",
-            "✓".green(),
-            path.blue().underline()
+            "{}: No issues found in {}",
+            "Success".green().bold(),
+            display_path(path).blue().underline()
         );
     }
 
@@ -549,7 +564,7 @@ fn process_file(
                                                 "{} checking rule {} for {}: {}",
                                                 "Error".red().bold(),
                                                 rule.name().cyan(),
-                                                path.blue().underline(),
+                                                display_path(path).blue().underline(),
                                                 err
                                             );
                                         }
@@ -565,7 +580,7 @@ fn process_file(
                             "{} applying fix for rule {} to {}: {}",
                             "Error".red().bold(),
                             rule_name.cyan(),
-                            path.blue().underline(),
+                            display_path(path).blue().underline(),
                             err
                         );
                     }
@@ -582,7 +597,7 @@ fn process_file(
                     eprintln!(
                         "{} {}: {}",
                         "Error writing fixed content to".red().bold(),
-                        path.blue().underline(),
+                        display_path(path).blue().underline(),
                         err
                     );
                 }
@@ -884,13 +899,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 total_files_processed += 1;
-                let (file_has_issues, issues_found, issues_fixed) =
-                    process_file(&file_path, &rules, cli.fix, cli.verbose);
-                if file_has_issues {
+                let (has_warnings, warnings_found, warnings_fixed) = process_file(&file_path, &rules, cli.fix, cli.verbose);
+                if has_warnings {
                     has_issues = true;
                     files_with_issues += 1;
-                    total_issues_found += issues_found;
-                    total_issues_fixed += issues_fixed;
+                    total_issues_found += warnings_found;
+                    total_issues_fixed += warnings_fixed;
                 }
             }
         } else {
@@ -924,13 +938,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 total_files_processed += 1;
-                let (file_has_issues, issues_found, issues_fixed) =
-                    process_file(&file_path, &rules, cli.fix, cli.verbose);
-                if file_has_issues {
+                let (has_warnings, warnings_found, warnings_fixed) = process_file(&file_path, &rules, cli.fix, cli.verbose);
+                if has_warnings {
                     has_issues = true;
                     files_with_issues += 1;
-                    total_issues_found += issues_found;
-                    total_issues_fixed += issues_fixed;
+                    total_issues_found += warnings_found;
+                    total_issues_fixed += warnings_fixed;
                 }
             }
         }
@@ -943,7 +956,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!(
                 "{}: Path does not exist: {}",
                 "Error".red().bold(),
-                path_str
+                display_path(path_str).blue().underline()
             );
             has_issues = true;
             continue;
@@ -1012,13 +1025,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     total_files_processed += 1;
-                    let (file_has_issues, issues_found, issues_fixed) =
-                        process_file(&file_path, &rules, cli.fix, cli.verbose);
-                    if file_has_issues {
+                    let (has_warnings, warnings_found, warnings_fixed) = process_file(&file_path, &rules, cli.fix, cli.verbose);
+                    if has_warnings {
                         has_issues = true;
                         files_with_issues += 1;
-                        total_issues_found += issues_found;
-                        total_issues_fixed += issues_fixed;
+                        total_issues_found += warnings_found;
+                        total_issues_fixed += warnings_fixed;
                     }
                 }
             } else {
@@ -1056,13 +1068,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     total_files_processed += 1;
-                    let (file_has_issues, issues_found, issues_fixed) =
-                        process_file(&file_path, &rules, cli.fix, cli.verbose);
-                    if file_has_issues {
+                    let (has_warnings, warnings_found, warnings_fixed) = process_file(&file_path, &rules, cli.fix, cli.verbose);
+                    if has_warnings {
                         has_issues = true;
                         files_with_issues += 1;
-                        total_issues_found += issues_found;
-                        total_issues_fixed += issues_fixed;
+                        total_issues_found += warnings_found;
+                        total_issues_fixed += warnings_fixed;
                     }
                 }
             }
@@ -1110,13 +1121,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     total_files_processed += 1;
-                    let (file_has_issues, issues_found, issues_fixed) =
-                        process_file(&file_path, &rules, cli.fix, cli.verbose);
-                    if file_has_issues {
+                    let (has_warnings, warnings_found, warnings_fixed) = process_file(&file_path, &rules, cli.fix, cli.verbose);
+                    if has_warnings {
                         has_issues = true;
                         files_with_issues += 1;
-                        total_issues_found += issues_found;
-                        total_issues_fixed += issues_fixed;
+                        total_issues_found += warnings_found;
+                        total_issues_fixed += warnings_fixed;
                     }
                 }
             } else {
@@ -1154,13 +1164,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     total_files_processed += 1;
-                    let (file_has_issues, issues_found, issues_fixed) =
-                        process_file(&file_path, &rules, cli.fix, cli.verbose);
-                    if file_has_issues {
+                    let (has_warnings, warnings_found, warnings_fixed) = process_file(&file_path, &rules, cli.fix, cli.verbose);
+                    if has_warnings {
                         has_issues = true;
                         files_with_issues += 1;
-                        total_issues_found += issues_found;
-                        total_issues_fixed += issues_fixed;
+                        total_issues_found += warnings_found;
+                        total_issues_fixed += warnings_fixed;
                     }
                 }
             }
