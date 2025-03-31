@@ -1,8 +1,15 @@
 use crate::utils::range_utils::LineIndex;
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::heading_utils::HeadingUtils;
+use lazy_static::lazy_static;
+use regex::Regex;
+use std::collections::HashSet;
+
+lazy_static! {
+    // Pattern for quick check if content has any headings at all
+    static ref HEADING_CHECK: Regex = Regex::new(r"(?m)^(?:\s*)#").unwrap();
+}
 
 #[derive(Debug)]
 pub struct MD025SingleTitle {
@@ -19,6 +26,21 @@ impl MD025SingleTitle {
     pub fn new(level: usize, _front_matter_title: &str) -> Self {
         Self { level }
     }
+
+    #[inline]
+    fn get_special_lines(&self, content: &str) -> HashSet<usize> {
+        let mut special_lines = HashSet::new();
+        
+        // Add code block lines
+        for (i, _) in content.lines().enumerate() {
+            if HeadingUtils::is_in_code_block(content, i) || 
+               FrontMatterUtils::is_in_front_matter(content, i) {
+                special_lines.insert(i);
+            }
+        }
+        
+        special_lines
+    }
 }
 
 impl Rule for MD025SingleTitle {
@@ -31,19 +53,27 @@ impl Rule for MD025SingleTitle {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // Quick check if there are any headings at all
+        if !HEADING_CHECK.is_match(content) {
+            return Ok(Vec::new());
+        }
 
+        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-
         let mut found_title = false;
+        
+        // Pre-compute special lines (code blocks or front matter)
+        let special_lines = self.get_special_lines(content);
 
-        let lines: Vec<&str> = content.lines().collect();
-
-        for (i, line) in lines.iter().enumerate() {
+        // Process each line
+        for (i, line) in content.lines().enumerate() {
             // Skip processing if line is in a code block or front matter
-            if HeadingUtils::is_in_code_block(content, i)
-                || FrontMatterUtils::is_in_front_matter(content, i)
-            {
+            if special_lines.contains(&i) {
                 continue;
             }
 
@@ -61,7 +91,7 @@ impl Rule for MD025SingleTitle {
                             column: line.find('#').unwrap_or(0) + 1,
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: _line_index
+                                range: line_index
                                     .line_col_to_byte_range(i + 1, line.find('#').unwrap_or(0) + 1),
                                 replacement: format!(
                                     "{} {}",
@@ -80,19 +110,25 @@ impl Rule for MD025SingleTitle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(String::new());
+        }
+        
+        // Quick check if there are any headings at all
+        if !HEADING_CHECK.is_match(content) {
+            return Ok(content.to_string());
+        }
 
-        let mut result = String::new();
-
+        let mut result = String::with_capacity(content.len());
         let mut found_first_title = false;
+        
+        // Pre-compute special lines (code blocks or front matter)
+        let special_lines = self.get_special_lines(content);
 
-        let lines: Vec<&str> = content.lines().collect();
-
-        for (i, line) in lines.iter().enumerate() {
+        for (i, line) in content.lines().enumerate() {
             // Don't modify lines in code blocks or front matter
-            if HeadingUtils::is_in_code_block(content, i)
-                || FrontMatterUtils::is_in_front_matter(content, i)
-            {
+            if special_lines.contains(&i) {
                 result.push_str(line);
             } else {
                 let trimmed = line.trim_start();
@@ -103,13 +139,9 @@ impl Rule for MD025SingleTitle {
                     if level == self.level {
                         if found_first_title {
                             // This is a duplicate level-n heading - add one more # to increase level
-                            let modified = format!(
-                                "{}{}{}",
-                                " ".repeat(indent),
-                                "#".repeat(level + 1),
-                                &trimmed[level..]
-                            );
-                            result.push_str(&modified);
+                            result.push_str(&" ".repeat(indent));
+                            result.push_str(&"#".repeat(level + 1));
+                            result.push_str(&trimmed[level..]);
                         } else {
                             // This is the first level-n heading - keep it as is
                             result.push_str(line);
@@ -126,7 +158,7 @@ impl Rule for MD025SingleTitle {
             }
 
             // Add newline between lines (except after the last line)
-            if i < lines.len() - 1 {
+            if i < content.lines().count() - 1 {
                 result.push('\n');
             }
         }
