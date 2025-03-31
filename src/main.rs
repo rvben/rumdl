@@ -63,6 +63,10 @@ struct Cli {
     /// Show detailed output
     #[arg(short, long)]
     verbose: bool,
+    
+    /// Show profiling information
+    #[arg(long)]
+    profile: bool,
 
     /// Command to run
     #[command(subcommand)]
@@ -291,6 +295,7 @@ fn list_available_rules() {
         respect_gitignore: false,
         debug_gitignore: false,
         verbose: false,
+        profile: false,
         command: None,
     });
 
@@ -1219,8 +1224,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Run with `--fix` to automatically fix issues");
         }
 
-        // Print profiling information if verbose or debug mode
-        if cli.verbose {
+        // Print profiling information if profile flag is set
+        if cli.profile {
             println!("\n{}", rumdl::get_profiling_report());
         }
 
@@ -1228,8 +1233,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         println!("{} No issues found", "✓".green().bold());
 
-        // Print profiling information if verbose or debug mode
-        if cli.verbose {
+        // Print profiling information if profile flag is set
+        if cli.profile {
             println!("\n{}", rumdl::get_profiling_report());
         }
     }
