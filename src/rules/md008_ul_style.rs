@@ -1,8 +1,13 @@
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::front_matter_utils::FrontMatterUtils;
-use crate::rules::heading_utils::HeadingUtils;
+use lazy_static::lazy_static;
+use regex::Regex;
+use std::collections::HashSet;
+
+lazy_static! {
+    static ref LIST_MARKER_REGEX: Regex = Regex::new(r"^\s*([*+-])(\s+|$)").unwrap();
+}
 
 #[derive(Debug)]
 pub struct MD008ULStyle {
@@ -27,30 +32,73 @@ impl MD008ULStyle {
         }
     }
 
+    #[inline]
     fn get_list_marker(line: &str) -> Option<char> {
-        let trimmed = line.trim_start();
-
         // Skip empty lines
-        if trimmed.is_empty() {
+        if line.trim().is_empty() {
             return None;
         }
 
-        // Check for actual list markers
-        if trimmed.starts_with(['*', '+', '-'])
-            && (trimmed.len() == 1 || trimmed.chars().nth(1) == Some(' '))
-        {
-            Some(trimmed.chars().next().unwrap())
-        } else {
-            None
+        // Use regex for faster matching
+        if let Some(caps) = LIST_MARKER_REGEX.captures(line) {
+            if let Some(marker_match) = caps.get(1) {
+                let marker = marker_match.as_str().chars().next().unwrap();
+                return Some(marker);
+            }
         }
+        None
     }
 
     fn detect_first_marker_style(&self, content: &str) -> Option<char> {
-        for (i, line) in content.lines().enumerate() {
+        // Early return for empty content
+        if content.is_empty() {
+            return None;
+        }
+        
+        // Pre-compute code blocks to avoid repeated checks
+        let lines: Vec<&str> = content.lines().collect();
+        let mut in_code_blocks = vec![false; lines.len()];
+        let mut in_front_matter = vec![false; lines.len()];
+        
+        // Fast pre-check for list markers
+        let has_markers = content.contains('*') || content.contains('+') || content.contains('-');
+        if !has_markers {
+            return None;
+        }
+        
+        // Pre-compute code blocks
+        let mut in_block = false;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_block = !in_block;
+            }
+            in_code_blocks[i] = in_block;
+        }
+        
+        // Pre-compute front matter
+        let mut in_fm = false;
+        let mut is_first_line = true;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            
+            if is_first_line && trimmed == "---" {
+                in_fm = true;
+                is_first_line = false;
+            } else if in_fm && trimmed == "---" {
+                in_fm = false;
+            }
+            
+            in_front_matter[i] = in_fm;
+            if !is_first_line {
+                is_first_line = false;
+            }
+        }
+        
+        // Find first marker
+        for (i, line) in lines.iter().enumerate() {
             // Skip front matter and code blocks
-            if FrontMatterUtils::is_in_front_matter(content, i)
-                || HeadingUtils::is_in_code_block(content, i)
-            {
+            if in_front_matter[i] || in_code_blocks[i] {
                 continue;
             }
 
@@ -73,12 +121,54 @@ impl Rule for MD008ULStyle {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
+        // Early returns for common cases
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // Quick check if any list markers exist
+        if !content.contains('*') && !content.contains('+') && !content.contains('-') {
+            return Ok(Vec::new());
+        }
 
+        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
-        // Determine the target style - use the first marker found or fall back to default
+        // Pre-compute code blocks and front matter
+        let lines: Vec<&str> = content.lines().collect();
+        let mut in_code_blocks = vec![false; lines.len()];
+        let mut in_front_matter = vec![false; lines.len()];
+        
+        // Pre-compute code blocks
+        let mut in_block = false;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_block = !in_block;
+            }
+            in_code_blocks[i] = in_block;
+        }
+        
+        // Pre-compute front matter
+        let mut in_fm = false;
+        let mut is_first_line = true;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            
+            if is_first_line && trimmed == "---" {
+                in_fm = true;
+                is_first_line = false;
+            } else if in_fm && trimmed == "---" {
+                in_fm = false;
+            }
+            
+            in_front_matter[i] = in_fm;
+            if !is_first_line {
+                is_first_line = false;
+            }
+        }
 
+        // Determine the target style - use the first marker found or fall back to default
         let target_style = if self.use_consistent {
             self.detect_first_marker_style(content)
                 .unwrap_or(self.style)
@@ -86,41 +176,56 @@ impl Rule for MD008ULStyle {
             self.style
         };
 
-        for (line_num, line) in content.lines().enumerate() {
+        // Keep track of markers we've seen to avoid duplicate warnings
+        let mut processed_markers = HashSet::new();
+
+        for (line_num, line) in lines.iter().enumerate() {
             // Skip front matter and code blocks
-            if FrontMatterUtils::is_in_front_matter(content, line_num)
-                || HeadingUtils::is_in_code_block(content, line_num)
-            {
+            if in_front_matter[line_num] || in_code_blocks[line_num] {
                 continue;
             }
 
-            if let Some(_marker) = Self::get_list_marker(line) {
-                if _marker != target_style {
-                    let message = if self.use_consistent {
-                        format!(
-                            "Unordered list item marker '{}' should be '{}' to match first marker style",
-                            _marker, target_style
-                        )
-                    } else {
-                        format!(
-                            "Unordered list item marker '{}' should be '{}' (configured style)",
-                            _marker, target_style
-                        )
-                    };
+            if let Some(marker) = Self::get_list_marker(line) {
+                if marker != target_style {
+                    // Create a unique key for this marker to avoid duplicate warnings
+                    let marker_key = (line_num, marker);
+                    
+                    if !processed_markers.contains(&marker_key) {
+                        processed_markers.insert(marker_key);
+                        
+                        let message = if self.use_consistent {
+                            format!(
+                                "Unordered list item marker '{}' should be '{}' to match first marker style",
+                                marker, target_style
+                            )
+                        } else {
+                            format!(
+                                "Unordered list item marker '{}' should be '{}' (configured style)",
+                                marker, target_style
+                            )
+                        };
 
-                    warnings.push(LintWarning {
-                        message,
-                        line: line_num + 1,
-                        column: line.find(_marker).unwrap() + 1,
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(
-                                line_num + 1,
-                                line.find(_marker).unwrap() + 1,
-                            ),
-                            replacement: line.replacen(_marker, &target_style.to_string(), 1),
-                        }),
-                    });
+                        warnings.push(LintWarning {
+                            message,
+                            line: line_num + 1,
+                            column: line.find(marker).unwrap_or(0) + 1,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range(
+                                    line_num + 1,
+                                    line.find(marker).unwrap_or(0) + 1,
+                                ),
+                                replacement: if let Some(r) = LIST_MARKER_REGEX.replace(line, |caps: &regex::Captures| {
+                                    let ws_after = caps.get(2).map_or("", |m| m.as_str());
+                                    format!("{}{}{}", &line[0..caps.get(1).unwrap().start()], target_style, ws_after)
+                                }).to_string().into() {
+                                    r
+                                } else {
+                                    line.replacen(marker, &target_style.to_string(), 1)
+                                },
+                            }),
+                        });
+                    }
                 }
             }
         }
@@ -129,31 +234,75 @@ impl Rule for MD008ULStyle {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-        // Apply front matter fixes first if needed
+        // Early returns for common cases
+        if content.is_empty() {
+            return Ok(String::new());
+        }
+        
+        // Quick check if any list markers exist
+        if !content.contains('*') && !content.contains('+') && !content.contains('-') {
+            return Ok(content.to_string());
+        }
 
-        let content = FrontMatterUtils::fix_malformed_front_matter(content);
+        // Pre-compute code blocks and front matter
+        let lines: Vec<&str> = content.lines().collect();
+        let mut in_code_blocks = vec![false; lines.len()];
+        let mut in_front_matter = vec![false; lines.len()];
+        
+        // Pre-compute code blocks
+        let mut in_block = false;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_block = !in_block;
+            }
+            in_code_blocks[i] = in_block;
+        }
+        
+        // Pre-compute front matter
+        let mut in_fm = false;
+        let mut is_first_line = true;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            
+            if is_first_line && trimmed == "---" {
+                in_fm = true;
+                is_first_line = false;
+            } else if in_fm && trimmed == "---" {
+                in_fm = false;
+            }
+            
+            in_front_matter[i] = in_fm;
+            if !is_first_line {
+                is_first_line = false;
+            }
+        }
 
         // Determine the target style - use the first marker found or fall back to default
-
         let target_style = if self.use_consistent {
-            self.detect_first_marker_style(&content)
+            self.detect_first_marker_style(content)
                 .unwrap_or(self.style)
         } else {
             self.style
         };
 
-        let mut result = String::new();
+        // Pre-allocate for better performance
+        let mut result = String::with_capacity(content.len());
 
-        for (i, line) in content.lines().enumerate() {
+        for (i, line) in lines.iter().enumerate() {
             // Skip modifying front matter and code blocks
-            if FrontMatterUtils::is_in_front_matter(&content, i)
-                || HeadingUtils::is_in_code_block(&content, i)
-            {
+            if in_front_matter[i] || in_code_blocks[i] {
                 result.push_str(line);
-            } else if let Some(_marker) = Self::get_list_marker(line) {
-                if _marker != target_style {
-                    result.push_str(&line.replacen(_marker, &target_style.to_string(), 1));
+            } else if let Some(marker) = Self::get_list_marker(line) {
+                if marker != target_style {
+                    if let Some(replaced) = LIST_MARKER_REGEX.replace(line, |caps: &regex::Captures| {
+                        let ws_after = caps.get(2).map_or("", |m| m.as_str());
+                        format!("{}{}{}", &line[0..caps.get(1).unwrap().start()], target_style, ws_after)
+                    }).to_string().into() {
+                        result.push_str(&replaced);
+                    } else {
+                        result.push_str(&line.replacen(marker, &target_style.to_string(), 1));
+                    }
                 } else {
                     result.push_str(line);
                 }
@@ -161,7 +310,7 @@ impl Rule for MD008ULStyle {
                 result.push_str(line);
             }
 
-            if i < content.lines().count() - 1 {
+            if i < lines.len() - 1 {
                 result.push('\n');
             }
         }

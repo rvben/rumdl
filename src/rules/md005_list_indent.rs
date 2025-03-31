@@ -1,67 +1,63 @@
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
+
+lazy_static! {
+    static ref LIST_MARKER_REGEX: Regex = Regex::new(r"^\d+[.)]").unwrap();
+}
 
 #[derive(Debug, Default)]
 pub struct MD005ListIndent;
 
 impl MD005ListIndent {
+    #[inline]
     fn get_list_marker_info(line: &str) -> Option<(usize, char, usize)> {
-        let indentation = line.len() - line.trim_start().len();
-
-        let trimmed = line.trim_start();
-
-        // Check for unordered list markers
-        if let Some(c) = trimmed.chars().next() {
-            if (c == '*' || c == '-' || c == '+')
-                && trimmed.len() > 1
-                && trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace())
-            {
-                return Some((indentation, c, 1)); // 1 char marker
-            }
+        // Early return for empty or whitespace-only lines
+        if line.is_empty() || line.trim().is_empty() {
+            return None;
         }
 
-        // Check for ordered list markers
-        let re = Regex::new(r"^\d+[.)]").unwrap();
-        if re.is_match(trimmed) {
-            let marker_match = re.find(trimmed).unwrap();
-            let marker_char = trimmed.chars().nth(marker_match.end() - 1).unwrap();
-            if trimmed.len() > marker_match.end()
-                && trimmed
-                    .chars()
-                    .nth(marker_match.end())
-                    .map_or(false, |c| c.is_whitespace())
+        let indentation = line.len() - line.trim_start().len();
+        let trimmed = line.trim_start();
+
+        // Fast path check for unordered list markers
+        if !trimmed.is_empty() {
+            let first_char = trimmed.chars().next().unwrap();
+            
+            // Check for unordered list markers (* - +)
+            if (first_char == '*' || first_char == '-' || first_char == '+') 
+                && trimmed.len() > 1 
+                && trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace())
             {
-                return Some((indentation, marker_char, marker_match.end()));
+                return Some((indentation, first_char, 1)); // 1 char marker
+            }
+            
+            // Fast path check for ordered list markers (digits followed by . or ))
+            if first_char.is_ascii_digit() {
+                if let Some(marker_match) = LIST_MARKER_REGEX.find(trimmed) {
+                    let marker_char = trimmed.chars().nth(marker_match.end() - 1).unwrap();
+                    if trimmed.len() > marker_match.end()
+                        && trimmed.chars().nth(marker_match.end()).map_or(false, |c| c.is_whitespace())
+                    {
+                        return Some((indentation, marker_char, marker_match.end()));
+                    }
+                }
             }
         }
 
         None
     }
 
+    #[inline]
     fn is_blank_line(line: &str) -> bool {
         line.trim().is_empty()
     }
 
-    fn is_in_code_block(lines: &[&str], current_line: usize) -> bool {
-        let mut in_code_block = false;
-
-        for (i, line) in lines.iter().take(current_line + 1).enumerate() {
-            if line.trim().starts_with("```") || line.trim().starts_with("~~~") {
-                in_code_block = !in_code_block;
-            }
-
-            if i == current_line {
-                return in_code_block;
-            }
-        }
-
-        false
-    }
-
     // Determine the expected indentation for a list item at a specific level
+    #[inline]
     fn get_expected_indent(level: usize) -> usize {
         if level == 1 {
             0 // Top level items should be at the start of the line
@@ -71,7 +67,13 @@ impl MD005ListIndent {
     }
 
     // Determine if a line is a continuation of a list item
+    #[inline]
     fn is_list_continuation(prev_line: &str, current_line: &str) -> bool {
+        // Early return for empty lines
+        if current_line.trim().is_empty() {
+            return false;
+        }
+        
         // If the previous line is a list item and the current line has more indentation
         // but is not a list item itself, it's a continuation
         if let Some((prev_indent, _, _)) = Self::get_list_marker_info(prev_line) {
@@ -93,11 +95,37 @@ impl Rule for MD005ListIndent {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
+        // Early returns for common cases
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // Quick check to avoid processing files without list markers
+        if !content.contains('*') && !content.contains('-') && !content.contains('+') 
+            && !content.contains(|c: char| c.is_ascii_digit()) {
+            return Ok(Vec::new());
+        }
 
+        let line_index = LineIndex::new(content.to_string());
         let lines: Vec<&str> = content.lines().collect();
+        
+        // Early return if there are no lines
+        if lines.is_empty() {
+            return Ok(Vec::new());
+        }
 
         let mut warnings = Vec::new();
+
+        // Pre-compute code blocks to avoid repeated checks
+        let mut in_code_blocks = vec![false; lines.len()];
+        let mut in_block = false;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_block = !in_block;
+            }
+            in_code_blocks[i] = in_block;
+        }
 
         // Maps to store indentation by level for each list
         let mut current_list_id = 0;
@@ -107,7 +135,7 @@ impl Rule for MD005ListIndent {
         let mut list_items = Vec::new();
         for (line_num, line) in lines.iter().enumerate() {
             // Skip blank lines and code blocks
-            if Self::is_blank_line(line) || Self::is_in_code_block(&lines, line_num) {
+            if Self::is_blank_line(line) || in_code_blocks[line_num] {
                 continue;
             }
 
@@ -139,6 +167,11 @@ impl Rule for MD005ListIndent {
                 }
             }
         }
+        
+        // Early return if no list items were found
+        if list_items.is_empty() {
+            return Ok(Vec::new());
+        }
 
         // Second pass: determine levels for each list
         let mut list_level_map: HashMap<usize, HashMap<usize, usize>> = HashMap::new(); // list_id -> { indent -> level }
@@ -146,7 +179,7 @@ impl Rule for MD005ListIndent {
 
         for (line_num, indent, list_id) in &list_items {
             // Skip items in code blocks
-            if Self::is_in_code_block(&lines, *line_num) {
+            if in_code_blocks[*line_num] {
                 continue;
             }
 
@@ -182,7 +215,7 @@ impl Rule for MD005ListIndent {
         // Third pass: check if indentation matches the expected level for each item
         for (line_num, indent, _list_id) in &list_items {
             // Skip items in code blocks
-            if Self::is_in_code_block(&lines, *line_num) {
+            if in_code_blocks[*line_num] {
                 continue;
             }
 
@@ -215,7 +248,7 @@ impl Rule for MD005ListIndent {
                     message: inconsistent_message,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(line_num + 1, 1),
+                        range: line_index.line_col_to_byte_range(line_num + 1, 1),
                         replacement,
                     }),
                 });
@@ -223,11 +256,9 @@ impl Rule for MD005ListIndent {
         }
 
         // Check for consistency among items in the same level of the same list
-        // This ensures that list items at the same level have consistent indentation
-
+        // Group list items by list_id and level
         let mut level_groups: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::new(); // (list_id, level) -> [(line_num, indent)]
 
-        // Group list items by list_id and level
         for (line_num, indent, level) in &list_item_levels {
             let list_id = list_items
                 .iter()
@@ -272,7 +303,7 @@ impl Rule for MD005ListIndent {
                             message: inconsistent_message,
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range(line_num + 1, 1),
+                                range: line_index.line_col_to_byte_range(line_num + 1, 1),
                                 replacement,
                             }),
                         });
@@ -326,7 +357,7 @@ impl Rule for MD005ListIndent {
                             message,
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range(line_num + 1, 1),
+                                range: line_index.line_col_to_byte_range(line_num + 1, 1),
                                 replacement,
                             }),
                         });
@@ -339,7 +370,17 @@ impl Rule for MD005ListIndent {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
+        // Early returns for common cases
+        if content.is_empty() {
+            return Ok(String::new());
+        }
+        
+        // Quick check to avoid processing files without list markers
+        if !content.contains('*') && !content.contains('-') && !content.contains('+') 
+            && !content.contains(|c: char| c.is_ascii_digit()) {
+            return Ok(content.to_string());
+        }
+        
         // Get warnings from the check method
         let warnings = self.check(content)?;
 
@@ -348,7 +389,6 @@ impl Rule for MD005ListIndent {
         }
 
         // Create a map of line numbers to replacements
-
         let mut line_replacements: HashMap<usize, String> = HashMap::new();
         for warning in &warnings {
             if let Some(fix) = &warning.fix {
@@ -366,7 +406,7 @@ impl Rule for MD005ListIndent {
             if let Some(replacement) = line_replacements.get(&i) {
                 fixed_lines.push(replacement.clone());
             } else {
-                fixed_lines.push(line.to_string());
+                fixed_lines.push((*line).to_string());
             }
         }
 

@@ -34,20 +34,37 @@ fn contains_file(output: &str, file: &str) -> bool {
     // We should ignore messages about skipping files
     let found = output.lines().any(|line| {
         // Check for the successful "No issues found" message with the exact file pattern
-        // The line contains "No issues found in ./file" where file is exactly the filename we're looking for
-        // but we need to be careful not to match partial filenames or subdirectories
-        let is_success_message = line.contains("No issues found in ./") && 
-                                line.contains(&format!("/{}", file)) &&
-                                !line.contains("Skipping") && 
-                                !line.contains("Excluding") && 
-                                !line.contains("Including");
+        // For README.md in the root directory, we need to check for "No issues found in ./README.md"
+        let is_success_message = if file == "README.md" {
+            (line.contains("No issues found in ./README.md") || 
+             line.contains("Success: No issues found in README.md")) &&
+            !line.contains("subfolder") &&
+            !line.contains("Skipping") && 
+            !line.contains("Excluding") && 
+            !line.contains("Including")
+        } else {
+            line.contains("No issues found in ./") && 
+            line.contains(&format!("/{}", file)) &&
+            !line.contains("Skipping") && 
+            !line.contains("Excluding") && 
+            !line.contains("Including")
+        };
         
         // Check for lines reporting issues in the file
-        let is_issue_message = line.contains(&format!("/{}", file)) && 
-                               line.contains(":") && 
-                               !line.contains("Skipping") && 
-                               !line.contains("Excluding") && 
-                               !line.contains("Including");
+        let is_issue_message = if file == "README.md" {
+            (line.starts_with("./README.md:") || 
+             line.starts_with("README.md:")) &&
+            !line.contains("subfolder") &&
+            !line.contains("Skipping") && 
+            !line.contains("Excluding") && 
+            !line.contains("Including")
+        } else {
+            line.contains(&format!("/{}", file)) && 
+            line.contains(":") && 
+            !line.contains("Skipping") && 
+            !line.contains("Excluding") && 
+            !line.contains("Including")
+        };
         
         if is_success_message || is_issue_message {
             println!("  Found file in line: '{}'", line);
