@@ -5,6 +5,7 @@ use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::collections::HashSet;
 
 lazy_static! {
     // Optimized regex patterns for heading detection
@@ -12,6 +13,9 @@ lazy_static! {
     static ref ATX_HEADING_SIMPLE: Regex = Regex::new(r"^\s*#{1,6}\s+.+$").unwrap();
     static ref SETEXT_HEADING_UNDERLINE1: Regex = Regex::new(r"^=+\s*$").unwrap();
     static ref SETEXT_HEADING_UNDERLINE2: Regex = Regex::new(r"^-+\s*$").unwrap();
+    
+    // Pattern to quickly check for hash marks at line start
+    static ref QUICK_HEADING_CHECK: Regex = Regex::new(r"^\s*#{1,6}\s+").unwrap();
 }
 
 #[derive(Debug)]
@@ -55,7 +59,13 @@ impl MD026NoTrailingPunctuation {
     }
 
     // Parse ATX style headings directly for trailing punctuation check
+    #[inline]
     fn parse_atx_heading(&self, line: &str) -> Option<(usize, String, HeadingStyle)> {
+        // Quick check first
+        if !QUICK_HEADING_CHECK.is_match(line) {
+            return None;
+        }
+        
         // Try detailed pattern first
         if let Some(caps) = ATX_HEADING_DETAILED.captures(line) {
             let _indent = caps.get(1).map_or("", |m| m.as_str()).len();
@@ -89,6 +99,7 @@ impl MD026NoTrailingPunctuation {
     }
 
     // Parse Setext style headings directly
+    #[inline]
     fn is_setext_heading(
         &self,
         line: &str,
@@ -106,6 +117,44 @@ impl MD026NoTrailingPunctuation {
         }
         None
     }
+    
+    // Pre-compute which lines are in code blocks
+    #[inline]
+    fn get_code_block_lines(&self, content: &str) -> HashSet<usize> {
+        let mut result = HashSet::new();
+        let lines: Vec<&str> = content.lines().collect();
+        let mut in_code_block = false;
+        let mut code_fence = "";
+        
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            
+            // Detect code fence start/end
+            if (trimmed.starts_with("```") || trimmed.starts_with("~~~")) && 
+               (trimmed == "```" || trimmed == "~~~" || 
+                trimmed.starts_with("```") && !trimmed[3..].contains('`') ||
+                trimmed.starts_with("~~~") && !trimmed[3..].contains('~')) {
+                
+                // If first encounter or fence matches the opening fence
+                if code_fence.is_empty() || trimmed.starts_with(code_fence) {
+                    if !in_code_block {
+                        // Starting a code block
+                        code_fence = if trimmed.starts_with("```") { "```" } else { "~~~" };
+                    } else {
+                        // Ending a code block
+                        code_fence = "";
+                    }
+                    in_code_block = !in_code_block;
+                }
+            }
+            
+            if in_code_block {
+                result.insert(i);
+            }
+        }
+        
+        result
+    }
 }
 
 impl Rule for MD026NoTrailingPunctuation {
@@ -118,8 +167,6 @@ impl Rule for MD026NoTrailingPunctuation {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
-
         let _timer = crate::profiling::ScopedTimer::new("MD026_check");
 
         // Early returns for empty content
@@ -136,15 +183,22 @@ impl Rule for MD026NoTrailingPunctuation {
             return Ok(vec![]);
         }
 
+        let _line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-
         let lines: Vec<&str> = content.lines().collect();
+        
+        // Pre-compute which lines are in code blocks
+        let code_block_lines = self.get_code_block_lines(content);
+        
+        // Pre-compute which lines are in front matter
+        let mut in_front_matter = vec![false; lines.len()];
+        for i in 0..lines.len() {
+            in_front_matter[i] = FrontMatterUtils::is_in_front_matter(content, i);
+        }
 
         for (line_num, line) in lines.iter().enumerate() {
             // Skip lines in code blocks or front matter
-            if HeadingUtils::is_in_code_block(content, line_num)
-                || FrontMatterUtils::is_in_front_matter(content, line_num)
-            {
+            if code_block_lines.contains(&line_num) || in_front_matter[line_num] {
                 continue;
             }
 
@@ -232,8 +286,6 @@ impl Rule for MD026NoTrailingPunctuation {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-
         let _timer = crate::profiling::ScopedTimer::new("MD026_fix");
 
         // Early return for empty content
@@ -250,9 +302,18 @@ impl Rule for MD026NoTrailingPunctuation {
             return Ok(content.to_string());
         }
 
+        let _line_index = LineIndex::new(content.to_string());
         let lines: Vec<&str> = content.lines().collect();
-
         let mut output_lines: Vec<String> = Vec::with_capacity(lines.len());
+        
+        // Pre-compute which lines are in code blocks
+        let code_block_lines = self.get_code_block_lines(content);
+        
+        // Pre-compute which lines are in front matter
+        let mut in_front_matter = vec![false; lines.len()];
+        for i in 0..lines.len() {
+            in_front_matter[i] = FrontMatterUtils::is_in_front_matter(content, i);
+        }
 
         let mut skip_next = false;
         for (i, line) in lines.iter().enumerate() {
@@ -263,9 +324,7 @@ impl Rule for MD026NoTrailingPunctuation {
             }
 
             // Skip lines in code blocks or front matter
-            if HeadingUtils::is_in_code_block(content, i)
-                || FrontMatterUtils::is_in_front_matter(content, i)
-            {
+            if code_block_lines.contains(&i) || in_front_matter[i] {
                 output_lines.push(line.to_string());
                 continue;
             }
@@ -333,7 +392,7 @@ impl Rule for MD026NoTrailingPunctuation {
                         // Mark next line (underline) to be skipped in next iteration
                         skip_next = true;
 
-                        // Add the underline to output (don't duplicate it)
+                        // Add the underline to output
                         output_lines.push(next_line.to_string());
                     } else {
                         output_lines.push(line.to_string());
