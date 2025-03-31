@@ -15,6 +15,8 @@ lazy_static! {
     static ref DIV_ALIGN_PATTERN: Regex = Regex::new(r"^<div\s+align=").unwrap();
     // Markdown link pattern - links like [text](<url>) should not be considered HTML
     static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r"\[.*?\]\(<.*?>\)").unwrap();
+    // HTML/Markdown comment pattern
+    static ref HTML_COMMENT_PATTERN: Regex = Regex::new(r"<!--[\s\S]*?-->").unwrap();
 }
 
 #[derive(Debug)]
@@ -106,6 +108,11 @@ impl MD033NoInlineHtml {
         
         false
     }
+
+    // Check if a tag is an HTML comment
+    fn is_html_comment(&self, tag: &str) -> bool {
+        tag.starts_with("<!--") && tag.ends_with("-->")
+    }
 }
 
 impl Rule for MD033NoInlineHtml {
@@ -145,6 +152,11 @@ impl Rule for MD033NoInlineHtml {
                 for cap in re.captures_iter(line) {
                     let html_tag = cap.get(0).unwrap().as_str();
                     let start_pos = cap.get(0).unwrap().start();
+                    
+                    // Skip HTML comments
+                    if self.is_html_comment(html_tag) {
+                        continue;
+                    }
                     
                     // Skip if this is part of a markdown link with angle brackets
                     if self.is_in_markdown_link(line, start_pos) {
@@ -193,6 +205,11 @@ impl Rule for MD033NoInlineHtml {
                 for cap in re.captures_iter(line) {
                     let html_tag = cap.get(0).unwrap().as_str();
                     let start_pos = cap.get(0).unwrap().start();
+                    
+                    // Skip HTML comments
+                    if self.is_html_comment(html_tag) {
+                        continue;
+                    }
                     
                     // Skip if this is part of a markdown link with angle brackets
                     if self.is_in_markdown_link(line, start_pos) {
@@ -265,6 +282,11 @@ impl Rule for MD033NoInlineHtml {
                     let start_pos = cap.get(0).unwrap().start();
                     let end_pos = cap.get(0).unwrap().end();
                     
+                    // Skip HTML comments
+                    if self.is_html_comment(html_tag) {
+                        continue;
+                    }
+                    
                     // Check if this tag is in a code span
                     let in_code_span = spans.iter().any(|(start, end)| 
                         start_pos >= *start && end_pos <= *end);
@@ -289,6 +311,11 @@ impl Rule for MD033NoInlineHtml {
                     let html_tag = cap.get(0).unwrap().as_str();
                     let start_pos = cap.get(0).unwrap().start();
                     let end_pos = cap.get(0).unwrap().end();
+                    
+                    // Skip HTML comments
+                    if self.is_html_comment(html_tag) {
+                        continue;
+                    }
                     
                     if !self.is_tag_allowed(html_tag) {
                         // Remove the tag, adjusting for previous removals
