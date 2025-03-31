@@ -303,18 +303,30 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
     let normalized_path_str = normalized_path.as_ref();
 
     for pattern in include_patterns {
+        // Special case: Treat invalid glob-like patterns as literal strings
+        if pattern.contains('[') && !pattern.contains(']') ||
+           pattern.contains('{') && !pattern.contains('}') {
+            if normalized_path_str.contains(pattern) {
+                return true;
+            }
+            continue;
+        }
+
         // Normalize the pattern by removing leading ./ if present
         let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
 
         // Special case: If pattern has no slashes or wildcards, it only matches files in the root directory
         if !normalized_pattern.contains('/') && !normalized_pattern.contains('*') {
-            // Get just the filename part of the path
+            // For patterns without slashes, they should only match files directly in the root directory
+            
+            // 1. Get just the filename part of the path
             let file_name = Path::new(normalized_path_str).file_name()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default();
-            
-            // For root-only patterns, also check that the file is in the root directory
-            let is_in_root = !normalized_path_str.contains('/') || normalized_path_str.matches('/').count() == 1;
+                
+            // 2. Check if the file is directly in the root (no directory component)
+            let parent = Path::new(normalized_path_str).parent();
+            let is_in_root = parent.map_or(true, |p| p.as_os_str().is_empty() || p.as_os_str() == ".");
             
             if file_name == normalized_pattern && is_in_root {
                 return true;

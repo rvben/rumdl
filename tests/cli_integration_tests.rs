@@ -10,11 +10,13 @@ fn setup_test_files() -> tempfile::TempDir {
     fs::create_dir_all(base_path.join("docs")).unwrap();
     fs::create_dir_all(base_path.join("docs/temp")).unwrap();
     fs::create_dir_all(base_path.join("src")).unwrap();
+    fs::create_dir_all(base_path.join("subfolder")).unwrap();
 
     fs::write(base_path.join("README.md"), "# Test\n").unwrap();
     fs::write(base_path.join("docs/doc1.md"), "# Doc 1\n").unwrap();
     fs::write(base_path.join("docs/temp/temp.md"), "# Temp\n").unwrap();
     fs::write(base_path.join("src/test.md"), "# Source\n").unwrap();
+    fs::write(base_path.join("subfolder/README.md"), "# Subfolder README\n").unwrap();
 
     temp_dir
 }
@@ -185,4 +187,35 @@ include = ["src/**/*.md"]
     assert!(!contains_file(&stdout, "README.md"), "Should not contain README.md");
     assert!(!contains_file(&stdout, "temp.md"), "Should not contain temp.md");
     assert!(!contains_file(&stdout, "test.md"), "Should not contain test.md");
+}
+
+#[test]
+fn test_readme_pattern_scope() {
+    let temp_dir = setup_test_files();
+    let base_path = temp_dir.path();
+
+    // Test include pattern for README.md should only match the root README.md file
+    let config = r#"
+[global]
+include = ["README.md"]
+"#;
+    create_config(base_path, config);
+
+    // Run without specifying a path to use include patterns
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .current_dir(base_path)
+        .arg("--verbose")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("Output:\n{}", stdout);
+    
+    // Should find the root README.md
+    assert!(contains_file(&stdout, "README.md"), "Should contain README.md from root");
+    
+    // Should NOT find the subfolder README.md - more precise check
+    // We're looking specifically for a successful linting message for subfolder/README.md
+    assert!(!stdout.contains("No issues found in ./subfolder/README.md"), 
+            "Should not process README.md from subfolder");
 } 
