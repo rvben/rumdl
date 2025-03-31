@@ -2,7 +2,6 @@ use rumdl::rule::Rule;
 use rumdl::rules::MD057ExistingRelativeLinks;
 use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
 use tempfile::tempdir;
 
 #[test]
@@ -197,4 +196,93 @@ fn test_no_base_path() {
     
     // Should have no warnings when no base path is set
     assert_eq!(result.len(), 0, "Expected 0 warnings when no base path is set, got {}", result.len());
+}
+
+#[test]
+fn test_fragment_links() {
+    // Create a temporary directory for test files
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    
+    // Create a file with headings to link to
+    let test_file_path = base_path.join("test_file.md");
+    let test_content = r#"
+# Main Heading
+
+## Sub Heading One
+
+Some content here.
+
+## Sub Heading Two
+
+More content.
+"#;
+    File::create(&test_file_path).unwrap().write_all(test_content.as_bytes()).unwrap();
+    
+    // Create content with internal fragment links to the same document
+    let content = r#"
+# Test Document
+
+- [Link to Heading](#main-heading)
+- [Link to Sub Heading](#sub-heading-one)
+- [Link to External File](other_file.md#some-heading)
+"#;
+    
+    // Initialize rule with the base path
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    
+    // Test the rule
+    let result = rule.check(content).unwrap();
+    
+    // Should only have one warning for the external file link, not for the fragment links
+    assert_eq!(result.len(), 1, "Expected 1 warning for external file link, got {}", result.len());
+    assert!(result[0].message.contains("other_file.md"), 
+            "Expected warning about other_file.md, got: {}", result[0].message);
+    
+    // Make sure the internal fragment links are not flagged
+    for warning in &result {
+        assert!(!warning.message.contains("#main-heading"), 
+                "Found unexpected warning for internal fragment link: {}", warning.message);
+        assert!(!warning.message.contains("#sub-heading-one"), 
+                "Found unexpected warning for internal fragment link: {}", warning.message);
+    }
+}
+
+#[test]
+fn test_combined_links() {
+    // Create a temporary directory for test files
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    
+    // Create an existing file and a missing file with fragments
+    let exists_path = base_path.join("exists.md");
+    File::create(&exists_path).unwrap().write_all(b"# Test File").unwrap();
+    
+    // Create content with combined file and fragment links
+    let content = r#"
+# Test Document
+
+- [Link to existing file with fragment](exists.md#section)
+- [Link to missing file with fragment](missing.md#section)
+- [Link to fragment only](#local-section)
+"#;
+    
+    // Initialize rule with the base path
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    
+    // Test the rule
+    let result = rule.check(content).unwrap();
+    
+    // Should only have one warning for the missing file link with fragment
+    assert_eq!(result.len(), 1, "Expected 1 warning for missing file with fragment, got {}", result.len());
+    assert!(result[0].message.contains("missing.md"), 
+            "Expected warning about missing.md, got: {}", result[0].message);
+    
+    // Make sure the existing file with fragment and fragment-only links are not flagged
+    for warning in &result {
+        assert!(!warning.message.contains("exists.md#section"), 
+                "Found unexpected warning for existing file with fragment: {}", warning.message);
+        assert!(!warning.message.contains("#local-section"), 
+                "Found unexpected warning for fragment-only link: {}", warning.message);
+    }
 } 

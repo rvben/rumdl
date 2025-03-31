@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 lazy_static! {
     // Match markdown links: [text](url) or [text](url "title") or [text](<url>)
-    // Updated to better handle angle brackets in URLs
-    static ref LINK_REGEX: FancyRegex = FancyRegex::new(r#"(?<!\\)\[([^\]]*)\]\(\s*<?([^">\s]+)>?(?:\s+"[^"]*")?(?:#[^)]*)??\s*\)"#).unwrap();
+    // Updated to better handle angle brackets in URLs and capture fragments separately
+    static ref LINK_REGEX: FancyRegex = FancyRegex::new(r#"(?<!\\)\[([^\]]*)\]\(\s*<?([^">\s#]+)(#[^)\s"]*)?(?:\s+"[^"]*")??\s*>?\s*\)"#).unwrap();
     static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
     // Protocol-based URLs
     static ref PROTOCOL_REGEX: Regex = Regex::new(r"^(https?://|ftp://|mailto:|tel:)").unwrap();
@@ -18,6 +18,8 @@ lazy_static! {
     static ref DOMAIN_REGEX: Regex = Regex::new(r"^(www\.[a-zA-Z0-9]|(^[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}))").unwrap();
     // Media files pattern - extensions that typically don't need to exist locally
     static ref MEDIA_FILES_REGEX: Regex = Regex::new(r"\.(pdf|mp4|mp3|avi|mov|flv|wmv|webm|ogg|wav|flac|aac|m4a|jpg|jpeg|png|gif|bmp|svg|webp|tiff|ico)$").unwrap();
+    // Fragment-only links pattern (links to headings within the same document)
+    static ref FRAGMENT_ONLY_REGEX: Regex = Regex::new(r"^#").unwrap();
 }
 
 /// Rule MD057: Relative links should point to existing files
@@ -121,6 +123,11 @@ impl MD057ExistingRelativeLinks {
         return false;
     }
     
+    /// Check if the URL is a fragment-only link (internal document link)
+    fn is_fragment_only_link(&self, url: &str) -> bool {
+        FRAGMENT_ONLY_REGEX.is_match(url)
+    }
+    
     /// Check if the URL has a media file extension
     fn is_media_file(&self, url: &str) -> bool {
         MEDIA_FILES_REGEX.is_match(url)
@@ -213,6 +220,14 @@ impl Rule for MD057ExistingRelativeLinks {
                         if url.is_empty() || self.is_external_url(url) {
                             if debug {
                                 println!("Skipping URL '{}': empty or external", url);
+                            }
+                            continue;
+                        }
+                        
+                        // Skip fragment-only links (internal document links)
+                        if self.is_fragment_only_link(url) {
+                            if debug {
+                                println!("Skipping URL '{}': fragment-only link", url);
                             }
                             continue;
                         }
