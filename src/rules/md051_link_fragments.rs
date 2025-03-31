@@ -43,6 +43,36 @@ impl MD051LinkFragments {
         Self
     }
 
+    /// Detect inline code spans in a line and return their ranges
+    fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
+        if !line.contains('`') {
+            return Vec::new();
+        }
+
+        let mut spans = Vec::new();
+        let mut in_code = false;
+        let mut code_start = 0;
+
+        for (i, c) in line.chars().enumerate() {
+            if c == '`' {
+                if !in_code {
+                    code_start = i;
+                    in_code = true;
+                } else {
+                    spans.push((code_start, i + 1)); // Include the closing backtick
+                    in_code = false;
+                }
+            }
+        }
+
+        spans
+    }
+    
+    /// Check if a position is within an inline code span
+    fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
+        spans.iter().any(|&(start, end)| pos >= start && pos < end)
+    }
+
     fn extract_headings(&self, content: &str) -> HashSet<String> {
         let mut headings = HashSet::new();
         let mut in_code_block = false;
@@ -203,40 +233,48 @@ impl Rule for MD051LinkFragments {
             if in_code_block || in_toc_section {
                 continue;
             }
+            
+            // Detect inline code spans in this line
+            let inline_code_spans = self.compute_inline_code_spans(line);
 
             // Check for invalid link fragments
-            if let Ok(captures) = LINK_REGEX.captures(line) {
-                if let Some(cap) = captures {
-                    let url = cap.get(2).map_or("", |m| m.as_str());
-                    let fragment = cap.get(3).map_or("", |m| m.as_str());
-                    let text = cap.get(1).map_or("", |m| m.as_str());
+            if let Ok(captures) = LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+                for cap in captures {
+                    // Skip links inside inline code spans
+                    if let Some(full_match) = cap.get(0) {
+                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
+                            continue;
+                        }
+                        
+                        let url = cap.get(2).map_or("", |m| m.as_str());
+                        let fragment = cap.get(3).map_or("", |m| m.as_str());
+                        let text = cap.get(1).map_or("", |m| m.as_str());
 
-                    // Skip validation for external URLs
-                    if !url.is_empty() && self.is_external_url(url) {
-                        continue;
-                    }
+                        // Skip validation for external URLs
+                        if !url.is_empty() && self.is_external_url(url) {
+                            continue;
+                        }
 
-                    // Check if the fragment exists (case-insensitive)
-                    if !headings.contains(&fragment.to_lowercase()) {
-                        let full_match = cap.get(0).unwrap();
+                        // Check if the fragment exists (case-insensitive)
+                        if !headings.contains(&fragment.to_lowercase()) {
+                            // Create the fix, accounting for shortcut links
+                            let replacement = if url.is_empty() {
+                                format!("[{}]", text)
+                            } else {
+                                format!("[{}]({})", text, url)
+                            };
 
-                        // Create the fix, accounting for shortcut links
-                        let replacement = if url.is_empty() {
-                            format!("[{}]", text)
-                        } else {
-                            format!("[{}]({})", text, url)
-                        };
-
-                        warnings.push(LintWarning {
-                            line: line_num + 1,
-                            column: full_match.start() + 1,
-                            message: format!("Link fragment '{}' does not exist", fragment),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(line_num + 1, full_match.start() + 1),
-                                replacement,
-                            }),
-                        });
+                            warnings.push(LintWarning {
+                                line: line_num + 1,
+                                column: full_match.start() + 1,
+                                message: format!("Link fragment '{}' does not exist", fragment),
+                                severity: Severity::Warning,
+                                fix: Some(Fix {
+                                    range: line_index.line_col_to_byte_range(line_num + 1, full_match.start() + 1),
+                                    replacement,
+                                }),
+                            });
+                        }
                     }
                 }
             }
@@ -274,28 +312,37 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // Detect inline code spans in this line
+            let inline_code_spans = self.compute_inline_code_spans(line);
+            
             // Process links in normal text
             let mut processed_line = line.to_string();
             if let Ok(matches) = LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
                 for cap in matches {
-                    let url = cap.get(2).map_or("", |m| m.as_str());
-                    let fragment = cap.get(3).map_or("", |m| m.as_str());
-                    let text = cap.get(1).map_or("", |m| m.as_str());
-                    let full_match = cap.get(0).unwrap();
+                    if let Some(full_match) = cap.get(0) {
+                        // Skip links inside inline code spans
+                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
+                            continue;
+                        }
+                        
+                        let url = cap.get(2).map_or("", |m| m.as_str());
+                        let fragment = cap.get(3).map_or("", |m| m.as_str());
+                        let text = cap.get(1).map_or("", |m| m.as_str());
 
-                    // Skip validation for external URLs
-                    if !url.is_empty() && self.is_external_url(url) {
-                        continue;
-                    }
+                        // Skip validation for external URLs
+                        if !url.is_empty() && self.is_external_url(url) {
+                            continue;
+                        }
 
-                    // Check if the fragment exists (case-insensitive)
-                    if !headings.contains(&fragment.to_lowercase()) {
-                        let replacement = if url.is_empty() {
-                            format!("[{}]", text)
-                        } else {
-                            format!("[{}]({})", text, url)
-                        };
-                        processed_line = processed_line.replace(full_match.as_str(), &replacement);
+                        // Check if the fragment exists (case-insensitive)
+                        if !headings.contains(&fragment.to_lowercase()) {
+                            let replacement = if url.is_empty() {
+                                format!("[{}]", text)
+                            } else {
+                                format!("[{}]({})", text, url)
+                            };
+                            processed_line = processed_line.replace(full_match.as_str(), &replacement);
+                        }
                     }
                 }
             }

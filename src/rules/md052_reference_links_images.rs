@@ -46,6 +46,36 @@ impl MD052ReferenceLinkImages {
         Self
     }
 
+    /// Detect inline code spans in a line and return their ranges
+    fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
+        if !line.contains('`') {
+            return Vec::new();
+        }
+
+        let mut spans = Vec::new();
+        let mut in_code = false;
+        let mut code_start = 0;
+
+        for (i, c) in line.chars().enumerate() {
+            if c == '`' {
+                if !in_code {
+                    code_start = i;
+                    in_code = true;
+                } else {
+                    spans.push((code_start, i + 1)); // Include the closing backtick
+                    in_code = false;
+                }
+            }
+        }
+
+        spans
+    }
+    
+    /// Check if a position is within an inline code span
+    fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
+        spans.iter().any(|&(start, end)| pos >= start && pos < end)
+    }
+
     fn extract_references(&self, content: &str) -> HashSet<String> {
         let mut references = HashSet::new();
         let mut in_code_block = false;
@@ -126,27 +156,35 @@ impl MD052ReferenceLinkImages {
             if in_code_block || in_example_section || LIST_ITEM_REGEX.is_match(line) {
                 continue;
             }
+            
+            // Detect inline code spans in this line
+            let inline_code_spans = self.compute_inline_code_spans(line);
 
             // Check for undefined references in reference links
-            if let Ok(captures) = REF_LINK_REGEX.captures(line) {
-                if let Some(cap) = captures {
-                    let reference = if let Some(ref_match) = cap.get(2) {
-                        if ref_match.as_str().is_empty() {
-                            cap.get(1).map(|m| m.as_str().to_string())
-                        } else {
-                            Some(ref_match.as_str().to_string())
+            if let Ok(captures) = REF_LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+                for cap in captures {
+                    if let Some(full_match) = cap.get(0) {
+                        // Skip if inside inline code span
+                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
+                            continue;
                         }
-                    } else {
-                        cap.get(1).map(|m| m.as_str().to_string())
-                    };
+                        
+                        let reference = if let Some(ref_match) = cap.get(2) {
+                            if ref_match.as_str().is_empty() {
+                                cap.get(1).map(|m| m.as_str().to_string())
+                            } else {
+                                Some(ref_match.as_str().to_string())
+                            }
+                        } else {
+                            cap.get(1).map(|m| m.as_str().to_string())
+                        };
 
-                    if let Some(ref_text) = reference {
-                        let reference_lower = ref_text.to_lowercase();
-                        if !references.contains(&reference_lower)
-                            && !reported_refs.contains_key(&reference_lower)
-                        {
-                            if let Some(m) = cap.get(0) {
-                                undefined.push((line_num, m.start(), ref_text));
+                        if let Some(ref_text) = reference {
+                            let reference_lower = ref_text.to_lowercase();
+                            if !references.contains(&reference_lower)
+                                && !reported_refs.contains_key(&reference_lower)
+                            {
+                                undefined.push((line_num, full_match.start(), ref_text));
                                 reported_refs.insert(reference_lower, true);
                             }
                         }
@@ -155,25 +193,30 @@ impl MD052ReferenceLinkImages {
             }
 
             // Check for undefined references in reference images
-            if let Ok(captures) = REF_IMAGE_REGEX.captures(line) {
-                if let Some(cap) = captures {
-                    let reference = if let Some(ref_match) = cap.get(2) {
-                        if ref_match.as_str().is_empty() {
-                            cap.get(1).map(|m| m.as_str().to_string())
-                        } else {
-                            Some(ref_match.as_str().to_string())
+            if let Ok(captures) = REF_IMAGE_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+                for cap in captures {
+                    if let Some(full_match) = cap.get(0) {
+                        // Skip if inside inline code span
+                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
+                            continue;
                         }
-                    } else {
-                        cap.get(1).map(|m| m.as_str().to_string())
-                    };
+                        
+                        let reference = if let Some(ref_match) = cap.get(2) {
+                            if ref_match.as_str().is_empty() {
+                                cap.get(1).map(|m| m.as_str().to_string())
+                            } else {
+                                Some(ref_match.as_str().to_string())
+                            }
+                        } else {
+                            cap.get(1).map(|m| m.as_str().to_string())
+                        };
 
-                    if let Some(ref_text) = reference {
-                        let reference_lower = ref_text.to_lowercase();
-                        if !references.contains(&reference_lower)
-                            && !reported_refs.contains_key(&reference_lower)
-                        {
-                            if let Some(m) = cap.get(0) {
-                                undefined.push((line_num, m.start(), ref_text));
+                        if let Some(ref_text) = reference {
+                            let reference_lower = ref_text.to_lowercase();
+                            if !references.contains(&reference_lower)
+                                && !reported_refs.contains_key(&reference_lower)
+                            {
+                                undefined.push((line_num, full_match.start(), ref_text));
                                 reported_refs.insert(reference_lower, true);
                             }
                         }
@@ -182,31 +225,36 @@ impl MD052ReferenceLinkImages {
             }
 
             // Check for undefined shortcut references
-            if let Ok(captures) = SHORTCUT_REF_REGEX.captures(line) {
-                if let Some(cap) = captures {
-                    // Skip if it's part of an inline link/image or a reference definition
-                    if let Ok(is_inline_link) = INLINE_LINK_REGEX.is_match(line) {
-                        if is_inline_link {
+            if let Ok(captures) = SHORTCUT_REF_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+                for cap in captures {
+                    if let Some(full_match) = cap.get(0) {
+                        // Skip if inside inline code span
+                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
                             continue;
                         }
-                    }
-                    if let Ok(is_inline_image) = INLINE_IMAGE_REGEX.is_match(line) {
-                        if is_inline_image {
+                        
+                        // Skip if it's part of an inline link/image or a reference definition
+                        if let Ok(is_inline_link) = INLINE_LINK_REGEX.is_match(line) {
+                            if is_inline_link {
+                                continue;
+                            }
+                        }
+                        if let Ok(is_inline_image) = INLINE_IMAGE_REGEX.is_match(line) {
+                            if is_inline_image {
+                                continue;
+                            }
+                        }
+                        if REF_REGEX.is_match(line) {
                             continue;
                         }
-                    }
-                    if REF_REGEX.is_match(line) {
-                        continue;
-                    }
 
-                    if let Some(ref_match) = cap.get(1) {
-                        let ref_text = ref_match.as_str().to_string();
-                        let reference_lower = ref_text.to_lowercase();
-                        if !references.contains(&reference_lower)
-                            && !reported_refs.contains_key(&reference_lower)
-                        {
-                            if let Some(m) = cap.get(0) {
-                                undefined.push((line_num, m.start(), ref_text));
+                        if let Some(ref_match) = cap.get(1) {
+                            let ref_text = ref_match.as_str().to_string();
+                            let reference_lower = ref_text.to_lowercase();
+                            if !references.contains(&reference_lower)
+                                && !reported_refs.contains_key(&reference_lower)
+                            {
+                                undefined.push((line_num, full_match.start(), ref_text));
                                 reported_refs.insert(reference_lower, true);
                             }
                         }
