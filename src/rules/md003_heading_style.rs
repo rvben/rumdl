@@ -5,12 +5,10 @@ use regex::Regex;
 use std::collections::HashSet;
 
 lazy_static! {
-    // More efficient regex patterns
     static ref ATX_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})(\s*)([^#\n]*?)(?:\s+(#{1,6}))?\s*$").unwrap();
     static ref SETEXT_HEADING_1: Regex = Regex::new(r"^(\s*)(=+)\s*$").unwrap();
     static ref SETEXT_HEADING_2: Regex = Regex::new(r"^(\s*)(-+)\s*$").unwrap();
     static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
-    // Quick check pattern for any heading in the document
     static ref QUICK_HEADING_CHECK: Regex = Regex::new(r"(?m)^(\s*)#|^(\s*)[^\s].*\n(\s*)(=+|-+)\s*$").unwrap();
 }
 
