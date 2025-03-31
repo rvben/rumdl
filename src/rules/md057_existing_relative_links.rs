@@ -7,8 +7,8 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 lazy_static! {
-    // Match markdown links: [text](url)
-    static ref LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]*)\]\(([^)#]+)(?:#[^)]*)??\)").unwrap();
+    // Match markdown links: [text](url) or [text](url "title")
+    static ref LINK_REGEX: FancyRegex = FancyRegex::new(r#"(?<!\\)\[([^\]]*)\]\(([^)\s"]+)(?:\s+"[^"]*")?(?:#[^)]*)??\)"#).unwrap();
     static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
     // Protocol-based URLs
     static ref PROTOCOL_REGEX: Regex = Regex::new(r"^(https?://|ftp://|mailto:|tel:)").unwrap();
@@ -302,5 +302,36 @@ mod tests {
             assert!(!msg.contains("'missing.md'"), 
                    "Found warning for disabled link 'missing.md' in message: {}", msg);
         }
+    }
+
+    #[test]
+    fn test_links_with_titles() {
+        // Create a temporary directory for test files
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+        
+        // Create an existing file
+        let exists_path = base_path.join("exists.md");
+        File::create(&exists_path).unwrap().write_all(b"# Test File").unwrap();
+        
+        // Create test content with links that have titles
+        let content = r#"
+# Test Document with Titled Links
+
+[Valid Link](exists.md "This is a valid link")
+[Invalid Link](missing.md "This is an invalid link")
+[External Link](https://example.com "External site")
+        "#;
+        
+        // Initialize rule with the base path
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        
+        // Test the rule
+        let result = rule.check(content).unwrap();
+        
+        // Should have one warning for the missing.md link
+        assert_eq!(result.len(), 1, "Expected only one warning for missing.md");
+        assert!(result[0].message.contains("missing.md"), "Warning should mention missing.md not the title");
+        assert!(!result[0].message.contains("This is an invalid link"), "Warning should not include the title text");
     }
 } 
