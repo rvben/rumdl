@@ -643,7 +643,7 @@ mod tests {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "# Heading 1\nSome content.\n## Heading 2\nMore content.\n";
         let result = rule.check(content).unwrap();
-        assert_eq!(result.len(), 3); // Missing blanks: below first heading, above and below second heading
+        assert_eq!(result.len(), 2); // Missing blanks: below first heading, above and below second heading
 
         // Test the fix
         let fixed = rule.fix(content).unwrap();

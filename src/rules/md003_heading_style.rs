@@ -29,8 +29,18 @@ impl MD003HeadingStyle {
     
     /// Detects the first heading style in the document for "consistent" mode
     fn detect_first_heading_style(&self, content: &str) -> Option<HeadingStyle> {
+        // First, check if there's front matter and get its end line
+        let front_matter_end = self.front_matter_end_line(content);
+        
         let lines: Vec<&str> = content.lines().collect();
         for i in 0..lines.len() {
+            // Skip front matter lines
+            if let Some(end_line) = front_matter_end {
+                if i + 1 <= end_line {
+                    continue;
+                }
+            }
+            
             if let Some(heading) = HeadingUtils::parse_heading(content, i + 1) {
                 return Some(heading.style);
             }

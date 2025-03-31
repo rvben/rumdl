@@ -78,7 +78,9 @@ impl Rule for MD047FileEndNewline {
         
         // If there are multiple newlines, trim them down to just one
         if content.ends_with("\n\n") {
-            result = result.trim_end().to_string() + "\n";
+            // Preserve any whitespace at the end but only have one newline
+            let content_without_trailing_newlines = content.trim_end_matches('\n');
+            result = content_without_trailing_newlines.to_string() + "\n";
         }
 
         Ok(result)

@@ -133,6 +133,19 @@ impl HeadingUtils {
                 return None;
             }
             
+            // Skip list items - they shouldn't be considered as potential Setext headings
+            if line.trim_start().starts_with('-') || 
+               line.trim_start().starts_with('*') || 
+               line.trim_start().starts_with('+') ||
+               line.trim_start().starts_with("1.") {
+                return None;
+            }
+            
+            // Skip front matter delimiters or lines within front matter
+            if line.trim() == "---" || Self::is_in_front_matter(content, line_num - 1) {
+                return None;
+            }
+            
             if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
                 let underline_indent = captures.get(1).map_or("", |m| m.as_str());
                 if underline_indent == line_indentation {
@@ -282,6 +295,37 @@ impl HeadingUtils {
 
         // Remove leading and trailing hyphens
         text_clean.trim_matches('-').to_string()
+    }
+
+    /// Check if a line is in front matter
+    pub fn is_in_front_matter(content: &str, line_number: usize) -> bool {
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() || line_number >= lines.len() {
+            return false;
+        }
+        
+        // Check if the document starts with front matter
+        if !lines[0].trim_start().eq("---") {
+            return false;
+        }
+        
+        let mut in_front_matter = true;
+        let mut found_closing = false;
+        
+        // Skip the first line (opening delimiter)
+        for (i, line) in lines.iter().enumerate().skip(1) {
+            if i > line_number {
+                break;
+            }
+            
+            if line.trim_start().eq("---") {
+                found_closing = true;
+                in_front_matter = i > line_number;
+                break;
+            }
+        }
+        
+        in_front_matter && !found_closing
     }
 }
 

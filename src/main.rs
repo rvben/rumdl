@@ -17,7 +17,8 @@ mod config;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// Files or directories to lint
+    /// Files or directories to lint. 
+    /// If provided, these paths take precedence over include patterns.
     #[arg(required = false)]
     paths: Vec<String>,
 
@@ -45,7 +46,9 @@ struct Cli {
     #[arg(long)]
     exclude: Option<String>,
 
-    /// Include only specific files or directories (comma-separated glob patterns)
+    /// Include only specific files or directories (comma-separated glob patterns).
+    /// Note: When explicit paths are provided, include patterns are ignored.
+    /// Use either include patterns or paths, not both.
     #[arg(long)]
     include: Option<String>,
 
@@ -805,6 +808,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Only apply include patterns when no CLI paths are provided
     let use_include_patterns = cli.paths.is_empty();
 
+    // Warn user if they combined --include flag with paths
+    if !cli.paths.is_empty() && !include_patterns.is_empty() {
+        println!("{}: You've specified both paths and --include patterns.", "Warning".yellow().bold());
+        println!("The explicit paths will take precedence, and include patterns will be ignored.");
+        println!("For best results, use either paths OR include patterns, not both.");
+        println!();
+    }
+
     if cli.verbose {
         if !exclude_patterns.is_empty() {
             println!("Excluding the following patterns:");
@@ -816,6 +827,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if !include_patterns.is_empty() && use_include_patterns {
             println!("Including only the following patterns:");
+            for pattern in &include_patterns {
+                println!("  - {}", pattern);
+            }
+            println!();
+        } else if !include_patterns.is_empty() {
+            println!("Include patterns specified but not applied because explicit paths were provided:");
             for pattern in &include_patterns {
                 println!("  - {}", pattern);
             }
