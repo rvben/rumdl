@@ -1,8 +1,6 @@
 use assert_cmd::Command;
-use predicates::prelude::*;
 use std::fs;
 use tempfile::tempdir;
-use std::path::Path;
 
 // Tests that exercise multiple components working together, 
 // including CLI, configuration, rule processing, etc.
