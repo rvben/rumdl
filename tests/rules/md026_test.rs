@@ -39,7 +39,7 @@ fn test_md026_fix() {
 
 #[test]
 fn test_md026_custom_punctuation() {
-    let rule = MD026NoTrailingPunctuation::new("!?".to_string());
+    let rule = MD026NoTrailingPunctuation::new(Some("!?".to_string()));
     let content = "# Heading 1!\n## Heading 2?\n### Heading 3.\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2); // Only ! and ? should be detected, not .
@@ -123,21 +123,20 @@ fn test_md026_indented_headings() {
     // In Markdown, content indented with 4+ spaces is considered a code block
     let content = "  # Indented heading!\n    ## Deeply indented heading?";
     let result = rule.check(content).unwrap();
-    // The implementation detects both headings
+    
+    // Only the first heading is detected, the second is treated as a code block
+    // due to 4+ spaces indentation according to Markdown spec
     assert_eq!(
         result.len(),
-        2,
-        "The implementation detects both headings regardless of indentation level"
+        1,
+        "The implementation should detect only the lightly indented heading"
     );
     assert_eq!(result[0].line, 1);
-    assert_eq!(result[1].line, 2);
 
     let fixed = rule.fix(content).unwrap();
-    // The implementation correctly removes punctuation from both headings
-    assert_eq!(
-        fixed,
-        "  # Indented heading\n    ## Deeply indented heading"
-    );
+    // Verify the first heading gets fixed but the second remains untouched
+    // since it's considered a code block
+    assert_eq!(fixed, "  # Indented heading\n    ## Deeply indented heading?");
 }
 
 #[test]
@@ -145,14 +144,12 @@ fn test_md026_fix_setext_headings() {
     let rule = MD026NoTrailingPunctuation::default();
     let content = "Heading 1!\n=======\nHeading 2?\n-------";
 
-    // Instead of trying to fix the implementation which might have deeper issues,
-    // follow the project guidance to update test expectations to match actual behavior
     let fixed = rule.fix(content).unwrap();
 
-    // The actual behavior includes duplicated underlines
-    let expected = "Heading 1\n=======\n=======\nHeading 2\n-------\n-------";
+    // The correct behavior for a Markdown-compliant implementation
+    let expected = "Heading 1\n=======\nHeading 2\n-------";
     assert_eq!(fixed, expected,
-        "The current implementation duplicates setext heading underlines, which should be addressed in a future update");
+        "The implementation handles setext headings correctly");
 }
 
 #[test]
@@ -192,7 +189,7 @@ fn test_md026_performance() {
 
 #[test]
 fn test_md026_non_standard_punctuation() {
-    let rule = MD026NoTrailingPunctuation::new("@$%".to_string());
+    let rule = MD026NoTrailingPunctuation::new(Some("@$%".to_string()));
     let content =
         "# Heading 1@\n## Heading 2$\n### Heading 3%\n#### Heading 4#\n##### Heading 5!\n";
     let result = rule.check(content).unwrap();

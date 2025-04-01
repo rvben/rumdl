@@ -1,6 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
 use crate::utils::range_utils::LineIndex;
+use crate::utils::markdown_elements::{MarkdownElements, ElementType};
 use crate::HeadingStyle;
 
 /// Rule MD001: Heading levels should only increment by one level at a time
@@ -67,35 +68,71 @@ impl Rule for MD001HeadingIncrement {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
         let mut prev_level = 0;
 
+        // Get all headings using the MarkdownElements utility
+        let headings = MarkdownElements::detect_headings(content);
         let lines: Vec<&str> = content.lines().collect();
 
-        for (line_num, _) in lines.iter().enumerate() {
-            if let Some(heading) = HeadingUtils::parse_heading(content, line_num + 1) {
-                if prev_level > 0 && heading.level > prev_level + 1 {
-                    let indentation = HeadingUtils::get_indentation(lines[line_num]);
-                    let mut fixed_heading = heading.clone();
-                    fixed_heading.level = prev_level + 1;
-                    let replacement = HeadingUtils::convert_heading_style(&heading.text, fixed_heading.level, heading.style);
-                    warnings.push(LintWarning {
-                        line: line_num + 1,
-                        column: indentation + 1,
-                        severity: Severity::Warning,
-                        message: format!(
-                            "Heading level should be {} for this level",
-                            prev_level + 1
-                        ),
-                        fix: Some(Fix {
-                            range: _line_index
-                                .line_col_to_byte_range(line_num + 1, indentation + 1),
-                            replacement: format!("{}{}", " ".repeat(indentation), replacement),
-                        }),
-                    });
+        for heading in headings {
+            if heading.element_type != ElementType::Heading {
+                continue;
+            }
+
+            // Extract the heading level from metadata
+            if let Some(level_str) = &heading.metadata {
+                if let Ok(level) = level_str.parse::<u32>() {
+                    // Check if this heading level is more than one level deeper than the previous
+                    if prev_level > 0 && level > prev_level + 1 {
+                        let line_num = heading.start_line;
+                        let indentation = if line_num < lines.len() {
+                            HeadingUtils::get_indentation(lines[line_num])
+                        } else {
+                            0
+                        };
+
+                        // Get the heading style for the fix
+                        let style = if line_num + 1 < lines.len() && 
+                           (lines[line_num + 1].trim().starts_with('=') || 
+                            lines[line_num + 1].trim().starts_with('-')) {
+                            if lines[line_num + 1].trim().starts_with('=') {
+                                HeadingStyle::Setext1
+                            } else {
+                                HeadingStyle::Setext2
+                            }
+                        } else {
+                            HeadingStyle::Atx
+                        };
+
+                        // Create a fix with the correct heading level
+                        let fixed_level = prev_level + 1;
+                        let replacement = HeadingUtils::convert_heading_style(&heading.text, fixed_level, style);
+                        
+                        warnings.push(LintWarning {
+                            line: line_num + 1, // Convert to 1-indexed
+                            column: indentation + 1,
+                            severity: Severity::Warning,
+                            message: format!(
+                                "Heading level should be {} for this level",
+                                prev_level + 1
+                            ),
+                            fix: Some(Fix {
+                                range: line_index
+                                    .line_col_to_byte_range(line_num + 1, indentation + 1),
+                                replacement: format!("{}{}", " ".repeat(indentation), replacement),
+                            }),
+                        });
+                    }
+                    
+                    prev_level = level;
                 }
-                prev_level = heading.level;
             }
         }
 
@@ -109,35 +146,73 @@ impl Rule for MD001HeadingIncrement {
         let lines: Vec<&str> = content.lines().collect();
         let ends_with_newline = content.ends_with('\n');
 
-        while i < lines.len() {
-            if let Some(heading) = HeadingUtils::parse_heading(content, i + 1) {
-                let indentation = HeadingUtils::get_indentation(lines[i]);
-                let mut fixed_heading = heading.clone();
-                
-                // Only increment if the level is greater than the previous level
-                if heading.level > prev_level + 1 {
-                    fixed_heading.level = prev_level + 1;
-                    let replacement = HeadingUtils::convert_heading_style(&heading.text, fixed_heading.level, heading.style);
-                    fixed_lines.push(format!("{}{}", " ".repeat(indentation), replacement));
-                } else {
-                    fixed_lines.push(lines[i].to_string());
+        let headings = MarkdownElements::detect_headings(content);
+        let mut heading_map: std::collections::HashMap<usize, (u32, usize)> = std::collections::HashMap::new();
+        
+        // Create a map of line number to (heading level, end line)
+        for heading in headings {
+            if heading.element_type == ElementType::Heading {
+                if let Some(level_str) = &heading.metadata {
+                    if let Ok(level) = level_str.parse::<u32>() {
+                        heading_map.insert(heading.start_line, (level, heading.end_line));
+                    }
                 }
-                
-                prev_level = if heading.level > prev_level + 1 {
-                    prev_level + 1
-                } else {
-                    heading.level
-                };
+            }
+        }
 
-                if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
+        while i < lines.len() {
+            // Check if this line is a heading
+            if let Some(&(level, end_line)) = heading_map.get(&i) {
+                let indentation = HeadingUtils::get_indentation(lines[i]);
+                let is_setext = end_line > i;
+
+                // Determine style
+                let style = if is_setext {
+                    if lines[i + 1].trim().starts_with('=') {
+                        HeadingStyle::Setext1
+                    } else {
+                        HeadingStyle::Setext2
+                    }
+                } else {
+                    HeadingStyle::Atx
+                };
+                
+                // Check if we need to fix the heading level
+                if level > prev_level + 1 {
+                    let fixed_level = prev_level + 1;
+                    let text = if is_setext {
+                        lines[i].to_string()
+                    } else {
+                        // For ATX headings, remove the # marks to get the text
+                        let mut text = lines[i].trim().to_string();
+                        while text.starts_with('#') {
+                            text.remove(0);
+                        }
+                        text.trim().to_string()
+                    };
+                    
+                    let replacement = HeadingUtils::convert_heading_style(&text, fixed_level, style);
+                    fixed_lines.push(format!("{}{}", " ".repeat(indentation), replacement));
+                    
+                    // Update prev_level to the fixed level
+                    prev_level = fixed_level;
+                } else {
+                    // No fix needed, keep original
+                    fixed_lines.push(lines[i].to_string());
+                    prev_level = level;
+                }
+
+                // Handle setext underline
+                if is_setext {
                     if i + 1 < lines.len() {
                         fixed_lines.push(lines[i + 1].to_string());
                     }
-                    i += 2; // Skip the underline line
+                    i = end_line + 1;
                 } else {
                     i += 1;
                 }
             } else {
+                // Not a heading, keep as is
                 fixed_lines.push(lines[i].to_string());
                 i += 1;
             }

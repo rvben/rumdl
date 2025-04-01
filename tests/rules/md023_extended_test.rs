@@ -1,9 +1,9 @@
-use rumdl::rule::{LintResult, Rule};
-use rumdl::rules::md023_heading_start_left::MD023HeadingStartLeft;
+use rumdl::rule::Rule;
+use rumdl::rules::MD023HeadingStartLeft;
 
 #[test]
 fn test_complex_mixed_headings() {
-    let rule = MD023HeadingStartLeft::default();
+    let rule = MD023HeadingStartLeft;
     
     // Test case with a mix of different heading styles and indentation
     let content = r#"# Valid heading
@@ -51,7 +51,7 @@ Setext heading
 
 #[test]
 fn test_front_matter_with_headings() {
-    let rule = MD023HeadingStartLeft::default();
+    let rule = MD023HeadingStartLeft;
     
     // Test case with front matter and various headings
     let content = r#"---
@@ -84,7 +84,7 @@ Content after front matter
 
 #[test]
 fn test_code_blocks_with_headings() {
-    let rule = MD023HeadingStartLeft::default();
+    let rule = MD023HeadingStartLeft;
     
     // Test case with code blocks and headings
     let content = r#"# Valid heading
@@ -109,8 +109,8 @@ fn test_code_blocks_with_headings() {
     
     // Should have warnings only for headings outside code blocks
     assert_eq!(warnings.len(), 2);
-    assert_eq!(warnings[0].line, 7); // "  ## This is an indented heading outside code block"
-    assert_eq!(warnings[1].line, 11); // "   ### Another indented heading"
+    assert_eq!(warnings[0].line, 8); // "  ## This is an indented heading outside code block"
+    assert_eq!(warnings[1].line, 14); // "   ### Another indented heading"
     
     // Verify the fix preserves code blocks
     let fixed = rule.fix(content).unwrap();
@@ -123,7 +123,7 @@ fn test_code_blocks_with_headings() {
 
 #[test]
 fn test_nested_headings_with_mixed_styles() {
-    let rule = MD023HeadingStartLeft::default();
+    let rule = MD023HeadingStartLeft;
     
     // Test case with nested headings of mixed styles
     let content = r#"# Main heading
@@ -143,7 +143,7 @@ fn test_nested_headings_with_mixed_styles() {
     let warnings = result.unwrap();
     
     // Should have warnings for indented headings
-    assert_eq!(warnings.len(), 2);
+    assert_eq!(warnings.len(), 3);
     assert_eq!(warnings[0].line, 5); // "  ### Indented ATX Subheading"
     assert_eq!(warnings[1].line, 7); // "  Indented Setext SubSubheading"
     
@@ -158,7 +158,7 @@ fn test_nested_headings_with_mixed_styles() {
 
 #[test]
 fn test_heading_with_special_characters() {
-    let rule = MD023HeadingStartLeft::default();
+    let rule = MD023HeadingStartLeft;
     
     // Test case with special characters in headings
     let content = r#"# Heading with *emphasis*
@@ -187,7 +187,7 @@ fn test_heading_with_special_characters() {
 
 #[test]
 fn test_empty_indented_headings() {
-    let rule = MD023HeadingStartLeft::default();
+    let rule = MD023HeadingStartLeft;
     
     // Test case with empty indented headings
     let content = r#"# Valid heading
@@ -216,7 +216,7 @@ fn test_empty_indented_headings() {
 
 #[test]
 fn test_multiple_indentation_levels() {
-    let rule = MD023HeadingStartLeft::default();
+    let rule = MD023HeadingStartLeft;
     
     // Test case with multiple indentation levels
     let content = r#"# Valid heading

@@ -1,96 +1,7 @@
-use lazy_static::lazy_static;
-use regex::Regex;
 use std::collections::HashMap;
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::heading_utils::{extract_heading_text, get_heading_level};
-
-lazy_static! {
-    // Optimized patterns with fast path checks
-    static ref ATX_HEADING: Regex = Regex::new(r"^(#+)(\s+)(.*)$").unwrap();
-    static ref CLOSED_ATX_HEADING: Regex = Regex::new(r"^(#+)(\s+)(.+?)(\s+#+\s*$)").unwrap();
-    static ref SETEXT_HEADING_1: Regex = Regex::new(r"^=+\s*$").unwrap();
-    static ref SETEXT_HEADING_2: Regex = Regex::new(r"^-+\s*$").unwrap();
-    static ref FENCED_CODE_BLOCK: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,}).*$").unwrap();
-    static ref FENCED_CODE_END: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*$").unwrap();
-    static ref YAML_FRONT_MATTER_START: Regex = Regex::new(r"^---\s*$").unwrap();
-}
-
-/// Structure to track code blocks and front matter
-#[derive(Default)]
-struct CodeBlockState {
-    in_code_block: bool,
-    in_front_matter: bool,
-    front_matter_started: bool,
-}
-
-impl CodeBlockState {
-    fn update(&mut self, line: &str) {
-        // Fast path - check for literal markers first
-        let trimmed = line.trim_start();
-
-        // YAML front matter handling
-        if !self.front_matter_started
-            && line.trim() == "---"
-            && YAML_FRONT_MATTER_START.is_match(line)
-        {
-            self.front_matter_started = true;
-            self.in_front_matter = true;
-            return;
-        } else if self.in_front_matter && line.trim() == "---" {
-            self.in_front_matter = false;
-            return;
-        }
-
-        // Skip the rest if we're in front matter
-        if self.in_front_matter {
-            return;
-        }
-
-        // Code block handling
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            if !self.in_code_block && FENCED_CODE_BLOCK.is_match(line) {
-                self.in_code_block = true;
-            } else if self.in_code_block && FENCED_CODE_END.is_match(line) {
-                self.in_code_block = false;
-            }
-        }
-    }
-}
-
-/// Checks if a line is a heading
-fn is_heading(content_lines: &[&str], index: usize, code_block_state: &CodeBlockState) -> bool {
-    // Skip if we're in a code block or front matter
-    if code_block_state.in_code_block || code_block_state.in_front_matter {
-        return false;
-    }
-
-    let line = content_lines[index];
-    let trimmed = line.trim();
-
-    // Fast path checks before regex
-    if trimmed.is_empty() {
-        return false;
-    }
-
-    // Check for ATX style headings (# Heading)
-    if trimmed.starts_with('#') {
-        return ATX_HEADING.is_match(line) || CLOSED_ATX_HEADING.is_match(line);
-    }
-
-    // Check for setext style headings (followed by ==== or ----)
-    if index + 1 < content_lines.len() {
-        let next_line = content_lines[index + 1].trim();
-        if !next_line.is_empty()
-            && (next_line.starts_with('=') && SETEXT_HEADING_1.is_match(next_line))
-            || (next_line.starts_with('-') && SETEXT_HEADING_2.is_match(next_line))
-        {
-            return true;
-        }
-    }
-
-    false
-}
+use crate::utils::markdown_elements::{MarkdownElements, ElementType};
 
 /// A rule that checks for multiple headings with the same content
 #[derive(Default)]
@@ -108,14 +19,15 @@ impl MD024MultipleHeadings {
 
     /// Gets a unique signature for a heading based on its text and level
     fn get_heading_signature(&self, text: &str, level: u32) -> String {
-        // If we're ignoring case, convert to lowercase
+        // If we're allowing different nesting levels, convert to lowercase for case-insensitive comparison
+        // Otherwise, preserve case as per the original implementation
         let text = if self.allow_different_nesting {
             text.to_lowercase()
         } else {
             text.to_string()
         };
 
-        // If we're ignoring level, use a fixed level
+        // If we're allowing different nesting levels, ignore the level
         let level = if self.allow_different_nesting {
             1
         } else {
@@ -142,31 +54,28 @@ impl Rule for MD024MultipleHeadings {
         }
 
         let mut warnings = Vec::new();
-        let content_lines: Vec<&str> = content.lines().collect();
-        let mut code_block_state = CodeBlockState::default();
-
+        
         // Track headings by their signature
         let mut headings = HashMap::new();
 
-        // First pass - identify headings and their lines
-        let mut i = 0;
-        while i < content_lines.len() {
-            // Update code block state
-            code_block_state.update(content_lines[i]);
+        // Detect all headings using the MarkdownElements utility
+        let detected_headings = MarkdownElements::detect_headings(content);
 
-            // Check if this line is a heading
-            if is_heading(&content_lines, i, &code_block_state) {
-                let heading_level = get_heading_level(&content_lines, i);
-                let heading_text = extract_heading_text(&content_lines, i);
+        for heading in detected_headings {
+            // Skip non-heading elements (shouldn't happen) and empty headings
+            if heading.element_type != ElementType::Heading || heading.text.trim().is_empty() {
+                continue;
+            }
 
-                // Skip empty headings
-                if !heading_text.is_empty() {
-                    let signature = self.get_heading_signature(&heading_text, heading_level);
+            // Get the heading level from metadata
+            if let Some(level_str) = &heading.metadata {
+                if let Ok(level) = level_str.parse::<u32>() {
+                    let signature = self.get_heading_signature(&heading.text, level);
 
                     // Check if we've seen this heading before
                     if let Some(first_occurrence) = headings.get(&signature) {
                         warnings.push(LintWarning {
-                            line: i + 1,
+                            line: heading.start_line + 1,  // Convert 0-indexed to 1-indexed
                             column: 1,
                             message: format!("Multiple headings with the same content (first occurrence at line {})", first_occurrence),
                             severity: Severity::Warning,
@@ -174,18 +83,10 @@ impl Rule for MD024MultipleHeadings {
                         });
                     } else {
                         // First occurrence
-                        headings.insert(signature, i + 1);
+                        headings.insert(signature, heading.start_line + 1);  // Convert to 1-indexed
                     }
                 }
-
-                // If this is a setext heading (level 1 or 2), skip the underline
-                if (heading_level == 1 && i + 1 < content_lines.len() && SETEXT_HEADING_1.is_match(content_lines[i + 1])) ||
-                   (heading_level == 2 && i + 1 < content_lines.len() && SETEXT_HEADING_2.is_match(content_lines[i + 1])) {
-                    i += 1;
-                }
             }
-
-            i += 1;
         }
 
         Ok(warnings)
@@ -195,5 +96,39 @@ impl Rule for MD024MultipleHeadings {
         // No automatic fix for multiple headings with the same content
         // The user needs to decide how to make each heading unique
         Ok(content.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_get_heading_signature() {
+        let rule_without_nesting = MD024MultipleHeadings::new(false);
+        let rule_with_nesting = MD024MultipleHeadings::new(true);
+        
+        // Test without allowing different nesting levels - should preserve case
+        assert_eq!(
+            rule_without_nesting.get_heading_signature("Test Heading", 2),
+            "2:Test Heading"
+        );
+        
+        // Test with allowing different nesting levels - should convert to lowercase
+        assert_eq!(
+            rule_with_nesting.get_heading_signature("Test Heading", 2),
+            "1:test heading"  // Level is normalized to 1
+        );
+        
+        // Test that the same heading at different levels produces different signatures
+        let heading = "Same Heading";
+        let sig1 = rule_without_nesting.get_heading_signature(heading, 1);
+        let sig2 = rule_without_nesting.get_heading_signature(heading, 2);
+        assert_ne!(sig1, sig2);
+        
+        // Test that with allow_different_nesting, levels are ignored
+        let sig3 = rule_with_nesting.get_heading_signature(heading, 1);
+        let sig4 = rule_with_nesting.get_heading_signature(heading, 2);
+        assert_eq!(sig3, sig4);
     }
 }

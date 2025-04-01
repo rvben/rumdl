@@ -20,7 +20,7 @@ mod md011_reversed_link;
 mod md013_line_length;
 mod md014_commands_show_output;
 mod md024_multiple_headings;
-mod md025_single_title;
+pub mod md025_single_title;
 mod md026_no_trailing_punctuation;
 mod md027_multiple_spaces_blockquote;
 mod md028_no_blanks_blockquote;

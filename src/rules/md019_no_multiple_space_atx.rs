@@ -1,12 +1,11 @@
 use crate::utils::range_utils::LineIndex;
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::markdown_elements::{ElementType, MarkdownElements};
 use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
     static ref ATX_MULTIPLE_SPACE_PATTERN: Regex = Regex::new(r"^(#+)\s{2,}").unwrap();
-    static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s*)```").unwrap();
 }
 
 #[derive(Debug, Default)]
@@ -51,39 +50,56 @@ impl Rule for MD019NoMultipleSpaceAtx {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
 
+        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
+        
+        // Use MarkdownElements to detect all headings
+        let headings = MarkdownElements::detect_headings(content);
+        
+        // Process each line to check for ATX headings with multiple spaces
+        let lines: Vec<&str> = content.lines().collect();
 
-        let mut in_code_block = false;
-
-        for (line_num, line) in content.lines().enumerate() {
-            if CODE_BLOCK_PATTERN.is_match(line) {
-                in_code_block = !in_code_block;
+        for (line_num, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks
+            if line_index.is_code_block(line_num) {
                 continue;
             }
 
-            if !in_code_block && self.is_atx_heading_with_multiple_spaces(line) {
-                let hashes = ATX_MULTIPLE_SPACE_PATTERN
-                    .captures(line)
-                    .unwrap()
-                    .get(1)
-                    .unwrap();
-                let spaces = self.count_spaces_after_hashes(line);
-                warnings.push(LintWarning {
-                    message: format!(
-                        "Multiple spaces ({}) after {} in ATX style heading",
-                        spaces,
-                        "#".repeat(hashes.as_str().len())
-                    ),
-                    line: line_num + 1,
-                    column: hashes.end() + 1,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(line_num + 1, 1),
-                        replacement: self.fix_atx_heading(line),
-                    }),
-                });
+            // Check if this is an ATX heading with multiple spaces
+            if self.is_atx_heading_with_multiple_spaces(line) {
+                // Make sure this is a heading, not just a line starting with #
+                let is_heading = headings.iter().any(|h| 
+                    h.element_type == ElementType::Heading && 
+                    h.start_line == line_num
+                );
+                
+                if is_heading {
+                    let hashes = ATX_MULTIPLE_SPACE_PATTERN
+                        .captures(line)
+                        .unwrap()
+                        .get(1)
+                        .unwrap();
+                    let spaces = self.count_spaces_after_hashes(line);
+                    warnings.push(LintWarning {
+                        message: format!(
+                            "Multiple spaces ({}) after {} in ATX style heading",
+                            spaces,
+                            "#".repeat(hashes.as_str().len())
+                        ),
+                        line: line_num + 1,
+                        column: hashes.end() + 1,
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(line_num + 1, 1),
+                            replacement: self.fix_atx_heading(line),
+                        }),
+                    });
+                }
             }
         }
 
@@ -91,27 +107,47 @@ impl Rule for MD019NoMultipleSpaceAtx {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(String::new());
+        }
+        
+        let line_index = LineIndex::new(content.to_string());
         let mut result = String::new();
 
-        let mut in_code_block = false;
+        // Use MarkdownElements to detect all headings
+        let headings = MarkdownElements::detect_headings(content);
+        
+        let lines: Vec<&str> = content.lines().collect();
 
-        for line in content.lines() {
-            if CODE_BLOCK_PATTERN.is_match(line) {
-                in_code_block = !in_code_block;
+        for (i, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks
+            if line_index.is_code_block(i) {
                 result.push_str(line);
-            } else if !in_code_block && self.is_atx_heading_with_multiple_spaces(line) {
-                result.push_str(&self.fix_atx_heading(line));
+            } else if self.is_atx_heading_with_multiple_spaces(line) {
+                // Make sure this is a heading, not just a line starting with #
+                let is_heading = headings.iter().any(|h| 
+                    h.element_type == ElementType::Heading && 
+                    h.start_line == i
+                );
+                
+                if is_heading {
+                    result.push_str(&self.fix_atx_heading(line));
+                } else {
+                    result.push_str(line);
+                }
             } else {
                 result.push_str(line);
             }
-            result.push('\n');
+            
+            if i < lines.len() - 1 {
+                result.push('\n');
+            }
         }
 
-        // Remove trailing newline if the original content didn't have one
-        if !content.ends_with('\n') {
-            result.pop();
+        // Preserve trailing newline if original had it
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
         }
 
         Ok(result)

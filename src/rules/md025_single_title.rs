@@ -1,10 +1,8 @@
 use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::front_matter_utils::FrontMatterUtils;
-use crate::rules::heading_utils::HeadingUtils;
+use crate::utils::MarkdownElements;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::HashSet;
 
 lazy_static! {
     // Pattern for quick check if content has any headings at all
@@ -14,32 +12,24 @@ lazy_static! {
 #[derive(Debug)]
 pub struct MD025SingleTitle {
     level: usize,
+    front_matter_title: String,
 }
 
 impl Default for MD025SingleTitle {
     fn default() -> Self {
-        Self { level: 1 }
+        Self {
+            level: 1,
+            front_matter_title: "title".to_string(),
+        }
     }
 }
 
 impl MD025SingleTitle {
-    pub fn new(level: usize, _front_matter_title: &str) -> Self {
-        Self { level }
-    }
-
-    #[inline]
-    fn get_special_lines(&self, content: &str) -> HashSet<usize> {
-        let mut special_lines = HashSet::new();
-        
-        // Add code block lines
-        for (i, _) in content.lines().enumerate() {
-            if HeadingUtils::is_in_code_block(content, i) || 
-               FrontMatterUtils::is_in_front_matter(content, i) {
-                special_lines.insert(i);
-            }
+    pub fn new(level: usize, front_matter_title: &str) -> Self {
+        Self {
+            level,
+            front_matter_title: front_matter_title.to_string(),
         }
-        
-        special_lines
     }
 }
 
@@ -65,44 +55,62 @@ impl Rule for MD025SingleTitle {
 
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        let mut found_title = false;
         
-        // Pre-compute special lines (code blocks or front matter)
-        let special_lines = self.get_special_lines(content);
-
-        // Process each line
-        for (i, line) in content.lines().enumerate() {
-            // Skip processing if line is in a code block or front matter
-            if special_lines.contains(&i) {
-                continue;
+        // Check for front matter title if configured
+        let mut found_title_in_front_matter = false;
+        if !self.front_matter_title.is_empty() {
+            if let Some(front_matter) = MarkdownElements::detect_front_matter(content) {
+                // Extract front matter content
+                let front_matter_content = &content[front_matter.start_line..=front_matter.end_line];
+                // Check if it contains a title field
+                found_title_in_front_matter = front_matter_content
+                    .lines()
+                    .any(|line| line.trim().starts_with(&format!("{}:", self.front_matter_title)));
             }
-
-            let trimmed = line.trim_start();
-            if trimmed.starts_with('#') {
-                let level = trimmed.chars().take_while(|&c| c == '#').count();
-                if level == self.level {
-                    if found_title {
-                        warnings.push(LintWarning {
-                            message: format!(
-                                "Multiple top-level headings (level {}) in the same document",
-                                self.level
-                            ),
-                            line: i + 1,
-                            column: line.find('#').unwrap_or(0) + 1,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index
-                                    .line_col_to_byte_range(i + 1, line.find('#').unwrap_or(0) + 1),
-                                replacement: format!(
-                                    "{} {}",
-                                    "#".repeat(level + 1),
-                                    &line[level + line.find('#').unwrap_or(0)..]
-                                ),
-                            }),
-                        });
+        }
+        
+        // Use unified heading detection
+        let headings = MarkdownElements::detect_headings(content);
+        
+        // Filter headings to only include those of the target level
+        let target_level_headings: Vec<_> = headings.iter()
+            .filter(|h| {
+                if let Some(level_str) = &h.metadata {
+                    if let Ok(level) = level_str.parse::<usize>() {
+                        return level == self.level;
                     }
-                    found_title = true;
                 }
+                false
+            })
+            .collect();
+        
+        // If we already found a title in front matter, all level-1 headings should trigger warnings
+        let start_index = if found_title_in_front_matter { 0 } else { 1 };
+        
+        // If we have any target level headings after accounting for front matter, warn as needed
+        if target_level_headings.len() > start_index {
+            for heading in &target_level_headings[start_index..] {
+                let line = heading.start_line;
+                let line_content = content.lines().nth(line).unwrap_or("");
+                let col = line_content.find('#').unwrap_or(0);
+                
+                warnings.push(LintWarning {
+                    message: format!(
+                        "Multiple top-level headings (level {}) in the same document",
+                        self.level
+                    ),
+                    line: line + 1,
+                    column: col + 1,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range(line + 1, col + 1),
+                        replacement: format!(
+                            "{} {}",
+                            "#".repeat(self.level + 1),
+                            &line_content[(col + self.level)..]
+                        ),
+                    }),
+                });
             }
         }
 
@@ -121,48 +129,73 @@ impl Rule for MD025SingleTitle {
         }
 
         let mut result = String::with_capacity(content.len());
-        let mut found_first_title = false;
+        let lines: Vec<&str> = content.lines().collect();
         
-        // Pre-compute special lines (code blocks or front matter)
-        let special_lines = self.get_special_lines(content);
-
-        for (i, line) in content.lines().enumerate() {
-            // Don't modify lines in code blocks or front matter
-            if special_lines.contains(&i) {
-                result.push_str(line);
-            } else {
-                let trimmed = line.trim_start();
-                if trimmed.starts_with('#') {
-                    let level = trimmed.chars().take_while(|&c| c == '#').count();
-                    let indent = line.len() - trimmed.len();
-
-                    if level == self.level {
-                        if found_first_title {
-                            // This is a duplicate level-n heading - add one more # to increase level
-                            result.push_str(&" ".repeat(indent));
-                            result.push_str(&"#".repeat(level + 1));
-                            result.push_str(&trimmed[level..]);
-                        } else {
-                            // This is the first level-n heading - keep it as is
-                            result.push_str(line);
-                            found_first_title = true;
-                        }
-                    } else {
-                        // Not a level-n heading, keep it as is
-                        result.push_str(line);
-                    }
-                } else {
-                    // Not a heading, keep it as is
-                    result.push_str(line);
-                }
+        // Check for front matter title if configured
+        let mut found_title_in_front_matter = false;
+        if !self.front_matter_title.is_empty() {
+            if let Some(front_matter) = MarkdownElements::detect_front_matter(content) {
+                // Extract front matter content
+                let front_matter_content = &content[front_matter.start_line..=front_matter.end_line];
+                // Check if it contains a title field
+                found_title_in_front_matter = front_matter_content
+                    .lines()
+                    .any(|line| line.trim().starts_with(&format!("{}:", self.front_matter_title)));
             }
-
+        }
+        
+        // Use unified heading detection
+        let headings = MarkdownElements::detect_headings(content);
+        
+        // Filter headings to only include those of the target level
+        let target_level_headings: Vec<_> = headings.iter()
+            .filter(|h| {
+                if let Some(level_str) = &h.metadata {
+                    if let Ok(level) = level_str.parse::<usize>() {
+                        return level == self.level;
+                    }
+                }
+                false
+            })
+            .collect();
+        
+        // If we already found a title in front matter, all level-1 headings should be fixed
+        let start_index = if found_title_in_front_matter { 0 } else { 1 };
+        
+        // No headings to fix or only acceptable number
+        if target_level_headings.len() <= start_index {
+            return Ok(content.to_string());
+        }
+        
+        // Create a set of line numbers for headings that need to be fixed
+        let lines_to_fix: std::collections::HashSet<usize> = target_level_headings[start_index..]
+            .iter()
+            .map(|h| h.start_line)
+            .collect();
+        
+        // Process each line
+        for (i, line) in lines.iter().enumerate() {
+            if lines_to_fix.contains(&i) {
+                // This is a line that needs fixing
+                let col = line.find('#').unwrap_or(0);
+                let indentation = &line[..col];
+                let content_start = col + self.level;
+                
+                // Add one more # to increase the heading level
+                result.push_str(indentation);
+                result.push_str(&"#".repeat(self.level + 1));
+                result.push_str(&line[content_start..]);
+            } else {
+                // Leave this line unchanged
+                result.push_str(line);
+            }
+            
             // Add newline between lines (except after the last line)
-            if i < content.lines().count() - 1 {
+            if i < lines.len() - 1 {
                 result.push('\n');
             }
         }
-
+        
         // Preserve trailing newline if original had it
         if content.ends_with('\n') && !result.ends_with('\n') {
             result.push('\n');

@@ -1,13 +1,16 @@
-use crate::utils::range_utils::LineIndex;
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
+    // Matches closed ATX headings with spaces between hashes and content, 
+    // including indented ones
     static ref CLOSED_ATX_MULTIPLE_SPACE_PATTERN: Regex =
         Regex::new(r"^(\s*)(#+)(\s+)(.*?)(\s+)(#+)\s*$").unwrap();
-    static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s*)```").unwrap();
+    
+    // Matches code fence blocks
+    static ref CODE_FENCE_PATTERN: Regex = 
+        Regex::new(r"^(`{3,}|~{3,})").unwrap();
 }
 
 #[derive(Debug, Default)]
@@ -55,6 +58,31 @@ impl MD021NoMultipleSpaceClosedAtx {
             (0, 0)
         }
     }
+    
+    // Calculate the byte range for a specific line in the content
+    fn get_line_byte_range(&self, content: &str, line_num: usize) -> std::ops::Range<usize> {
+        let mut current_line = 1;
+        let mut start_byte = 0;
+        
+        for (i, c) in content.char_indices() {
+            if current_line == line_num && c == '\n' {
+                return start_byte..i;
+            } else if c == '\n' {
+                current_line += 1;
+                if current_line == line_num {
+                    start_byte = i + 1;
+                }
+            }
+        }
+        
+        // If we're looking for the last line and it doesn't end with a newline
+        if current_line == line_num {
+            return start_byte..content.len();
+        }
+        
+        // Fallback if line not found (shouldn't happen)
+        0..0
+    }
 }
 
 impl Rule for MD021NoMultipleSpaceClosedAtx {
@@ -67,23 +95,34 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
-
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+        
         let mut warnings = Vec::new();
-
         let mut in_code_block = false;
-
-        for (line_num, line) in content.lines().enumerate() {
-            if CODE_BLOCK_PATTERN.is_match(line) {
+        
+        for (i, line) in content.lines().enumerate() {
+            let line_num = i + 1; // Convert to 1-indexed
+            
+            // Handle code blocks
+            if CODE_FENCE_PATTERN.is_match(line.trim()) {
                 in_code_block = !in_code_block;
                 continue;
             }
-
-            if !in_code_block && self.is_closed_atx_heading_with_multiple_spaces(line) {
+            
+            // Skip content inside code blocks
+            if in_code_block {
+                continue;
+            }
+            
+            // Check if line matches closed ATX pattern with multiple spaces
+            if self.is_closed_atx_heading_with_multiple_spaces(line) {
                 let captures = CLOSED_ATX_MULTIPLE_SPACE_PATTERN.captures(line).unwrap();
                 let indentation = captures.get(1).unwrap();
                 let opening_hashes = captures.get(2).unwrap();
                 let (start_spaces, end_spaces) = self.count_spaces(line);
+                
                 let message = if start_spaces > 1 && end_spaces > 1 {
                     format!(
                         "Multiple spaces ({} at start, {} at end) inside hashes on closed ATX style heading with {} hashes",
@@ -104,13 +143,16 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                         opening_hashes.as_str().len()
                     )
                 };
+                
+                let line_range = self.get_line_byte_range(content, line_num);
+                
                 warnings.push(LintWarning {
                     message,
-                    line: line_num + 1,
+                    line: line_num,
                     column: indentation.end() + 1,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(line_num + 1, 1),
+                        range: line_range,
                         replacement: self.fix_closed_atx_heading(line),
                     }),
                 });
@@ -121,27 +163,34 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-
+        if content.is_empty() {
+            return Ok(String::new());
+        }
+        
         let mut result = String::new();
-
         let mut in_code_block = false;
 
-        for line in content.lines() {
-            if CODE_BLOCK_PATTERN.is_match(line) {
+        for (i, line) in content.lines().enumerate() {
+            // Handle code blocks
+            if CODE_FENCE_PATTERN.is_match(line.trim()) {
                 in_code_block = !in_code_block;
                 result.push_str(line);
-            } else if !in_code_block && self.is_closed_atx_heading_with_multiple_spaces(line) {
+            } else if in_code_block {
+                result.push_str(line);
+            } else if self.is_closed_atx_heading_with_multiple_spaces(line) {
                 result.push_str(&self.fix_closed_atx_heading(line));
             } else {
                 result.push_str(line);
             }
-            result.push('\n');
+            
+            if i < content.lines().count() - 1 {
+                result.push('\n');
+            }
         }
 
-        // Remove trailing newline if the original content didn't have one
-        if !content.ends_with('\n') {
-            result.pop();
+        // Preserve trailing newline if original had it
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
         }
 
         Ok(result)

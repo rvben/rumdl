@@ -21,6 +21,7 @@ mod md020_test;
 mod md021_test;
 mod md022_test;
 mod md023_test;
+mod md023_extended_test;
 mod md024_test;
 mod md025_test;
 mod md026_test;
