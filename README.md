@@ -1,24 +1,28 @@
-# rumdl - An extremely fast Markdown linter, written in Rust
+# rumdl - A high-performance Markdown linter, written in Rust
 
 <div align="center">
 
-![rumdl Logo](https://raw.githubusercontent.com/user/rumdl/main/assets/logo.png)
+![rumdl Logo](https://raw.githubusercontent.com/rvben/rumdl/main/assets/logo.png)
 
-[![Build Status](https://img.shields.io/github/workflow/status/user/rumdl/CI)](https://github.com/user/rumdl/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/rvben/rumdl/build.yml?branch=main)](https://github.com/rvben/rumdl/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Crates.io](https://img.shields.io/crates/v/rumdl)](https://crates.io/crates/rumdl)
 [![PyPI](https://img.shields.io/pypi/v/rumdl)](https://pypi.org/project/rumdl/)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/rvben/rumdl)](https://github.com/rvben/rumdl/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/rvben/rumdl)](https://github.com/rvben/rumdl/stargazers)
 
-## An extremely fast Markdown linter and formatter, written in Rust
+## A modern Markdown linter and formatter, built for speed with Rust
 
-| [**Docs**](docs/RULES.md) | [**Rules**](docs/RULES.md) | [**Configuration**](#configuration) |
+| [**Docs**](https://github.com/rvben/rumdl/blob/main/docs/RULES.md) | [**Rules**](https://github.com/rvben/rumdl/blob/main/docs/RULES.md) | [**Configuration**](#configuration) |
 
 </div>
 
 ## Table of Contents
 
-- [rumdl - An extremely fast Markdown linter, written in Rust](#rumdl---an-extremely-fast-markdown-linter-written-in-rust)
+- [rumdl - A high-performance Markdown linter, written in Rust](#rumdl---a-high-performance-markdown-linter-written-in-rust)
+  - [A modern Markdown linter and formatter, built for speed with Rust](#a-modern-markdown-linter-and-formatter-built-for-speed-with-rust)
   - [Table of Contents](#table-of-contents)
+  - [Quick Start](#quick-start)
   - [Overview](#overview)
   - [Installation](#installation)
     - [Using Cargo (Rust)](#using-cargo-rust)
@@ -38,16 +42,33 @@
     - [Testing](#testing)
   - [License](#license)
 
+## Quick Start
+
+```bash
+# Install using Cargo
+cargo install rumdl
+
+# Check Markdown files in the current directory
+rumdl .
+
+# Automatically fix issues
+rumdl --fix .
+
+# Create a default configuration file
+rumdl init
+```
+
 ## Overview
 
-rumdl is a lightning-fast Markdown linter and fixer that helps ensure consistency and best practices in your Markdown files. It offers:
+rumdl is a high-performance Markdown linter and fixer that helps ensure consistency and best practices in your Markdown files. It offers:
 
-- ⚡️ **10-50x faster** than other Markdown linters
+- ⚡️ **Built for speed** with Rust
 - 🔍 **50+ lint rules** covering common Markdown issues
 - 🛠️ **Automatic fixing** with `--fix` for most rules
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
 - 🌐 **Multiple installation options** - Rust, Python, standalone binaries
+- 🐍 **Installable via pip** for Python users
 - 📏 **Modern CLI** with detailed error reporting
 - 🔄 **CI/CD friendly** with non-zero exit code on errors
 
@@ -71,10 +92,10 @@ pip install rumdl
 
 ```bash
 # Linux/macOS
-curl -LsSf https://github.com/user/rumdl/releases/latest/download/rumdl-linux-x86_64.tar.gz | tar xzf - -C /usr/local/bin
+curl -LsSf https://github.com/rvben/rumdl/releases/latest/download/rumdl-linux-x86_64.tar.gz | tar xzf - -C /usr/local/bin
 
 # Windows PowerShell
-Invoke-WebRequest -Uri "https://github.com/user/rumdl/releases/latest/download/rumdl-windows-x86_64.zip" -OutFile "rumdl.zip"
+Invoke-WebRequest -Uri "https://github.com/rvben/rumdl/releases/latest/download/rumdl-windows-x86_64.zip" -OutFile "rumdl.zip"
 Expand-Archive -Path "rumdl.zip" -DestinationPath "$env:USERPROFILE\.rumdl"
 ```
 
@@ -132,7 +153,7 @@ rumdl implements over 50 lint rules for Markdown files. Here are some key rule c
 | **Images** | Image alt text and references | MD045, MD052 |
 | **Style** | Consistent style across document | MD031, MD032, MD035 |
 
-For a complete list of rules and their descriptions, see our [documentation](docs/RULES.md) or run:
+For a complete list of rules and their descriptions, see our [documentation](https://github.com/rvben/rumdl/blob/main/docs/RULES.md) or run:
 
 ```bash
 rumdl --list-rules
