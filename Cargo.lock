@@ -168,9 +168,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.34"
+version = "4.5.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e958897981290da2a852763fe9cdb89cd36977a5d729023127095fa94d95e2ff"
+checksum = "d8aa86934b44c19c50f87cc2790e19f54f7a67aedb64101c2e1a2e5ecfb73944"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -178,9 +178,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.34"
+version = "4.5.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83b0f35019843db2160b5bb19ae09b4e6411ac33fc6a712003c33e03090e2489"
+checksum = "2414dbb2dd0695280da6ea9261e327479e9d37b0630f6b53ba2a11c60c679fd9"
 dependencies = [
  "anstream",
  "anstyle",
@@ -840,7 +840,7 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "rumdl"
-version = "0.0.27"
+version = "0.0.28"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -867,9 +867,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a04a32fb43fcdef85b977ce7f77a150805e4b2ea1f2656898d4a547dde78df6"
+checksum = "d97817398dd4bb2e6da002002db259209759911da105da92bec29ccb12cf58bf"
 dependencies = [
  "bitflags",
  "errno",
