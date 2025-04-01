@@ -96,7 +96,7 @@ impl MD006StartBullets {
 
 impl Rule for MD006StartBullets {
     fn name(&self) -> &'static str {
-        "MD006StartBullets"
+        "MD006"
     }
 
     fn description(&self) -> &'static str {

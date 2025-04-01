@@ -568,7 +568,7 @@ impl MD053LinkImageReferenceDefinitions {
 
 impl Rule for MD053LinkImageReferenceDefinitions {
     fn name(&self) -> &'static str {
-        "md053"
+        "MD053"
     }
 
     fn description(&self) -> &'static str {
