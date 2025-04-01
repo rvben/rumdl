@@ -184,8 +184,8 @@ impl MD054LinkImageStyle {
 
             // Make sure it's not the start of an inline, full, or collapsed reference
             if safe_substring.len() > _match_text.len() {
-                let next_char = &safe_substring[_match_text.len()..][..1];
-                if next_char == "(" || next_char == "[" {
+                let next_char = &safe_substring[_match_text.len()..].chars().next().unwrap();
+                if *next_char == '(' || *next_char == '[' {
                     return None;
                 }
             }
