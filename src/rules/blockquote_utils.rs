@@ -161,8 +161,8 @@ impl BlockquoteUtils {
             let current_line = lines[i];
 
             if Self::is_blockquote(prev_line) && Self::is_blockquote(current_line) {
-                // Check if there are blank lines between these blockquotes
-                if current_line.trim().is_empty() {
+                // Check if the current blockquote line is empty
+                if Self::is_empty_blockquote(current_line) {
                     blank_line_numbers.push(i + 1); // 1-indexed line number
                 }
             }

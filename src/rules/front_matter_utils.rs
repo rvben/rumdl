@@ -147,10 +147,31 @@ impl FrontMatterUtils {
 
         let front_matter = Self::extract_front_matter(content);
         for line in front_matter {
-            if let Some(captures) = FRONT_MATTER_FIELD.captures(line) {
-                let key = captures.get(1).unwrap().as_str().trim();
-                if key == field_name {
-                    return Some(captures.get(2).unwrap().as_str().trim());
+            let line = line.trim();
+            match front_matter_type {
+                FrontMatterType::Toml => {
+                    // Handle TOML-style fields (key = value)
+                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap().captures(line) {
+                        let key = captures.get(1).unwrap().as_str().trim();
+                        if key == field_name {
+                            let value = captures.get(2).unwrap().as_str();
+                            return Some(value);
+                        }
+                    }
+                },
+                _ => {
+                    // Handle YAML/JSON-style fields (key: value)
+                    if let Some(captures) = FRONT_MATTER_FIELD.captures(line) {
+                        let key = captures.get(1).unwrap().as_str().trim();
+                        if key == field_name {
+                            let value = captures.get(2).unwrap().as_str().trim();
+                            // Strip quotes if present
+                            if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                                return Some(&value[1..value.len()-1]);
+                            }
+                            return Some(value);
+                        }
+                    }
                 }
             }
         }
@@ -168,11 +189,72 @@ impl FrontMatterUtils {
         }
 
         let front_matter = Self::extract_front_matter(content);
+        let mut current_prefix = String::new();
+        let mut indent_level = 0;
+
         for line in front_matter {
-            if let Some(captures) = FRONT_MATTER_FIELD.captures(line) {
-                let key = captures.get(1).unwrap().as_str().trim().to_string();
-                let value = captures.get(2).unwrap().as_str().trim().to_string();
-                fields.insert(key, value);
+            let line_indent = line.chars().take_while(|c| c.is_whitespace()).count();
+            let line = line.trim();
+            
+            // Handle indentation changes for nested fields
+            if line_indent > indent_level {
+                // Going deeper
+                indent_level = line_indent;
+            } else if line_indent < indent_level {
+                // Going back up
+                indent_level = line_indent;
+                // Remove last nested level from prefix
+                if let Some(last_dot) = current_prefix.rfind('.') {
+                    current_prefix.truncate(last_dot);
+                } else {
+                    current_prefix.clear();
+                }
+            }
+
+            match front_matter_type {
+                FrontMatterType::Toml => {
+                    // Handle TOML-style fields
+                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap().captures(line) {
+                        let key = captures.get(1).unwrap().as_str().trim();
+                        let value = captures.get(2).unwrap().as_str();
+                        let full_key = if current_prefix.is_empty() {
+                            key.to_string()
+                        } else {
+                            format!("{}.{}", current_prefix, key)
+                        };
+                        fields.insert(full_key, value.to_string());
+                    }
+                },
+                _ => {
+                    // Handle YAML/JSON-style fields
+                    if let Some(captures) = FRONT_MATTER_FIELD.captures(line) {
+                        let key = captures.get(1).unwrap().as_str().trim();
+                        let value = captures.get(2).unwrap().as_str().trim();
+                        
+                        if key.ends_with(':') {
+                            // This is a nested field marker
+                            if current_prefix.is_empty() {
+                                current_prefix = key[..key.len()-1].to_string();
+                            } else {
+                                current_prefix = format!("{}.{}", current_prefix, &key[..key.len()-1]);
+                            }
+                        } else {
+                            // This is a field with a value
+                            let full_key = if current_prefix.is_empty() {
+                                key.to_string()
+                            } else {
+                                format!("{}.{}", current_prefix, key)
+                            };
+                            // Strip quotes if present
+                            let value = if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                                &value[1..value.len()-1]
+                            } else {
+                                value
+                            };
+                            fields.insert(full_key, value.to_string());
+                        }
+                    }
+                }
             }
         }
 
