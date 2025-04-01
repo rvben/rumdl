@@ -110,3 +110,13 @@ fn test_unicode_images() {
         "Restricted styles with Unicode images should generate warnings"
     );
 }
+
+#[test]
+fn test_shortcut_link() {
+    let rule = MD054LinkImageStyle::default();
+
+    // Test for multi-byte character after shortcut link
+    let shortcut_lnk = "[https://www.example.com]例";
+    let result = rule.check(shortcut_lnk).unwrap();
+    assert!(result.is_empty());
+}
