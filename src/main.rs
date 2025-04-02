@@ -53,7 +53,7 @@ struct Cli {
     include: Option<String>,
 
     /// Respect .gitignore files when scanning directories
-    #[arg(long)]
+    #[arg(long, default_value = "true")]
     respect_gitignore: bool,
 
     /// Debug gitignore patterns for a specific file
