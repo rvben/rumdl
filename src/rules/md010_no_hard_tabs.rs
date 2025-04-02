@@ -1,6 +1,14 @@
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    // Pattern to detect HTML comments (start and end tags separately)
+    static ref HTML_COMMENT_START: Regex = Regex::new(r"<!--").unwrap();
+    static ref HTML_COMMENT_END: Regex = Regex::new(r"-->").unwrap();
+}
 
 #[derive(Debug)]
 pub struct MD010NoHardTabs {
@@ -38,6 +46,37 @@ impl MD010NoHardTabs {
         false
     }
 
+    // Identify lines that are part of HTML comments
+    fn find_html_comment_lines(lines: &[&str]) -> Vec<bool> {
+        let mut in_html_comment = false;
+        let mut html_comment_lines = vec![false; lines.len()];
+
+        for (i, line) in lines.iter().enumerate() {
+            // Check if this line has a comment start
+            let has_comment_start = HTML_COMMENT_START.is_match(line);
+            // Check if this line has a comment end
+            let has_comment_end = HTML_COMMENT_END.is_match(line);
+
+            if has_comment_start && !has_comment_end && !in_html_comment {
+                // Comment starts on this line and doesn't end
+                in_html_comment = true;
+                html_comment_lines[i] = true;
+            } else if has_comment_end && in_html_comment {
+                // Comment ends on this line
+                html_comment_lines[i] = true;
+                in_html_comment = false;
+            } else if has_comment_start && has_comment_end {
+                // Both start and end on the same line
+                html_comment_lines[i] = true;
+            } else if in_html_comment {
+                // We're inside a multi-line comment
+                html_comment_lines[i] = true;
+            }
+        }
+
+        html_comment_lines
+    }
+
     fn count_leading_tabs(line: &str) -> usize {
         let mut count = 0;
         for c in line.chars() {
@@ -72,10 +111,17 @@ impl Rule for MD010NoHardTabs {
         let _line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
-
         let lines: Vec<&str> = content.lines().collect();
+        
+        // Pre-compute which lines are part of HTML comments
+        let html_comment_lines = Self::find_html_comment_lines(&lines);
 
         for (line_num, &line) in lines.iter().enumerate() {
+            // Skip if in HTML comment
+            if html_comment_lines[line_num] {
+                continue;
+            }
+            
             // Skip if in code block and code_blocks is false
             if !self.code_blocks && Self::is_in_code_block(&lines, line_num) {
                 continue;
@@ -127,11 +173,16 @@ impl Rule for MD010NoHardTabs {
         let _line_index = LineIndex::new(content.to_string());
 
         let mut result = String::new();
-
         let lines: Vec<&str> = content.lines().collect();
+        
+        // Pre-compute which lines are part of HTML comments
+        let html_comment_lines = Self::find_html_comment_lines(&lines);
 
         for (i, line) in lines.iter().enumerate() {
-            if !self.code_blocks && Self::is_in_code_block(&lines, i) {
+            if html_comment_lines[i] {
+                // Preserve HTML comments as they are
+                result.push_str(line);
+            } else if !self.code_blocks && Self::is_in_code_block(&lines, i) {
                 result.push_str(line);
             } else {
                 result.push_str(&line.replace('\t', &" ".repeat(self.spaces_per_tab)));
