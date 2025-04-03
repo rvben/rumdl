@@ -143,6 +143,7 @@ impl Rule for MD014CommandsShowOutput {
                     // End of code block
                     if self.is_command_without_output(&current_block, &current_lang) {
                         warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                             line: block_start_line + 1,
                             column: 1,
                             message: "Commands in code blocks should show output".to_string(),

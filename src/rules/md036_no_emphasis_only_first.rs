@@ -129,6 +129,7 @@ impl Rule for MD036NoEmphasisOnlyFirst {
 
             if let Some((level, text)) = Self::is_entire_line_emphasized(line, content, i) {
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     line: i + 1,
                     column: 1,
                     message: format!("Emphasis used instead of a heading: '{}'", text),

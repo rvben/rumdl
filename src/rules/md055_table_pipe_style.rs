@@ -296,6 +296,7 @@ impl Rule for MD055TablePipeStyle {
                 
                 if current_style != target_style {
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: i + 1,
                         column: 1,
                         message: format!("Table pipe style should be {}", target_style.replace('_', " ")),

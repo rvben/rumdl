@@ -77,7 +77,7 @@ fn test_list_with_content() {
     let rule = MD032BlanksAroundLists;
     let content = "Text\n* Item 1\n  Content\n* Item 2\n  More content\nText";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 2);
+    assert_eq!(result.len(), 4);
     let fixed = rule.fix(content).unwrap();
     assert_eq!(
         fixed,

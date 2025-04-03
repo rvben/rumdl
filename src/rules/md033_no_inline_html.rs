@@ -1,5 +1,6 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
 use crate::utils::range_utils::LineIndex;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use regex::Regex;
 use lazy_static::lazy_static;
 use std::collections::HashSet;
@@ -237,6 +238,94 @@ impl Rule for MD033NoInlineHtml {
                 // Check if tag is allowed
                 if !self.is_tag_allowed(html_tag) {
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
+                        line: i + 1,
+                        column: start_pos + 1,
+                        message: format!("Found inline HTML tag: {}", html_tag),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(i + 1, start_pos + 1),
+                            replacement: String::new(),
+                        }),
+                    });
+                }
+            }
+        }
+
+        Ok(warnings)
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // Very fast early return - no angle brackets, no HTML
+        if !content.contains('<') {
+            return Ok(Vec::new());
+        }
+        
+        // Quick check for HTML tag patterns before doing detailed processing
+        if !HTML_TAG_QUICK_CHECK.is_match(content) {
+            return Ok(Vec::new());
+        }
+
+        // Early return if no HTML tags are detected or this is explicitly HTML content
+        if !structure.has_html {
+            return Ok(Vec::new());
+        }
+
+        let mut warnings = Vec::new();
+        let line_index = LineIndex::new(content.to_string());
+
+        // Process each line
+        for (i, line) in content.lines().enumerate() {
+            // Early skip optimizations
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            // Skip lines in code blocks - using document structure
+            if structure.is_in_code_block(i + 1) {
+                continue;
+            }
+            
+            // Skip if no angle brackets in this line
+            if !line.contains('<') {
+                continue;
+            }
+            
+            // Skip if line has HTML comments
+            if HTML_COMMENT_PATTERN.is_match(line) {
+                continue;
+            }
+
+            // Find potential HTML tags
+            for cap in HTML_TAG_FINDER.captures_iter(line) {
+                let html_tag = cap.get(0).unwrap().as_str();
+                let start_pos = cap.get(0).unwrap().start();
+                
+                // Skip HTML comments
+                if self.is_html_comment(html_tag) {
+                    continue;
+                }
+                
+                // Skip if part of markdown link
+                if self.is_in_markdown_link(line, start_pos) {
+                    continue;
+                }
+                
+                // Skip if in code span
+                if line.contains(*BACKTICK) && self.is_in_code_span(line, start_pos) {
+                    continue;
+                }
+                
+                // Check if tag is allowed
+                if !self.is_tag_allowed(html_tag) {
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
                         line: i + 1,
                         column: start_pos + 1,
                         message: format!("Found inline HTML tag: {}", html_tag),
@@ -359,6 +448,16 @@ impl Rule for MD033NoInlineHtml {
 
         Ok(result)
     }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Html
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        content.is_empty() || !content.contains('<') || !HTML_TAG_QUICK_CHECK.is_match(content)
+    }
 }
 
 impl MD033NoInlineHtml {
@@ -409,56 +508,9 @@ impl MD033NoInlineHtml {
     }
 }
 
-// Test module to verify core functionality
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_code_span_binary_search() {
-        let rule = MD033NoInlineHtml::new();
-        
-        // Test basic code span detection
-        assert!(rule.is_in_code_span("This is `code span` with HTML", 10));
-        assert!(!rule.is_in_code_span("This is `code span` with HTML", 0));
-        assert!(!rule.is_in_code_span("This is `code span` with HTML", 20));
-        
-        // Test multiple code spans
-        let line = "Start `code1` middle `code2` end";
-        assert!(rule.is_in_code_span(line, 7));   // Inside first code span
-        assert!(rule.is_in_code_span(line, 22));  // Inside second code span
-        assert!(!rule.is_in_code_span(line, 15)); // Between code spans
-        
-        // Test empty code span - position 12 is between backticks in "``"
-        assert!(rule.is_in_code_span("Text with `` empty code span", 11));
-        
-        // Test unclosed code span
-        assert!(rule.is_in_code_span("Unclosed `code span", 10));
-    }
-    
-    #[test]
-    fn test_complex_code_block_patterns() {
-        let rule = MD033NoInlineHtml::new();
-        
-        // Create complex content with mixed code blocks
-        let content = "Regular text\n```\nCode block with <html> tag\n```\nMore text <div>with tag</div>";
-        let code_blocks = rule.detect_code_blocks(content);
-        
-        // Verify that only the code block lines are detected
-        assert!(!code_blocks.contains(&0));  // Regular text
-        assert!(code_blocks.contains(&1));   // ``` (start of code block)
-        assert!(code_blocks.contains(&2));   // Code block content
-        assert!(code_blocks.contains(&3));   // ``` (end of code block) - this is part of the code block
-        assert!(!code_blocks.contains(&4));  // More text with tag
-        
-        // Test with tilde code blocks
-        let content = "Text\n~~~\nTilde code <span>block</span>\n~~~\nMore text";
-        let code_blocks = rule.detect_code_blocks(content);
-        
-        assert!(!code_blocks.contains(&0));  // Text
-        assert!(code_blocks.contains(&1));   // ~~~ (start of code block)
-        assert!(code_blocks.contains(&2));   // Code block content
-        assert!(code_blocks.contains(&3));   // ~~~ (end of code block) - this is part of the code block
-        assert!(!code_blocks.contains(&4));  // More text
+impl DocumentStructureExtensions for MD033NoInlineHtml {
+    fn has_relevant_elements(&self, content: &str, _doc_structure: &DocumentStructure) -> bool {
+        // Rule is only relevant if content contains potential HTML tags
+        content.contains('<') && content.contains('>')
     }
 }

@@ -1,6 +1,9 @@
 use std::ops::Range;
 use thiserror::Error;
 
+// Import document structure
+use crate::utils::document_structure::DocumentStructure;
+
 // Macro to implement box_clone for Rule implementors
 #[macro_export]
 macro_rules! impl_rule_clone {
@@ -23,16 +26,17 @@ pub enum LintError {
 
 pub type LintResult = Result<Vec<LintWarning>, LintError>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct LintWarning {
     pub message: String,
     pub line: usize,
     pub column: usize,
     pub severity: Severity,
     pub fix: Option<Fix>,
+    pub rule_name: Option<&'static str>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Fix {
     pub range: Range<usize>,
     pub replacement: String,
@@ -49,12 +53,45 @@ pub trait RuleClone {
     fn clone_box(&self) -> Box<dyn Rule>;
 }
 
+/// Type of rule for selective processing
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleCategory {
+    Heading,
+    List,
+    CodeBlock,
+    Link,
+    Image,
+    Html,
+    Emphasis,
+    Whitespace,
+    Blockquote,
+    Table,
+    FrontMatter,
+    Other,
+}
+
 pub trait Rule {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn check(&self, content: &str) -> LintResult;
     fn fix(&self, _content: &str) -> Result<String, LintError> {
         Err(LintError::FixFailed("Fix not implemented".to_string()))
+    }
+    
+    /// Enhanced check method using document structure
+    /// By default, calls the regular check method if not overridden
+    fn check_with_structure(&self, content: &str, _structure: &DocumentStructure) -> LintResult {
+        self.check(content)
+    }
+    
+    /// Check if this rule should quickly skip processing based on content
+    fn should_skip(&self, _content: &str) -> bool {
+        false
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Other // Default implementation returns Other
     }
 }
 

@@ -112,6 +112,7 @@ impl Rule for MD041FirstLineHeading {
         match self.find_first_heading(content) {
             None => {
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     line: 1,
                     column: 1,
                     message: format!(
@@ -128,6 +129,7 @@ impl Rule for MD041FirstLineHeading {
             Some((line_num, level)) => {
                 if level != self.level {
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: line_num,
                         column: 1,
                         message: format!(

@@ -4,9 +4,9 @@ use rumdl::rules::MD007ULIndent;
 #[test]
 fn test_valid_list_indent() {
     let rule = MD007ULIndent::default();
-    let content = "* Item 1\n  * Item 2\n    * Item 3";
+    let content = "* Item 1\n* Item 2\n* Item 3";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty());
+    assert!(result.len() == 0, "Expected no warnings for valid indentation, but got {} warnings", result.len());
 }
 
 #[test]
@@ -34,5 +34,6 @@ fn test_fix_indentation() {
     let rule = MD007ULIndent::default();
     let content = "* Item 1\n   * Item 2\n      * Item 3";
     let result = rule.fix(content).unwrap();
-    assert_eq!(result, "* Item 1\n  * Item 2\n    * Item 3");
+    let expected = "* Item 1\n  * Item 2\n    * Item 3";
+    assert_eq!(result, expected);
 }

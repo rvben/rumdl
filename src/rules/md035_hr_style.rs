@@ -114,6 +114,7 @@ impl Rule for MD035HRStyle {
 
                 if style_mismatch || has_indentation {
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: i + 1,
                         column: 1,
                         message: if has_indentation {

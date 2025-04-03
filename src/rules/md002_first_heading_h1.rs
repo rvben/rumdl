@@ -1,7 +1,9 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
 use crate::rules::heading_utils::{HeadingStyle};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::ops::Range;
 
 lazy_static! {
     static ref HEADING_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})\s+(.+?)(?:\s+#*)?$").unwrap();
@@ -198,6 +200,7 @@ impl Rule for MD002FirstHeadingH1 {
             if let Some((_, _, level, _)) = self.parse_heading(content, i + 1) {
                 if level != self.level {
                     result.push(LintWarning {
+                        rule_name: Some(self.name()),
                         line: i + 1,
                         column: 1,
                         message: format!(
@@ -205,12 +208,81 @@ impl Rule for MD002FirstHeadingH1 {
                             self.level,
                             level
                         ),
-                        severity: crate::rule::Severity::Warning,
-                        fix: None,
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: Range {
+                                start: i + 1,
+                                end: i + 1,
+                            },
+                            replacement: format!("{}{}", "#".repeat(self.level as usize), " ".repeat(i + 1 - start_line)),
+                        }),
                     });
                 }
                 break;
             }
+        }
+
+        Ok(result)
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early return if no headings
+        if structure.heading_lines.is_empty() {
+            return Ok(vec![]);
+        }
+        
+        let mut result = Vec::new();
+        
+        // Get the first heading
+        let first_heading_line = structure.heading_lines[0];
+        let first_heading_level = structure.heading_levels[0];
+        
+        // Check if the level matches the required level
+        if first_heading_level as u32 != self.level {
+            // Get the line from the content
+            let line_idx = first_heading_line - 1; // Convert 1-indexed to 0-indexed
+            
+            let lines: Vec<&str> = content.lines().collect();
+            let line = if line_idx < lines.len() {
+                lines[line_idx]
+            } else {
+                return Ok(vec![]); // Error condition, shouldn't happen
+            };
+            
+            // Determine heading style
+            let _style = if line_idx + 1 < lines.len() && 
+                       (lines[line_idx + 1].trim().starts_with('=') || 
+                        lines[line_idx + 1].trim().starts_with('-')) {
+                if lines[line_idx + 1].trim().starts_with('=') {
+                    HeadingStyle::Setext1
+                } else {
+                    HeadingStyle::Setext2
+                }
+            } else if line.trim_end().ends_with('#') {
+                HeadingStyle::AtxClosed
+            } else {
+                HeadingStyle::Atx
+            };
+            
+            result.push(LintWarning {
+                rule_name: Some(self.name()),
+                line: first_heading_line,
+                column: 1,
+                message: format!(
+                    "First heading should be level {}, found level {}",
+                    self.level,
+                    first_heading_level
+                ),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: Range {
+                        start: first_heading_line,
+                        end: first_heading_line,
+                    },
+                    replacement: format!("{}{}", "#".repeat(self.level as usize), " ".repeat(first_heading_line - 1)),
+                }),
+            });
         }
 
         Ok(result)
@@ -274,4 +346,44 @@ impl Rule for MD002FirstHeadingH1 {
 
         Ok(result)
     }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Heading
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        content.is_empty() || (!content.contains('#') && !content.contains('=') && !content.contains('-'))
+    }
 }
+
+impl DocumentStructureExtensions for MD002FirstHeadingH1 {
+    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+        // Rule is only relevant if there are headings
+        !doc_structure.heading_lines.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_with_document_structure() {
+        let rule = MD002FirstHeadingH1::default();
+        
+        // Test with correct heading level
+        let content = "# Heading 1\n## Heading 2\n### Heading 3";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert!(result.is_empty());
+        
+        // Test with incorrect heading level
+        let content = "## Heading 2\n### Heading 3";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+    }
+} 

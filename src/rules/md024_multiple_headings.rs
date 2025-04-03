@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
 use crate::utils::markdown_elements::{MarkdownElements, ElementType};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 
 /// A rule that checks for multiple headings with the same content
 #[derive(Default)]
@@ -75,6 +76,7 @@ impl Rule for MD024MultipleHeadings {
                     // Check if we've seen this heading before
                     if let Some(first_occurrence) = headings.get(&signature) {
                         warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                             line: heading.start_line + 1,  // Convert 0-indexed to 1-indexed
                             column: 1,
                             message: format!("Multiple headings with the same content (first occurrence at line {})", first_occurrence),
@@ -96,6 +98,98 @@ impl Rule for MD024MultipleHeadings {
         // No automatic fix for multiple headings with the same content
         // The user needs to decide how to make each heading unique
         Ok(content.to_string())
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early return if no headings or only one heading
+        if structure.heading_lines.len() <= 1 {
+            return Ok(Vec::new());
+        }
+        
+        let mut warnings = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Track headings by their signature
+        let mut headings = HashMap::new();
+        
+        // Process only heading lines using structure.heading_lines and structure.heading_levels
+        for (i, &line_num) in structure.heading_lines.iter().enumerate() {
+            // Get the line index (0-based)
+            let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
+            
+            // Skip if out of bounds
+            if line_idx >= lines.len() {
+                continue;
+            }
+            
+            // Get the heading text
+            let line = lines[line_idx];
+            
+            // Extract the text content (strip hashes and whitespace for ATX headings)
+            let text = if line.trim().starts_with('#') {
+                // This is an ATX heading
+                let mut chars = line.trim().chars();
+                // Skip the hash symbols at the beginning
+                while chars.next() == Some('#') {}
+                chars.as_str().trim()
+            } else if i + 1 < structure.heading_lines.len() && line_idx + 1 < lines.len() {
+                // This could be a setext heading - check if the next line has = or -
+                let next_line = lines[line_idx + 1];
+                if next_line.trim().starts_with('=') || next_line.trim().starts_with('-') {
+                    line.trim()
+                } else {
+                    continue; // Not a heading we can process
+                }
+            } else {
+                continue; // Not a heading we can process
+            };
+            
+            // Get the heading level
+            let level = if i < structure.heading_levels.len() {
+                structure.heading_levels[i] as u32
+            } else {
+                // Fallback if the structure doesn't have the level
+                1
+            };
+            
+            // Get the signature
+            let signature = self.get_heading_signature(text, level);
+            
+            // Check if we've seen this heading before
+            if let Some(first_occurrence) = headings.get(&signature) {
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: line_num,  // Already 1-indexed from structure
+                    column: 1,
+                    message: format!("Multiple headings with the same content (first occurrence at line {})", first_occurrence),
+                    severity: Severity::Warning,
+                    fix: None,
+                });
+            } else {
+                // First occurrence
+                headings.insert(signature, line_num);  // Already 1-indexed
+            }
+        }
+        
+        Ok(warnings)
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Heading
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        content.is_empty() || !content.contains('#')
+    }
+}
+
+impl DocumentStructureExtensions for MD024MultipleHeadings {
+    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+        // This rule is only relevant if there are at least two headings
+        doc_structure.heading_lines.len() > 1
     }
 }
 
@@ -130,5 +224,34 @@ mod tests {
         let sig3 = rule_with_nesting.get_heading_signature(heading, 1);
         let sig4 = rule_with_nesting.get_heading_signature(heading, 2);
         assert_eq!(sig3, sig4);
+    }
+
+    #[test]
+    fn test_with_document_structure() {
+        let rule = MD024MultipleHeadings::default();
+        
+        // Test with unique headings
+        let content = "# Heading 1\n## Heading 2\n### Heading 3";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert!(result.is_empty());
+        
+        // Test with duplicate headings
+        let content = "# Heading\n## Subheading\n# Heading";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 1); // Should flag the duplicate heading
+        assert_eq!(result[0].line, 3);
+        
+        // Test with allow_different_nesting=true
+        let rule_with_nesting = MD024MultipleHeadings::new(true);
+        
+        // Duplicate headings at different levels should be flagged
+        let content = "# Heading\n## Heading\n### Heading";
+        let structure = DocumentStructure::new(content);
+        let result = rule_with_nesting.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 2); // Should flag both duplicate headings
+        assert_eq!(result[0].line, 2);
+        assert_eq!(result[1].line, 3);
     }
 }

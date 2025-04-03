@@ -1,4 +1,5 @@
 use crate::utils::range_utils::LineIndex;
+use crate::utils::document_structure::DocumentStructure;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
@@ -79,6 +80,7 @@ impl Rule for MD007ULIndent {
                     }
                     if indent != expected_indent {
                         warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                             line: line_num + 1,
                             column: indent + 1,
                             message: format!(
@@ -100,6 +102,7 @@ impl Rule for MD007ULIndent {
                     let expected_indent = self.get_expected_indent(current_level);
                     if indent != expected_indent {
                         warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                             line: line_num + 1,
                             column: indent + 1,
                             message: format!(
@@ -121,6 +124,7 @@ impl Rule for MD007ULIndent {
                     let expected_indent = self.get_expected_indent(current_level);
                     if indent != expected_indent {
                         warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                             line: line_num + 1,
                             column: indent + 1,
                             message: format!(
@@ -214,5 +218,34 @@ impl Rule for MD007ULIndent {
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::document_structure::DocumentStructure;
+
+    #[test]
+    fn test_with_document_structure() {
+        println!("=====================");
+        println!("RUNNING MD007 TEST WITH DOCUMENT STRUCTURE");
+        println!("=====================");
+        
+        let rule = MD007ULIndent::default();
+        let content = "* Item 1\n   * Item 2\n      * Item 3";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        
+        // Debug output
+        println!("Number of warnings: {}", result.len());
+        for (i, warning) in result.iter().enumerate() {
+            println!("Warning {}: line={}, column={}, message={}", 
+                     i, warning.line, warning.column, warning.message);
+        }
+        
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 2);
+        assert_eq!(result[0].column, 4);
     }
 }

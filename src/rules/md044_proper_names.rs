@@ -205,6 +205,7 @@ impl Rule for MD044ProperNames {
             .filter_map(|(line, column, found_name)| {
                 self.get_proper_name_for(&found_name)
                     .map(|proper_name| LintWarning {
+                rule_name: Some(self.name()),
                         line,
                         column,
                         message: format!(

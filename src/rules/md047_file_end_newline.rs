@@ -36,6 +36,7 @@ impl Rule for MD047FileEndNewline {
             let last_column = lines.last().map_or(1, |line| line.len() + 1);
 
             warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                 message: String::from("File should end with a single newline character"),
                 line: last_line,
                 column: last_column,

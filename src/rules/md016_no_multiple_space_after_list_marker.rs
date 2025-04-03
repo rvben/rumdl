@@ -48,6 +48,7 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
 
             if ListUtils::is_list_item_with_multiple_spaces(line) {
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     severity: Severity::Warning,
                     line: line_num + 1,
                     column: 1,

@@ -99,6 +99,7 @@ impl Rule for MD029OrderedListItemPrefix {
             let expected = self.get_expected_number(i, self.style);
             if *number != expected {
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     message: format!(
                         "Ordered list item prefix should be {} (style: {:?})",
                         expected, self.style

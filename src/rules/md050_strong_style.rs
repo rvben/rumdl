@@ -103,6 +103,7 @@ impl Rule for MD050StrongStyle {
                     };
 
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: line_num + 1,
                         column: m.start() + 1,
                         message: message.to_string(),

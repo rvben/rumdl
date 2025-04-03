@@ -115,6 +115,7 @@ impl Rule for MD017NoEmphasisAsHeading {
 
                 if let Some(replacement) = HeadingUtils::convert_emphasis_to_heading(line) {
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: i + 1,
                         column: 1,
                         message: message.to_string(),

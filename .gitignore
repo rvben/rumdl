@@ -2,3 +2,5 @@ target/
 **/__pycache__
 **/*.egg-info
 cov-report
+benchmark
+*.bak*

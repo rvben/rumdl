@@ -65,6 +65,7 @@ impl Rule for MD011NoReversedLinks {
             for cap in re.captures_iter(line) {
                 let column = line_start + cap.get(0).unwrap().start() + 1;
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     message: "Reversed link syntax".to_string(),
                     line: line_num + 1,
                     column,

@@ -209,6 +209,7 @@ impl Rule for MD056TableColumnCount {
                         let fix_result = self.fix_table_row(lines[i], expected_count);
 
                         warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                             message: format!(
                                 "Table row has {} cells, but expected {}",
                                 count, expected_count

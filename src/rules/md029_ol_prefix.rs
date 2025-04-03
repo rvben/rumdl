@@ -66,6 +66,7 @@ impl Rule for MD029OLPrefix {
                     let indentation = line.len() - line.trim_start().len();
                     let expected = self.get_expected_number(list_index);
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: line_num + 1,
                         column: indentation + 1,
                         message: format!("List item prefix should be {} for style '{}'", expected, self.style),

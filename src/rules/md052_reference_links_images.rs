@@ -282,6 +282,7 @@ impl Rule for MD052ReferenceLinkImages {
 
         for (line_num, col, reference) in self.find_undefined_references(content, &references) {
             warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                 line: line_num + 1,
                 column: col + 1,
                 message: format!("Reference '{}' not found", reference),

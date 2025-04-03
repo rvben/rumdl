@@ -1,6 +1,7 @@
 use crate::utils::range_utils::LineIndex;
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
 use crate::utils::markdown_elements::{MarkdownElements, ElementType};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 
 #[derive(Debug, Default)]
 pub struct MD023HeadingStartLeft;
@@ -61,6 +62,7 @@ impl Rule for MD023HeadingStartLeft {
                         
                         // Add warning for the heading text line
                         warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                             line: start_line + 1, // Convert to 1-indexed
                             column: 1,
                             severity: Severity::Warning,
@@ -78,6 +80,7 @@ impl Rule for MD023HeadingStartLeft {
                         let underline_indentation = lines[underline_line].len() - lines[underline_line].trim_start().len();
                         if underline_indentation > 0 {
                             warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                                 line: underline_line + 1, // Convert to 1-indexed
                                 column: 1,
                                 severity: Severity::Warning,
@@ -110,6 +113,7 @@ impl Rule for MD023HeadingStartLeft {
                     };
 
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: start_line + 1, // Convert to 1-indexed
                         column: 1,
                         severity: Severity::Warning,
@@ -216,5 +220,182 @@ impl Rule for MD023HeadingStartLeft {
         } else {
             Ok(result)
         }
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early return if no headings
+        if structure.heading_lines.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let line_index = LineIndex::new(content.to_string());
+        let mut warnings = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Process only heading lines using structure.heading_lines
+        for &line_num in &structure.heading_lines {
+            let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
+            
+            // Skip if out of bounds
+            if line_idx >= lines.len() {
+                continue;
+            }
+            
+            let line = lines[line_idx];
+            let indentation = line.len() - line.trim_start().len();
+            
+            // If the heading is indented, add a warning
+            if indentation > 0 {
+                // Determine if it's an ATX or Setext heading
+                let is_setext = line_idx + 1 < lines.len() && 
+                               (lines[line_idx + 1].trim().starts_with('=') || 
+                                lines[line_idx + 1].trim().starts_with('-'));
+                
+                // Find the heading level from the structure
+                let level_idx = structure.heading_lines.iter().position(|&l| l == line_num).unwrap_or(0);
+                let level = structure.heading_levels.get(level_idx).unwrap_or(&1);
+                
+                if is_setext {
+                    // For Setext headings, we need to fix both the heading text and underline
+                    let heading_text = line.trim();
+                    let underline_line_idx = line_idx + 1;
+                    
+                    if underline_line_idx < lines.len() {
+                        let underline_text = lines[underline_line_idx].trim();
+                        
+                        // Add warning for the heading text line
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: line_num, // Already 1-indexed from structure
+                            column: 1,
+                            severity: Severity::Warning,
+                            message: format!(
+                                "Setext heading should not be indented by {} spaces",
+                                indentation
+                            ),
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range(line_num, 1),
+                                replacement: heading_text.to_string(),
+                            }),
+                        });
+
+                        // Add warning for the underline - only if it's indented
+                        let underline_indentation = lines[underline_line_idx].len() - lines[underline_line_idx].trim_start().len();
+                        if underline_indentation > 0 {
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                line: underline_line_idx + 1, // Convert to 1-indexed
+                                column: 1,
+                                severity: Severity::Warning,
+                                message: "Setext heading underline should not be indented".to_string(),
+                                fix: Some(Fix {
+                                    range: line_index.line_col_to_byte_range(underline_line_idx + 1, 1),
+                                    replacement: underline_text.to_string(),
+                                }),
+                            });
+                        }
+                    }
+                } else {
+                    // For ATX headings, just fix the single line
+                    let is_closed_atx = line.trim().ends_with('#');
+                    let heading_text = line.trim();
+                    
+                    // Extract the heading content by removing the hashes
+                    let mut content_start = 0;
+                    while content_start < heading_text.len() && heading_text.chars().nth(content_start) == Some('#') {
+                        content_start += 1;
+                    }
+                    
+                    let heading_content = if content_start < heading_text.len() {
+                        heading_text[content_start..].trim().to_string()
+                    } else {
+                        String::new() // Empty heading
+                    };
+                    
+                    // Create a fixed version without indentation
+                    let fixed_heading = if is_closed_atx {
+                        if heading_content.trim().is_empty() {
+                            format!("{} {}", "#".repeat(*level), "#".repeat(*level))
+                        } else {
+                            format!("{} {} {}", "#".repeat(*level), heading_content.trim(), "#".repeat(*level))
+                        }
+                    } else {
+                        if heading_content.trim().is_empty() {
+                            format!("{}", "#".repeat(*level))
+                        } else {
+                            format!("{} {}", "#".repeat(*level), heading_content.trim())
+                        }
+                    };
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: line_num, // Already 1-indexed from structure
+                        column: 1,
+                        severity: Severity::Warning,
+                        message: format!(
+                            "Heading should not be indented by {} spaces",
+                            indentation
+                        ),
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(line_num, 1),
+                            replacement: fixed_heading,
+                        }),
+                    });
+                }
+            }
+        }
+        
+        Ok(warnings)
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Heading
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        content.is_empty() || !content.contains('#')
+    }
+}
+
+impl DocumentStructureExtensions for MD023HeadingStartLeft {
+    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+        // This rule is only relevant if there are headings
+        !doc_structure.heading_lines.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_with_document_structure() {
+        let rule = MD023HeadingStartLeft::default();
+        
+        // Test with properly aligned headings
+        let content = "# Heading 1\n## Heading 2\n### Heading 3";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert!(result.is_empty());
+        
+        // Test with indented headings
+        let content = "  # Heading 1\n ## Heading 2\n   ### Heading 3";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 3); // Should flag all three indented headings
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[1].line, 2);
+        assert_eq!(result[2].line, 3);
+        
+        // Test with setext headings
+        let content = "Heading 1\n=========\n  Heading 2\n  ---------";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 2); // Should flag the indented heading and underline
+        assert_eq!(result[0].line, 3);
+        assert_eq!(result[1].line, 4);
     }
 }

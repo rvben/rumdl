@@ -144,6 +144,7 @@ impl Rule for MD038NoSpaceInCode {
             if !self.is_in_code_block(content, i + 1) {
                 for (column, _original, fixed) in self.check_line(line) {
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: i + 1,
                         column,
                         message: "Spaces inside code span elements should be removed".to_string(),

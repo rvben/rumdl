@@ -1,7 +1,8 @@
 use crate::utils::range_utils::LineIndex;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
 use crate::rules::heading_utils::HeadingUtils;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use std::collections::HashSet;
 
 #[derive(Debug)]
@@ -70,6 +71,7 @@ impl Rule for MD024NoDuplicateHeading {
 
                     if current_siblings.contains(&text) {
                         warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
                             line: line_num + 1,
                             column: indentation + 1,
                             message: "Multiple headings with the same content at the same nesting level".to_string(),
@@ -89,6 +91,7 @@ impl Rule for MD024NoDuplicateHeading {
                 } else if !self.allow_different_nesting || heading.level == current_level {
                     if seen_headings.contains(&text) {
                         warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
                             line: line_num + 1,
                             column: indentation + 1,
                             message: "Multiple headings with the same content".to_string(),
@@ -182,4 +185,3 @@ impl Rule for MD024NoDuplicateHeading {
 
         Ok(result)
     }
-} 

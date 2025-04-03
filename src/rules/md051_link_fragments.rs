@@ -265,6 +265,7 @@ impl Rule for MD051LinkFragments {
                             };
 
                             warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                                 line: line_num + 1,
                                 column: full_match.start() + 1,
                                 message: format!("Link fragment '{}' does not exist", fragment),

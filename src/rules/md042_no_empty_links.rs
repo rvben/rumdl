@@ -44,6 +44,7 @@ impl Rule for MD042NoEmptyLinks {
                 if text.trim().is_empty() || url.trim().is_empty() {
                     let full_match = cap.get(0).unwrap();
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         message: format!("Empty link found: [{}]({})", text, url),
                         line: line_num + 1,
                         column: full_match.start() + 1,

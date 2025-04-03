@@ -1,44 +1,30 @@
-pub mod range_utils;
 pub mod code_block_utils;
+pub mod document_structure;
+pub mod early_returns;
 pub mod markdown_elements;
+pub mod range_utils;
+pub mod regex_cache;
+
 
 pub use range_utils::LineIndex;
 pub use code_block_utils::CodeBlockUtils;
 pub use markdown_elements::{MarkdownElements, MarkdownElement, ElementType, ElementQuality};
+pub use document_structure::DocumentStructure;
+
 
 /// Trait for string-related extensions
 pub trait StrExt {
-    /// Count the number of trailing spaces in a string
-    fn trailing_spaces(&self) -> usize;
-    
-    /// Replace trailing spaces with a given replacement string
+    /// Replace trailing spaces with a specified replacement string
     fn replace_trailing_spaces(&self, replacement: &str) -> String;
+    
+    /// Check if the string has trailing whitespace
+    fn has_trailing_spaces(&self) -> bool;
+    
+    /// Count the number of trailing spaces in the string
+    fn trailing_spaces(&self) -> usize;
 }
 
 impl StrExt for str {
-    fn trailing_spaces(&self) -> usize {
-        // Custom implementation to handle both newlines and tabs specially
-        
-        // Prepare the string without newline if it ends with one
-        let content = if self.ends_with('\n') {
-            &self[..self.len() - 1]
-        } else {
-            self
-        };
-        
-        // Count only trailing spaces at the end, not tabs
-        let mut space_count = 0;
-        for c in content.chars().rev() {
-            if c == ' ' {
-                space_count += 1;
-            } else {
-                break;
-            }
-        }
-        
-        space_count
-    }
-    
     fn replace_trailing_spaces(&self, replacement: &str) -> String {
         // Custom implementation to handle both newlines and tabs specially
         
@@ -71,6 +57,33 @@ impl StrExt for str {
         }
         
         result
+    }
+    
+    fn has_trailing_spaces(&self) -> bool {
+        self.trailing_spaces() > 0
+    }
+    
+    fn trailing_spaces(&self) -> usize {
+        // Custom implementation to handle both newlines and tabs specially
+        
+        // Prepare the string without newline if it ends with one
+        let content = if self.ends_with('\n') {
+            &self[..self.len() - 1]
+        } else {
+            self
+        };
+        
+        // Count only trailing spaces at the end, not tabs
+        let mut space_count = 0;
+        for c in content.chars().rev() {
+            if c == ' ' {
+                space_count += 1;
+            } else {
+                break;
+            }
+        }
+        
+        space_count
     }
 }
 

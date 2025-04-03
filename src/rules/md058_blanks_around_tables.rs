@@ -131,6 +131,7 @@ impl Rule for MD058BlanksAroundTables {
             // Check for blank line before table
             if table_start > 0 && !self.is_blank_line(lines[table_start - 1]) {
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     message: "Missing blank line before table".to_string(),
                     line: table_start + 1,
                     column: 1,
@@ -145,6 +146,7 @@ impl Rule for MD058BlanksAroundTables {
             // Check for blank line after table
             if table_end < lines.len() - 1 && !self.is_blank_line(lines[table_end + 1]) {
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     message: "Missing blank line after table".to_string(),
                     line: table_end + 1,
                     column: lines[table_end].len() + 1,

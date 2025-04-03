@@ -167,6 +167,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
             if Self::is_list_item_without_space(line) {
                 let is_unordered = line.trim_start().starts_with(['*', '+', '-']);
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     severity: Severity::Warning,
                     line: line_num + 1,
                     column: 1,

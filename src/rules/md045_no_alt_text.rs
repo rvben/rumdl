@@ -43,6 +43,7 @@ impl Rule for MD045NoAltText {
                     let full_match = cap.get(0).unwrap();
                     let _url_part = cap.get(2).unwrap();
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: line_num + 1,
                         column: full_match.start() + 1,
                         message: "Image should have alternate text".to_string(),

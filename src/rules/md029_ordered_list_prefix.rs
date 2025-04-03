@@ -164,6 +164,7 @@ impl Rule for MD029OrderedListPrefix {
                     };
 
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: line_num + 1,
                         column: indentation + 1,
                         message,

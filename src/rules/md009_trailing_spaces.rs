@@ -82,6 +82,7 @@ impl Rule for MD009TrailingSpaces {
             if line.trim().is_empty() {
                 if trailing_spaces > 0 {
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: line_num + 1,
                         column: 1,
                         message: "Empty line should not have trailing spaces".to_string(),
@@ -109,6 +110,7 @@ impl Rule for MD009TrailingSpaces {
             if Self::is_empty_blockquote_line(line) {
                 let trimmed = line.trim_end();
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     line: line_num + 1,
                     column: trimmed.len() + 1,
                     message: "Empty blockquote line should have a space after >".to_string(),
@@ -123,6 +125,7 @@ impl Rule for MD009TrailingSpaces {
 
             let trimmed = line.trim_end();
             warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                 line: line_num + 1,
                 column: trimmed.len() + 1,
                 message: if trailing_spaces == 1 {

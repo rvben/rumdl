@@ -50,6 +50,7 @@ impl Rule for MD037NoSpaceInEmphasis {
             for (start, _, fixed) in issues {
                 let column = start + 1;
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     line: i + 1,
                     column,
                     message: "Spaces inside emphasis markers should be removed".to_string(),

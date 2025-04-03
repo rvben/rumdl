@@ -74,7 +74,7 @@ impl MD057ExistingRelativeLinks {
         
         if url.is_empty() {
             if debug {
-                println!("is_external_url: URL is empty");
+                // println!("is_external_url: URL is empty");
             }
             return false;
         }
@@ -82,7 +82,7 @@ impl MD057ExistingRelativeLinks {
         // If it starts with a protocol (http://, https://, ftp://, etc.), it's external
         if PROTOCOL_REGEX.is_match(url) {
             if debug {
-                println!("is_external_url: URL '{}' matches protocol pattern", url);
+                // println!("is_external_url: URL '{}' matches protocol pattern", url);
             }
             return true;
         }
@@ -90,7 +90,7 @@ impl MD057ExistingRelativeLinks {
         // Check for www. prefix which indicates an external URL
         if url.starts_with("www.") {
             if debug {
-                println!("is_external_url: URL '{}' starts with www.", url);
+                // println!("is_external_url: URL '{}' starts with www.", url);
             }
             return true;
         }
@@ -103,7 +103,7 @@ impl MD057ExistingRelativeLinks {
                 "ru", "jp", "cn", "br", "in", "fr", "it", "nl", "ca", "es", "au", "ch"]
                    .contains(&tld)) {
             if debug {
-                println!("is_external_url: URL '{}' matches domain pattern with valid TLD", url);
+                // println!("is_external_url: URL '{}' matches domain pattern with valid TLD", url);
             }
             return true;
         }
@@ -111,14 +111,14 @@ impl MD057ExistingRelativeLinks {
         // Check for absolute paths
         if url.starts_with('/') {
             if debug {
-                println!("is_external_url: URL '{}' is an absolute path, not external", url);
+                // println!("is_external_url: URL '{}' is an absolute path, not external", url);
             }
             return false; // Absolute paths within the site are not external
         }
         
         // All other cases (relative paths, etc.) are not external
         if debug {
-            println!("is_external_url: URL '{}' is not external", url);
+            // println!("is_external_url: URL '{}' is not external", url);
         }
         return false;
     }
@@ -201,7 +201,7 @@ impl Rule for MD057ExistingRelativeLinks {
 
         let base_path = self.base_path.borrow();
         if debug {
-            println!("Base path: {:?}", base_path);
+            // println!("Base path: {:?}", base_path);
         }
 
         for (line_num, line) in content.lines().enumerate() {
@@ -239,7 +239,7 @@ impl Rule for MD057ExistingRelativeLinks {
                         // Skip links inside inline code spans
                         if self.is_in_code_span(&inline_code_spans, full_match.start()) {
                             if debug {
-                                println!("Skipping link inside inline code span");
+                                // println!("Skipping link inside inline code span");
                             }
                             continue;
                         }
@@ -247,21 +247,21 @@ impl Rule for MD057ExistingRelativeLinks {
                         let mut url = url_match.as_str().trim();
                         
                         if debug {
-                            println!("Found URL: '{}'", url);
+                            // println!("Found URL: '{}'", url);
                         }
                         
                         // Clean the URL - remove trailing '>' if present
                         if url.ends_with('>') {
                             url = &url[..url.len() - 1];
                             if debug {
-                                println!("Cleaned URL: '{}'", url);
+                                // println!("Cleaned URL: '{}'", url);
                             }
                         }
                         
                         // Skip empty or external URLs
                         if url.is_empty() || self.is_external_url(url) {
                             if debug {
-                                println!("Skipping URL '{}': empty or external", url);
+                                // println!("Skipping URL '{}': empty or external", url);
                             }
                             continue;
                         }
@@ -269,7 +269,7 @@ impl Rule for MD057ExistingRelativeLinks {
                         // Skip fragment-only links (internal document links)
                         if self.is_fragment_only_link(url) {
                             if debug {
-                                println!("Skipping URL '{}': fragment-only link", url);
+                                // println!("Skipping URL '{}': fragment-only link", url);
                             }
                             continue;
                         }
@@ -279,13 +279,13 @@ impl Rule for MD057ExistingRelativeLinks {
                         let should_skip = self.should_skip_media_file(url);
                         
                         if debug {
-                            println!("URL '{}': is_media={}, should_skip={}", url, is_media, should_skip);
+                            // println!("URL '{}': is_media={}, should_skip={}", url, is_media, should_skip);
                         }
                         
                         // Skip media files if configured to do so
                         if should_skip {
                             if debug {
-                                println!("URL '{}' is a media file and should be skipped", url);
+                                // println!("URL '{}' is a media file and should be skipped", url);
                             }
                             continue;
                         }
@@ -295,8 +295,8 @@ impl Rule for MD057ExistingRelativeLinks {
                             let exists = resolved_path.exists();
                             
                             if debug {
-                                println!("Resolved path: {:?}", resolved_path);
-                                println!("Path exists? {}", exists);
+                                // println!("Resolved path: {:?}", resolved_path);
+                                // println!("Path exists? {}", exists);
                             }
                             
                             // Check if the file exists
@@ -304,6 +304,7 @@ impl Rule for MD057ExistingRelativeLinks {
                                 let full_match = cap.get(0).unwrap();
                                 
                                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                                     line: line_num + 1,
                                     column: full_match.start() + 1,
                                     message: format!("Relative link '{}' does not exist", url),
@@ -312,10 +313,10 @@ impl Rule for MD057ExistingRelativeLinks {
                                 });
                                 
                                 if debug {
-                                    println!("Added warning for non-existent file: {}", url);
+                                    // println!("Added warning for non-existent file: {}", url);
                                 }
                             } else if debug {
-                                println!("File exists: {}", url);
+                                // println!("File exists: {}", url);
                             }
                         }
                     }
@@ -481,27 +482,34 @@ mod tests {
             .with_skip_media_files(false);
         
         // Debug: Verify media file identification and handling
-        println!("Is 'image.jpg' a media file? {}", rule_check_all.is_media_file("image.jpg"));
-        println!("Should skip 'image.jpg'? {}", rule_check_all.should_skip_media_file("image.jpg"));
-        println!("Skip media files setting: {}", rule_check_all.skip_media_files);
+        if false { // Set to false to disable debug output in tests
+            // println!("Is 'image.jpg' a media file? {}", rule_check_all.is_media_file("image.jpg"));
+            // println!("Should skip 'image.jpg'? {}", rule_check_all.should_skip_media_file("image.jpg"));
+            // println!("Skip media files setting: {}", rule_check_all.skip_media_files);
+        }
         
         // Ensure the file still doesn't exist
         assert!(!image_path.exists(), "image.jpg should not exist for this test");
         
         // Debug: Verify the path resolution
         if let Some(resolved) = rule_check_all.resolve_link_path("image.jpg") {
-            println!("Resolved path: {:?}", resolved);
-            println!("Path exists? {}", resolved.exists());
+            if false { // Set to false to disable debug output
+                // println!("Resolved path: {:?}", resolved);
+                // println!("Path exists? {}", resolved.exists());
+            } else {
+                // println!("Failed to resolve path");
+            }
         } else {
-            println!("Failed to resolve path");
+            // println!("Failed to resolve path");
         }
         
         let result_all = rule_check_all.check(content).unwrap();
         
-        // Debug: Print results
-        println!("Number of warnings: {}", result_all.len());
-        for (i, warning) in result_all.iter().enumerate() {
-            println!("Warning {}: {}", i, warning.message);
+        if false { // Set to false to disable debug output in tests
+            // println!("Number of warnings: {}", result_all.len());
+            // for (i, warning) in result_all.iter().enumerate() {
+            //     println!("Warning {}: {}", i, warning.message);
+            // }
         }
         
         // Should warn about the missing media file

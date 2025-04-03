@@ -1,6 +1,7 @@
 use crate::utils::range_utils::LineIndex;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -148,40 +149,49 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
-        // Fast path
+        // Early return for empty content
         if content.is_empty() {
             return Ok(Vec::new());
         }
-
-        let lines: Vec<&str> = content.lines().collect();
-        let (is_list_line, multi_line) = self.precompute_states(&lines);
+        
+        // Skip if no list markers
+        if !content.contains('*') && !content.contains('-') && !content.contains('+') &&
+           !content.contains(|c: char| c.is_ascii_digit()) {
+            return Ok(Vec::new());
+        }
+        
+        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
-        for i in 0..lines.len() {
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Precompute list states
+        let (is_list_line, multi_line) = self.precompute_states(&lines);
+
+        for (i, &line) in lines.iter().enumerate() {
+            // Skip non-list lines
             if !is_list_line[i] {
                 continue;
             }
 
-            let line = lines[i];
-            if let Some((list_type, marker, spaces)) = Self::is_list_item(line) {
-                let is_multi = multi_line[i];
-                let expected_spaces = self.get_expected_spaces(list_type, is_multi);
-
+            if let Some((list_type, line_start, spaces)) = Self::is_list_item(line) {
+                let expected_spaces = self.get_expected_spaces(list_type, multi_line[i]);
                 if spaces != expected_spaces {
+                    let col = line_start.len() - spaces;
                     warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
                         line: i + 1,
-                        column: marker.len() - spaces,
-                        severity: Severity::Warning,
+                        column: col,
                         message: format!(
-                            "Expected {} space{} after list marker, got {}",
+                            "Expected {} space{} after list marker, found {}",
                             expected_spaces,
                             if expected_spaces == 1 { "" } else { "s" },
                             spaces
                         ),
+                        severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: self.fix_line(line, list_type, is_multi),
+                            range: line_index.line_col_to_byte_range(i + 1, 1),
+                            replacement: self.fix_line(line, list_type, multi_line[i]),
                         }),
                     });
                 }
@@ -192,22 +202,28 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-        // Fast path
+        // Early return for empty content
         if content.is_empty() {
             return Ok(String::new());
         }
+        
+        // Skip if no list markers
+        if !content.contains('*') && !content.contains('-') && !content.contains('+') &&
+           !content.contains(|c: char| c.is_ascii_digit()) {
+            return Ok(content.to_string());
+        }
 
         let lines: Vec<&str> = content.lines().collect();
+        
+        // Precompute list states
         let (is_list_line, multi_line) = self.precompute_states(&lines);
-        let mut result = String::new();
 
-        for i in 0..lines.len() {
-            let line = lines[i];
+        let mut result = String::with_capacity(content.len() + 100);
+
+        for (i, &line) in lines.iter().enumerate() {
             if is_list_line[i] {
                 if let Some((list_type, _, _)) = Self::is_list_item(line) {
-                    let is_multi = multi_line[i];
-                    result.push_str(&self.fix_line(line, list_type, is_multi));
+                    result.push_str(&self.fix_line(line, list_type, multi_line[i]));
                 } else {
                     result.push_str(line);
                 }
@@ -220,6 +236,65 @@ impl Rule for MD030ListMarkerSpace {
             }
         }
 
+        // Preserve trailing newline
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
+        }
+
         Ok(result)
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::List
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        content.is_empty() ||
+            (!content.contains('*') && !content.contains('-') && !content.contains('+') &&
+             !content.contains(|c: char| c.is_ascii_digit()))
+    }
+}
+
+impl DocumentStructureExtensions for MD030ListMarkerSpace {
+    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+        // Rule is only relevant if there are list items
+        !doc_structure.list_lines.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_with_document_structure() {
+        let rule = MD030ListMarkerSpace::default();
+        
+        // Test with correct spacing
+        let content = "* Item 1\n* Item 2\n  * Nested item\n1. Ordered item";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert!(result.is_empty(), "Correctly spaced list markers should not generate warnings");
+        
+        // Test with incorrect spacing
+        let content = "*  Item 1 (too many spaces)\n* Item 2\n1.   Ordered item (too many spaces)";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 2, "Should have warnings for both items with incorrect spacing");
+        
+        // Test with multiline items
+        let content = "* Item 1\n  continued on next line\n* Item 2";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert!(result.is_empty(), "Default spacing for single and multiline is 1");
+        
+        // Test with custom spacing settings
+        let custom_rule = MD030ListMarkerSpace::new(1, 2, 1, 2);
+        let content = "* Item 1\n  continued on next line\n*  Item 2 with 2 spaces";
+        let structure = DocumentStructure::new(content);
+        let result = custom_rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 2, "Should have warnings for both items (wrong spacing)");
     }
 }

@@ -253,6 +253,7 @@ impl Rule for MD049EmphasisStyle {
                     }
                     
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: line_num,
                         column: col_num,
                         message: "Emphasis should use asterisks (*) instead of underscores (_)".to_string(),
@@ -290,6 +291,7 @@ impl Rule for MD049EmphasisStyle {
                     }
                     
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: line_num,
                         column: col_num,
                         message: "Emphasis should use underscores (_) instead of asterisks (*)".to_string(),

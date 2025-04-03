@@ -586,6 +586,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         // Create warnings for unused references
         for (definition, start, _) in unused_refs {
             warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                 line: start + 1, // 1-indexed line numbers
                 column: 1,
                 message: format!("Unused link/image reference definition: [{}]", definition),

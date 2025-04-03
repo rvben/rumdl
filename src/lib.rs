@@ -14,6 +14,12 @@ pub use rules::*;
 
 use globset::GlobBuilder;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use rayon::prelude::*;
+use crate::rule::{LintError, LintResult, Rule, RuleCategory};
+use crate::utils::document_structure::DocumentStructure;
+// Remove the log import as it's causing errors and we've commented out the debug statements
+// use log::debug;
 
 /// Collect patterns from .gitignore files
 ///
@@ -489,33 +495,30 @@ fn normalize_path(path: &str) -> Option<String> {
     Some(normalized)
 }
 
-/// Lint a Markdown file
-pub fn lint(content: &str, rules: &[Box<dyn rule::Rule>]) -> rule::LintResult {
-    let _timer = profiling::ScopedTimer::new("lint_total");
-
+/// Lint a file against the given rules
+pub fn lint(content: &str, rules: &[Box<dyn Rule>]) -> LintResult {
     let mut warnings = Vec::new();
-
+    
     for rule in rules {
-        let _rule_timer = profiling::ScopedTimer::new(&format!("rule:{}", rule.name()));
-
         match rule.check(content) {
             Ok(rule_warnings) => {
                 warnings.extend(rule_warnings);
             }
             Err(e) => {
+                // Only print errors in non-parallel mode and when not running tests
+                #[cfg(not(test))]
                 eprintln!("Error checking rule {}: {}", rule.name(), e);
+                return Err(e);
             }
         }
     }
-
-    // Force profiling to be enabled in debug mode
-    #[cfg(debug_assertions)]
-    {
-        if !warnings.is_empty() {
-            eprintln!("Found {} warnings", warnings.len());
-        }
+    
+    // Only print warning counts in debug mode and when not running tests
+    #[cfg(all(debug_assertions, not(test)))]
+    if !warnings.is_empty() {
+        eprintln!("Found {} warnings", warnings.len());
     }
-
+    
     Ok(warnings)
 }
 
@@ -528,3 +531,186 @@ pub fn get_profiling_report() -> String {
 pub fn reset_profiling() {
     profiling::reset()
 }
+
+// Comment out the parallel processing functions as they're causing compilation errors
+/*
+#[cfg(feature = "parallel")]
+pub fn lint_parallel(content: &str, rules: &[Box<dyn Rule>]) -> LintResult {
+    let warnings = Arc::new(Mutex::new(Vec::new()));
+    let errors = Arc::new(Mutex::new(Vec::new()));
+
+    rules.par_iter().for_each(|rule| {
+        let rule_result = rule.check(content);
+        match rule_result {
+            Ok(rule_warnings) => {
+                let mut warnings_lock = warnings.lock().unwrap();
+                warnings_lock.extend(rule_warnings);
+            }
+            Err(error) => {
+                let mut errors_lock = errors.lock().unwrap();
+                errors_lock.push(error);
+            }
+        }
+    });
+
+    // Don't print errors in parallel mode - previously: eprintln!("{}", error);
+    let errors_lock = errors.lock().unwrap();
+    if !errors_lock.is_empty() {
+        // In parallel mode, we just log that errors occurred without showing the full content
+        if !errors_lock.is_empty() {
+            // DEBUG LINE REMOVED: Previously showed error count
+        }
+    }
+
+    Ok(warnings.lock().unwrap().clone())
+}
+
+#[cfg(feature = "parallel")]
+pub fn lint_parallel_with_structure(content: &str, rules: &[Box<dyn Rule>]) -> LintResult {
+    let structure = match DocumentStructure::parse(content) {
+        Ok(s) => s,
+        Err(e) => return Err(LintError::new(&format!("Failed to parse document structure: {}", e))),
+    };
+
+    // Filter rules that can skip execution based on the content
+    let filtered_rules: Vec<_> = rules
+        .iter()
+        .filter(|&rule| {
+            if let Some(skippable) = rule.as_any().downcast_ref::<dyn RuleSkippable>() {
+                !skippable.should_skip(&structure)
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    let warnings = Arc::new(Mutex::new(Vec::new()));
+    let errors = Arc::new(Mutex::new(Vec::new()));
+
+    filtered_rules.par_iter().for_each(|rule| {
+        let rule_result = rule.check(content);
+        match rule_result {
+            Ok(rule_warnings) => {
+                let mut warnings_lock = warnings.lock().unwrap();
+                warnings_lock.extend(rule_warnings);
+            }
+            Err(error) => {
+                let mut errors_lock = errors.lock().unwrap();
+                errors_lock.push(error);
+            }
+        }
+    });
+
+    // Don't print errors in parallel mode to avoid content leakage
+    let errors_lock = errors.lock().unwrap();
+    if !errors_lock.is_empty() {
+        // In parallel mode, we just log that errors occurred without showing the full content
+        // DEBUG LINE REMOVED: Previously showed error count and contents
+        // Previously: for error in errors_lock.iter() { eprintln!("{}", error); }
+    }
+
+    Ok(warnings.lock().unwrap().clone())
+}
+
+#[cfg(feature = "parallel")]
+pub fn lint_selective_parallel(content: &str, rules: &[Box<dyn Rule>]) -> LintResult {
+    let structure = match DocumentStructure::parse(content) {
+        Ok(s) => s,
+        Err(e) => return Err(LintError::new(&format!("Failed to parse document structure: {}", e))),
+    };
+
+    // Determine relevant rule categories for the content
+    let relevant_categories = determine_relevant_categories(&structure);
+
+    // Filter rules based on their categories and skippability
+    let filtered_rules: Vec<_> = rules
+        .iter()
+        .filter(|&rule| {
+            // First, check if the rule is in a relevant category
+            let rule_categories: Vec<RuleCategory> = if let Some(categorized) = rule.as_any().downcast_ref::<dyn RuleCategorized>() {
+                categorized.categories()
+            } else {
+                vec![RuleCategory::Uncategorized]
+            };
+
+            // If ANY of the rule's categories are relevant, include it
+            if !rule_categories.iter().any(|cat| relevant_categories.contains(cat)) {
+                return false;
+            }
+
+            // Then check if the rule should be skipped
+            if let Some(skippable) = rule.as_any().downcast_ref::<dyn RuleSkippable>() {
+                !skippable.should_skip(&structure)
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    // If we have no rules left, return empty results
+    if filtered_rules.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let warnings = Arc::new(Mutex::new(Vec::new()));
+    let errors = Arc::new(Mutex::new(Vec::new()));
+
+    filtered_rules.par_iter().for_each(|rule| {
+        let rule_result = rule.check(content);
+        match rule_result {
+            Ok(rule_warnings) => {
+                let mut warnings_lock = warnings.lock().unwrap();
+                warnings_lock.extend(rule_warnings);
+            }
+            Err(error) => {
+                let mut errors_lock = errors.lock().unwrap();
+                errors_lock.push(error);
+            }
+        }
+    });
+
+    // Don't print errors in parallel mode to avoid content leakage
+    let errors_lock = errors.lock().unwrap();
+    if !errors_lock.is_empty() {
+        // In parallel mode, we just log that errors occurred without showing the full content
+        // DEBUG LINE REMOVED: Previously showed error count and contents
+        // Previously: for error in errors_lock.iter() { eprintln!("{}", error); }
+    }
+
+    Ok(warnings.lock().unwrap().clone())
+}
+
+#[cfg(feature = "parallel")]
+pub fn lint_optimized(content: &str, rules: &[Box<dyn Rule>], optimize_flags: OptimizeFlags) -> LintResult {
+    // Track our linter time
+    let _timer = profiling::ScopedTimer::new("lint_optimized");
+
+    // If parallel processing is enabled
+    if optimize_flags.enable_parallel {
+        // If document structure optimization is enabled
+        if optimize_flags.enable_document_structure {
+            // If selective linting is enabled
+            if optimize_flags.enable_selective_linting {
+                return lint_selective_parallel(content, rules);
+            } else {
+                return lint_parallel_with_structure(content, rules);
+            }
+        } else {
+            return lint_parallel(content, rules);
+        }
+    } else {
+        // Non-parallel processing
+        // If document structure optimization is enabled
+        if optimize_flags.enable_document_structure {
+            // If selective linting is enabled
+            if optimize_flags.enable_selective_linting {
+                return lint_selective(content, rules);
+            } else {
+                return lint_with_structure(content, rules);
+            }
+        } else {
+            return lint(content, rules);
+        }
+    }
+}
+*/

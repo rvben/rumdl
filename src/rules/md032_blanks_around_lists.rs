@@ -1,9 +1,11 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
 use crate::rules::code_block_utils::CodeBlockUtils;
 use crate::rules::front_matter_utils::FrontMatterUtils;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::document_structure::document_structure_from_str;
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::utils::range_utils::LineIndex;
 
 lazy_static! {
     static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)\s").unwrap();
@@ -155,119 +157,8 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        // Early returns for common cases
-        if content.is_empty() {
-            return Ok(Vec::new());
-        }
-        
-        // Quick check to avoid processing files without list markers
-        if !content.contains(|c| matches!(c, '-' | '*' | '+' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0')) {
-            return Ok(Vec::new());
-        }
-
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Pre-compute which lines are in code blocks or front matter - only when needed
-        let mut excluded_lines = vec![false; lines.len()];
-        let has_code_blocks = content.contains("```") || content.contains("~~~") || content.contains("    ");
-        let has_front_matter = content.starts_with("---\n") || content.starts_with("---\r\n");
-        
-        if has_code_blocks || has_front_matter {
-            for (i, _) in lines.iter().enumerate() {
-                excluded_lines[i] = 
-                    (has_front_matter && FrontMatterUtils::is_in_front_matter(content, i)) ||
-                    (has_code_blocks && CodeBlockUtils::is_in_code_block(content, i));
-            }
-        }
-
-        // Pre-compute list items and content lines
-        let mut is_list_item_vec = vec![false; lines.len()];
-        let mut is_list_content_vec = vec![false; lines.len()];
-        let mut is_empty_vec = vec![false; lines.len()];
-
-        for (i, line) in lines.iter().enumerate() {
-            if excluded_lines[i] {
-                continue;
-            }
-
-            is_empty_vec[i] = Self::is_empty_line(line);
-            
-            // Skip checking if empty
-            if is_empty_vec[i] {
-                continue;
-            }
-            
-            is_list_item_vec[i] = Self::is_list_item(line);
-            
-            // Only check for list content if not a list item
-            if !is_list_item_vec[i] {
-                is_list_content_vec[i] = Self::is_list_content(line);
-            }
-        }
-
-        let mut in_list = false;
-        let mut _list_start_index = 0;
-        let mut _list_end_index = 0;
-
-        // Find list boundaries and check for blank lines around lists
-        for (i, _line) in lines.iter().enumerate() {
-            if excluded_lines[i] {
-                continue;
-            }
-
-            let is_list_item = is_list_item_vec[i];
-            let is_list_content = is_list_content_vec[i];
-            let is_empty = is_empty_vec[i];
-
-            if is_list_item {
-                if !in_list {
-                    // Starting a new list
-                    in_list = true;
-                    _list_start_index = i;
-
-                    // Check if there's no blank line before the list (unless it's at the start of the document)
-                    if i > 0 && !is_empty_vec[i - 1] && !excluded_lines[i - 1] {
-                        warnings.push(LintWarning {
-                            line: i + 1,
-                            column: 1,
-                            message: "List should be preceded by a blank line".to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(i + 1, 1),
-                                replacement: format!("\n{}", lines[i]),
-                            }),
-                        });
-                    }
-                }
-                _list_end_index = i;
-            } else if is_list_content && in_list {
-                // This is content belonging to a list item
-                _list_end_index = i;
-            } else if !is_empty {
-                // Regular content line
-                if in_list {
-                    // Just finished a list, check if there's no blank line after
-                    warnings.push(LintWarning {
-                        line: i + 1,
-                        column: 1,
-                        message: "List should be followed by a blank line".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: format!("\n{}", lines[i]),
-                        }),
-                    });
-                    in_list = false;
-                }
-            } else if is_empty {
-                // Empty line
-                in_list = false;
-            }
-        }
-
-        Ok(warnings)
+        let structure = document_structure_from_str(content);
+        self.check_with_structure(content, &structure)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
@@ -346,5 +237,139 @@ impl Rule for MD032BlanksAroundLists {
         }
 
         Ok(result.join("\n"))
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early returns for common cases
+        if self.should_skip(content) {
+            return Ok(Vec::new());
+        }
+        
+        // Use document structure to check only for lists
+        if !self.has_relevant_elements(content, structure) {
+            return Ok(Vec::new());
+        }
+
+        let line_index = LineIndex::new(content.to_string());
+        let mut warnings = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Pre-compute empty lines
+        let mut is_empty_vec = vec![false; lines.len()];
+        for (i, line) in lines.iter().enumerate() {
+            is_empty_vec[i] = Self::is_empty_line(line);
+        }
+
+        // Pre-compute list content lines (indented content belonging to list items)
+        let mut is_list_content_vec = vec![false; lines.len()];
+        for (i, line) in lines.iter().enumerate() {
+            if !is_empty_vec[i] && !Self::is_list_item(line) && Self::is_list_content(line) {
+                is_list_content_vec[i] = true;
+            }
+        }
+
+        // Get list boundaries from document structure
+        let list_starts = structure.get_list_start_indices();
+        let list_ends = structure.get_list_end_indices();
+        
+        // Process each list
+        for i in 0..list_starts.len().min(list_ends.len()) {
+            let start_idx = list_starts[i];
+            let mut end_idx = list_ends[i];
+            
+            // Extend the list end to include indented content
+            for j in end_idx..lines.len() {
+                if is_list_content_vec[j] {
+                    end_idx = j;
+                } else if !is_empty_vec[j] {
+                    break;
+                }
+            }
+            
+            // Check for blank line before list (unless at document start)
+            if start_idx > 0 && !is_empty_vec[start_idx - 1] && !structure.is_in_code_block(start_idx) {
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: start_idx + 1,
+                    column: 1,
+                    message: "List should be preceded by a blank line".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range(start_idx + 1, 1),
+                        replacement: format!("\n{}", lines[start_idx]),
+                    }),
+                });
+            }
+            
+            // Check for blank line after list (unless at document end)
+            if end_idx < lines.len() - 1 && !is_empty_vec[end_idx + 1] && !structure.is_in_code_block(end_idx + 1) {
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: end_idx + 2,
+                    column: 1,
+                    message: "List should be followed by a blank line".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range(end_idx + 2, 1),
+                        replacement: format!("\n{}", lines[end_idx + 1]),
+                    }),
+                });
+            }
+        }
+
+        Ok(warnings)
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        content.is_empty() || 
+        !content.contains(|c| matches!(c, '-' | '*' | '+' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0'))
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::List
+    }
+}
+
+impl DocumentStructureExtensions for MD032BlanksAroundLists {
+    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+        !doc_structure.list_lines.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::document_structure::document_structure_from_str;
+
+    #[test]
+    fn test_with_document_structure() {
+        let rule = MD032BlanksAroundLists::default();
+        
+        // Test case 1: List without blank lines
+        let content = "Paragraph\n- Item 1\n- Item 2\nAnother paragraph";
+        let structure = document_structure_from_str(content);
+        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(warnings.len(), 2); // Should warn about missing blank lines before and after
+        
+        // Test case 2: Lists with proper blank lines
+        let content = "Paragraph\n\n- Item 1\n- Item 2\n\nAnother paragraph";
+        let structure = document_structure_from_str(content);
+        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(warnings.len(), 0); // No warnings
+        
+        // Test case 3: List at beginning of document
+        let content = "- Item 1\n- Item 2\n\nParagraph";
+        let structure = document_structure_from_str(content);
+        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(warnings.len(), 0); // No warnings for missing blank line before
+        
+        // Test case 4: List at end of document
+        let content = "Paragraph\n\n- Item 1\n- Item 2";
+        let structure = document_structure_from_str(content);
+        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(warnings.len(), 0); // No warnings for missing blank line after
     }
 }

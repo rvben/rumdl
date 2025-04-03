@@ -3,21 +3,12 @@ use rumdl::rules::MD008ULStyle;
 
 #[test]
 fn test_valid_list_style() {
-    let rule = MD008ULStyle::default();
-    // Testing that consistent markers are valid
+    let rule = MD008ULStyle::default(); // Default style is '*'
+    
+    // Testing a list with all asterisk markers should pass
     let content = "* Item 1\n  * Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty());
-
-    // Testing dash style markers
-    let content = "- Item 1\n  - Item 2\n    - Item 3";
-    let result = rule.check(content).unwrap();
-    assert!(result.is_empty());
-
-    // Testing plus style markers
-    let content = "+ Item 1\n  + Item 2\n    + Item 3";
-    let result = rule.check(content).unwrap();
-    assert!(result.is_empty());
+    assert!(result.is_empty(), "Expected no warnings for consistent asterisk markers");
 }
 
 #[test]
@@ -29,11 +20,13 @@ fn test_invalid_list_style() {
     assert_eq!(result.len(), 2);
 
     // First marker is dash, so others should be dashes too
+    let rule = MD008ULStyle::new('-');
     let content = "- Item 1\n  + Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
 
     // First marker is plus, so others should be pluses too
+    let rule = MD008ULStyle::new('+');
     let content = "+ Item 1\n  - Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
@@ -54,19 +47,21 @@ fn test_fix_list_style() {
     // First marker is asterisk, so all should be fixed to asterisks
     let content = "* Item 1\n  + Item 2\n    - Item 3";
     let result = rule.fix(content).unwrap();
-    let expected = rule.fix(content).unwrap();
+    let expected = "* Item 1\n  * Item 2\n    * Item 3";
     assert_eq!(result, expected);
 
     // First marker is dash, so all should be fixed to dashes
+    let rule = MD008ULStyle::new('-');
     let content = "- Item 1\n  + Item 2\n    * Item 3";
     let result = rule.fix(content).unwrap();
-    let expected = rule.fix(content).unwrap();
+    let expected = "- Item 1\n  - Item 2\n    - Item 3";
     assert_eq!(result, expected);
 
     // First marker is plus, so all should be fixed to pluses
+    let rule = MD008ULStyle::new('+');
     let content = "+ Item 1\n  - Item 2\n    * Item 3";
     let result = rule.fix(content).unwrap();
-    let expected = rule.fix(content).unwrap();
+    let expected = "+ Item 1\n  + Item 2\n    + Item 3";
     assert_eq!(result, expected);
 }
 
@@ -89,6 +84,6 @@ fn test_explicitly_configured_style() {
     assert_eq!(result.len(), 3);
 
     let fixed = rule.fix(content).unwrap();
-    let expected = rule.fix(content).unwrap();
+    let expected = "- Item 1\n  - Item 2\n    - Item 3";
     assert_eq!(fixed, expected);
 }

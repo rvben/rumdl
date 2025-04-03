@@ -25,8 +25,9 @@ pub enum HeadingStyle {
     AtxClosed, // # Heading #
     Setext1,   // Heading
     // =======
-    Setext2, // Heading
-             // -------
+    Setext2,   // Heading
+    // -------
+    Consistent, // Use the style of the first heading in the document
 }
 
 /// Represents a heading in a Markdown document
@@ -201,14 +202,19 @@ impl HeadingUtils {
             }
             HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
                 if level > 2 {
-                    // Fall back to ATX style for levels > 2
+                    // Setext only supports level 1-2, fall back to ATX for level 3+
                     format!("{}{} {}", indentation, "#".repeat(level as usize), text_content.trim())
                 } else {
-                    let underline_char = if level == 1 || style == HeadingStyle::Setext1 { '=' } else { '-' };
-                    let visible_length = text_content.trim().chars().count();
-                    let underline_length = visible_length.max(3); // Ensure at least 3 underline chars
-                    format!("{}{}\n{}{}", indentation, text_content.trim(), indentation, underline_char.to_string().repeat(underline_length))
+                    let marker = if style == HeadingStyle::Setext1 || level == 1 { "=" } else { "-" };
+                    let content_len = text_content.trim().len();
+                    // Need at least 3 markers for a valid setext heading
+                    let marker_count = content_len.max(3);
+                    format!("{}{}\n{}{}", indentation, text_content.trim(), indentation, marker.repeat(marker_count))
                 }
+            }
+            HeadingStyle::Consistent => {
+                // For Consistent style, default to ATX as it's the most commonly used
+                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content.trim())
             }
         }
     }

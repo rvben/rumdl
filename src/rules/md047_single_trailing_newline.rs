@@ -25,6 +25,7 @@ impl Rule for MD047SingleTrailingNewline {
 
         if !content.ends_with('\n') || content.ends_with("\n\n") {
             warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                 line: line_count,
                 column: 1,
                 message: "File should end with a single newline character".to_string(),

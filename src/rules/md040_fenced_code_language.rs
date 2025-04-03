@@ -1,6 +1,7 @@
 use crate::utils::range_utils::LineIndex;
-
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions, CodeBlockType};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rules::code_block_utils::CodeBlockUtils;
 
 #[derive(Debug, Default)]
 pub struct MD040FencedCodeLanguage;
@@ -45,6 +46,7 @@ impl Rule for MD040FencedCodeLanguage {
                 if after_fence.is_empty() {
                     let _indent = line.len() - line.trim_start().len();
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         line: i + 1,
                         column: 1,
                         message: "Fenced code blocks should have a language specified".to_string(),
@@ -60,6 +62,55 @@ impl Rule for MD040FencedCodeLanguage {
                     });
                 }
                 in_code_block = true;
+            }
+        }
+
+        Ok(warnings)
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early return if no code blocks
+        if !structure.has_code_blocks {
+            return Ok(vec![]);
+        }
+        
+        let line_index = LineIndex::new(content.to_string());
+        let mut warnings = Vec::new();
+        
+        // Use the code blocks from document structure
+        for block in &structure.code_blocks {
+            // Only check fenced code blocks
+            match block.block_type {
+                CodeBlockType::Fenced => {
+                    // Check if language is specified
+                    if block.language.as_ref().map_or(true, |lang| lang.is_empty()) {
+                        // Get the opening fence line
+                        let fence_line = content.lines().nth(block.start_line - 1).unwrap_or("");
+                        let trimmed = fence_line.trim();
+                        let _fence = if trimmed.starts_with("```") { "```" } else { "~~~" };
+                        
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: block.start_line,
+                            column: 1,
+                            message: "Fenced code blocks should have a language specified".to_string(),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range(block.start_line, 1),
+                                replacement: if fence_line.starts_with("```") {
+                                    "```text".to_string()
+                                } else {
+                                    "~~~text".to_string()
+                                },
+                            }),
+                        });
+                    }
+                },
+                CodeBlockType::Indented => {
+                    // Indented code blocks don't have languages, so skip them
+                    continue;
+                }
             }
         }
 
@@ -127,5 +178,22 @@ impl Rule for MD040FencedCodeLanguage {
         }
 
         Ok(result)
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::CodeBlock
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        content.is_empty() || (!content.contains("```") && !content.contains("~~~"))
+    }
+}
+
+impl DocumentStructureExtensions for MD040FencedCodeLanguage {
+    fn has_relevant_elements(&self, content: &str, _doc_structure: &DocumentStructure) -> bool {
+        // Rule is only relevant if content contains code fences
+        content.contains("```") || content.contains("~~~")
     }
 }

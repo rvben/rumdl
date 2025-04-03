@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -147,6 +148,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                 let line_range = self.get_line_byte_range(content, line_num);
                 
                 warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
                     message,
                     line: line_num,
                     column: indentation.end() + 1,
@@ -194,5 +196,114 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
         }
 
         Ok(result)
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early return if no headings
+        if structure.heading_lines.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        let mut warnings = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Process only heading lines using structure.heading_lines
+        for &line_num in &structure.heading_lines {
+            let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
+            
+            // Skip if out of bounds
+            if line_idx >= lines.len() {
+                continue;
+            }
+            
+            let line = lines[line_idx];
+            
+            // Check if line matches closed ATX pattern with multiple spaces
+            if self.is_closed_atx_heading_with_multiple_spaces(line) {
+                let captures = CLOSED_ATX_MULTIPLE_SPACE_PATTERN.captures(line).unwrap();
+                let indentation = captures.get(1).unwrap();
+                let opening_hashes = captures.get(2).unwrap();
+                let (start_spaces, end_spaces) = self.count_spaces(line);
+                
+                let message = if start_spaces > 1 && end_spaces > 1 {
+                    format!(
+                        "Multiple spaces ({} at start, {} at end) inside hashes on closed ATX style heading with {} hashes",
+                        start_spaces,
+                        end_spaces,
+                        opening_hashes.as_str().len()
+                    )
+                } else if start_spaces > 1 {
+                    format!(
+                        "Multiple spaces ({}) after opening hashes on closed ATX style heading with {} hashes",
+                        start_spaces,
+                        opening_hashes.as_str().len()
+                    )
+                } else {
+                    format!(
+                        "Multiple spaces ({}) before closing hashes on closed ATX style heading with {} hashes",
+                        end_spaces,
+                        opening_hashes.as_str().len()
+                    )
+                };
+                
+                let line_range = self.get_line_byte_range(content, line_num);
+                
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    message,
+                    line: line_num,
+                    column: indentation.end() + 1,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_range,
+                        replacement: self.fix_closed_atx_heading(line),
+                    }),
+                });
+            }
+        }
+        
+        Ok(warnings)
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Heading
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        content.is_empty() || !content.contains('#')
+    }
+}
+
+impl DocumentStructureExtensions for MD021NoMultipleSpaceClosedAtx {
+    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+        // This rule is only relevant if there are headings
+        !doc_structure.heading_lines.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_with_document_structure() {
+        let rule = MD021NoMultipleSpaceClosedAtx::default();
+        
+        // Test with correct spacing
+        let content = "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert!(result.is_empty());
+        
+        // Test with multiple spaces
+        let content = "#  Heading 1 #\n## Heading 2 ##\n### Heading 3  ###";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 2); // Should flag the two headings with multiple spaces
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[1].line, 3);
     }
 }

@@ -1,5 +1,6 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
 use crate::utils::range_utils::LineIndex;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -128,6 +129,7 @@ impl Rule for MD004UnorderedListStyle {
 
                 if marker != target_style {
                     warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
                         line: line_num + 1,
                         column: indent + 1,
                         severity: Severity::Warning,
@@ -144,6 +146,71 @@ impl Rule for MD004UnorderedListStyle {
             }
         }
 
+        Ok(warnings)
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early return if the document has no lists
+        if structure.list_lines.is_empty() {
+            return Ok(vec![]);
+        }
+        
+        let line_index = LineIndex::new(content.to_string());
+        let mut warnings = Vec::new();
+        
+        // Track the first marker style for the "consistent" option
+        let mut first_marker: Option<char> = None;
+        
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Process only lines with list items, using the pre-computed list_lines
+        for &line_num in &structure.list_lines {
+            let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
+            
+            // Skip if out of bounds
+            if line_idx >= lines.len() {
+                continue;
+            }
+            
+            let line = lines[line_idx];
+            
+            // Skip lines in code blocks
+            if structure.is_in_code_block(line_num) {
+                continue;
+            }
+            
+            if let Some((indent, marker)) = Self::parse_list_marker(line) {
+                // For consistent style, use the first marker encountered
+                let target_style = match self.style {
+                    UnorderedListStyle::Consistent => {
+                        if first_marker.is_none() {
+                            first_marker = Some(marker);
+                        }
+                        first_marker.unwrap()
+                    }
+                    specific_style => Self::get_marker_char(specific_style),
+                };
+                
+                if marker != target_style {
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: line_num,
+                        column: indent + 1,
+                        severity: Severity::Warning,
+                        message: format!(
+                            "Unordered list item marker '{}' does not match style '{}'",
+                            marker, target_style
+                        ),
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(line_num, indent + 1),
+                            replacement: format!("{}{} ", " ".repeat(indent), target_style),
+                        }),
+                    });
+                }
+            }
+        }
+        
         Ok(warnings)
     }
 
@@ -196,5 +263,52 @@ impl Rule for MD004UnorderedListStyle {
         }
 
         Ok(result)
+    }
+
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::List
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        content.is_empty() || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
+    }
+}
+
+impl DocumentStructureExtensions for MD004UnorderedListStyle {
+    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+        // Rule is only relevant if there are list items
+        !doc_structure.list_lines.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_with_document_structure() {
+        // Test with consistent style
+        let rule = MD004UnorderedListStyle::default();
+        
+        // Test with consistent markers
+        let content = "* Item 1\n* Item 2\n* Item 3";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert!(result.is_empty());
+        
+        // Test with inconsistent markers
+        let content = "* Item 1\n- Item 2\n+ Item 3";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 2); // Should flag the - and + markers
+        
+        // Test specific style
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+        let content = "* Item 1\n- Item 2\n+ Item 3";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 2); // Should flag the * and + markers
     }
 }

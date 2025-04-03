@@ -154,6 +154,7 @@ impl Rule for MD010NoHardTabs {
                 };
 
                 warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                     line: line_num + 1,
                     column: pos + 1,
                     message,

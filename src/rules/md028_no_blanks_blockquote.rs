@@ -65,6 +65,7 @@ impl Rule for MD028NoBlanksBlockquote {
                     let indent = BlockquoteUtils::extract_indentation(line);
 
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         message: "Blank line inside blockquote".to_string(),
                         line: i + 1,
                         column: 1,

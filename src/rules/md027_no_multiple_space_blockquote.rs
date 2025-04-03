@@ -57,6 +57,7 @@ impl Rule for MD027NoMultipleSpaceBlockquote {
                 let (_, spaces_after) = Self::count_spaces_after_blockquote(line);
                 if spaces_after > 1 || (spaces_after == 1 && line.trim_end() == ">") {
                     warnings.push(LintWarning {
+            rule_name: Some(self.name()),
                         message: if line.trim_end() == ">" {
                             "Unnecessary space after empty blockquote symbol".to_string()
                         } else {

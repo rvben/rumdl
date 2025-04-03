@@ -1,4 +1,6 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::utils::regex_cache;
+use crate::utils::early_returns;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -23,6 +25,11 @@ lazy_static! {
 pub struct MD034NoBareUrls;
 
 impl MD034NoBareUrls {
+    // Method to quickly check if the rule needs to run at all
+    pub fn should_skip(&self, content: &str) -> bool {
+        !early_returns::has_urls(content)
+    }
+
     // Optimized function to detect code blocks with cached results
     #[inline]
     fn is_in_code_block(&self, line_idx: usize, code_blocks: &[(usize, usize)]) -> bool {
@@ -122,7 +129,7 @@ impl MD034NoBareUrls {
         let mut warnings = Vec::new();
         
         // Fast path - check if line potentially contains a URL
-        if !URL_QUICK_CHECK.is_match(line) {
+        if !line.contains("http://") && !line.contains("https://") && !line.contains("ftp://") {
             return warnings;
         }
 
@@ -142,6 +149,7 @@ impl MD034NoBareUrls {
             }
             
             warnings.push(LintWarning {
+                rule_name: Some(self.name()),
                 line: line_idx + 1,
                 column: url_start + 1,
                 message: format!("Bare URL found: {}", url),
@@ -197,8 +205,8 @@ impl Rule for MD034NoBareUrls {
     }
     
     fn check(&self, content: &str) -> LintResult {
-        // Fast path - if content doesn't contain http://, https://, or ftp://, no URLs present
-        if !content.contains("http://") && !content.contains("https://") && !content.contains("ftp://") {
+        // Fast path - if content doesn't contain URL schemes, return empty result
+        if self.should_skip(content) {
             return Ok(Vec::new());
         }
 
@@ -234,8 +242,8 @@ impl Rule for MD034NoBareUrls {
     }
     
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        // Fast path - if content doesn't contain http://, https://, or ftp://, no URLs present
-        if !content.contains("http://") && !content.contains("https://") && !content.contains("ftp://") {
+        // Fast path - if content doesn't contain URL schemes, return content as-is
+        if self.should_skip(content) {
             return Ok(content.to_string());
         }
 
@@ -244,8 +252,8 @@ impl Rule for MD034NoBareUrls {
         let lines: Vec<&str> = content.split('\n').collect();
         
         for (i, line) in lines.iter().enumerate() {
-            // Fast path for non-URL lines
-            if !line.contains("http://") && !line.contains("https://") && !line.contains("ftp://") {
+            // Skip processing lines in code blocks
+            if self.is_in_code_block(i, &code_blocks) {
                 result.push_str(line);
                 if i < lines.len() - 1 {
                     result.push('\n');
@@ -253,10 +261,9 @@ impl Rule for MD034NoBareUrls {
                 continue;
             }
             
-            // Skip lines in code blocks, HTML blocks, and front matter
-            if self.is_in_code_block(i, &code_blocks) || 
-               (line.trim_start().starts_with('<') && line.trim_end().ends_with('>')) ||
-               (i == 0 && (*line == "---" || *line == "+++")) {
+            // Skip HTML blocks and front matter
+            if line.trim_start().starts_with('<') && line.trim_end().ends_with('>') || 
+               (i == 0 && *line == "---") || (i == 0 && *line == "+++") {
                 result.push_str(line);
                 if i < lines.len() - 1 {
                     result.push('\n');
@@ -264,63 +271,63 @@ impl Rule for MD034NoBareUrls {
                 continue;
             }
             
+            // Compute code spans
             let spans = self.compute_inline_code_spans(line);
             
-            // Fast path - if line doesn't match quick check pattern, don't perform expensive regex operations
-            if !URL_QUICK_CHECK.is_match(line) {
-                result.push_str(line);
-                if i < lines.len() - 1 {
-                    result.push('\n');
-                }
-                continue;
-            }
-            
-            // Process the line to fix bare URLs
-            let mut current_pos = 0;
-            let mut modified_line = String::with_capacity(line.len() + 20);
-            let mut modified = false;
+            // Find bare URLs and fix them
+            let mut last_end = 0;
+            let mut has_url = false;
             
             for url_match in URL_REGEX.find_iter(line) {
                 let url_start = url_match.start();
                 let url_end = url_match.end();
+                let url = url_match.as_str();
                 
-                // Skip URLs in code spans or already in links
-                if self.is_in_code_span(url_start, &spans) || 
-                   self.is_url_in_link(line, url_start, url_end) {
+                // Skip if URL is in a code span or already in a link
+                if self.is_in_code_span(url_start, &spans) || self.is_url_in_link(line, url_start, url_end) {
                     continue;
                 }
                 
-                // URL needs to be fixed
-                modified = true;
+                has_url = true;
                 
                 // Add text before the URL
-                modified_line.push_str(&line[current_pos..url_start]);
+                result.push_str(&line[last_end..url_start]);
                 
                 // Add the URL with angle brackets
-                modified_line.push('<');
-                modified_line.push_str(&line[url_start..url_end]);
-                modified_line.push('>');
+                result.push_str(&format!("<{}>", url));
                 
-                current_pos = url_end;
+                last_end = url_end;
             }
             
-            // If no modifications were made, just use the original line
-            if !modified {
-                result.push_str(line);
+            // Add any remaining text
+            if has_url {
+                result.push_str(&line[last_end..]);
             } else {
-                // Add remaining text
-                if current_pos < line.len() {
-                    modified_line.push_str(&line[current_pos..]);
-                }
-                result.push_str(&modified_line);
+                result.push_str(line);
             }
             
+            // Add newline for all lines except the last
             if i < lines.len() - 1 {
                 result.push('\n');
             }
         }
         
+        // Preserve trailing newline
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
+        }
+        
         Ok(result)
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Link
+    }
+    
+    /// Check if this rule should be skipped based on content
+    fn should_skip(&self, content: &str) -> bool {
+        !regex_cache::contains_url(content)
     }
 }
 
