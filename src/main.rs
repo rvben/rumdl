@@ -243,7 +243,7 @@ fn find_markdown_files(paths: &[String]) -> Vec<String> {
             // Find markdown files in the directory
             let walker = WalkDir::new(path)
                 .follow_links(true)
-                .into_iter()
+                    .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| {
                     e.file_type().is_file()
@@ -276,33 +276,50 @@ fn print_results(
         return;
     }
     
-    // Print fix summary if fixes were applied
-    if cli.fix && total_issues_fixed > 0 {
-        println!("\n{} Fixed {} issues in {} files",
-                 "Fixed:".green().bold(),
-                 total_issues_fixed,
-                 files_with_issues);
-    }
+    // Choose singular or plural form of "file" based on count
+    let file_text = if total_files_processed == 1 { "file" } else { "files" };
+    let file_with_issues_text = if files_with_issues == 1 { "file" } else { "files" };
     
     // Show results summary
     if has_issues {
-        println!("\n{} Found {} issues in {}/{} files ({}ms)",
-                 "Issues:".yellow().bold(),
-                 total_issues,
-                 files_with_issues,
-                 total_files_processed,
-                 duration_ms);
-                 
-        if !cli.fix && total_fixable_issues > 0 {
-            // Display the exact count of fixable issues
-            println!("Run with `--fix` to automatically fix {} of the {} issues", 
-                     total_fixable_issues,
-                     total_issues);
+        // If fix mode is enabled, only show the fixed summary
+        if cli.fix && total_issues_fixed > 0 {
+            println!("\n{} Fixed {}/{} issues in {} {} ({}ms)",
+                     "Fixed:".green().bold(),
+                     total_issues_fixed,
+                     total_issues,
+                     files_with_issues,
+                     file_with_issues_text,
+                     duration_ms);
+        } else {
+            // In non-fix mode, show issues summary with simplified count when appropriate
+            let files_display = if files_with_issues == total_files_processed {
+                // Just show the number if all files have issues
+                format!("{}", files_with_issues)
+            } else {
+                // Show the fraction if only some files have issues
+                format!("{}/{}", files_with_issues, total_files_processed)
+            };
+            
+            println!("\n{} Found {} issues in {} {} ({}ms)",
+                     "Issues:".yellow().bold(),
+                     total_issues,
+                     files_display,
+                     file_text,
+                     duration_ms);
+                     
+            if !cli.fix && total_fixable_issues > 0 {
+                // Display the exact count of fixable issues
+                println!("Run with `--fix` to automatically fix {} of the {} issues", 
+                         total_fixable_issues,
+                         total_issues);
+            }
         }
     } else {
-        println!("\n{} No issues found in {} files ({}ms)",
+        println!("\n{} No issues found in {} {} ({}ms)",
                  "Success:".green().bold(),
                  total_files_processed,
+                 file_text,
                  duration_ms);
     }
 }
@@ -322,13 +339,13 @@ fn process_file(
     // Read file content
     let mut content = match std::fs::read_to_string(file_path) {
         Ok(content) => content,
-        Err(err) => {
-            eprintln!(
+                Err(err) => {
+                    eprintln!(
                 "{}: Could not read file {}: {}",
-                "Error".red().bold(),
+                        "Error".red().bold(),
                 file_path,
-                err
-            );
+                        err
+                    );
             return (false, 0, 0, 0);
         }
     };
@@ -360,24 +377,26 @@ fn process_file(
         return (false, 0, 0, 0);
     }
     
-    // Print warnings - only print the warning location and message, not the content
-    // We always show warnings, even in quiet mode
-    for warning in &all_warnings {
-        let rule_name = warning.rule_name.unwrap_or("unknown");
-        
-        // Add fix indicator if this warning has a fix
-        let fix_indicator = if warning.fix.is_some() { " [*]" } else { "" };
-        
-        // Print the warning in the format: file:line:column: [rule] message [*]
-        println!(
-            "{}:{}:{}: {} {}{}",
-            file_path.blue().underline(),
-            warning.line.to_string().cyan(),
-            warning.column.to_string().cyan(),
-            format!("[{}]", rule_name).yellow(),
-            warning.message,
-            fix_indicator.green()
-        );
+    // Print warnings - only in non-fix mode or verbose mode
+    if (!fix || verbose) && !quiet {
+        // Print the individual warnings
+        for warning in &all_warnings {
+            let rule_name = warning.rule_name.unwrap_or("unknown");
+            
+            // Add fix indicator if this warning has a fix
+            let fix_indicator = if warning.fix.is_some() { " [fixed]" } else { "" };
+            
+            // Print the warning in the format: file:line:column: [rule] message [*]
+            println!(
+                "{}:{}:{}: {} {}{}",
+                file_path.blue().underline(),
+                warning.line.to_string().cyan(),
+                warning.column.to_string().cyan(),
+                format!("[{}]", rule_name).yellow(),
+                warning.message,
+                fix_indicator.green()
+            );
+        }
     }
     
     // Fix issues if requested
@@ -396,10 +415,10 @@ fn process_file(
                             warnings_fixed += all_warnings.iter()
                                 .filter(|w| w.rule_name == Some(rule.name()) && w.fix.is_some())
                                 .count();
-                        }
-                    }
-                    Err(err) => {
-                        eprintln!(
+                                        }
+                                    }
+                                    Err(err) => {
+                                            eprintln!(
                             "{} Failed to apply fix for rule {}: {}",
                             "Warning:".yellow().bold(),
                             rule.name(),
@@ -409,16 +428,16 @@ fn process_file(
                 }
             }
         }
-        
+
         // Write fixed content back to file
         if warnings_fixed > 0 {
             if let Err(err) = std::fs::write(file_path, &content) {
-                eprintln!(
+                    eprintln!(
                     "{} Failed to write fixed content to file {}: {}",
                     "Error:".red().bold(),
                     file_path,
-                    err
-                );
+                        err
+                    );
             }
         }
     }
@@ -440,8 +459,8 @@ fn main() {
                 if !cli.quiet {
                     println!("Created default configuration file: .rumdl.toml");
                 }
-                return;
-            }
+        return;
+    }
             Err(e) => {
                 eprintln!("{}: Failed to create config file: {}", "Error".red().bold(), e);
                 std::process::exit(1);
@@ -483,7 +502,7 @@ fn main() {
     
     // Confirm with the user if we're fixing a large number of files
     if cli.fix && file_paths.len() > 10 && !cli.quiet {
-        println!(
+                println!(
             "You are about to fix {} files. This will modify files in-place.",
             file_paths.len()
         );
@@ -512,14 +531,14 @@ fn main() {
     for file_path in &file_paths {
         let (file_has_issues, issues_found, issues_fixed, fixable_issues) = 
             process_file(file_path, &enabled_rules, cli.fix, cli.verbose, cli.quiet);
-        
-        total_files_processed += 1;
+
+                total_files_processed += 1;
         total_issues_fixed += issues_fixed;
         total_fixable_issues += fixable_issues;
         
         if file_has_issues {
-            has_issues = true;
-            files_with_issues += 1;
+                    has_issues = true;
+                    files_with_issues += 1;
             total_issues += issues_found;
         }
     }
@@ -531,11 +550,11 @@ fn main() {
     print_results(
         &cli,
         has_issues,
-        files_with_issues,
+                files_with_issues,
         total_issues,
         total_issues_fixed,
         total_fixable_issues,
-        total_files_processed,
+                total_files_processed,
         duration_ms
     );
     
