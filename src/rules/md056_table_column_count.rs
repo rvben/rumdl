@@ -6,6 +6,12 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 #[derive(Debug)]
 pub struct MD056TableColumnCount;
 
+impl Default for MD056TableColumnCount {
+    fn default() -> Self {
+        MD056TableColumnCount
+    }
+}
+
 impl MD056TableColumnCount {
     /// Check if a line is in a code block
     fn is_in_code_block(&self, lines: &[&str], line_index: usize) -> bool {

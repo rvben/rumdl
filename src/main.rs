@@ -8,7 +8,11 @@ use walkdir::WalkDir;
 
 use rumdl::rule::Rule;
 use rumdl::rules::*;
-use rumdl::{MD046CodeBlockStyle, MD048CodeFenceStyle, MD049EmphasisStyle, MD050StrongStyle};
+use rumdl::{
+    MD046CodeBlockStyle, MD048CodeFenceStyle, MD049EmphasisStyle, MD050StrongStyle,
+    MD052ReferenceLinkImages, MD053LinkImageReferenceDefinitions, MD054LinkImageStyle,
+    MD055TablePipeStyle, MD056TableColumnCount, MD058BlanksAroundTables,
+};
 use rumdl::rules::code_block_utils::CodeBlockStyle;
 use rumdl::rules::code_fence_utils::CodeFenceStyle;
 use rumdl::rules::emphasis_style::EmphasisStyle;
@@ -70,7 +74,7 @@ struct Cli {
     #[arg(long)]
     profile: bool,
     
-    /// Quiet mode - don't show banner
+    /// Quiet mode
     #[arg(short, long)]
     quiet: bool,
 
@@ -85,11 +89,41 @@ enum Commands {
     Init,
 }
 
+// Helper function to apply configuration to rules that need it
+fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
+    // Replace any rules that need configuration with properly configured instances
+    
+    // Replace MD013 with configured instance
+    if let Some(pos) = rules.iter().position(|r| r.name() == "MD013") {
+        let line_length = config::get_rule_config_value::<usize>(config, "MD013", "line_length")
+            .unwrap_or(80);
+        let code_blocks = config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
+            .unwrap_or(true);
+        let tables = config::get_rule_config_value::<bool>(config, "MD013", "tables")
+            .unwrap_or(false);
+        let headings = config::get_rule_config_value::<bool>(config, "MD013", "headings")
+            .unwrap_or(true);
+        let strict = config::get_rule_config_value::<bool>(config, "MD013", "strict")
+            .unwrap_or(false);
+            
+        rules[pos] = Box::new(MD013LineLength::new(line_length, code_blocks, tables, headings, strict));
+    }
+    
+    // Replace MD053 with configured instance
+    if let Some(pos) = rules.iter().position(|r| r.name() == "MD053") {
+        let ignored_definitions = config::get_rule_config_value::<Vec<String>>(config, "MD053", "ignored_definitions")
+            .unwrap_or_else(Vec::new);
+        rules[pos] = Box::new(MD053LinkImageReferenceDefinitions::new(ignored_definitions));
+    }
+    
+    // Add more rule configurations as needed
+}
+
 // Get a complete set of enabled rules based on CLI options and config
 fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
     let mut rules: Vec<Box<dyn Rule>> = Vec::new();
     
-    // Add all the implemented rules
+    // Add all the implemented rules with default configuration
     rules.push(Box::new(MD001HeadingIncrement));
     rules.push(Box::new(MD002FirstHeadingH1::default()));
     rules.push(Box::new(MD003HeadingStyle::default()));
@@ -101,7 +135,7 @@ fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
     rules.push(Box::new(MD010NoHardTabs::default()));
     rules.push(Box::new(MD011ReversedLink {}));
     rules.push(Box::new(MD012NoMultipleBlanks::default()));
-    rules.push(Box::new(MD013LineLength::new(80, true, false, true, false)));
+    rules.push(Box::new(MD013LineLength::default()));
     rules.push(Box::new(MD014CommandsShowOutput::default()));
     rules.push(Box::new(MD015NoMissingSpaceAfterListMarker::default()));
     rules.push(Box::new(MD016NoMultipleSpaceAfterListMarker::default()));
@@ -140,6 +174,16 @@ fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
     rules.push(Box::new(MD049EmphasisStyle::new(EmphasisStyle::Consistent)));
     rules.push(Box::new(MD050StrongStyle::new(StrongStyle::Consistent)));
     rules.push(Box::new(MD051LinkFragments));
+    rules.push(Box::new(MD052ReferenceLinkImages::default()));
+    rules.push(Box::new(MD053LinkImageReferenceDefinitions::default()));
+    rules.push(Box::new(MD054LinkImageStyle::default()));
+    rules.push(Box::new(MD055TablePipeStyle::default()));
+    rules.push(Box::new(MD056TableColumnCount::default()));
+    rules.push(Box::new(MD057ExistingRelativeLinks::default()));
+    rules.push(Box::new(MD058BlanksAroundTables::default()));
+    
+    // Apply configuration to rules that need it
+    apply_rule_configs(&mut rules, config);
     
     // Apply config disable first
     if !config.global.disable.is_empty() {
@@ -249,11 +293,7 @@ fn print_results(
                  total_files_processed,
                  duration_ms);
                  
-        if cli.fix {
-            println!("{} Fixed {} issues", 
-                     "Fixed:".green().bold(), 
-                     total_issues_fixed);
-        } else if total_fixable_issues > 0 {
+        if !cli.fix && total_fixable_issues > 0 {
             // Display the exact count of fixable issues
             println!("Run with `--fix` to automatically fix {} of the {} issues", 
                      total_fixable_issues,

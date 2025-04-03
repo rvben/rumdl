@@ -6,6 +6,12 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 #[derive(Debug)]
 pub struct MD058BlanksAroundTables;
 
+impl Default for MD058BlanksAroundTables {
+    fn default() -> Self {
+        MD058BlanksAroundTables
+    }
+}
+
 impl MD058BlanksAroundTables {
     /// Check if a line is in a code block
     fn is_in_code_block(&self, lines: &[&str], line_index: usize) -> bool {

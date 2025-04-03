@@ -2,6 +2,18 @@ use rumdl::should_include;
 use rumdl::should_exclude;
 use std::fs;
 
+// Helper function to check if we can create test files
+fn can_create_test_files() -> bool {
+    if let Ok(temp_dir) = tempfile::tempdir() {
+        let test_file = temp_dir.path().join("test_file");
+        let result = fs::write(&test_file, "test").is_ok();
+        temp_dir.close().unwrap();
+        result
+    } else {
+        false
+    }
+}
+
 #[cfg(test)]
 mod include_tests {
     use super::*;
@@ -279,17 +291,5 @@ mod include_tests {
         assert!(should_include("src/tests/file.md", &include_patterns));
         assert!(should_include("tests/unit/integration/file.md", &include_patterns));
         assert!(!should_include("docs/file.md", &include_patterns));
-    }
-}
-
-// Helper function to check if we can create test files
-fn can_create_test_files() -> bool {
-    if let Ok(temp_dir) = tempfile::tempdir() {
-        let test_file = temp_dir.path().join("test_file");
-        let result = fs::write(&test_file, "test").is_ok();
-        temp_dir.close().unwrap();
-        result
-    } else {
-        false
     }
 } 

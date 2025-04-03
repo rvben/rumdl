@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::rc::Rc;
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex as FancyRegex;
@@ -35,7 +36,7 @@ lazy_static! {
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
 }
 
-type DefinitionCache = RefCell<HashMap<u64, Vec<(String, usize, usize)>>>;
+type DefinitionCache = Rc<RefCell<HashMap<u64, Vec<(String, usize, usize)>>>>;
 
 /// Rule MD053: Link and image reference definitions should be needed
 ///
@@ -87,6 +88,7 @@ type DefinitionCache = RefCell<HashMap<u64, Vec<(String, usize, usize)>>>;
 /// When fixing issues, this rule removes unused reference definitions while preserving
 /// the document's structure, including handling proper blank line formatting around
 /// the removed definitions.
+#[derive(Clone)]
 pub struct MD053LinkImageReferenceDefinitions {
     ignored_definitions: HashSet<String>,
     content_cache: DefinitionCache,
@@ -96,7 +98,7 @@ impl Default for MD053LinkImageReferenceDefinitions {
     fn default() -> Self {
         Self {
             ignored_definitions: HashSet::new(),
-            content_cache: RefCell::new(HashMap::new()),
+            content_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 }
@@ -106,7 +108,7 @@ impl MD053LinkImageReferenceDefinitions {
     pub fn new(ignored_definitions: Vec<String>) -> Self {
         Self {
             ignored_definitions: ignored_definitions.into_iter().map(|s| s.to_lowercase()).collect(),
-            content_cache: RefCell::new(HashMap::new()),
+            content_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
