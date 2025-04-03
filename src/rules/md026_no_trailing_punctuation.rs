@@ -2,9 +2,9 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::ops::Range;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::LineIndex;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::document_structure::DocumentStructure;
 
 lazy_static! {
     // Match ATX headings (with or without closing hashes)
@@ -226,7 +226,7 @@ impl MD026NoTrailingPunctuation {
         let lines: Vec<&str> = content.lines().collect();
         
         // Process each heading using heading line numbers from the document structure
-        for (_i, line_num) in structure.heading_lines.iter().enumerate() {
+        for line_num in structure.heading_lines.iter() {
             // Line numbers in the structure are 1-indexed
             let line_idx = line_num - 1;
             
@@ -277,27 +277,25 @@ impl MD026NoTrailingPunctuation {
             // Check for Setext headings
             else {
                 // Only process first line of setext headings (the text, not the underline)
-                if line_idx + 1 < lines.len() && self.is_setext_underline(lines[line_idx + 1]) {
-                    if self.has_trailing_punctuation(line, &re) {
-                        let range = self.get_line_byte_range(content, *line_num);
-                        let trailing_punct_len = self.count_trailing_punctuation(line, &re);
-                        
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_idx + 1,
-                            column: 1,
-                            message: format!("Heading should not end with {}", 
-                                            self.get_punctuation_description()),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: Range { 
-                                    start: range.end - trailing_punct_len,
-                                    end: range.end
-                                },
-                                replacement: self.fix_setext_heading(line, &re),
-                            }),
-                        });
-                    }
+                if line_idx + 1 < lines.len() && self.is_setext_underline(lines[line_idx + 1]) && self.has_trailing_punctuation(line, &re) {
+                    let range = self.get_line_byte_range(content, *line_num);
+                    let trailing_punct_len = self.count_trailing_punctuation(line, &re);
+                    
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: line_idx + 1,
+                        column: 1,
+                        message: format!("Heading should not end with {}", 
+                                        self.get_punctuation_description()),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: Range { 
+                                start: range.end - trailing_punct_len,
+                                end: range.end
+                            },
+                            replacement: self.fix_setext_heading(line, &re),
+                        }),
+                    });
                 }
             }
         }
@@ -411,26 +409,24 @@ impl Rule for MD026NoTrailingPunctuation {
             }
             
             // Process setext headings (if the next line is a setext underline)
-            else if line_num + 1 < lines.len() && self.is_setext_underline(lines[line_num + 1]) {
-                if self.has_trailing_punctuation(line, &re) {
-                    let last_char = line.trim().chars().last().unwrap_or(' ');
-                    
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: line_num + 1,
-                        column: 1,
-                        message: format!(
-                            "Heading '{}' should not end with punctuation '{}'",
-                            line.trim(),
-                            last_char
-                        ),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: self.get_line_byte_range(content, line_num + 1),
-                            replacement: self.fix_setext_heading(line, &re),
-                        }),
-                    });
-                }
+            else if line_num + 1 < lines.len() && self.is_setext_underline(lines[line_num + 1]) && self.has_trailing_punctuation(line, &re) {
+                let last_char = line.trim().chars().last().unwrap_or(' ');
+                
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: line_num + 1,
+                    column: 1,
+                    message: format!(
+                        "Heading '{}' should not end with punctuation '{}'",
+                        line.trim(),
+                        last_char
+                    ),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: self.get_line_byte_range(content, line_num + 1),
+                        replacement: self.fix_setext_heading(line, &re),
+                    }),
+                });
             }
         }
         

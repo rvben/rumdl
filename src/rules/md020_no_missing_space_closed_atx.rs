@@ -221,7 +221,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line).unwrap_or_else(|| {
                         // This shouldn't happen given the is_closed_atx_heading_without_space check,
                         // but we'll handle it gracefully anyway
-                        return CLOSED_ATX_NO_SPACE_PATTERN.captures(" # # ").unwrap();
+                        CLOSED_ATX_NO_SPACE_PATTERN.captures(" # # ").unwrap()
                     })
                 };
                 
@@ -273,7 +273,7 @@ mod tests {
     
     #[test]
     fn test_with_document_structure() {
-        let rule = MD020NoMissingSpaceClosedAtx::default();
+        let rule = MD020NoMissingSpaceClosedAtx;
         
         // Test with correct spacing
         let content = "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###";

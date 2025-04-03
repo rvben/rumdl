@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_is_in_code_span() {
-        let rule = MD034NoBareUrls::default();
+        let rule = MD034NoBareUrls;
         let spans = vec![(5, 10), (15, 20), (25, 30)];
         
         assert!(rule.is_in_code_span(7, &spans));

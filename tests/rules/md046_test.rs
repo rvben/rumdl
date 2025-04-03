@@ -1,6 +1,6 @@
 use rumdl::rule::Rule;
-use rumdl::rules::md046_code_block_style::CodeBlockStyle;
-use rumdl::rules::MD046CodeBlockStyle;
+use rumdl::rules::code_block_utils::CodeBlockStyle;
+use rumdl::MD046CodeBlockStyle;
 
 #[test]
 fn test_consistent_fenced_blocks() {

@@ -324,7 +324,7 @@ mod tests {
     
     #[test]
     fn test_with_document_structure() {
-        let rule = MD001HeadingIncrement::default();
+        let rule = MD001HeadingIncrement;
         
         // Test with valid headings
         let content = "# Heading 1\n## Heading 2\n### Heading 3";

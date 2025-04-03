@@ -1,7 +1,6 @@
 use crate::utils::range_utils::LineIndex;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions, CodeBlockType};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
-use crate::rules::code_block_utils::CodeBlockUtils;
 
 #[derive(Debug, Default)]
 pub struct MD040FencedCodeLanguage;

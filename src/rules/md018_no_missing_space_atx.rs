@@ -236,7 +236,7 @@ mod tests {
     
     #[test]
     fn test_with_document_structure() {
-        let rule = MD018NoMissingSpaceAtx::default();
+        let rule = MD018NoMissingSpaceAtx;
         
         // Test with correct space
         let content = "# Heading 1\n## Heading 2\n### Heading 3";

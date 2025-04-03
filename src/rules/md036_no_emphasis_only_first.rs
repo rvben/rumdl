@@ -69,12 +69,12 @@ impl MD036NoEmphasisOnlyFirst {
         // Split long text into multiple lines if needed
         let text = text.trim();
         if text.len() > 80 {
-            let mut words = text.split_whitespace();
+            let words = text.split_whitespace();
             let mut current_line = String::new();
             let mut result = String::new();
             let mut first_line = true;
 
-            while let Some(word) = words.next() {
+            for word in words {
                 if current_line.len() + word.len() + 1 > 80 {
                     if first_line {
                         result.push_str(&format!("{} {}\n", prefix, current_line.trim()));
@@ -94,7 +94,7 @@ impl MD036NoEmphasisOnlyFirst {
             if first_line {
                 result.push_str(&format!("{} {}", prefix, current_line.trim()));
             } else {
-                result.push_str(&format!("{}", current_line.trim()));
+                result.push_str(current_line.trim());
             }
             result
         } else {

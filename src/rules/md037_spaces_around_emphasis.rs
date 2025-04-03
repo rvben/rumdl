@@ -264,7 +264,7 @@ fn check_emphasis_patterns(
     warnings: &mut Vec<LintWarning>,
 ) {
     // Instance of the rule to call the check_pattern method
-    let rule = MD037SpacesAroundEmphasis::default();
+    let rule = MD037SpacesAroundEmphasis;
     
     // Skip if this is a list marker rather than emphasis
     if LIST_MARKER.is_match(line) {
@@ -447,7 +447,7 @@ mod tests {
     
     #[test]
     fn test_with_document_structure() {
-        let rule = MD037SpacesAroundEmphasis::default();
+        let rule = MD037SpacesAroundEmphasis;
         
         // Test with no spaces inside emphasis
         let content = "This is *correct* emphasis and **strong emphasis**";

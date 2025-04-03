@@ -32,6 +32,12 @@ pub struct MD033NoInlineHtml {
     allowed: Vec<String>,
 }
 
+impl Default for MD033NoInlineHtml {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MD033NoInlineHtml {
     pub fn new() -> Self {
         Self {
@@ -317,8 +323,8 @@ impl Rule for MD033NoInlineHtml {
                     continue;
                 }
                 
-                // Skip if in code span
-                if line.contains(*BACKTICK) && self.is_in_code_span(line, start_pos) {
+                // Skip if in code span - using document structure
+                if structure.is_in_code_span(i + 1, start_pos + 1) {
                     continue;
                 }
                 

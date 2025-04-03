@@ -1,17 +1,10 @@
 use crate::utils::range_utils::LineIndex;
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rules::code_fence_utils::CodeFenceStyle;
 
 /// Rule MD048: Code fence style should be consistent
 pub struct MD048CodeFenceStyle {
     style: CodeFenceStyle,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum CodeFenceStyle {
-    Backtick,
-    Tilde,
-    Consistent,
 }
 
 impl MD048CodeFenceStyle {
@@ -50,7 +43,7 @@ impl Rule for MD048CodeFenceStyle {
             CodeFenceStyle::Consistent => self
                 .detect_style(content)
                 .unwrap_or(CodeFenceStyle::Backtick),
-            _ => self.style.clone(),
+            _ => self.style,
         };
 
         for (line_num, line) in content.lines().enumerate() {
@@ -94,7 +87,7 @@ impl Rule for MD048CodeFenceStyle {
             CodeFenceStyle::Consistent => self
                 .detect_style(content)
                 .unwrap_or(CodeFenceStyle::Backtick),
-            _ => self.style.clone(),
+            _ => self.style,
         };
 
         let mut result = String::new();

@@ -25,9 +25,9 @@ pub enum HeadingStyle {
     AtxClosed, // # Heading #
     Setext1,   // Heading
     // =======
-    Setext2,   // Heading
-    // -------
-    Consistent, // Use the style of the first heading in the document
+    Setext2, // Heading
+             // -------
+    Consistent, // For maintaining consistency with the first found header style
 }
 
 /// Represents a heading in a Markdown document
@@ -183,49 +183,44 @@ impl HeadingUtils {
     }
 
     /// Convert a heading to a different style
-    pub fn convert_heading_style(text: &str, level: u32, style: HeadingStyle) -> String {
-        if text.trim().is_empty() {
+    pub fn convert_heading_style(text_content: &str, level: u32, style: HeadingStyle) -> String {
+        if text_content.trim().is_empty() {
             return String::new();
         }
-
+        
         // Validate heading level
         let level = level.clamp(1, 6);
-        let indentation = text.chars().take_while(|c| c.is_whitespace()).collect::<String>();
-        let text_content = text.trim_start();
-
+        let indentation = text_content.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+        let text_content = text_content.trim();
+        
         match style {
             HeadingStyle::Atx => {
-                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content.trim())
+                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
             }
             HeadingStyle::AtxClosed => {
-                format!("{}{} {} {}", indentation, "#".repeat(level as usize), text_content.trim(), "#".repeat(level as usize))
+                format!("{}{} {} {}", indentation, "#".repeat(level as usize), text_content, "#".repeat(level as usize))
             }
             HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
                 if level > 2 {
-                    // Setext only supports level 1-2, fall back to ATX for level 3+
-                    format!("{}{} {}", indentation, "#".repeat(level as usize), text_content.trim())
+                    // Fall back to ATX style for levels > 2
+                    format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
                 } else {
-                    let marker = if style == HeadingStyle::Setext1 || level == 1 { "=" } else { "-" };
-                    let content_len = text_content.trim().len();
-                    // Need at least 3 markers for a valid setext heading
-                    let marker_count = content_len.max(3);
-                    format!("{}{}\n{}{}", indentation, text_content.trim(), indentation, marker.repeat(marker_count))
+                    let underline_char = if level == 1 || style == HeadingStyle::Setext1 { '=' } else { '-' };
+                    let visible_length = text_content.chars().count();
+                    let underline_length = visible_length.max(3); // Ensure at least 3 underline chars
+                    format!("{}{}\n{}{}", indentation, text_content, indentation, underline_char.to_string().repeat(underline_length))
                 }
             }
             HeadingStyle::Consistent => {
                 // For Consistent style, default to ATX as it's the most commonly used
-                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content.trim())
+                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
             }
         }
     }
 
     /// Get the text content of a heading line
     pub fn get_heading_text(line: &str) -> Option<String> {
-        if let Some(captures) = ATX_PATTERN.captures(line) {
-            Some(captures.get(4).map_or("", |m| m.as_str()).trim().to_string())
-        } else {
-            None
-        }
+        ATX_PATTERN.captures(line).map(|captures| captures.get(4).map_or("", |m| m.as_str()).trim().to_string())
     }
 
     /// Detect emphasis-only lines

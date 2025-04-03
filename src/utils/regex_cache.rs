@@ -4,6 +4,22 @@ use regex::Regex;
 /// A module that provides cached regex patterns for use across multiple rules
 /// This helps avoid recompiling the same patterns repeatedly, improving performance
 
+/// Macro for lazily creating a regex pattern
+#[macro_export]
+macro_rules! regex_lazy {
+    ($pattern:expr) => {
+        {
+            lazy_static::lazy_static! {
+                static ref REGEX: regex::Regex = regex::Regex::new($pattern).unwrap();
+            }
+            &*REGEX
+        }
+    };
+}
+
+// Also make the macro available directly from this module
+pub use crate::regex_lazy;
+
 lazy_static! {
     // URL patterns
     pub static ref URL_REGEX: Regex = Regex::new(r#"(?:https?|ftp)://[^\s<>\[\]()'"]+[^\s<>\[\]()"'.,]"#).unwrap();

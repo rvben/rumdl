@@ -121,13 +121,13 @@ fn test_blockquote_sections() {
     assert!(BlockquoteUtils::is_blockquote(content.lines().nth(5).unwrap()));
     
     // Test for lines that are not blockquotes
-    assert!(!BlockquoteUtils::is_blockquote(content.lines().nth(0).unwrap()));
+    assert!(!BlockquoteUtils::is_blockquote(content.lines().next().unwrap()));
     assert!(!BlockquoteUtils::is_blockquote(content.lines().nth(3).unwrap()));
     assert!(!BlockquoteUtils::is_blockquote(content.lines().nth(4).unwrap()));
     assert!(!BlockquoteUtils::is_blockquote(content.lines().nth(6).unwrap()));
     
     // Edge cases - out of bounds should return false
-    assert!(!content.lines().nth(100).is_some()); // Out of bounds
+    assert!(content.lines().nth(100).is_none()); // Out of bounds
     assert!(!BlockquoteUtils::is_blockquote("")); // Empty document
 }
 

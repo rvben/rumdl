@@ -3,22 +3,18 @@ use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
 use regex::Regex;
+use crate::rules::strong_style::StrongStyle;
 
 lazy_static! {
     static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"__[^_\\]+__").unwrap();
     static ref ASTERISK_PATTERN: Regex = Regex::new(r"\*\*[^*\\]+\*\*").unwrap();
 }
 
-/// Rule MD050: Strong emphasis style should be consistent
+/// Rule MD050: Strong style should be consistent
+///
+/// This rule is triggered when strong markers (** or __) are used in an inconsistent way.
 pub struct MD050StrongStyle {
     style: StrongStyle,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StrongStyle {
-    Asterisk,
-    Underscore,
-    Consistent,
 }
 
 impl MD050StrongStyle {
@@ -83,7 +79,7 @@ impl Rule for MD050StrongStyle {
 
         let target_style = match self.style {
             StrongStyle::Consistent => self.detect_style(content).unwrap_or(StrongStyle::Asterisk),
-            _ => self.style.clone(),
+            _ => self.style,
         };
 
         let strong_regex = match target_style {
@@ -129,7 +125,7 @@ impl Rule for MD050StrongStyle {
 
         let target_style = match self.style {
             StrongStyle::Consistent => self.detect_style(content).unwrap_or(StrongStyle::Asterisk),
-            _ => self.style.clone(),
+            _ => self.style,
         };
 
         let strong_regex = match target_style {

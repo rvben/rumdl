@@ -1,7 +1,8 @@
 use crate::utils::range_utils::LineIndex;
-
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use regex::Regex;
+use lazy_static::lazy_static;
 
 /// Rule MD042: No empty links
 ///
@@ -30,27 +31,28 @@ impl Rule for MD042NoEmptyLinks {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
-
+        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
-        let empty_link_regex = Regex::new(r"\[([^\]]*)\]\(([^\)]*)\)").unwrap();
+        lazy_static! {
+            static ref EMPTY_LINK_REGEX: Regex = Regex::new(r"\[([^\]]*)\]\(([^\)]*)\)").unwrap();
+        }
 
         for (line_num, line) in content.lines().enumerate() {
-            for cap in empty_link_regex.captures_iter(line) {
+            for cap in EMPTY_LINK_REGEX.captures_iter(line) {
                 let text = cap.get(1).map_or("", |m| m.as_str());
                 let url = cap.get(2).map_or("", |m| m.as_str());
 
                 if text.trim().is_empty() || url.trim().is_empty() {
                     let full_match = cap.get(0).unwrap();
                     warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         message: format!("Empty link found: [{}]({})", text, url),
                         line: line_num + 1,
                         column: full_match.start() + 1,
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index
+                            range: line_index
                                 .line_col_to_byte_range(line_num + 1, full_match.start() + 1),
                             replacement: String::new(), // Remove empty link
                         }),
@@ -62,12 +64,44 @@ impl Rule for MD042NoEmptyLinks {
         Ok(warnings)
     }
 
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early return if there are no links
+        if structure.links.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        let line_index = LineIndex::new(content.to_string());
+        let mut warnings = Vec::new();
+        
+        // Get pre-computed empty links
+        let empty_links = structure.get_empty_links();
+        
+        for link in empty_links {
+            warnings.push(LintWarning {
+                rule_name: Some(self.name()),
+                message: format!("Empty link found: [{}]({})", link.text, link.url),
+                line: link.line,
+                column: link.start_col,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: line_index.line_col_to_byte_range(link.line, link.start_col),
+                    replacement: String::new(), // Remove empty link
+                }),
+            });
+        }
+        
+        Ok(warnings)
+    }
+
     fn fix(&self, content: &str) -> Result<String, LintError> {
         let _line_index = LineIndex::new(content.to_string());
 
-        let empty_link_regex = Regex::new(r"\[([^\]]*)\]\(([^\)]*)\)").unwrap();
+        lazy_static! {
+            static ref EMPTY_LINK_REGEX: Regex = Regex::new(r"\[([^\]]*)\]\(([^\)]*)\)").unwrap();
+        }
 
-        let result = empty_link_regex.replace_all(content, |caps: &regex::Captures| {
+        let result = EMPTY_LINK_REGEX.replace_all(content, |caps: &regex::Captures| {
             let text = caps.get(1).map_or("", |m| m.as_str());
             let url = caps.get(2).map_or("", |m| m.as_str());
 
@@ -79,5 +113,23 @@ impl Rule for MD042NoEmptyLinks {
         });
 
         Ok(result.to_string())
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Link
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        // Skip if there are no links in the content
+        !content.contains('[')
+    }
+}
+
+impl DocumentStructureExtensions for MD042NoEmptyLinks {
+    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+        // Only run if the document has links
+        !doc_structure.links.is_empty()
     }
 }

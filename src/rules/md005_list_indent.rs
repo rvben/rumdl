@@ -728,7 +728,7 @@ mod tests {
     
     #[test]
     fn test_with_document_structure() {
-        let rule = MD005ListIndent::default();
+        let rule = MD005ListIndent;
         
         // Test with consistent list indentation
         let content = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";

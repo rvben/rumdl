@@ -160,7 +160,7 @@ impl Rule for MD031BlanksAroundFences {
         
         // Process each code fence start and end
         for &start_line in &structure.fenced_code_block_starts {
-            let line_num = start_line as usize;
+            let line_num = start_line;
             
             // Check for blank line before fence
             if line_num > 1 && !Self::is_empty_line(lines[line_num - 2]) {
@@ -179,7 +179,7 @@ impl Rule for MD031BlanksAroundFences {
         }
         
         for &end_line in &structure.fenced_code_block_ends {
-            let line_num = end_line as usize;
+            let line_num = end_line;
             
             // Check for blank line after fence
             if line_num < lines.len() && !Self::is_empty_line(lines[line_num]) {
@@ -214,7 +214,7 @@ mod tests {
     
     #[test]
     fn test_with_document_structure() {
-        let rule = MD031BlanksAroundFences::default();
+        let rule = MD031BlanksAroundFences;
         
         // Test with properly formatted code blocks
         let content = "# Test Code Blocks\n\n```rust\nfn main() {}\n```\n\nSome text here.";

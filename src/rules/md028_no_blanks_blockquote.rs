@@ -1,7 +1,7 @@
 use crate::utils::range_utils::LineIndex;
-
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
 use crate::rules::blockquote_utils::BlockquoteUtils;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 
 #[derive(Debug, Default)]
 pub struct MD028NoBlanksBlockquote;
@@ -37,7 +37,7 @@ impl Rule for MD028NoBlanksBlockquote {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
 
@@ -65,13 +65,13 @@ impl Rule for MD028NoBlanksBlockquote {
                     let indent = BlockquoteUtils::extract_indentation(line);
 
                     warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         message: "Blank line inside blockquote".to_string(),
                         line: i + 1,
                         column: 1,
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, 1),
+                            range: line_index.line_col_to_byte_range(i + 1, 1),
                             replacement: Self::get_replacement(&indent, level),
                         }),
                     });
@@ -82,6 +82,52 @@ impl Rule for MD028NoBlanksBlockquote {
             }
         }
 
+        Ok(warnings)
+    }
+    
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early return if there are no blockquotes
+        if structure.blockquotes.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        let line_index = LineIndex::new(content.to_string());
+        let mut warnings = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Process each blockquote region
+        for blockquote in &structure.blockquotes {
+            // Check for blank lines within this blockquote
+            for line_num in blockquote.start_line..=blockquote.end_line {
+                // Skip if out of bounds
+                if line_num == 0 || line_num > lines.len() {
+                    continue;
+                }
+                
+                let line_idx = line_num - 1; // Convert to 0-indexed
+                let line = lines[line_idx];
+                
+                // Check if this is an empty blockquote line
+                if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::is_empty_blockquote(line) {
+                    let level = BlockquoteUtils::get_nesting_level(line);
+                    let indent = BlockquoteUtils::extract_indentation(line);
+                    
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        message: "Blank line inside blockquote".to_string(),
+                        line: line_num,
+                        column: 1,
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(line_num, 1),
+                            replacement: Self::get_replacement(&indent, level),
+                        }),
+                    });
+                }
+            }
+        }
+        
         Ok(warnings)
     }
 
@@ -127,5 +173,22 @@ impl Rule for MD028NoBlanksBlockquote {
 
         // Preserve trailing newline if original content had one
         Ok(result.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Blockquote
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        !content.contains('>')
+    }
+}
+
+impl DocumentStructureExtensions for MD028NoBlanksBlockquote {
+    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+        // Only run if the document has blockquotes
+        !doc_structure.blockquotes.is_empty()
     }
 }

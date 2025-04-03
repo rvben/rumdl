@@ -1,6 +1,6 @@
 use rumdl::rule::Rule;
-use rumdl::rules::md049_emphasis_style::EmphasisStyle;
-use rumdl::rules::MD049EmphasisStyle;
+use rumdl::rules::emphasis_style::EmphasisStyle;
+use rumdl::MD049EmphasisStyle;
 
 #[test]
 fn test_consistent_asterisks() {

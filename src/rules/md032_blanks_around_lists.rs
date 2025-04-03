@@ -175,7 +175,7 @@ impl Rule for MD032BlanksAroundLists {
         let mut result = Vec::with_capacity(lines.len() + 10);
 
         // Fast path check - if no list markers are present, return content as is
-        if !content.contains(|c| matches!(c, '-' | '*' | '+' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0')) {
+        if !content.contains(['-', '*', '+', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0']) {
             return Ok(content.to_string());
         }
 
@@ -324,7 +324,7 @@ impl Rule for MD032BlanksAroundLists {
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || 
-        !content.contains(|c| matches!(c, '-' | '*' | '+' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0'))
+        !content.contains(['-', '*', '+', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'])
     }
     
     /// Get the category of this rule for selective processing
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_with_document_structure() {
-        let rule = MD032BlanksAroundLists::default();
+        let rule = MD032BlanksAroundLists;
         
         // Test case 1: List without blank lines
         let content = "Paragraph\n- Item 1\n- Item 2\nAnother paragraph";

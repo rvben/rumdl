@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_empty_content() {
-        let rule = MD047FileEndNewline::default();
+        let rule = MD047FileEndNewline;
         let content = "";
         let result = rule.check(content).unwrap();
         assert!(result.is_empty(), "Empty content should not trigger warnings");
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_single_newline() {
-        let rule = MD047FileEndNewline::default();
+        let rule = MD047FileEndNewline;
         let content = "# Test\n";
         let result = rule.check(content).unwrap();
         assert!(result.is_empty(), "Content with single trailing newline should not trigger warnings");
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn test_missing_newline() {
-        let rule = MD047FileEndNewline::default();
+        let rule = MD047FileEndNewline;
         let content = "# Test";
         let result = rule.check(content).unwrap();
         assert_eq!(result.len(), 1, "Content without trailing newline should trigger a warning");
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_multiple_newlines() {
-        let rule = MD047FileEndNewline::default();
+        let rule = MD047FileEndNewline;
         let content = "# Test\n\n";
         let result = rule.check(content).unwrap();
         assert_eq!(result.len(), 1, "Content with multiple trailing newlines should trigger a warning");
@@ -132,7 +132,7 @@ mod tests {
     
     #[test]
     fn test_only_whitespace() {
-        let rule = MD047FileEndNewline::default();
+        let rule = MD047FileEndNewline;
         let content = "  \n\n";
         let result = rule.check(content).unwrap();
         assert_eq!(result.len(), 1, "Content with only whitespace and multiple newlines should trigger a warning");

@@ -1,5 +1,4 @@
 use rumdl::rules::front_matter_utils::{FrontMatterUtils, FrontMatterType};
-use std::collections::HashMap;
 
 #[test]
 fn test_detect_front_matter_type() {
@@ -189,7 +188,7 @@ fn test_extract_front_matter_fields() {
     // Front matter with nested fields
     let nested_content = "---\ntitle: Test Document\nmetadata:\n  date: 2023-04-01\n  author: Test Author\n---\n# Heading";
     let nested_fields = FrontMatterUtils::extract_front_matter_fields(nested_content);
-    assert!(nested_fields.len() >= 1);
+    assert!(!nested_fields.is_empty());
     assert_eq!(nested_fields.get("title"), Some(&"Test Document".to_string()));
     
     // No front matter

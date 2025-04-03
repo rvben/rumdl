@@ -419,3 +419,17 @@ fn is_likely_code_block_delimiter(chars: &[char], start_idx: usize) -> bool {
 
     true
 }
+
+/// The style for code blocks (MD046)
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Default)]
+pub enum CodeBlockStyle {
+    /// Consistent with the first code block style found
+    #[default]
+    Consistent,
+    /// Indented code blocks (4 spaces)
+    Indented,
+    /// Fenced code blocks (``` or ~~~)
+    Fenced,
+}
+

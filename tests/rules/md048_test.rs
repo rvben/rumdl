@@ -1,6 +1,6 @@
 use rumdl::rule::Rule;
-use rumdl::rules::md048_code_fence_style::CodeFenceStyle;
-use rumdl::rules::MD048CodeFenceStyle;
+use rumdl::rules::code_fence_utils::CodeFenceStyle;
+use rumdl::MD048CodeFenceStyle;
 
 #[test]
 fn test_consistent_backticks() {

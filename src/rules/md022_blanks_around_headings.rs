@@ -550,7 +550,7 @@ impl Rule for MD022BlanksAroundHeadings {
                         
                         if effective_heading_line < lines.len() - 1 && blank_lines_below < self.lines_below {
                             issues.push(format!("Heading should have at least {} blank line(s) below.", self.lines_below));
-                            fix_ranges.push(line.len() as usize..line.len() as usize);
+                            fix_ranges.push(line.len()..line.len());
                             fix_replacements.push("\n".repeat(self.lines_below));
                         }
                     }
@@ -707,7 +707,7 @@ impl Rule for MD022BlanksAroundHeadings {
                     
                     if effective_heading_line < lines.len() - 1 && blank_lines_below < self.lines_below {
                         issues.push(format!("Heading should have at least {} blank line(s) below.", self.lines_below));
-                        fix_ranges.push(line.len() as usize..line.len() as usize);
+                        fix_ranges.push(line.len()..line.len());
                         fix_replacements.push("\n".repeat(self.lines_below));
                     }
                 }

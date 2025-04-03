@@ -8,18 +8,13 @@ pub mod utils;
 #[cfg(feature = "python")]
 pub mod python;
 
-// Re-export commonly used types
 pub use rules::heading_utils::{Heading, HeadingStyle};
 pub use rules::*;
 
 use globset::GlobBuilder;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use rayon::prelude::*;
-use crate::rule::{LintError, LintResult, Rule, RuleCategory};
-use crate::utils::document_structure::DocumentStructure;
-// Remove the log import as it's causing errors and we've commented out the debug statements
-// use log::debug;
+use crate::rule::{LintResult, Rule};
 
 /// Collect patterns from .gitignore files
 ///
@@ -243,10 +238,8 @@ pub fn should_exclude(file_path: &str, exclude_patterns: &[String], respect_giti
             }
 
             // If it's not a directory pattern (no /), also try as a literal string
-            if !normalized_pattern.contains('/') {
-                if normalized_path_str.contains(dir_pattern) {
-                    return true;
-                }
+            if !normalized_pattern.contains('/') && normalized_path_str.contains(dir_pattern) {
+                return true;
             }
             continue;
         }
@@ -254,8 +247,7 @@ pub fn should_exclude(file_path: &str, exclude_patterns: &[String], respect_giti
         // Try to create a glob pattern
         let glob_result = GlobBuilder::new(normalized_pattern)
             .literal_separator(true)  // Make sure * doesn't match /
-            .build()
-            .and_then(|glob| Ok(glob.compile_matcher()));
+            .build().map(|glob| glob.compile_matcher());
 
         match glob_result {
             Ok(matcher) => {
@@ -349,8 +341,7 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
                 // Try as a glob pattern
                 let glob_result = GlobBuilder::new(&resolved_pattern)
                     .literal_separator(true)
-                    .build()
-                    .and_then(|glob| Ok(glob.compile_matcher()));
+                    .build().map(|glob| glob.compile_matcher());
                     
                 if let Ok(matcher) = glob_result {
                     if matcher.is_match(normalized_path_str) {
@@ -362,8 +353,7 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
             // Try to create a glob pattern for traversal
             match GlobBuilder::new(normalized_pattern)
                 .literal_separator(false) // Allow matching across directory boundaries
-                .build()
-                .and_then(|glob| Ok(glob.compile_matcher())) {
+                .build().map(|glob| glob.compile_matcher()) {
                 Ok(matcher) => {
                     if matcher.is_match(normalized_path_str) {
                         return true;
@@ -425,10 +415,8 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
             }
 
             // If it's not a directory pattern (no /), also try as a literal string
-            if !normalized_pattern.contains('/') {
-                if normalized_path_str.contains(dir_pattern) {
-                    return true;
-                }
+            if !normalized_pattern.contains('/') && normalized_path_str.contains(dir_pattern) {
+                return true;
             }
             continue;
         }
@@ -437,8 +425,7 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
         // First try with literal_separator=true (more strict)
         let glob_result = GlobBuilder::new(normalized_pattern)
             .literal_separator(true)  // Make sure * doesn't match /
-            .build()
-            .and_then(|glob| Ok(glob.compile_matcher()));
+            .build().map(|glob| glob.compile_matcher());
 
         match glob_result {
             Ok(matcher) => {
@@ -450,16 +437,12 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
                         // For complex glob patterns, we need a more flexible match
                         let flexible_glob_result = GlobBuilder::new(normalized_pattern)
                             .literal_separator(false)  // Allow * to match /
-                            .build()
-                            .and_then(|glob| Ok(glob.compile_matcher()));
+                            .build().map(|glob| glob.compile_matcher());
                             
-                        match flexible_glob_result {
-                            Ok(flexible_matcher) => {
-                                if flexible_matcher.is_match(normalized_path_str) {
-                                    return true;
-                                }
-                            },
-                            Err(_) => {}
+                        if let Ok(flexible_matcher) = flexible_glob_result {
+                            if flexible_matcher.is_match(normalized_path_str) {
+                                return true;
+                            }
                         }
                     }
                 }

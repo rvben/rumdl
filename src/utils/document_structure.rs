@@ -1,7 +1,6 @@
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::ops::Range;
-use crate::rules::code_block_utils::CodeBlockUtils;
+use crate::rules::heading_utils::HeadingStyle;
 
 /// A struct that contains pre-computed information about a markdown document structure
 /// to avoid redundant parsing of the same elements by multiple rules.
@@ -31,6 +30,22 @@ pub struct DocumentStructure {
     pub fenced_code_block_starts: Vec<usize>,
     /// Line numbers of fenced code block ends (1-indexed)
     pub fenced_code_block_ends: Vec<usize>,
+    /// Style of the first heading found in the document (for consistent style rules)
+    pub first_heading_style: Option<HeadingStyle>,
+    /// OPTIMIZATION 1: Detailed information about inline code spans
+    pub code_spans: Vec<CodeSpan>,
+    /// OPTIMIZATION 1: Bitmap indicating which line-column positions are within code spans
+    pub in_code_span: Vec<Vec<bool>>,
+    /// OPTIMIZATION 2: Collection of links in the document
+    pub links: Vec<Link>,
+    /// OPTIMIZATION 2: Collection of images in the document
+    pub images: Vec<Image>,
+    /// OPTIMIZATION 3: Detailed information about list items
+    pub list_items: Vec<ListItem>,
+    /// OPTIMIZATION 4: Blockquotes in the document
+    pub blockquotes: Vec<BlockquoteRange>,
+    /// OPTIMIZATION 4: Bitmap indicating which lines are inside blockquotes
+    pub in_blockquote: Vec<bool>,
 }
 
 /// Front matter block
@@ -106,6 +121,57 @@ enum InternalCodeBlockState {
     InIndented,
 }
 
+/// OPTIMIZATION 1: Inline code span representation
+#[derive(Debug, Clone)]
+pub struct CodeSpan {
+    /// The line number where the code span is (1-indexed)
+    pub line: usize,
+    /// Starting column of the code span (1-indexed)
+    pub start_col: usize,
+    /// Ending column of the code span (1-indexed)
+    pub end_col: usize,
+    /// The content of the code span (without the backticks)
+    pub content: String,
+}
+
+/// OPTIMIZATION 2: Link representation
+#[derive(Debug, Clone)]
+pub struct Link {
+    /// The line number where the link is (1-indexed)
+    pub line: usize,
+    /// Starting column of the link (1-indexed)
+    pub start_col: usize,
+    /// Ending column of the link (1-indexed)
+    pub end_col: usize,
+    /// The text displayed for the link
+    pub text: String,
+    /// The destination URL
+    pub url: String,
+    /// Whether this is a reference link [text][reference]
+    pub is_reference: bool,
+    /// The reference ID (for reference links)
+    pub reference_id: Option<String>,
+}
+
+/// OPTIMIZATION 2: Image representation
+#[derive(Debug, Clone)]
+pub struct Image {
+    /// The line number where the image is (1-indexed)
+    pub line: usize,
+    /// Starting column of the image (1-indexed)
+    pub start_col: usize,
+    /// Ending column of the image (1-indexed)
+    pub end_col: usize,
+    /// The alt text of the image
+    pub alt_text: String,
+    /// The source URL
+    pub src: String,
+    /// Whether this is a reference image ![text][reference]
+    pub is_reference: bool,
+    /// The reference ID (for reference images)
+    pub reference_id: Option<String>,
+}
+
 impl DocumentStructure {
     /// Create a new DocumentStructure by analyzing the document content
     pub fn new(content: &str) -> Self {
@@ -123,6 +189,15 @@ impl DocumentStructure {
             in_code_block: Vec::new(),
             fenced_code_block_starts: Vec::new(),
             fenced_code_block_ends: Vec::new(),
+            first_heading_style: None,
+            // Initialize new optimization fields
+            code_spans: Vec::new(),
+            in_code_span: Vec::new(),
+            links: Vec::new(),
+            images: Vec::new(),
+            list_items: Vec::new(),
+            blockquotes: Vec::new(),
+            in_blockquote: Vec::new(),
         };
 
         // Analyze the document and populate the structure
@@ -150,11 +225,20 @@ impl DocumentStructure {
         // Populate fenced code block starts and ends
         self.populate_fenced_code_blocks();
 
+        // OPTIMIZATION 4: Detect blockquotes (before code spans and links)
+        self.detect_blockquotes(content);
+
+        // OPTIMIZATION 1: Detect inline code spans
+        self.detect_code_spans(content);
+
+        // OPTIMIZATION 2: Detect links and images
+        self.detect_links_and_images(content);
+
         // Detect headings after front matter is processed
         self.detect_headings(content);
 
-        // Detect lists
-        self.detect_lists(content);
+        // OPTIMIZATION 3: Detect lists with detailed information
+        self.detect_list_items(content);
 
         // Check for URLs
         self.has_urls = content.contains("http://") || content.contains("https://") || 
@@ -210,6 +294,7 @@ impl DocumentStructure {
         // Clear existing data
         self.heading_lines.clear();
         self.heading_levels.clear();
+        self.first_heading_style = None;
         
         let lines: Vec<&str> = content.lines().collect();
         
@@ -229,6 +314,16 @@ impl DocumentStructure {
                 let level = captures[2].len();
                 self.heading_lines.push(i + 1);
                 self.heading_levels.push(level);
+                
+                // If this is the first heading detected, set the style
+                if self.first_heading_style.is_none() {
+                    // Determine if it's a closed ATX heading
+                    if line.trim().ends_with('#') {
+                        self.first_heading_style = Some(HeadingStyle::AtxClosed);
+                    } else {
+                        self.first_heading_style = Some(HeadingStyle::Atx);
+                    }
+                }
                 continue;
             }
 
@@ -239,7 +334,21 @@ impl DocumentStructure {
                 let level = if line.trim().starts_with('=') { 1 } else { 2 };
                 self.heading_lines.push(i); // The heading is the previous line
                 self.heading_levels.push(level);
+                
+                // If this is the first heading detected, set the style
+                if self.first_heading_style.is_none() {
+                    if level == 1 {
+                        self.first_heading_style = Some(HeadingStyle::Setext1);
+                    } else {
+                        self.first_heading_style = Some(HeadingStyle::Setext2);
+                    }
+                }
             }
+        }
+        
+        // Default to ATX if no headings are found
+        if self.heading_lines.is_empty() {
+            self.first_heading_style = Some(HeadingStyle::Atx);
         }
     }
 
@@ -314,11 +423,7 @@ impl DocumentStructure {
                     
                     // Only set language if it's not empty
                     let lang = captures.get(3).map(|m| m.as_str().to_string());
-                    current_language = if let Some(l) = lang {
-                        if !l.is_empty() { Some(l) } else { None }
-                    } else {
-                        None
-                    };
+                    current_language = lang.filter(|l| !l.is_empty());
                 }
                 // Check for indented code block (simplified)
                 else if line.starts_with("    ") && !line.trim().is_empty() {
@@ -470,6 +575,458 @@ impl DocumentStructure {
         }
 
         list_ends
+    }
+
+    /// OPTIMIZATION 1: Detect inline code spans in the document
+    fn detect_code_spans(&mut self, content: &str) {
+        // Clear existing data
+        self.code_spans.clear();
+        
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Initialize in_code_span bitmap
+        self.in_code_span = vec![Vec::new(); lines.len()];
+        for (i, line) in lines.iter().enumerate() {
+            self.in_code_span[i] = vec![false; line.len() + 1]; // +1 for 1-indexed columns
+        }
+        
+        for (line_num, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks
+            if self.is_in_code_block(line_num + 1) {
+                continue;
+            }
+            
+            // Skip empty lines
+            if line.is_empty() {
+                continue;
+            }
+            
+            let mut i = 0;
+            while i < line.len() {
+                // Look for backtick
+                if let Some(start_pos) = line[i..].find('`') {
+                    let start_idx = i + start_pos;
+                    
+                    // Look for closing backtick
+                    if let Some(end_pos) = line[start_idx + 1..].find('`') {
+                        let end_idx = start_idx + 1 + end_pos;
+                        
+                        // We found a code span
+                        let content = line[start_idx + 1..end_idx].to_string();
+                        
+                        // Add to code_spans collection
+                        self.code_spans.push(CodeSpan {
+                            line: line_num + 1, // 1-indexed
+                            start_col: start_idx + 1, // 1-indexed
+                            end_col: end_idx + 1, // 1-indexed
+                            content,
+                        });
+                        
+                        // Mark in the bitmap
+                        for col in start_idx..=end_idx {
+                            if col < self.in_code_span[line_num].len() {
+                                self.in_code_span[line_num][col] = true;
+                            }
+                        }
+                        
+                        // Continue from after the closing backtick
+                        i = end_idx + 1;
+                    } else {
+                        // No closing backtick found
+                        i = start_idx + 1;
+                    }
+                } else {
+                    // No more backticks in this line
+                    break;
+                }
+            }
+        }
+    }
+    
+    /// OPTIMIZATION 2: Detect links and images in the document
+    fn detect_links_and_images(&mut self, content: &str) {
+        lazy_static! {
+            // Regex for inline links: [text](url)
+            static ref INLINE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\(([^)]*)\)").unwrap();
+            // Regex for reference links: [text][id] or [text][] (implicit)
+            static ref REFERENCE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\[([^\]]*)\]").unwrap();
+            // Regex for shortcut reference links: [text]
+            static ref SHORTCUT_LINK: Regex = Regex::new(r"\[([^\]]+)\](?!\(|\[)").unwrap();
+            // Regex for link definitions: [id]: url
+            static ref LINK_DEFINITION: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap();
+            // Regex for inline images: ![alt](src)
+            static ref INLINE_IMAGE: Regex = Regex::new(r"!\[([^\]]*)\]\(([^)]*)\)").unwrap();
+            // Regex for reference images: ![alt][id]
+            static ref REFERENCE_IMAGE: Regex = Regex::new(r"!\[([^\]]*)\]\[([^\]]*)\]").unwrap();
+        }
+        
+        // Clear existing data
+        self.links.clear();
+        self.images.clear();
+        
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // First, find all link definitions
+        let mut link_defs = std::collections::HashMap::new();
+        for (line_num, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks
+            if self.is_in_code_block(line_num + 1) {
+                continue;
+            }
+            
+            // Check for link definitions
+            if let Some(cap) = LINK_DEFINITION.captures(line) {
+                let id = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                let url = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                link_defs.insert(id.to_lowercase(), url);
+            }
+        }
+        
+        // Now find all links and images
+        for (line_num, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks
+            if self.is_in_code_block(line_num + 1) {
+                continue;
+            }
+            
+            // Skip empty lines
+            if line.is_empty() {
+                continue;
+            }
+            
+            // Check if this line contains a character that would indicate a link or image
+            if !line.contains('[') && !line.contains('!') {
+                continue;
+            }
+            
+            // Process each character position to ensure we don't detect links inside code spans
+            let mut i = 0;
+            while i < line.len() {
+                // Skip if this position is in a code span
+                if i < self.in_code_span[line_num].len() && self.in_code_span[line_num][i] {
+                    i += 1;
+                    continue;
+                }
+                
+                // Check for inline links starting at this position
+                if let Some(rest) = line.get(i..) {
+                    if rest.starts_with('[') {
+                        if let Some(cap) = INLINE_LINK.captures(rest) {
+                            let whole_match = cap.get(0).unwrap();
+                            let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                            let url = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                            
+                            // Ensure we're not inside a code span
+                            let is_in_span = (i..i + whole_match.end()).any(|pos| {
+                                pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
+                            });
+                            
+                            if !is_in_span {
+                                self.links.push(Link {
+                                    line: line_num + 1, // 1-indexed
+                                    start_col: i + 1, // 1-indexed
+                                    end_col: i + whole_match.end(), // 1-indexed
+                                    text,
+                                    url,
+                                    is_reference: false,
+                                    reference_id: None,
+                                });
+                            }
+                            
+                            // Skip past this link
+                            i += whole_match.end();
+                        } else if let Some(cap) = REFERENCE_LINK.captures(rest) {
+                            let whole_match = cap.get(0).unwrap();
+                            let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                            let id = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                            
+                            // Use the ID or text as the reference
+                            let ref_id = if id.is_empty() { text.clone() } else { id };
+                            
+                            // Look up the URL from link definitions
+                            let url = link_defs.get(&ref_id.to_lowercase()).cloned().unwrap_or_default();
+                            
+                            // Ensure we're not inside a code span
+                            let is_in_span = (i..i + whole_match.end()).any(|pos| {
+                                pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
+                            });
+                            
+                            if !is_in_span {
+                                self.links.push(Link {
+                                    line: line_num + 1, // 1-indexed
+                                    start_col: i + 1, // 1-indexed
+                                    end_col: i + whole_match.end(), // 1-indexed
+                                    text,
+                                    url,
+                                    is_reference: true,
+                                    reference_id: Some(ref_id),
+                                });
+                            }
+                            
+                            // Skip past this link
+                            i += whole_match.end();
+                        } else {
+                            // No match found, move to next character
+                            i += 1;
+                        }
+                    } else if rest.starts_with("![") {
+                        if let Some(cap) = INLINE_IMAGE.captures(rest) {
+                            let whole_match = cap.get(0).unwrap();
+                            let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                            let src = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                            
+                            // Ensure we're not inside a code span
+                            let is_in_span = (i..i + whole_match.end()).any(|pos| {
+                                pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
+                            });
+                            
+                            if !is_in_span {
+                                self.images.push(Image {
+                                    line: line_num + 1, // 1-indexed
+                                    start_col: i + 1, // 1-indexed
+                                    end_col: i + whole_match.end(), // 1-indexed
+                                    alt_text,
+                                    src,
+                                    is_reference: false,
+                                    reference_id: None,
+                                });
+                            }
+                            
+                            // Skip past this image
+                            i += whole_match.end();
+                        } else if let Some(cap) = REFERENCE_IMAGE.captures(rest) {
+                            let whole_match = cap.get(0).unwrap();
+                            let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                            let id = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                            
+                            // Use the ID or alt_text as the reference
+                            let ref_id = if id.is_empty() { alt_text.clone() } else { id };
+                            
+                            // Look up the URL from link definitions
+                            let src = link_defs.get(&ref_id.to_lowercase()).cloned().unwrap_or_default();
+                            
+                            // Ensure we're not inside a code span
+                            let is_in_span = (i..i + whole_match.end()).any(|pos| {
+                                pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
+                            });
+                            
+                            if !is_in_span {
+                                self.images.push(Image {
+                                    line: line_num + 1, // 1-indexed
+                                    start_col: i + 1, // 1-indexed
+                                    end_col: i + whole_match.end(), // 1-indexed
+                                    alt_text,
+                                    src,
+                                    is_reference: true,
+                                    reference_id: Some(ref_id),
+                                });
+                            }
+                            
+                            // Skip past this image
+                            i += whole_match.end();
+                        } else {
+                            // No match found, move to next character
+                            i += 1;
+                        }
+                    } else {
+                        // Neither a link nor an image, move to next character
+                        i += 1;
+                    }
+                } else {
+                    // We've reached the end of the line
+                    break;
+                }
+            }
+        }
+    }
+    
+    /// OPTIMIZATION 3: Detect list items with detailed information
+    fn detect_list_items(&mut self, content: &str) {
+        lazy_static! {
+            // Regex for unordered list items
+            static ref UL_MARKER: Regex = Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
+            // Regex for ordered list items
+            static ref OL_MARKER: Regex = Regex::new(r"^(\s*)(\d+\.)(\s+)(.*)$").unwrap();
+            // Regex for task list items
+            static ref TASK_MARKER: Regex = Regex::new(r"^(\s*)([*+-])(\s+)\[([ xX])\](.*)$").unwrap();
+        }
+        
+        // Clear existing data
+        self.list_items.clear();
+        self.list_lines.clear();
+        
+        let lines: Vec<&str> = content.lines().collect();
+        
+        for (line_num, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks or front matter
+            if self.is_in_code_block(line_num + 1) || self.is_in_front_matter(line_num + 1) {
+                continue;
+            }
+            
+            // Skip empty lines
+            if line.trim().is_empty() {
+                continue;
+            }
+            
+            // Check for task list items first (they're a subset of unordered list items)
+            if let Some(cap) = TASK_MARKER.captures(line) {
+                let indentation = cap.get(1).map_or("", |m| m.as_str()).len();
+                let marker = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                let content = cap.get(5).map_or("", |m| m.as_str()).to_string();
+                
+                // Record the list line
+                self.list_lines.push(line_num + 1);
+                
+                // Add detailed list item info
+                self.list_items.push(ListItem {
+                    line_number: line_num + 1,
+                    indentation,
+                    marker: marker.clone(),
+                    marker_type: ListMarkerType::Task,
+                    content,
+                });
+            } 
+            // Check for unordered list items
+            else if let Some(cap) = UL_MARKER.captures(line) {
+                let indentation = cap.get(1).map_or("", |m| m.as_str()).len();
+                let marker = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                let content = cap.get(4).map_or("", |m| m.as_str()).to_string();
+                
+                // Record the list line
+                self.list_lines.push(line_num + 1);
+                
+                // Add detailed list item info
+                self.list_items.push(ListItem {
+                    line_number: line_num + 1,
+                    indentation,
+                    marker: marker.clone(),
+                    marker_type: ListMarkerType::Unordered,
+                    content,
+                });
+            } 
+            // Check for ordered list items
+            else if let Some(cap) = OL_MARKER.captures(line) {
+                let indentation = cap.get(1).map_or("", |m| m.as_str()).len();
+                let marker = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                let content = cap.get(4).map_or("", |m| m.as_str()).to_string();
+                
+                // Record the list line
+                self.list_lines.push(line_num + 1);
+                
+                // Add detailed list item info
+                self.list_items.push(ListItem {
+                    line_number: line_num + 1,
+                    indentation,
+                    marker: marker.clone(),
+                    marker_type: ListMarkerType::Ordered,
+                    content,
+                });
+            }
+        }
+    }
+    
+    /// OPTIMIZATION 4: Detect blockquotes in the document
+    fn detect_blockquotes(&mut self, content: &str) {
+        lazy_static! {
+            static ref BLOCKQUOTE_MARKER: Regex = Regex::new(r"^\s*>(.*)$").unwrap();
+        }
+        
+        // Clear existing data
+        self.blockquotes.clear();
+        
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Initialize the blockquote bitmap
+        self.in_blockquote = vec![false; lines.len()];
+        
+        let mut in_blockquote = false;
+        let mut start_line = 0;
+        
+        for (i, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks or front matter
+            if self.is_in_code_block(i + 1) || self.is_in_front_matter(i + 1) {
+                continue;
+            }
+            
+            let is_blockquote_line = BLOCKQUOTE_MARKER.is_match(line);
+            
+            if is_blockquote_line {
+                // Mark this line as inside a blockquote
+                self.in_blockquote[i] = true;
+                
+                if !in_blockquote {
+                    // Start of a new blockquote
+                    in_blockquote = true;
+                    start_line = i + 1; // 1-indexed
+                }
+            } else if in_blockquote {
+                // End of a blockquote
+                self.blockquotes.push(BlockquoteRange {
+                    start_line,
+                    end_line: i, // Previous line was the end
+                });
+                
+                in_blockquote = false;
+            }
+        }
+        
+        // Handle case where file ends with a blockquote
+        if in_blockquote {
+            self.blockquotes.push(BlockquoteRange {
+                start_line,
+                end_line: lines.len(), // Last line
+            });
+        }
+    }
+    
+    /// Check if a position is inside a code span
+    pub fn is_in_code_span(&self, line_num: usize, col: usize) -> bool {
+        if line_num == 0 || line_num > self.in_code_span.len() {
+            return false;
+        }
+        
+        let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
+        
+        if col == 0 || col > self.in_code_span[line_idx].len() {
+            return false;
+        }
+        
+        self.in_code_span[line_idx][col - 1] // Convert 1-indexed to 0-indexed
+    }
+    
+    /// Check if a line is inside a blockquote
+    pub fn is_in_blockquote(&self, line_num: usize) -> bool {
+        if line_num == 0 || line_num > self.in_blockquote.len() {
+            return false;
+        }
+        
+        self.in_blockquote[line_num - 1] // Convert 1-indexed to 0-indexed
+    }
+    
+    /// Get detailed information about a list item at a specific line
+    pub fn get_list_item_at_line(&self, line_num: usize) -> Option<&ListItem> {
+        self.list_items.iter().find(|item| item.line_number == line_num)
+    }
+    
+    /// Get all list items with a specific marker type
+    pub fn get_list_items_by_type(&self, marker_type: ListMarkerType) -> Vec<&ListItem> {
+        self.list_items.iter()
+            .filter(|item| item.marker_type == marker_type)
+            .collect()
+    }
+    
+    /// Get all links with empty text or URLs
+    pub fn get_empty_links(&self) -> Vec<&Link> {
+        self.links.iter()
+            .filter(|link| link.text.trim().is_empty() || link.url.trim().is_empty())
+            .collect()
+    }
+    
+    /// Get all images with empty alt text
+    pub fn get_images_without_alt_text(&self) -> Vec<&Image> {
+        self.images.iter()
+            .filter(|img| img.alt_text.trim().is_empty())
+            .collect()
     }
 }
 

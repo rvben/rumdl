@@ -70,11 +70,11 @@ impl MD029OrderedListPrefix {
     }
 
     // Helper function to find or create a sequence for a given indentation level
-    fn find_or_create_sequence<'a>(
-        sequences: &'a mut HashMap<usize, ListSequence>,
+    fn find_or_create_sequence(
+        sequences: &mut HashMap<usize, ListSequence>,
         indent_level: usize,
         line_num: usize,
-    ) -> &'a mut ListSequence {
+    ) -> &mut ListSequence {
         sequences.entry(indent_level).or_insert(ListSequence {
             index: 0,
             indent_level,

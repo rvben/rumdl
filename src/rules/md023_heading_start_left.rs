@@ -320,12 +320,10 @@ impl Rule for MD023HeadingStartLeft {
                         } else {
                             format!("{} {} {}", "#".repeat(*level), heading_content.trim(), "#".repeat(*level))
                         }
+                    } else if heading_content.trim().is_empty() {
+                        "#".repeat(*level).to_string()
                     } else {
-                        if heading_content.trim().is_empty() {
-                            format!("{}", "#".repeat(*level))
-                        } else {
-                            format!("{} {}", "#".repeat(*level), heading_content.trim())
-                        }
+                        format!("{} {}", "#".repeat(*level), heading_content.trim())
                     };
 
                     warnings.push(LintWarning {
@@ -373,7 +371,7 @@ mod tests {
     
     #[test]
     fn test_with_document_structure() {
-        let rule = MD023HeadingStartLeft::default();
+        let rule = MD023HeadingStartLeft;
         
         // Test with properly aligned headings
         let content = "# Heading 1\n## Heading 2\n### Heading 3";

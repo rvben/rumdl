@@ -329,7 +329,7 @@ mod tests {
     
     #[test]
     fn test_with_document_structure() {
-        let rule = MD006StartBullets::default();
+        let rule = MD006StartBullets;
         
         // Test with properly formatted lists
         let content = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";

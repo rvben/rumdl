@@ -1,6 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
 use crate::utils::range_utils::LineIndex;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions, ListMarkerType};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -156,55 +156,47 @@ impl Rule for MD004UnorderedListStyle {
             return Ok(vec![]);
         }
         
+        // Get only unordered list items from the structure
+        let unordered_items = structure.get_list_items_by_type(ListMarkerType::Unordered);
+        if unordered_items.is_empty() {
+            return Ok(vec![]);
+        }
+        
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
         
         // Track the first marker style for the "consistent" option
-        let mut first_marker: Option<char> = None;
+        let first_marker = match self.style {
+            UnorderedListStyle::Consistent => {
+                // Get marker from first unordered list item
+                if let Some(first_item) = unordered_items.first() {
+                    first_item.marker.chars().next()
+                } else {
+                    // Default to asterisk if no items found
+                    Some('*')
+                }
+            },
+            specific_style => Some(Self::get_marker_char(specific_style)),
+        };
         
-        let lines: Vec<&str> = content.lines().collect();
-        
-        // Process only lines with list items, using the pre-computed list_lines
-        for &line_num in &structure.list_lines {
-            let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-            
-            // Skip if out of bounds
-            if line_idx >= lines.len() {
-                continue;
-            }
-            
-            let line = lines[line_idx];
-            
-            // Skip lines in code blocks
-            if structure.is_in_code_block(line_num) {
-                continue;
-            }
-            
-            if let Some((indent, marker)) = Self::parse_list_marker(line) {
-                // For consistent style, use the first marker encountered
-                let target_style = match self.style {
-                    UnorderedListStyle::Consistent => {
-                        if first_marker.is_none() {
-                            first_marker = Some(marker);
-                        }
-                        first_marker.unwrap()
-                    }
-                    specific_style => Self::get_marker_char(specific_style),
-                };
+        // Process all unordered list items
+        for item in unordered_items {
+            if let Some(target_style) = first_marker {
+                let item_marker = item.marker.chars().next().unwrap_or('*');
                 
-                if marker != target_style {
+                if item_marker != target_style {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
-                        line: line_num,
-                        column: indent + 1,
+                        line: item.line_number,
+                        column: item.indentation + 1,
                         severity: Severity::Warning,
                         message: format!(
                             "Unordered list item marker '{}' does not match style '{}'",
-                            marker, target_style
+                            item_marker, target_style
                         ),
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num, indent + 1),
-                            replacement: format!("{}{} ", " ".repeat(indent), target_style),
+                            range: line_index.line_col_to_byte_range(item.line_number, item.indentation + 1),
+                            replacement: format!("{}{} ", " ".repeat(item.indentation), target_style),
                         }),
                     });
                 }
@@ -311,4 +303,4 @@ mod tests {
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should flag the * and + markers
     }
-}
+} 

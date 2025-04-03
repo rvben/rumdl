@@ -290,7 +290,7 @@ mod tests {
     
     #[test]
     fn test_with_document_structure() {
-        let rule = MD021NoMultipleSpaceClosedAtx::default();
+        let rule = MD021NoMultipleSpaceClosedAtx;
         
         // Test with correct spacing
         let content = "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###";

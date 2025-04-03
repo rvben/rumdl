@@ -48,7 +48,7 @@ impl MD015NoMissingSpaceAfterListMarker {
             return false;
         }
         
-        if let Some(_) = LIST_ITEM_RE.captures(line) {
+        if LIST_ITEM_RE.captures(line).is_some() {
             // Match found, now check if there's no space after the marker
             return true;
         }
@@ -132,7 +132,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
         
         // Early return if no list markers found
         if !content.contains('-') && !content.contains('*') && 
-           !content.contains('+') && !content.contains(|c: char| c.is_digit(10)) {
+           !content.contains('+') && !content.contains(|c: char| c.is_ascii_digit()) {
             return Ok(Vec::new());
         }
 
@@ -197,7 +197,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
         // Early return if no list markers found
         if !content.contains('-') && !content.contains('*') && 
-           !content.contains('+') && !content.contains(|c: char| c.is_digit(10)) {
+           !content.contains('+') && !content.contains(|c: char| c.is_ascii_digit()) {
             return Ok(content.to_string());
         }
 

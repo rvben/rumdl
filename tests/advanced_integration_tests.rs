@@ -135,7 +135,7 @@ fn test_init_load_apply_config() {
     let mut init_cmd = Command::cargo_bin("rumdl").unwrap();
     init_cmd
         .arg("init")
-        .current_dir(&temp_dir.path())
+        .current_dir(temp_dir.path())
         .assert()
         .success();
     
@@ -160,7 +160,7 @@ fn test_init_load_apply_config() {
     // Execute the command and capture output first
     let assert = cmd
         .arg(&markdown_path)
-        .current_dir(&temp_dir.path())
+        .current_dir(temp_dir.path())
         .assert();
     
     // May contain line length issues by default, depending on the default config

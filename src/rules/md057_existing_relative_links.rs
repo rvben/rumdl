@@ -120,7 +120,7 @@ impl MD057ExistingRelativeLinks {
         if debug {
             // println!("is_external_url: URL '{}' is not external", url);
         }
-        return false;
+        false
     }
     
     /// Check if the URL is a fragment-only link (internal document link)
@@ -140,11 +140,7 @@ impl MD057ExistingRelativeLinks {
     
     /// Resolve a relative link against the base path
     fn resolve_link_path(&self, link: &str) -> Option<PathBuf> {
-        if let Some(base_path) = self.base_path.borrow().as_ref() {
-            Some(base_path.join(link))
-        } else {
-            None
-        }
+        self.base_path.borrow().as_ref().map(|base_path| base_path.join(link))
     }
     
     /// Detect inline code spans in a line and return their ranges
@@ -414,7 +410,7 @@ mod tests {
         "#;
         
         // Initialize rule with the base path
-        let rule = MD057ExistingRelativeLinks::new().with_path(base_path.to_path_buf());
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
         
         // Test the rule
         let result = rule.check(content).unwrap();
@@ -445,7 +441,7 @@ mod tests {
         
         // Test with default settings
         let rule = MD057ExistingRelativeLinks::new()
-            .with_path(base_path.to_path_buf());
+            .with_path(base_path);
         
         let result = rule.check(content).unwrap();
         
@@ -469,7 +465,7 @@ mod tests {
         
         // Test with skip_media_files = true (default)
         let rule_skip_media = MD057ExistingRelativeLinks::new()
-            .with_path(base_path.to_path_buf());
+            .with_path(base_path);
         
         let result_skip = rule_skip_media.check(content).unwrap();
         
@@ -478,7 +474,7 @@ mod tests {
         
         // Test with skip_media_files = false
         let rule_check_all = MD057ExistingRelativeLinks::new()
-            .with_path(base_path.to_path_buf())
+            .with_path(base_path)
             .with_skip_media_files(false);
         
         // Debug: Verify media file identification and handling
@@ -536,7 +532,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
     "#;
         
         // Initialize rule with the base path
-        let rule = MD057ExistingRelativeLinks::new().with_path(base_path.to_path_buf());
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
         
         // Test the rule
         let result = rule.check(content).unwrap();

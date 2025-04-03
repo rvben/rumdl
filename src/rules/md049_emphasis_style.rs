@@ -1,4 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rules::emphasis_style::EmphasisStyle;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -16,33 +17,6 @@ lazy_static! {
     static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r"\[.*?\]\(.*?\)").unwrap();
     static ref MARKDOWN_LINK_URL_PART: Regex = Regex::new(r"\[.*?\]\(([^)]+)").unwrap();
     static ref URL_PATTERN: Regex = Regex::new(r"https?://[^\s)]+").unwrap();
-}
-
-/// Emphasis style for MD049
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum EmphasisStyle {
-    /// Use consistent style based on first occurrence
-    Consistent,
-    /// Use asterisks for emphasis
-    Asterisk,
-    /// Use underscores for emphasis
-    Underscore,
-}
-
-impl Default for EmphasisStyle {
-    fn default() -> Self {
-        EmphasisStyle::Consistent
-    }
-}
-
-impl From<&str> for EmphasisStyle {
-    fn from(s: &str) -> Self {
-        match s {
-            "asterisk" => EmphasisStyle::Asterisk,
-            "underscore" => EmphasisStyle::Underscore,
-            _ => EmphasisStyle::Consistent,
-        }
-    }
 }
 
 /// MD049 - Emphasis style should be consistent

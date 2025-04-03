@@ -1,6 +1,7 @@
 use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions, CodeBlockType};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::rules::code_block_utils::CodeBlockStyle;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -13,13 +14,6 @@ lazy_static! {
 /// This rule is triggered when code blocks do not use a consistent style (either fenced or indented).
 pub struct MD046CodeBlockStyle {
     style: CodeBlockStyle,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum CodeBlockStyle {
-    Consistent,
-    Fenced,
-    Indented,
 }
 
 impl MD046CodeBlockStyle {
@@ -104,7 +98,7 @@ impl MD046CodeBlockStyle {
 
         if !fenced_found && !indented_found {
             // No code blocks found
-            return None;
+            None
         } else if fenced_found && !indented_found {
             // Only fenced blocks found
             return Some(CodeBlockStyle::Fenced);
@@ -145,7 +139,7 @@ impl Rule for MD046CodeBlockStyle {
             CodeBlockStyle::Consistent => {
                 self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced)
             }
-            _ => self.style.clone(),
+            _ => self.style,
         };
 
         // Track code block states for proper detection
@@ -245,7 +239,7 @@ impl Rule for MD046CodeBlockStyle {
             CodeBlockStyle::Consistent => {
                 self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced)
             }
-            _ => self.style.clone(),
+            _ => self.style,
         };
 
         let mut result = String::with_capacity(content.len());
@@ -439,7 +433,7 @@ impl Rule for MD046CodeBlockStyle {
                     CodeBlockStyle::Fenced
                 }
             }
-            _ => self.style.clone(),
+            _ => self.style,
         };
         
         // Keep track of code blocks we've processed to avoid duplicate warnings
