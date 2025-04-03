@@ -1,7 +1,7 @@
-use crate::utils::range_utils::LineIndex;
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::blockquote_utils::BlockquoteUtils;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::LineIndex;
 
 #[derive(Debug, Default)]
 pub struct MD028NoBlanksBlockquote;
@@ -84,18 +84,18 @@ impl Rule for MD028NoBlanksBlockquote {
 
         Ok(warnings)
     }
-    
+
     /// Optimized check using document structure
     fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
         // Early return if there are no blockquotes
         if structure.blockquotes.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Process each blockquote region
         for blockquote in &structure.blockquotes {
             // Check for blank lines within this blockquote
@@ -104,15 +104,17 @@ impl Rule for MD028NoBlanksBlockquote {
                 if line_num == 0 || line_num > lines.len() {
                     continue;
                 }
-                
+
                 let line_idx = line_num - 1; // Convert to 0-indexed
                 let line = lines[line_idx];
-                
+
                 // Check if this is an empty blockquote line
-                if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::is_empty_blockquote(line) {
+                if BlockquoteUtils::is_blockquote(line)
+                    && BlockquoteUtils::is_empty_blockquote(line)
+                {
                     let level = BlockquoteUtils::get_nesting_level(line);
                     let indent = BlockquoteUtils::extract_indentation(line);
-                    
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message: "Blank line inside blockquote".to_string(),
@@ -127,7 +129,7 @@ impl Rule for MD028NoBlanksBlockquote {
                 }
             }
         }
-        
+
         Ok(warnings)
     }
 
@@ -174,12 +176,12 @@ impl Rule for MD028NoBlanksBlockquote {
         // Preserve trailing newline if original content had one
         Ok(result.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::Blockquote
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
         !content.contains('>')

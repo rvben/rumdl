@@ -1,5 +1,5 @@
-use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
@@ -47,12 +47,12 @@ impl MD015NoMissingSpaceAfterListMarker {
         if line.is_empty() || line.trim().is_empty() {
             return false;
         }
-        
+
         if LIST_ITEM_RE.captures(line).is_some() {
             // Match found, now check if there's no space after the marker
             return true;
         }
-        
+
         false
     }
 
@@ -72,11 +72,11 @@ impl MD015NoMissingSpaceAfterListMarker {
         let lines: Vec<&str> = content.lines().collect();
         let mut code_block_lines = HashSet::with_capacity(lines.len() / 4);
         let mut front_matter_lines = HashSet::with_capacity(10); // Usually small
-        
+
         let mut in_code_block = false;
         let mut code_fence = String::new();
         let mut in_front_matter = false;
-        
+
         for (i, line) in lines.iter().enumerate() {
             // Track front matter
             if i == 0 && line.trim() == "---" {
@@ -84,7 +84,7 @@ impl MD015NoMissingSpaceAfterListMarker {
                 front_matter_lines.insert(i);
                 continue;
             }
-            
+
             if in_front_matter {
                 front_matter_lines.insert(i);
                 if line.trim() == "---" {
@@ -92,23 +92,27 @@ impl MD015NoMissingSpaceAfterListMarker {
                 }
                 continue;
             }
-            
+
             // Track code blocks more efficiently
             let trimmed = line.trim();
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 if !in_code_block {
                     in_code_block = true;
-                    code_fence = if trimmed.starts_with("```") { "```".to_string() } else { "~~~".to_string() };
+                    code_fence = if trimmed.starts_with("```") {
+                        "```".to_string()
+                    } else {
+                        "~~~".to_string()
+                    };
                 } else if trimmed.starts_with(&code_fence) {
                     in_code_block = false;
                 }
             }
-            
+
             if in_code_block {
                 code_block_lines.insert(i);
             }
         }
-        
+
         (code_block_lines, front_matter_lines)
     }
 }
@@ -124,15 +128,18 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
     fn check(&self, content: &str) -> LintResult {
         let _timer = crate::profiling::ScopedTimer::new("MD015_check");
-        
+
         // Quick returns for common cases
         if content.is_empty() || !self.require_space {
             return Ok(Vec::new());
         }
-        
+
         // Early return if no list markers found
-        if !content.contains('-') && !content.contains('*') && 
-           !content.contains('+') && !content.contains(|c: char| c.is_ascii_digit()) {
+        if !content.contains('-')
+            && !content.contains('*')
+            && !content.contains('+')
+            && !content.contains(|c: char| c.is_ascii_digit())
+        {
             return Ok(Vec::new());
         }
 
@@ -167,7 +174,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
             if Self::is_list_item_without_space(line) {
                 let is_unordered = line.trim_start().starts_with(['*', '+', '-']);
                 warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                    rule_name: Some(self.name()),
                     severity: Severity::Warning,
                     line: line_num + 1,
                     column: 1,
@@ -189,15 +196,18 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
         let _timer = crate::profiling::ScopedTimer::new("MD015_fix");
-        
+
         // Quick returns for common cases
         if content.is_empty() || !self.require_space {
             return Ok(content.to_string());
         }
 
         // Early return if no list markers found
-        if !content.contains('-') && !content.contains('*') && 
-           !content.contains('+') && !content.contains(|c: char| c.is_ascii_digit()) {
+        if !content.contains('-')
+            && !content.contains('*')
+            && !content.contains('+')
+            && !content.contains(|c: char| c.is_ascii_digit())
+        {
             return Ok(content.to_string());
         }
 
@@ -208,7 +218,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
         // Pre-compute special lines efficiently
         let (code_block_lines, front_matter_lines) = self.get_special_lines(content);
-        
+
         // Process the content more efficiently
         let lines: Vec<&str> = content.lines().collect();
         let mut result = String::with_capacity(content.len() + 100); // Pre-allocate with extra space
@@ -217,7 +227,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
             // Fast checks using HashSet lookups
             if code_block_lines.contains(&i) || front_matter_lines.contains(&i) {
                 result.push_str(line);
-            } 
+            }
             // Skip if this is a horizontal rule
             else if Self::is_horizontal_rule(line) {
                 result.push_str(line);

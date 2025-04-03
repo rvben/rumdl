@@ -28,7 +28,7 @@ impl Rule for MD011ReversedLink {
                 let url = &cap[2];
                 let start = cap.get(0).unwrap().start();
                 warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                    rule_name: Some(self.name()),
                     line: line_num + 1,
                     column: start + 1,
                     message: "Reversed link syntax found".to_string(),

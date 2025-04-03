@@ -1,5 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
-use crate::rules::heading_utils::{HeadingStyle};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -41,13 +41,13 @@ lazy_static! {
 ///
 /// ```markdown
 /// # Document Title
-/// 
+///
 /// ## Section 1
-/// 
+///
 /// Content here...
-/// 
+///
 /// ## Section 2
-/// 
+///
 /// More content...
 /// ```
 ///
@@ -55,11 +55,11 @@ lazy_static! {
 ///
 /// ```markdown
 /// ## Introduction
-/// 
+///
 /// Content here...
-/// 
+///
 /// # Main Title
-/// 
+///
 /// More content...
 /// ```
 ///
@@ -114,14 +114,18 @@ impl MD002FirstHeadingH1 {
         0
     }
 
-    fn parse_heading(&self, content: &str, line_number: usize) -> Option<(String, String, u32, HeadingStyle)> {
+    fn parse_heading(
+        &self,
+        content: &str,
+        line_number: usize,
+    ) -> Option<(String, String, u32, HeadingStyle)> {
         let lines: Vec<&str> = content.lines().collect();
         if line_number == 0 || line_number > lines.len() {
             return None;
         }
 
         let line = lines[line_number - 1];
-        
+
         // Skip if line is within a code block
         if self.is_in_code_block(content, line_number) {
             return None;
@@ -146,10 +150,20 @@ impl MD002FirstHeadingH1 {
             if !next_line.trim().is_empty() {
                 if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
                     let indent = captures.get(1).map_or("", |m| m.as_str());
-                    return Some((indent.to_string(), line.trim().to_string(), 1, HeadingStyle::Setext1));
+                    return Some((
+                        indent.to_string(),
+                        line.trim().to_string(),
+                        1,
+                        HeadingStyle::Setext1,
+                    ));
                 } else if let Some(captures) = SETEXT_HEADING_2.captures(next_line) {
                     let indent = captures.get(1).map_or("", |m| m.as_str());
-                    return Some((indent.to_string(), line.trim().to_string(), 2, HeadingStyle::Setext2));
+                    return Some((
+                        indent.to_string(),
+                        line.trim().to_string(),
+                        2,
+                        HeadingStyle::Setext2,
+                    ));
                 }
             }
         }
@@ -205,8 +219,7 @@ impl Rule for MD002FirstHeadingH1 {
                         column: 1,
                         message: format!(
                             "First heading should be level {}, found level {}",
-                            self.level,
-                            level
+                            self.level, level
                         ),
                         severity: Severity::Warning,
                         fix: Some(Fix {
@@ -214,7 +227,11 @@ impl Rule for MD002FirstHeadingH1 {
                                 start: i + 1,
                                 end: i + 1,
                             },
-                            replacement: format!("{}{}", "#".repeat(self.level as usize), " ".repeat(i + 1 - start_line)),
+                            replacement: format!(
+                                "{}{}",
+                                "#".repeat(self.level as usize),
+                                " ".repeat(i + 1 - start_line)
+                            ),
                         }),
                     });
                 }
@@ -231,29 +248,30 @@ impl Rule for MD002FirstHeadingH1 {
         if structure.heading_lines.is_empty() {
             return Ok(vec![]);
         }
-        
+
         let mut result = Vec::new();
-        
+
         // Get the first heading
         let first_heading_line = structure.heading_lines[0];
         let first_heading_level = structure.heading_levels[0];
-        
+
         // Check if the level matches the required level
         if first_heading_level as u32 != self.level {
             // Get the line from the content
             let line_idx = first_heading_line - 1; // Convert 1-indexed to 0-indexed
-            
+
             let lines: Vec<&str> = content.lines().collect();
             let line = if line_idx < lines.len() {
                 lines[line_idx]
             } else {
                 return Ok(vec![]); // Error condition, shouldn't happen
             };
-            
+
             // Determine heading style
-            let _style = if line_idx + 1 < lines.len() && 
-                       (lines[line_idx + 1].trim().starts_with('=') || 
-                        lines[line_idx + 1].trim().starts_with('-')) {
+            let _style = if line_idx + 1 < lines.len()
+                && (lines[line_idx + 1].trim().starts_with('=')
+                    || lines[line_idx + 1].trim().starts_with('-'))
+            {
                 if lines[line_idx + 1].trim().starts_with('=') {
                     HeadingStyle::Setext1
                 } else {
@@ -264,15 +282,14 @@ impl Rule for MD002FirstHeadingH1 {
             } else {
                 HeadingStyle::Atx
             };
-            
+
             result.push(LintWarning {
                 rule_name: Some(self.name()),
                 line: first_heading_line,
                 column: 1,
                 message: format!(
                     "First heading should be level {}, found level {}",
-                    self.level,
-                    first_heading_level
+                    self.level, first_heading_level
                 ),
                 severity: Severity::Warning,
                 fix: Some(Fix {
@@ -280,7 +297,11 @@ impl Rule for MD002FirstHeadingH1 {
                         start: first_heading_line,
                         end: first_heading_line,
                     },
-                    replacement: format!("{}{}", "#".repeat(self.level as usize), " ".repeat(first_heading_line - 1)),
+                    replacement: format!(
+                        "{}{}",
+                        "#".repeat(self.level as usize),
+                        " ".repeat(first_heading_line - 1)
+                    ),
                 }),
             });
         }
@@ -311,7 +332,13 @@ impl Rule for MD002FirstHeadingH1 {
                                 format!("{}{} {}", indent, "#".repeat(self.level as usize), text)
                             }
                             HeadingStyle::AtxClosed => {
-                                format!("{}{} {} {}", indent, "#".repeat(self.level as usize), text, "#".repeat(self.level as usize))
+                                format!(
+                                    "{}{} {} {}",
+                                    indent,
+                                    "#".repeat(self.level as usize),
+                                    text,
+                                    "#".repeat(self.level as usize)
+                                )
                             }
                             _ => {
                                 format!("{}{} {}", indent, "#".repeat(self.level as usize), text)
@@ -331,7 +358,7 @@ impl Rule for MD002FirstHeadingH1 {
             } else {
                 result.push_str(lines[_i]);
             }
-            
+
             // Add newline if not at the end of the file
             if _i < lines.len() - 1 {
                 result.push('\n');
@@ -346,15 +373,16 @@ impl Rule for MD002FirstHeadingH1 {
 
         Ok(result)
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::Heading
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || (!content.contains('#') && !content.contains('=') && !content.contains('-'))
+        content.is_empty()
+            || (!content.contains('#') && !content.contains('=') && !content.contains('-'))
     }
 }
 
@@ -368,17 +396,17 @@ impl DocumentStructureExtensions for MD002FirstHeadingH1 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         let rule = MD002FirstHeadingH1::default();
-        
+
         // Test with correct heading level
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert!(result.is_empty());
-        
+
         // Test with incorrect heading level
         let content = "## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
@@ -386,4 +414,4 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
     }
-} 
+}

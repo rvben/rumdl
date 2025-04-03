@@ -22,9 +22,9 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 ///
 /// ## Purpose
 ///
-/// Ensuring consistent capitalization of proper names improves document quality and 
-/// professionalism. This is especially important for technical documentation where 
-/// product names, programming languages, and technologies often have specific 
+/// Ensuring consistent capitalization of proper names improves document quality and
+/// professionalism. This is especially important for technical documentation where
+/// product names, programming languages, and technologies often have specific
 /// capitalization conventions.
 ///
 /// ## Configuration Options
@@ -134,7 +134,7 @@ impl MD044ProperNames {
 
         let mut violations = Vec::new();
         let mut in_code_block = false;
-        
+
         // Pre-compile and prepare regex patterns before the line loop
         let patterns: Vec<(&String, Regex)> = self
             .names
@@ -205,7 +205,7 @@ impl Rule for MD044ProperNames {
             .filter_map(|(line, column, found_name)| {
                 self.get_proper_name_for(&found_name)
                     .map(|proper_name| LintWarning {
-                rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         line,
                         column,
                         message: format!(

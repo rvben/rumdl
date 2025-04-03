@@ -1,27 +1,27 @@
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use fancy_regex::Regex as FancyRegex;
 use std::collections::HashSet;
 
 lazy_static! {
     static ref ATX_HEADING_REGEX: Regex = Regex::new(r"^(#{1,6})\s+(.+?)(?:\s+#*\s*)?$").unwrap();
     static ref SETEXT_HEADING_REGEX: Regex = Regex::new(r"^([^\n]+)\n([=\-])\2+\s*$").unwrap();
     static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
-    static ref TOC_SECTION_START: Regex = Regex::new(r"^#+\s*(?:Table of Contents|Contents|TOC)\s*$").unwrap();
+    static ref TOC_SECTION_START: Regex =
+        Regex::new(r"^#+\s*(?:Table of Contents|Contents|TOC)\s*$").unwrap();
     static ref MULTIPLE_HYPHENS: Regex = Regex::new(r"-{2,}").unwrap();
-
-    static ref LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]*)\]\((?:([^)]+))?#([^)]+)\)").unwrap();
-    static ref EXTERNAL_URL_REGEX: FancyRegex = FancyRegex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap();
+    static ref LINK_REGEX: FancyRegex =
+        FancyRegex::new(r"(?<!\\)\[([^\]]*)\]\((?:([^)]+))?#([^)]+)\)").unwrap();
+    static ref EXTERNAL_URL_REGEX: FancyRegex =
+        FancyRegex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap();
     static ref INLINE_CODE_REGEX: FancyRegex = FancyRegex::new(r"`[^`]+`").unwrap();
-    
     static ref BOLD_ASTERISK_REGEX: Regex = Regex::new(r"\*\*(.+?)\*\*").unwrap();
     static ref BOLD_UNDERSCORE_REGEX: Regex = Regex::new(r"__(.+?)__").unwrap();
     static ref ITALIC_ASTERISK_REGEX: Regex = Regex::new(r"\*([^*]+?)\*").unwrap();
     static ref ITALIC_UNDERSCORE_REGEX: Regex = Regex::new(r"_([^_]+?)_").unwrap();
-    
     static ref LINK_TEXT_REGEX: FancyRegex = FancyRegex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap();
     static ref STRIKETHROUGH_REGEX: Regex = Regex::new(r"~~(.+?)~~").unwrap();
 }
@@ -67,7 +67,7 @@ impl MD051LinkFragments {
 
         spans
     }
-    
+
     /// Check if a position is within an inline code span
     fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
         spans.iter().any(|&(start, end)| pos >= start && pos < end)
@@ -134,7 +134,10 @@ impl MD051LinkFragments {
         let mut stripped = heading.to_string();
 
         // Handle code spans more thoroughly
-        if let Ok(captures) = INLINE_CODE_REGEX.captures_iter(&stripped.clone()).collect::<Result<Vec<_>, _>>() {
+        if let Ok(captures) = INLINE_CODE_REGEX
+            .captures_iter(&stripped.clone())
+            .collect::<Result<Vec<_>, _>>()
+        {
             for cap in captures {
                 if let Some(code_match) = cap.get(0) {
                     // Extract the code content (without the backticks)
@@ -148,14 +151,23 @@ impl MD051LinkFragments {
         // Manual approach for nested formatting
         // First, handle bold formatting with capture groups
         stripped = BOLD_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = BOLD_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
-        
+        stripped = BOLD_UNDERSCORE_REGEX
+            .replace_all(&stripped, "$1")
+            .to_string();
+
         // Then handle italic formatting
-        stripped = ITALIC_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = ITALIC_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = ITALIC_ASTERISK_REGEX
+            .replace_all(&stripped, "$1")
+            .to_string();
+        stripped = ITALIC_UNDERSCORE_REGEX
+            .replace_all(&stripped, "$1")
+            .to_string();
 
         // Handle links more thoroughly
-        if let Ok(captures) = LINK_TEXT_REGEX.captures_iter(&stripped.clone()).collect::<Result<Vec<_>, _>>() {
+        if let Ok(captures) = LINK_TEXT_REGEX
+            .captures_iter(&stripped.clone())
+            .collect::<Result<Vec<_>, _>>()
+        {
             for cap in captures {
                 if let (Some(full_match), Some(text_match)) = (cap.get(0), cap.get(1)) {
                     // Replace the entire link with just the link text
@@ -233,19 +245,22 @@ impl Rule for MD051LinkFragments {
             if in_code_block || in_toc_section {
                 continue;
             }
-            
+
             // Detect inline code spans in this line
             let inline_code_spans = self.compute_inline_code_spans(line);
 
             // Check for invalid link fragments
-            if let Ok(captures) = LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+            if let Ok(captures) = LINK_REGEX
+                .captures_iter(line)
+                .collect::<Result<Vec<_>, _>>()
+            {
                 for cap in captures {
                     // Skip links inside inline code spans
                     if let Some(full_match) = cap.get(0) {
                         if self.is_in_code_span(&inline_code_spans, full_match.start()) {
                             continue;
                         }
-                        
+
                         let url = cap.get(2).map_or("", |m| m.as_str());
                         let fragment = cap.get(3).map_or("", |m| m.as_str());
                         let text = cap.get(1).map_or("", |m| m.as_str());
@@ -265,13 +280,16 @@ impl Rule for MD051LinkFragments {
                             };
 
                             warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                                rule_name: Some(self.name()),
                                 line: line_num + 1,
                                 column: full_match.start() + 1,
                                 message: format!("Link fragment '{}' does not exist", fragment),
                                 severity: Severity::Warning,
                                 fix: Some(Fix {
-                                    range: line_index.line_col_to_byte_range(line_num + 1, full_match.start() + 1),
+                                    range: line_index.line_col_to_byte_range(
+                                        line_num + 1,
+                                        full_match.start() + 1,
+                                    ),
                                     replacement,
                                 }),
                             });
@@ -315,17 +333,20 @@ impl Rule for MD051LinkFragments {
 
             // Detect inline code spans in this line
             let inline_code_spans = self.compute_inline_code_spans(line);
-            
+
             // Process links in normal text
             let mut processed_line = line.to_string();
-            if let Ok(matches) = LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+            if let Ok(matches) = LINK_REGEX
+                .captures_iter(line)
+                .collect::<Result<Vec<_>, _>>()
+            {
                 for cap in matches {
                     if let Some(full_match) = cap.get(0) {
                         // Skip links inside inline code spans
                         if self.is_in_code_span(&inline_code_spans, full_match.start()) {
                             continue;
                         }
-                        
+
                         let url = cap.get(2).map_or("", |m| m.as_str());
                         let fragment = cap.get(3).map_or("", |m| m.as_str());
                         let text = cap.get(1).map_or("", |m| m.as_str());
@@ -342,7 +363,8 @@ impl Rule for MD051LinkFragments {
                             } else {
                                 format!("[{}]({})", text, url)
                             };
-                            processed_line = processed_line.replace(full_match.as_str(), &replacement);
+                            processed_line =
+                                processed_line.replace(full_match.as_str(), &replacement);
                         }
                     }
                 }

@@ -1,6 +1,6 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
-use crate::utils::range_utils::LineIndex;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -27,9 +27,14 @@ impl MD007ULIndent {
 
         LIST_ITEM_RE.captures(line).map(|caps| {
             let whitespace = caps.get(1).map_or("", |m| m.as_str());
-            let marker = caps.get(2).map_or("", |m| m.as_str()).chars().next().unwrap();
+            let marker = caps
+                .get(2)
+                .map_or("", |m| m.as_str())
+                .chars()
+                .next()
+                .unwrap();
             let content = caps.get(3).map_or("", |m| m.as_str());
-            
+
             (whitespace.len(), marker, content.len())
         })
     }
@@ -74,13 +79,13 @@ impl Rule for MD007ULIndent {
         if !content.contains('*') && !content.contains('-') && !content.contains('+') {
             return Ok(Vec::new());
         }
-        
+
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
         let lines: Vec<&str> = content.lines().collect();
         let mut list_levels: Vec<(usize, usize)> = Vec::new(); // (indent, nesting level)
-        
+
         for (i, line) in lines.iter().enumerate() {
             if Self::is_in_code_block(content, i) {
                 continue;
@@ -108,13 +113,13 @@ impl Rule for MD007ULIndent {
                     }
                     level
                 };
-                
+
                 // Update list level tracking
                 list_levels.push((indent, nesting_level));
-                
+
                 // Calculate expected indentation: level * indent spaces
                 let expected_indent = nesting_level * self.indent;
-                
+
                 // If indentation doesn't match expected value
                 if indent != expected_indent {
                     // Get the correct indentation
@@ -148,36 +153,36 @@ impl Rule for MD007ULIndent {
 
         Ok(warnings)
     }
-    
+
     /// Optimized check using document structure
     fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
         // Early return if the document has no lists
         if structure.list_lines.is_empty() {
             return Ok(vec![]);
         }
-        
+
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        
+
         let lines: Vec<&str> = content.lines().collect();
         let mut list_levels: Vec<(usize, usize)> = Vec::new(); // (indent, nesting level)
-        
+
         // Process only lines with list items, using the pre-computed list_lines
         for &line_num in &structure.list_lines {
             let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-            
+
             // Skip if out of bounds
             if line_idx >= lines.len() {
                 continue;
             }
-            
+
             let line = lines[line_idx];
-            
+
             // Skip lines in code blocks
             if structure.is_in_code_block(line_num) {
                 continue;
             }
-            
+
             if let Some((indent, _marker, _content_len)) = Self::parse_list_item(line) {
                 // Determine the nesting level of this item
                 let nesting_level = if indent == 0 {
@@ -200,20 +205,20 @@ impl Rule for MD007ULIndent {
                     }
                     level
                 };
-                
+
                 // Update list level tracking
                 list_levels.push((indent, nesting_level));
-                
+
                 // Calculate expected indentation: level * indent spaces
                 let expected_indent = nesting_level * self.indent;
-                
+
                 // If indentation doesn't match expected value
                 if indent != expected_indent {
                     // Get the correct indentation
                     let correct_indent = " ".repeat(expected_indent);
                     let trimmed = line.trim_start();
                     let replacement = format!("{}{}", correct_indent, trimmed);
-                    
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: line_num,
@@ -237,7 +242,7 @@ impl Rule for MD007ULIndent {
                 }
             }
         }
-        
+
         Ok(warnings)
     }
 
@@ -281,15 +286,16 @@ impl Rule for MD007ULIndent {
 
         Ok(result)
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::List
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
+        content.is_empty()
+            || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
 }
 
@@ -303,29 +309,36 @@ impl DocumentStructureExtensions for MD007ULIndent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         // Test with default indentation (2 spaces)
         let rule = MD007ULIndent::default();
-        
+
         // Test with valid indentation
         let content = "* Item 1\n  * Nested item 1\n  * Nested item 2";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(result.is_empty(), "Expected no warnings for correct indentation");
-        
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for correct indentation"
+        );
+
         // Test with invalid indentation
         let content = "* Item 1\n * Nested item 1\n * Nested item 2";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert_eq!(result.len(), 2, "Expected warnings for 1-space indentation");
-        
+
         // Test with custom indentation
         let rule = MD007ULIndent::new(4);
         let content = "* Item 1\n * Nested item 1";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(result.len(), 1, "Expected warning for 1-space indentation with 4-space rule");
+        assert_eq!(
+            result.len(),
+            1,
+            "Expected warning for 1-space indentation with 4-space rule"
+        );
     }
-} 
+}

@@ -285,7 +285,8 @@ fn test_nested_code_and_emphasis() {
     );
 
     // Test with indented code and emphasis
-    let content = "1. First step with _emphasis_\n    ```\n    some _code_\n    ```\n   And _more_ text";
+    let content =
+        "1. First step with _emphasis_\n    ```\n    some _code_\n    ```\n   And _more_ text";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
 

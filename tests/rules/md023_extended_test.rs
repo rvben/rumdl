@@ -4,7 +4,7 @@ use rumdl::rules::MD023HeadingStartLeft;
 #[test]
 fn test_complex_mixed_headings() {
     let rule = MD023HeadingStartLeft;
-    
+
     // Test case with a mix of different heading styles and indentation
     let content = r#"# Valid heading
 
@@ -22,28 +22,28 @@ Setext heading
 
    # Indented closed ATX heading #
 "#;
-    
+
     let result = rule.check(content);
     assert!(result.is_ok());
     let warnings = result.unwrap();
-    
+
     // Should have warnings for all indented headings
     assert_eq!(warnings.len(), 5);
-    
+
     // Verify the correct lines are flagged
-    assert_eq!(warnings[0].line, 3);  // "  ## Indented ATX heading"
-    assert_eq!(warnings[1].line, 7);  // "   #### Another indented heading"
+    assert_eq!(warnings[0].line, 3); // "  ## Indented ATX heading"
+    assert_eq!(warnings[1].line, 7); // "   #### Another indented heading"
     assert_eq!(warnings[2].line, 12); // "  Another setext heading"
     assert_eq!(warnings[3].line, 13); // "  ---------------------"
     assert_eq!(warnings[4].line, 15); // "   # Indented closed ATX heading #"
-    
+
     // Verify the fix
     let fixed = rule.fix(content).unwrap();
     assert!(!fixed.contains("  ## Indented"));
     assert!(!fixed.contains("   ####"));
     assert!(!fixed.contains("  Another setext"));
     assert!(!fixed.contains("   # Indented closed"));
-    
+
     // Verify that properly aligned headings are preserved
     assert!(fixed.contains("# Valid heading"));
     assert!(fixed.contains("### Valid heading"));
@@ -52,7 +52,7 @@ Setext heading
 #[test]
 fn test_front_matter_with_headings() {
     let rule = MD023HeadingStartLeft;
-    
+
     // Test case with front matter and various headings
     let content = r#"---
 title: Test Document
@@ -65,15 +65,15 @@ author: Test Author
 
 Content after front matter
 "#;
-    
+
     let result = rule.check(content);
     assert!(result.is_ok());
     let warnings = result.unwrap();
-    
+
     // Should have one warning for the indented heading (line 8)
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].line, 8);
-    
+
     // Verify the fix preserves front matter
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("---\ntitle:"));
@@ -85,7 +85,7 @@ Content after front matter
 #[test]
 fn test_code_blocks_with_headings() {
     let rule = MD023HeadingStartLeft;
-    
+
     // Test case with code blocks and headings
     let content = r#"# Valid heading
 
@@ -102,16 +102,16 @@ fn test_code_blocks_with_headings() {
 
    ### Another indented heading
 "#;
-    
+
     let result = rule.check(content);
     assert!(result.is_ok());
     let warnings = result.unwrap();
-    
+
     // Should have warnings only for headings outside code blocks
     assert_eq!(warnings.len(), 2);
     assert_eq!(warnings[0].line, 8); // "  ## This is an indented heading outside code block"
     assert_eq!(warnings[1].line, 14); // "   ### Another indented heading"
-    
+
     // Verify the fix preserves code blocks
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("```markdown\n# This is a heading"));
@@ -124,7 +124,7 @@ fn test_code_blocks_with_headings() {
 #[test]
 fn test_nested_headings_with_mixed_styles() {
     let rule = MD023HeadingStartLeft;
-    
+
     // Test case with nested headings of mixed styles
     let content = r#"# Main heading
 
@@ -137,16 +137,16 @@ fn test_nested_headings_with_mixed_styles() {
 
 #### Regular SubSubSubheading
 "#;
-    
+
     let result = rule.check(content);
     assert!(result.is_ok());
     let warnings = result.unwrap();
-    
+
     // Should have warnings for indented headings
     assert_eq!(warnings.len(), 3);
     assert_eq!(warnings[0].line, 5); // "  ### Indented ATX Subheading"
     assert_eq!(warnings[1].line, 7); // "  Indented Setext SubSubheading"
-    
+
     // Also check fix
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("### Indented ATX Subheading")); // Fixed with no indentation
@@ -159,7 +159,7 @@ fn test_nested_headings_with_mixed_styles() {
 #[test]
 fn test_heading_with_special_characters() {
     let rule = MD023HeadingStartLeft;
-    
+
     // Test case with special characters in headings
     let content = r#"# Heading with *emphasis*
 
@@ -167,16 +167,16 @@ fn test_heading_with_special_characters() {
 
    ### Indented heading with [link](https://example.com)
 "#;
-    
+
     let result = rule.check(content);
     assert!(result.is_ok());
     let warnings = result.unwrap();
-    
+
     // Should have warnings for indented headings
     assert_eq!(warnings.len(), 2);
     assert_eq!(warnings[0].line, 3); // "  ## Indented heading with **bold** and `code`"
     assert_eq!(warnings[1].line, 5); // "   ### Indented heading with [link](https://example.com)"
-    
+
     // Verify the fix preserves special characters
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("## Indented heading with **bold** and `code`"));
@@ -188,7 +188,7 @@ fn test_heading_with_special_characters() {
 #[test]
 fn test_empty_indented_headings() {
     let rule = MD023HeadingStartLeft;
-    
+
     // Test case with empty indented headings
     let content = r#"# Valid heading
 
@@ -196,16 +196,16 @@ fn test_empty_indented_headings() {
 
    ### 
 "#;
-    
+
     let result = rule.check(content);
     assert!(result.is_ok());
     let warnings = result.unwrap();
-    
+
     // Should have warnings for indented headings
     assert_eq!(warnings.len(), 2);
     assert_eq!(warnings[0].line, 3); // "  ## "
     assert_eq!(warnings[1].line, 5); // "   ### "
-    
+
     // Verify the fix works for empty headings
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("##"));
@@ -217,7 +217,7 @@ fn test_empty_indented_headings() {
 #[test]
 fn test_multiple_indentation_levels() {
     let rule = MD023HeadingStartLeft;
-    
+
     // Test case with multiple indentation levels
     let content = r#"# Valid heading
 
@@ -229,18 +229,18 @@ fn test_multiple_indentation_levels() {
 
     ## Heading with 4 spaces
 "#;
-    
+
     let result = rule.check(content);
     assert!(result.is_ok());
     let warnings = result.unwrap();
-    
+
     // Should have warnings for all indented headings
     assert_eq!(warnings.len(), 4);
     assert_eq!(warnings[0].line, 3); // " ## Heading with 1 space"
     assert_eq!(warnings[1].line, 5); // "  ## Heading with 2 spaces"
     assert_eq!(warnings[2].line, 7); // "   ## Heading with 3 spaces"
     assert_eq!(warnings[3].line, 9); // "    ## Heading with 4 spaces"
-    
+
     // Verify the fix works for different indentation levels
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed.matches("## Heading with").count(), 4);
@@ -248,4 +248,4 @@ fn test_multiple_indentation_levels() {
     assert!(!fixed.contains("  ## Heading"));
     assert!(!fixed.contains("   ## Heading"));
     assert!(!fixed.contains("    ## Heading"));
-} 
+}

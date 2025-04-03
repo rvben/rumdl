@@ -186,18 +186,24 @@ fn test_fix_preserves_structure_html() {
 #[test]
 fn test_markdown_comments() {
     let rule = MD033NoInlineHtml::default();
-    
+
     // Test with markdownlint comments
     let content = "Some content\n<!-- markdownlint-disable -->\nIgnored content\n<!-- markdownlint-enable -->\nMore content";
     let result = rule.check(content).unwrap();
-    
+
     // These should not be flagged as HTML tags
-    assert!(result.is_empty(), "Markdown comments should not be flagged as HTML");
-    
+    assert!(
+        result.is_empty(),
+        "Markdown comments should not be flagged as HTML"
+    );
+
     // Test with regular HTML comments
     let content = "Some content\n<!-- This is a comment -->\nMore content";
     let result = rule.check(content).unwrap();
-    
+
     // Comments should not be flagged
-    assert!(result.is_empty(), "HTML comments should not be flagged as HTML tags");
+    assert!(
+        result.is_empty(),
+        "HTML comments should not be flagged as HTML tags"
+    );
 }

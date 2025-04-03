@@ -1,6 +1,6 @@
 use crate::utils::range_utils::LineIndex;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -27,21 +27,24 @@ impl MD005ListIndent {
         // Fast path check for unordered list markers
         if !trimmed.is_empty() {
             let first_char = trimmed.chars().next().unwrap();
-            
+
             // Check for unordered list markers (* - +)
-            if (first_char == '*' || first_char == '-' || first_char == '+') 
-                && trimmed.len() > 1 
+            if (first_char == '*' || first_char == '-' || first_char == '+')
+                && trimmed.len() > 1
                 && trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace())
             {
                 return Some((indentation, first_char, 1)); // 1 char marker
             }
-            
+
             // Fast path check for ordered list markers (digits followed by . or ))
             if first_char.is_ascii_digit() {
                 if let Some(marker_match) = LIST_MARKER_REGEX.find(trimmed) {
                     let marker_char = trimmed.chars().nth(marker_match.end() - 1).unwrap();
                     if trimmed.len() > marker_match.end()
-                        && trimmed.chars().nth(marker_match.end()).map_or(false, |c| c.is_whitespace())
+                        && trimmed
+                            .chars()
+                            .nth(marker_match.end())
+                            .map_or(false, |c| c.is_whitespace())
                     {
                         return Some((indentation, marker_char, marker_match.end()));
                     }
@@ -74,7 +77,7 @@ impl MD005ListIndent {
         if current_line.trim().is_empty() {
             return false;
         }
-        
+
         // If the previous line is a list item and the current line has more indentation
         // but is not a list item itself, it's a continuation
         if let Some((prev_indent, _, _)) = Self::get_list_marker_info(prev_line) {
@@ -100,16 +103,19 @@ impl Rule for MD005ListIndent {
         if content.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         // Quick check to avoid processing files without list markers
-        if !content.contains('*') && !content.contains('-') && !content.contains('+') 
-            && !content.contains(|c: char| c.is_ascii_digit()) {
+        if !content.contains('*')
+            && !content.contains('-')
+            && !content.contains('+')
+            && !content.contains(|c: char| c.is_ascii_digit())
+        {
             return Ok(Vec::new());
         }
 
         let line_index = LineIndex::new(content.to_string());
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Early return if there are no lines
         if lines.is_empty() {
             return Ok(Vec::new());
@@ -168,7 +174,7 @@ impl Rule for MD005ListIndent {
                 }
             }
         }
-        
+
         // Early return if no list items were found
         if list_items.is_empty() {
             return Ok(Vec::new());
@@ -378,13 +384,16 @@ impl Rule for MD005ListIndent {
         if content.is_empty() {
             return Ok(String::new());
         }
-        
+
         // Quick check to avoid processing files without list markers
-        if !content.contains('*') && !content.contains('-') && !content.contains('+') 
-            && !content.contains(|c: char| c.is_ascii_digit()) {
+        if !content.contains('*')
+            && !content.contains('-')
+            && !content.contains('+')
+            && !content.contains(|c: char| c.is_ascii_digit())
+        {
             return Ok(content.to_string());
         }
-        
+
         // Get warnings from the check method
         let warnings = self.check(content)?;
 
@@ -427,10 +436,11 @@ impl Rule for MD005ListIndent {
     fn category(&self) -> RuleCategory {
         RuleCategory::List
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
+        content.is_empty()
+            || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
 
     /// Optimized check using document structure
@@ -439,16 +449,19 @@ impl Rule for MD005ListIndent {
         if structure.list_lines.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         // Quick check to avoid processing files with no list markers
-        if !content.contains('*') && !content.contains('-') && !content.contains('+') 
-            && !content.contains(|c: char| c.is_ascii_digit()) {
+        if !content.contains('*')
+            && !content.contains('-')
+            && !content.contains('+')
+            && !content.contains(|c: char| c.is_ascii_digit())
+        {
             return Ok(Vec::new());
         }
 
         let line_index = LineIndex::new(content.to_string());
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Early return if there are no lines
         if lines.is_empty() {
             return Ok(Vec::new());
@@ -462,18 +475,18 @@ impl Rule for MD005ListIndent {
 
         // First pass: collect all list items and their indentation
         let mut list_items = Vec::new();
-        
+
         // Process only list lines using structure.list_lines
         for &line_num in &structure.list_lines {
             let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-            
+
             // Skip if out of bounds
             if line_idx >= lines.len() {
                 continue;
             }
-            
+
             let line = lines[line_idx];
-            
+
             // Skip blank lines and code blocks
             if Self::is_blank_line(line) || structure.is_in_code_block(line_num) {
                 continue;
@@ -507,7 +520,7 @@ impl Rule for MD005ListIndent {
                 }
             }
         }
-        
+
         // Early return if no list items were found
         if list_items.is_empty() {
             return Ok(Vec::new());
@@ -723,25 +736,25 @@ impl DocumentStructureExtensions for MD005ListIndent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     // ... existing tests ...
-    
+
     #[test]
     fn test_with_document_structure() {
         let rule = MD005ListIndent;
-        
+
         // Test with consistent list indentation
         let content = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert!(result.is_empty());
-        
+
         // Test with inconsistent list indentation
         let content = "* Item 1\n* Item 2\n * Nested item\n  * Another nested item";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert!(!result.is_empty()); // Should have at least one warning
-        
+
         // Test with different level indentation issues
         let content = "* Item 1\n  * Nested item\n * Another nested item with wrong indent";
         let structure = DocumentStructure::new(content);

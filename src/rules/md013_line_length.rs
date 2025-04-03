@@ -163,7 +163,7 @@ impl Rule for MD013LineLength {
 
                 if !skip {
                     warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         message: format!(
                             "Line length {} exceeds {} characters",
                             line.len(),

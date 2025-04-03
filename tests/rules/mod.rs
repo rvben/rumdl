@@ -20,8 +20,8 @@ mod md019_test;
 mod md020_test;
 mod md021_test;
 mod md022_test;
-mod md023_test;
 mod md023_extended_test;
+mod md023_test;
 mod md024_test;
 mod md025_test;
 mod md026_test;
@@ -56,8 +56,8 @@ mod md053_test;
 mod md054_test;
 mod md055_test;
 mod md056_test;
-mod md058_test;
 mod md057_test;
+mod md058_test;
 
 // Unicode-specific test modules
 mod md001_unicode_test;

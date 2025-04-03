@@ -42,7 +42,11 @@ fn test_mixed_blocks_prefer_indented() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
     let content = "# Mixed blocks\n\n```\nfenced block\n```\n\n    indented block";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 3, "Should detect all parts of the inconsistent fenced code block");
+    assert_eq!(
+        result.len(),
+        3,
+        "Should detect all parts of the inconsistent fenced code block"
+    );
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
     assert!(

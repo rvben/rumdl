@@ -73,17 +73,17 @@ impl CodeBlockUtils {
     }
 
     /// Extracts the language specifier from a fenced code block start line
-    /// 
+    ///
     /// This function parses the line that starts a fenced code block (using either ``` or ~~~)
     /// and extracts the language specifier that follows the fence markers.
-    /// 
+    ///
     /// # Parameters
     /// * `line` - The line of text that potentially contains a code block start with language specifier
-    /// 
+    ///
     /// # Returns
     /// * `Some(String)` - The language specifier if found
     /// * `None` - If the line is not a code block start or has no language specifier
-    /// 
+    ///
     /// # Examples
     /// ```
     /// use rumdl::rules::code_block_utils::CodeBlockUtils;
@@ -98,7 +98,9 @@ impl CodeBlockUtils {
     /// assert_eq!(specifier, None);
     /// ```
     pub fn get_language_specifier(line: &str) -> Option<String> {
-        if FENCED_CODE_BLOCK_START.is_match(line) || ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line) {
+        if FENCED_CODE_BLOCK_START.is_match(line)
+            || ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line)
+        {
             let trimmed = line.trim_start();
             let after_fence = &trimmed[3..].trim_start();
             if !after_fence.is_empty() {
@@ -109,25 +111,25 @@ impl CodeBlockUtils {
     }
 
     /// Identify which lines in the content are in code blocks
-    /// 
+    ///
     /// This function analyzes Markdown content and determines which lines are part of code blocks,
     /// including both fenced code blocks (``` or ~~~) and indented code blocks.
-    /// 
+    ///
     /// # Algorithm
     /// - Iterates through each line of content
     /// - Tracks state for fenced code blocks (toggled by fence delimiters)
     /// - Detects indented code blocks (4 spaces or 1 tab)
     /// - Handles nested code blocks appropriately
-    /// 
+    ///
     /// # Parameters
     /// * `content` - The full Markdown content to analyze
-    /// 
+    ///
     /// # Returns
     /// A vector of boolean values with the same length as the number of lines in the input content.
     /// Each element indicates whether the corresponding line is inside a code block:
     /// * `true` - The line is inside a code block
     /// * `false` - The line is not inside a code block
-    /// 
+    ///
     /// # Examples
     /// ```
     /// use rumdl::rules::code_block_utils::CodeBlockUtils;
@@ -421,8 +423,7 @@ fn is_likely_code_block_delimiter(chars: &[char], start_idx: usize) -> bool {
 }
 
 /// The style for code blocks (MD046)
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[derive(Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub enum CodeBlockStyle {
     /// Consistent with the first code block style found
     #[default]
@@ -432,4 +433,3 @@ pub enum CodeBlockStyle {
     /// Fenced code blocks (``` or ~~~)
     Fenced,
 }
-

@@ -92,7 +92,11 @@ impl MD029OrderedListPrefix {
     }
 
     // Helper function to reset sequences for deeper levels
-    fn reset_deeper_sequences(sequences: &mut HashMap<usize, ListSequence>, current_level: usize, line_num: usize) {
+    fn reset_deeper_sequences(
+        sequences: &mut HashMap<usize, ListSequence>,
+        current_level: usize,
+        line_num: usize,
+    ) {
         // Only reset sequences at deeper levels that haven't been seen recently
         sequences.retain(|&level, sequence| {
             level <= current_level || line_num - sequence.last_seen_line <= 2
@@ -152,7 +156,8 @@ impl Rule for MD029OrderedListPrefix {
                 Self::reset_deeper_sequences(&mut sequences, indent_level, line_num);
 
                 // Find or create sequence for this level
-                let sequence = Self::find_or_create_sequence(&mut sequences, indent_level, line_num);
+                let sequence =
+                    Self::find_or_create_sequence(&mut sequences, indent_level, line_num);
                 let expected = self.get_expected_number(sequence);
 
                 if !self.is_number_valid(number, expected) {
@@ -164,7 +169,7 @@ impl Rule for MD029OrderedListPrefix {
                     };
 
                     warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         line: line_num + 1,
                         column: indentation + 1,
                         message,
@@ -173,9 +178,13 @@ impl Rule for MD029OrderedListPrefix {
                             range: line_index.line_col_to_byte_range(line_num + 1, indentation + 1),
                             replacement: format!(
                                 "{}{}",
-                                if self.style == "one" { 1 } 
-                                else if self.style == "zero" { 0 }
-                                else { expected },
+                                if self.style == "one" {
+                                    1
+                                } else if self.style == "zero" {
+                                    0
+                                } else {
+                                    expected
+                                },
                                 &line[indentation + number.to_string().len()..]
                             ),
                         }),
@@ -236,7 +245,8 @@ impl Rule for MD029OrderedListPrefix {
                 Self::reset_deeper_sequences(&mut sequences, indent_level, line_num);
 
                 // Find or create sequence for this level
-                let sequence = Self::find_or_create_sequence(&mut sequences, indent_level, line_num);
+                let sequence =
+                    Self::find_or_create_sequence(&mut sequences, indent_level, line_num);
                 let expected = self.get_expected_number(sequence);
                 let expected_num = match self.style.as_str() {
                     "one" => 1,

@@ -1,6 +1,6 @@
+use crate::rules::heading_utils::HeadingStyle;
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::rules::heading_utils::HeadingStyle;
 
 /// A struct that contains pre-computed information about a markdown document structure
 /// to avoid redundant parsing of the same elements by multiple rules.
@@ -221,7 +221,7 @@ impl DocumentStructure {
 
         // Compute bitmap of code block regions
         self.compute_code_block_bitmap(content);
-        
+
         // Populate fenced code block starts and ends
         self.populate_fenced_code_blocks();
 
@@ -241,8 +241,9 @@ impl DocumentStructure {
         self.detect_list_items(content);
 
         // Check for URLs
-        self.has_urls = content.contains("http://") || content.contains("https://") || 
-                       content.contains("ftp://");
+        self.has_urls = content.contains("http://")
+            || content.contains("https://")
+            || content.contains("ftp://");
 
         // Check for HTML tags
         self.has_html = content.contains('<') && (content.contains("</") || content.contains("/>"));
@@ -256,7 +257,7 @@ impl DocumentStructure {
         for block in &self.code_blocks {
             let start = block.start_line.saturating_sub(1); // Convert 1-indexed to 0-indexed
             let end = block.end_line.min(line_count); // Ensure we don't go out of bounds
-            
+
             // For fenced code blocks, skip the start and end lines (the "```" lines)
             if let CodeBlockType::Fenced = block.block_type {
                 // Mark only the lines between fences as in code block
@@ -295,9 +296,9 @@ impl DocumentStructure {
         self.heading_lines.clear();
         self.heading_levels.clear();
         self.first_heading_style = None;
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        
+
         for (i, line) in lines.iter().enumerate() {
             // Skip lines in code blocks or front matter
             if self.is_in_code_block(i + 1) || self.is_in_front_matter(i + 1) {
@@ -314,7 +315,7 @@ impl DocumentStructure {
                 let level = captures[2].len();
                 self.heading_lines.push(i + 1);
                 self.heading_levels.push(level);
-                
+
                 // If this is the first heading detected, set the style
                 if self.first_heading_style.is_none() {
                     // Determine if it's a closed ATX heading
@@ -330,11 +331,12 @@ impl DocumentStructure {
             // Check for setext headings (line with ===== or ----- below)
             if i > 0 && !lines[i - 1].trim().is_empty() &&
                !self.is_in_front_matter(i) && // Check that previous line is not in front matter
-               SETEXT_HEADING_UNDERLINE.is_match(line) {
+               SETEXT_HEADING_UNDERLINE.is_match(line)
+            {
                 let level = if line.trim().starts_with('=') { 1 } else { 2 };
                 self.heading_lines.push(i); // The heading is the previous line
                 self.heading_levels.push(level);
-                
+
                 // If this is the first heading detected, set the style
                 if self.first_heading_style.is_none() {
                     if level == 1 {
@@ -345,7 +347,7 @@ impl DocumentStructure {
                 }
             }
         }
-        
+
         // Default to ATX if no headings are found
         if self.heading_lines.is_empty() {
             self.first_heading_style = Some(HeadingStyle::Atx);
@@ -361,7 +363,7 @@ impl DocumentStructure {
 
         // Clear existing data
         self.list_lines.clear();
-        
+
         for (i, line) in content.lines().enumerate() {
             // Skip lines in code blocks or front matter
             if self.is_in_code_block(i + 1) || self.is_in_front_matter(i + 1) {
@@ -378,11 +380,11 @@ impl DocumentStructure {
     /// Detect front matter in the document
     fn detect_front_matter(&mut self, content: &str) {
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Clear existing data
         self.has_front_matter = false;
         self.front_matter_range = None;
-        
+
         // If document starts with ---, it might have front matter
         if !lines.is_empty() && lines[0] == "---" {
             // Look for the closing delimiter
@@ -399,28 +401,31 @@ impl DocumentStructure {
     /// Compute code blocks in the document
     fn compute_code_blocks(&self, content: &str) -> Vec<CodeBlock> {
         lazy_static! {
-            static ref FENCED_START: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*([^`\s]*)").unwrap();
+            static ref FENCED_START: Regex =
+                Regex::new(r"^(\s*)(`{3,}|~{3,})\s*([^`\s]*)").unwrap();
             static ref FENCED_END: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*$").unwrap();
         }
-        
+
         let mut code_blocks = Vec::new();
         let mut in_code_block = false;
         let mut current_block_start = 0;
         let mut current_language = None;
         let mut current_fence_char = ' ';
         let lines: Vec<&str> = content.lines().collect();
-        
+
         let mut i = 0;
         while i < lines.len() {
             let line = lines[i];
-            
+
             if !in_code_block {
                 // Check for fenced code block start
                 if let Some(captures) = FENCED_START.captures(line) {
                     in_code_block = true;
                     current_block_start = i + 1;
-                    current_fence_char = captures.get(2).map_or('`', |m| m.as_str().chars().next().unwrap());
-                    
+                    current_fence_char = captures
+                        .get(2)
+                        .map_or('`', |m| m.as_str().chars().next().unwrap());
+
                     // Only set language if it's not empty
                     let lang = captures.get(3).map(|m| m.as_str().to_string());
                     current_language = lang.filter(|l| !l.is_empty());
@@ -429,19 +434,20 @@ impl DocumentStructure {
                 else if line.starts_with("    ") && !line.trim().is_empty() {
                     // Find the end of the indented block
                     let mut end_line = i;
-                    while end_line + 1 < lines.len() && 
-                          (lines[end_line + 1].starts_with("    ") || 
-                           lines[end_line + 1].trim().is_empty()) {
+                    while end_line + 1 < lines.len()
+                        && (lines[end_line + 1].starts_with("    ")
+                            || lines[end_line + 1].trim().is_empty())
+                    {
                         end_line += 1;
                     }
-                    
+
                     code_blocks.push(CodeBlock {
                         start_line: i + 1,
                         end_line: end_line + 1,
                         language: None,
                         block_type: CodeBlockType::Indented,
                     });
-                    
+
                     // Skip to end of block
                     i = end_line;
                 }
@@ -454,16 +460,16 @@ impl DocumentStructure {
                         language: current_language.clone(),
                         block_type: CodeBlockType::Fenced,
                     });
-                    
+
                     in_code_block = false;
                     current_language = None;
                     current_fence_char = ' ';
                 }
             }
-            
+
             i += 1;
         }
-        
+
         // Handle case where file ends without closing code fence
         if in_code_block {
             code_blocks.push(CodeBlock {
@@ -473,7 +479,7 @@ impl DocumentStructure {
                 block_type: CodeBlockType::Fenced,
             });
         }
-        
+
         code_blocks
     }
 
@@ -481,7 +487,7 @@ impl DocumentStructure {
     fn populate_fenced_code_blocks(&mut self) {
         self.fenced_code_block_starts.clear();
         self.fenced_code_block_ends.clear();
-        
+
         for block in &self.code_blocks {
             if let CodeBlockType::Fenced = block.block_type {
                 self.fenced_code_block_starts.push(block.start_line);
@@ -500,7 +506,7 @@ impl DocumentStructure {
     }
 
     /// Count the number of trailing spaces in a line
-    /// 
+    ///
     /// This function returns the number of trailing spaces in a line,
     /// ignoring newlines but counting spaces before newlines.
     #[inline]
@@ -511,7 +517,7 @@ impl DocumentStructure {
         } else {
             line
         };
-        
+
         // Count trailing spaces at the end, not including tabs
         let mut space_count = 0;
         for c in content.chars().rev() {
@@ -521,12 +527,12 @@ impl DocumentStructure {
                 break;
             }
         }
-        
+
         space_count
     }
-    
+
     /// Check if a line has trailing whitespace
-    /// 
+    ///
     /// This function returns true if the line has trailing spaces,
     /// false otherwise.
     #[inline]
@@ -545,7 +551,7 @@ impl DocumentStructure {
         let mut prev_line = 0;
 
         for (i, &line_num) in self.list_lines.iter().enumerate() {
-            // If this is the first item or there's a gap in line numbers, 
+            // If this is the first item or there's a gap in line numbers,
             // it's the start of a new list
             if i == 0 || line_num > prev_line + 1 {
                 list_starts.push(line_num - 1); // Convert from 1-indexed to 0-indexed
@@ -581,54 +587,54 @@ impl DocumentStructure {
     fn detect_code_spans(&mut self, content: &str) {
         // Clear existing data
         self.code_spans.clear();
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Initialize in_code_span bitmap
         self.in_code_span = vec![Vec::new(); lines.len()];
         for (i, line) in lines.iter().enumerate() {
             self.in_code_span[i] = vec![false; line.len() + 1]; // +1 for 1-indexed columns
         }
-        
+
         for (line_num, line) in lines.iter().enumerate() {
             // Skip lines in code blocks
             if self.is_in_code_block(line_num + 1) {
                 continue;
             }
-            
+
             // Skip empty lines
             if line.is_empty() {
                 continue;
             }
-            
+
             let mut i = 0;
             while i < line.len() {
                 // Look for backtick
                 if let Some(start_pos) = line[i..].find('`') {
                     let start_idx = i + start_pos;
-                    
+
                     // Look for closing backtick
                     if let Some(end_pos) = line[start_idx + 1..].find('`') {
                         let end_idx = start_idx + 1 + end_pos;
-                        
+
                         // We found a code span
                         let content = line[start_idx + 1..end_idx].to_string();
-                        
+
                         // Add to code_spans collection
                         self.code_spans.push(CodeSpan {
-                            line: line_num + 1, // 1-indexed
+                            line: line_num + 1,       // 1-indexed
                             start_col: start_idx + 1, // 1-indexed
-                            end_col: end_idx + 1, // 1-indexed
+                            end_col: end_idx + 1,     // 1-indexed
                             content,
                         });
-                        
+
                         // Mark in the bitmap
                         for col in start_idx..=end_idx {
                             if col < self.in_code_span[line_num].len() {
                                 self.in_code_span[line_num][col] = true;
                             }
                         }
-                        
+
                         // Continue from after the closing backtick
                         i = end_idx + 1;
                     } else {
@@ -642,7 +648,7 @@ impl DocumentStructure {
             }
         }
     }
-    
+
     /// OPTIMIZATION 2: Detect links and images in the document
     fn detect_links_and_images(&mut self, content: &str) {
         lazy_static! {
@@ -659,13 +665,13 @@ impl DocumentStructure {
             // Regex for reference images: ![alt][id]
             static ref REFERENCE_IMAGE: Regex = Regex::new(r"!\[([^\]]*)\]\[([^\]]*)\]").unwrap();
         }
-        
+
         // Clear existing data
         self.links.clear();
         self.images.clear();
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // First, find all link definitions
         let mut link_defs = std::collections::HashMap::new();
         for (line_num, line) in lines.iter().enumerate() {
@@ -673,7 +679,7 @@ impl DocumentStructure {
             if self.is_in_code_block(line_num + 1) {
                 continue;
             }
-            
+
             // Check for link definitions
             if let Some(cap) = LINK_DEFINITION.captures(line) {
                 let id = cap.get(1).map_or("", |m| m.as_str()).to_string();
@@ -681,24 +687,24 @@ impl DocumentStructure {
                 link_defs.insert(id.to_lowercase(), url);
             }
         }
-        
+
         // Now find all links and images
         for (line_num, line) in lines.iter().enumerate() {
             // Skip lines in code blocks
             if self.is_in_code_block(line_num + 1) {
                 continue;
             }
-            
+
             // Skip empty lines
             if line.is_empty() {
                 continue;
             }
-            
+
             // Check if this line contains a character that would indicate a link or image
             if !line.contains('[') && !line.contains('!') {
                 continue;
             }
-            
+
             // Process each character position to ensure we don't detect links inside code spans
             let mut i = 0;
             while i < line.len() {
@@ -707,7 +713,7 @@ impl DocumentStructure {
                     i += 1;
                     continue;
                 }
-                
+
                 // Check for inline links starting at this position
                 if let Some(rest) = line.get(i..) {
                     if rest.starts_with('[') {
@@ -715,16 +721,17 @@ impl DocumentStructure {
                             let whole_match = cap.get(0).unwrap();
                             let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
                             let url = cap.get(2).map_or("", |m| m.as_str()).to_string();
-                            
+
                             // Ensure we're not inside a code span
                             let is_in_span = (i..i + whole_match.end()).any(|pos| {
-                                pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
+                                pos < self.in_code_span[line_num].len()
+                                    && self.in_code_span[line_num][pos]
                             });
-                            
+
                             if !is_in_span {
                                 self.links.push(Link {
-                                    line: line_num + 1, // 1-indexed
-                                    start_col: i + 1, // 1-indexed
+                                    line: line_num + 1,             // 1-indexed
+                                    start_col: i + 1,               // 1-indexed
                                     end_col: i + whole_match.end(), // 1-indexed
                                     text,
                                     url,
@@ -732,29 +739,33 @@ impl DocumentStructure {
                                     reference_id: None,
                                 });
                             }
-                            
+
                             // Skip past this link
                             i += whole_match.end();
                         } else if let Some(cap) = REFERENCE_LINK.captures(rest) {
                             let whole_match = cap.get(0).unwrap();
                             let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
                             let id = cap.get(2).map_or("", |m| m.as_str()).to_string();
-                            
+
                             // Use the ID or text as the reference
                             let ref_id = if id.is_empty() { text.clone() } else { id };
-                            
+
                             // Look up the URL from link definitions
-                            let url = link_defs.get(&ref_id.to_lowercase()).cloned().unwrap_or_default();
-                            
+                            let url = link_defs
+                                .get(&ref_id.to_lowercase())
+                                .cloned()
+                                .unwrap_or_default();
+
                             // Ensure we're not inside a code span
                             let is_in_span = (i..i + whole_match.end()).any(|pos| {
-                                pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
+                                pos < self.in_code_span[line_num].len()
+                                    && self.in_code_span[line_num][pos]
                             });
-                            
+
                             if !is_in_span {
                                 self.links.push(Link {
-                                    line: line_num + 1, // 1-indexed
-                                    start_col: i + 1, // 1-indexed
+                                    line: line_num + 1,             // 1-indexed
+                                    start_col: i + 1,               // 1-indexed
                                     end_col: i + whole_match.end(), // 1-indexed
                                     text,
                                     url,
@@ -762,7 +773,7 @@ impl DocumentStructure {
                                     reference_id: Some(ref_id),
                                 });
                             }
-                            
+
                             // Skip past this link
                             i += whole_match.end();
                         } else {
@@ -774,16 +785,17 @@ impl DocumentStructure {
                             let whole_match = cap.get(0).unwrap();
                             let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
                             let src = cap.get(2).map_or("", |m| m.as_str()).to_string();
-                            
+
                             // Ensure we're not inside a code span
                             let is_in_span = (i..i + whole_match.end()).any(|pos| {
-                                pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
+                                pos < self.in_code_span[line_num].len()
+                                    && self.in_code_span[line_num][pos]
                             });
-                            
+
                             if !is_in_span {
                                 self.images.push(Image {
-                                    line: line_num + 1, // 1-indexed
-                                    start_col: i + 1, // 1-indexed
+                                    line: line_num + 1,             // 1-indexed
+                                    start_col: i + 1,               // 1-indexed
                                     end_col: i + whole_match.end(), // 1-indexed
                                     alt_text,
                                     src,
@@ -791,29 +803,33 @@ impl DocumentStructure {
                                     reference_id: None,
                                 });
                             }
-                            
+
                             // Skip past this image
                             i += whole_match.end();
                         } else if let Some(cap) = REFERENCE_IMAGE.captures(rest) {
                             let whole_match = cap.get(0).unwrap();
                             let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
                             let id = cap.get(2).map_or("", |m| m.as_str()).to_string();
-                            
+
                             // Use the ID or alt_text as the reference
                             let ref_id = if id.is_empty() { alt_text.clone() } else { id };
-                            
+
                             // Look up the URL from link definitions
-                            let src = link_defs.get(&ref_id.to_lowercase()).cloned().unwrap_or_default();
-                            
+                            let src = link_defs
+                                .get(&ref_id.to_lowercase())
+                                .cloned()
+                                .unwrap_or_default();
+
                             // Ensure we're not inside a code span
                             let is_in_span = (i..i + whole_match.end()).any(|pos| {
-                                pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
+                                pos < self.in_code_span[line_num].len()
+                                    && self.in_code_span[line_num][pos]
                             });
-                            
+
                             if !is_in_span {
                                 self.images.push(Image {
-                                    line: line_num + 1, // 1-indexed
-                                    start_col: i + 1, // 1-indexed
+                                    line: line_num + 1,             // 1-indexed
+                                    start_col: i + 1,               // 1-indexed
                                     end_col: i + whole_match.end(), // 1-indexed
                                     alt_text,
                                     src,
@@ -821,7 +837,7 @@ impl DocumentStructure {
                                     reference_id: Some(ref_id),
                                 });
                             }
-                            
+
                             // Skip past this image
                             i += whole_match.end();
                         } else {
@@ -839,7 +855,7 @@ impl DocumentStructure {
             }
         }
     }
-    
+
     /// OPTIMIZATION 3: Detect list items with detailed information
     fn detect_list_items(&mut self, content: &str) {
         lazy_static! {
@@ -850,33 +866,33 @@ impl DocumentStructure {
             // Regex for task list items
             static ref TASK_MARKER: Regex = Regex::new(r"^(\s*)([*+-])(\s+)\[([ xX])\](.*)$").unwrap();
         }
-        
+
         // Clear existing data
         self.list_items.clear();
         self.list_lines.clear();
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        
+
         for (line_num, line) in lines.iter().enumerate() {
             // Skip lines in code blocks or front matter
             if self.is_in_code_block(line_num + 1) || self.is_in_front_matter(line_num + 1) {
                 continue;
             }
-            
+
             // Skip empty lines
             if line.trim().is_empty() {
                 continue;
             }
-            
+
             // Check for task list items first (they're a subset of unordered list items)
             if let Some(cap) = TASK_MARKER.captures(line) {
                 let indentation = cap.get(1).map_or("", |m| m.as_str()).len();
                 let marker = cap.get(2).map_or("", |m| m.as_str()).to_string();
                 let content = cap.get(5).map_or("", |m| m.as_str()).to_string();
-                
+
                 // Record the list line
                 self.list_lines.push(line_num + 1);
-                
+
                 // Add detailed list item info
                 self.list_items.push(ListItem {
                     line_number: line_num + 1,
@@ -885,16 +901,16 @@ impl DocumentStructure {
                     marker_type: ListMarkerType::Task,
                     content,
                 });
-            } 
+            }
             // Check for unordered list items
             else if let Some(cap) = UL_MARKER.captures(line) {
                 let indentation = cap.get(1).map_or("", |m| m.as_str()).len();
                 let marker = cap.get(2).map_or("", |m| m.as_str()).to_string();
                 let content = cap.get(4).map_or("", |m| m.as_str()).to_string();
-                
+
                 // Record the list line
                 self.list_lines.push(line_num + 1);
-                
+
                 // Add detailed list item info
                 self.list_items.push(ListItem {
                     line_number: line_num + 1,
@@ -903,16 +919,16 @@ impl DocumentStructure {
                     marker_type: ListMarkerType::Unordered,
                     content,
                 });
-            } 
+            }
             // Check for ordered list items
             else if let Some(cap) = OL_MARKER.captures(line) {
                 let indentation = cap.get(1).map_or("", |m| m.as_str()).len();
                 let marker = cap.get(2).map_or("", |m| m.as_str()).to_string();
                 let content = cap.get(4).map_or("", |m| m.as_str()).to_string();
-                
+
                 // Record the list line
                 self.list_lines.push(line_num + 1);
-                
+
                 // Add detailed list item info
                 self.list_items.push(ListItem {
                     line_number: line_num + 1,
@@ -924,36 +940,36 @@ impl DocumentStructure {
             }
         }
     }
-    
+
     /// OPTIMIZATION 4: Detect blockquotes in the document
     fn detect_blockquotes(&mut self, content: &str) {
         lazy_static! {
             static ref BLOCKQUOTE_MARKER: Regex = Regex::new(r"^\s*>(.*)$").unwrap();
         }
-        
+
         // Clear existing data
         self.blockquotes.clear();
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Initialize the blockquote bitmap
         self.in_blockquote = vec![false; lines.len()];
-        
+
         let mut in_blockquote = false;
         let mut start_line = 0;
-        
+
         for (i, line) in lines.iter().enumerate() {
             // Skip lines in code blocks or front matter
             if self.is_in_code_block(i + 1) || self.is_in_front_matter(i + 1) {
                 continue;
             }
-            
+
             let is_blockquote_line = BLOCKQUOTE_MARKER.is_match(line);
-            
+
             if is_blockquote_line {
                 // Mark this line as inside a blockquote
                 self.in_blockquote[i] = true;
-                
+
                 if !in_blockquote {
                     // Start of a new blockquote
                     in_blockquote = true;
@@ -965,11 +981,11 @@ impl DocumentStructure {
                     start_line,
                     end_line: i, // Previous line was the end
                 });
-                
+
                 in_blockquote = false;
             }
         }
-        
+
         // Handle case where file ends with a blockquote
         if in_blockquote {
             self.blockquotes.push(BlockquoteRange {
@@ -978,53 +994,58 @@ impl DocumentStructure {
             });
         }
     }
-    
+
     /// Check if a position is inside a code span
     pub fn is_in_code_span(&self, line_num: usize, col: usize) -> bool {
         if line_num == 0 || line_num > self.in_code_span.len() {
             return false;
         }
-        
+
         let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-        
+
         if col == 0 || col > self.in_code_span[line_idx].len() {
             return false;
         }
-        
+
         self.in_code_span[line_idx][col - 1] // Convert 1-indexed to 0-indexed
     }
-    
+
     /// Check if a line is inside a blockquote
     pub fn is_in_blockquote(&self, line_num: usize) -> bool {
         if line_num == 0 || line_num > self.in_blockquote.len() {
             return false;
         }
-        
+
         self.in_blockquote[line_num - 1] // Convert 1-indexed to 0-indexed
     }
-    
+
     /// Get detailed information about a list item at a specific line
     pub fn get_list_item_at_line(&self, line_num: usize) -> Option<&ListItem> {
-        self.list_items.iter().find(|item| item.line_number == line_num)
+        self.list_items
+            .iter()
+            .find(|item| item.line_number == line_num)
     }
-    
+
     /// Get all list items with a specific marker type
     pub fn get_list_items_by_type(&self, marker_type: ListMarkerType) -> Vec<&ListItem> {
-        self.list_items.iter()
+        self.list_items
+            .iter()
             .filter(|item| item.marker_type == marker_type)
             .collect()
     }
-    
+
     /// Get all links with empty text or URLs
     pub fn get_empty_links(&self) -> Vec<&Link> {
-        self.links.iter()
+        self.links
+            .iter()
             .filter(|link| link.text.trim().is_empty() || link.url.trim().is_empty())
             .collect()
     }
-    
+
     /// Get all images with empty alt text
     pub fn get_images_without_alt_text(&self) -> Vec<&Image> {
-        self.images.iter()
+        self.images
+            .iter()
             .filter(|img| img.alt_text.trim().is_empty())
             .collect()
     }
@@ -1037,7 +1058,7 @@ pub trait DocumentStructureExtensions {
         // Skip lines in code blocks by default
         !doc_structure.is_in_code_block(line_num)
     }
-    
+
     /// Check if content contains elements relevant to this rule
     fn has_relevant_elements(&self, _content: &str, _doc_structure: &DocumentStructure) -> bool {
         // Default implementation returns true - rules should override this
@@ -1056,9 +1077,10 @@ mod tests {
 
     #[test]
     fn test_document_structure_creation() {
-        let content = "# Heading 1\n\nSome text.\n\n## Heading 2\n\nMore text.\n\n```\nCode block\n```\n";
+        let content =
+            "# Heading 1\n\nSome text.\n\n## Heading 2\n\nMore text.\n\n```\nCode block\n```\n";
         let structure = DocumentStructure::new(content);
-        
+
         assert_eq!(structure.heading_lines.len(), 2);
         assert_eq!(structure.heading_levels.len(), 2);
         assert!(structure.has_code_blocks);
@@ -1067,9 +1089,10 @@ mod tests {
 
     #[test]
     fn test_document_with_front_matter() {
-        let content = "---\ntitle: Test Document\ndate: 2021-01-01\n---\n\n# Heading 1\n\nSome text.\n";
+        let content =
+            "---\ntitle: Test Document\ndate: 2021-01-01\n---\n\n# Heading 1\n\nSome text.\n";
         let structure = DocumentStructure::new(content);
-        
+
         assert!(structure.has_front_matter);
         assert!(structure.front_matter_range.is_some());
         assert_eq!(structure.heading_lines.len(), 1);
@@ -1080,13 +1103,13 @@ mod tests {
     fn test_is_in_code_block() {
         let content = "# Heading\n\nText.\n\n```\ncode line 1\ncode line 2\n```\n\nMore text.\n";
         let structure = DocumentStructure::new(content);
-        
+
         assert!(!structure.is_in_code_block(1)); // # Heading
         assert!(!structure.is_in_code_block(3)); // Text.
         assert!(!structure.is_in_code_block(5)); // ```
-        assert!(structure.is_in_code_block(6));  // code line 1
-        assert!(structure.is_in_code_block(7));  // code line 2
+        assert!(structure.is_in_code_block(6)); // code line 1
+        assert!(structure.is_in_code_block(7)); // code line 2
         assert!(!structure.is_in_code_block(8)); // ```
         assert!(!structure.is_in_code_block(10)); // More text.
     }
-} 
+}

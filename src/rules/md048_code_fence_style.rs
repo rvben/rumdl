@@ -1,6 +1,6 @@
-use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::code_fence_utils::CodeFenceStyle;
+use crate::utils::range_utils::LineIndex;
 
 /// Rule MD048: Code fence style should be consistent
 pub struct MD048CodeFenceStyle {
@@ -50,7 +50,7 @@ impl Rule for MD048CodeFenceStyle {
             let trimmed = line.trim_start();
             if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
                 warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                    rule_name: Some(self.name()),
                     message: "Code fence style should use tildes".to_string(),
                     line: line_num + 1,
                     column: line.len() - trimmed.len() + 1,
@@ -63,7 +63,7 @@ impl Rule for MD048CodeFenceStyle {
                 });
             } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
                 warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                    rule_name: Some(self.name()),
                     message: "Code fence style should use backticks".to_string(),
                     line: line_num + 1,
                     column: line.len() - trimmed.len() + 1,

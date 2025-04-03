@@ -2,8 +2,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 /// The style for strong emphasis (MD050)
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[derive(Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub enum StrongStyle {
     /// Consistent with the first strong style found
     #[default]
@@ -14,11 +13,11 @@ pub enum StrongStyle {
     Underscore,
 }
 
-
 /// Get regex pattern for finding strong emphasis markers
 pub fn get_strong_pattern() -> &'static Regex {
     lazy_static! {
-        static ref STRONG_PATTERN: Regex = Regex::new(r"(\*\*|__)(?!\s)(?:(?!\1).)+?(?<!\s)(\1)").unwrap();
+        static ref STRONG_PATTERN: Regex =
+            Regex::new(r"(\*\*|__)(?!\s)(?:(?!\1).)+?(?<!\s)(\1)").unwrap();
     }
     &STRONG_PATTERN
 }
@@ -30,4 +29,4 @@ pub fn get_strong_style(marker: &str) -> Option<StrongStyle> {
         "__" => Some(StrongStyle::Underscore),
         _ => None,
     }
-} 
+}

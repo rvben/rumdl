@@ -160,8 +160,11 @@ fn test_md025_fix_with_indentation() {
     assert!(fixed.contains("# Title 1"));
     assert!(fixed.contains("Title 2"));
     assert!(fixed.contains("Title 3"));
-    
+
     // Ensure there are no duplicate H1 headings (the issue this rule checks for)
     let check_result = rule.check(&fixed).unwrap();
-    assert!(check_result.is_empty(), "Fixed content should have no warnings");
+    assert!(
+        check_result.is_empty(),
+        "Fixed content should have no warnings"
+    );
 }

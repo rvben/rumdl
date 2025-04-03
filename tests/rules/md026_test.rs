@@ -123,7 +123,7 @@ fn test_md026_indented_headings() {
     // In Markdown, content indented with 4+ spaces is considered a code block
     let content = "  # Indented heading!\n    ## Deeply indented heading?";
     let result = rule.check(content).unwrap();
-    
+
     // Only the first heading is detected, the second is treated as a code block
     // due to 4+ spaces indentation according to Markdown spec
     assert_eq!(
@@ -136,7 +136,10 @@ fn test_md026_indented_headings() {
     let fixed = rule.fix(content).unwrap();
     // Verify the first heading gets fixed but the second remains untouched
     // since it's considered a code block
-    assert_eq!(fixed, "  # Indented heading\n    ## Deeply indented heading?");
+    assert_eq!(
+        fixed,
+        "  # Indented heading\n    ## Deeply indented heading?"
+    );
 }
 
 #[test]
@@ -148,8 +151,10 @@ fn test_md026_fix_setext_headings() {
 
     // The correct behavior for a Markdown-compliant implementation
     let expected = "Heading 1\n=======\nHeading 2\n-------";
-    assert_eq!(fixed, expected,
-        "The implementation handles setext headings correctly");
+    assert_eq!(
+        fixed, expected,
+        "The implementation handles setext headings correctly"
+    );
 }
 
 #[test]

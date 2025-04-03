@@ -29,7 +29,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                 let start_col = BlockquoteUtils::get_blockquote_start_col(line);
                 let actual_content = BlockquoteUtils::get_blockquote_content(line);
                 warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                    rule_name: Some(self.name()),
                     line: i + 1,
                     column: start_col,
                     message: "Multiple spaces after blockquote symbol".to_string(),

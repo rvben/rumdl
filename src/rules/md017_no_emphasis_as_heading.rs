@@ -1,9 +1,9 @@
-use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
+use crate::utils::range_utils::LineIndex;
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
     // Optimize regex patterns with compilation once at startup
@@ -24,7 +24,7 @@ pub struct MD017NoEmphasisAsHeading;
 
 impl MD017NoEmphasisAsHeading {
     /// Creates a new instance of the MD017 rule.
-    /// 
+    ///
     /// This rule enforces that emphasis markers (`*`, `_`, `**`, `__`) are not used as headings.
     /// According to the CommonMark spec, emphasis markers are for inline text emphasis,
     /// while headings should use either ATX style (`#`) or Setext style (`===`, `---`).
@@ -98,9 +98,12 @@ impl Rule for MD017NoEmphasisAsHeading {
 
             // Check for single-line emphasis patterns
             let trimmed = line.trim();
-            let level = if RE_ASTERISK_SINGLE.is_match(trimmed) || RE_UNDERSCORE_SINGLE.is_match(trimmed) {
+            let level = if RE_ASTERISK_SINGLE.is_match(trimmed)
+                || RE_UNDERSCORE_SINGLE.is_match(trimmed)
+            {
                 Some(1)
-            } else if RE_ASTERISK_DOUBLE.is_match(trimmed) || RE_UNDERSCORE_DOUBLE.is_match(trimmed) {
+            } else if RE_ASTERISK_DOUBLE.is_match(trimmed) || RE_UNDERSCORE_DOUBLE.is_match(trimmed)
+            {
                 Some(2)
             } else {
                 None
@@ -115,7 +118,7 @@ impl Rule for MD017NoEmphasisAsHeading {
 
                 if let Some(replacement) = HeadingUtils::convert_emphasis_to_heading(line) {
                     warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         line: i + 1,
                         column: 1,
                         message: message.to_string(),

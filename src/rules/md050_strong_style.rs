@@ -1,9 +1,9 @@
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rules::strong_style::StrongStyle;
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::rules::strong_style::StrongStyle;
 
 lazy_static! {
     static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"__[^_\\]+__").unwrap();
@@ -99,7 +99,7 @@ impl Rule for MD050StrongStyle {
                     };
 
                     warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         line: line_num + 1,
                         column: m.start() + 1,
                         message: message.to_string(),

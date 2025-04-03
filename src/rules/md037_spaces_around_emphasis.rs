@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -117,20 +117,20 @@ impl Rule for MD037SpacesAroundEmphasis {
         if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
             return Ok(vec![]);
         }
-        
+
         let mut warnings = Vec::new();
         let mut state = CodeBlockState::new();
-        
+
         // Process the content line by line to track code blocks
         for (line_num, line) in content.lines().enumerate() {
             // Update code block state
             state.update(line);
-            
+
             // Skip if in code block or front matter
             if state.is_in_code_block(line) {
                 continue;
             }
-            
+
             // Skip if the line doesn't contain any emphasis markers
             if !line.contains('*') && !line.contains('_') {
                 continue;
@@ -138,10 +138,10 @@ impl Rule for MD037SpacesAroundEmphasis {
 
             // Process the line for emphasis patterns
             let line_no_code = replace_inline_code(line);
-            
+
             check_emphasis_patterns(&line_no_code, line_num + 1, line, &mut warnings);
         }
-        
+
         Ok(warnings)
     }
 
@@ -153,17 +153,18 @@ impl Rule for MD037SpacesAroundEmphasis {
         if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
             return Ok(vec![]);
         }
-        
+
         let mut warnings = Vec::new();
-        
+
         // Process the content line by line using the document structure
         for (line_num, line) in content.lines().enumerate() {
             // Skip if in code block or front matter
-            if structure.is_in_code_block(line_num + 1) || 
-                structure.is_in_front_matter(line_num + 1) {
+            if structure.is_in_code_block(line_num + 1)
+                || structure.is_in_front_matter(line_num + 1)
+            {
                 continue;
             }
-            
+
             // Skip if the line doesn't contain any emphasis markers
             if !line.contains('*') && !line.contains('_') {
                 continue;
@@ -171,25 +172,45 @@ impl Rule for MD037SpacesAroundEmphasis {
 
             // Replace inline code with placeholders to avoid false positives
             let line_no_code = replace_inline_code(line);
-            
+
             // Check for spaces in emphasis patterns
             if line_no_code.contains('*') {
                 // Check single asterisk emphasis (* text *)
-                self.check_pattern(&line_no_code, line_num + 1, &ASTERISK_EMPHASIS, &mut warnings);
-                
+                self.check_pattern(
+                    &line_no_code,
+                    line_num + 1,
+                    &ASTERISK_EMPHASIS,
+                    &mut warnings,
+                );
+
                 // Check double asterisk emphasis (** text **)
-                self.check_pattern(&line_no_code, line_num + 1, &DOUBLE_ASTERISK_EMPHASIS, &mut warnings);
+                self.check_pattern(
+                    &line_no_code,
+                    line_num + 1,
+                    &DOUBLE_ASTERISK_EMPHASIS,
+                    &mut warnings,
+                );
             }
-            
+
             if line_no_code.contains('_') {
                 // Check single underscore emphasis (_ text _)
-                self.check_pattern(&line_no_code, line_num + 1, &UNDERSCORE_EMPHASIS, &mut warnings);
-                
+                self.check_pattern(
+                    &line_no_code,
+                    line_num + 1,
+                    &UNDERSCORE_EMPHASIS,
+                    &mut warnings,
+                );
+
                 // Check double underscore emphasis (__ text __)
-                self.check_pattern(&line_no_code, line_num + 1, &DOUBLE_UNDERSCORE_EMPHASIS, &mut warnings);
+                self.check_pattern(
+                    &line_no_code,
+                    line_num + 1,
+                    &DOUBLE_UNDERSCORE_EMPHASIS,
+                    &mut warnings,
+                );
             }
         }
-        
+
         Ok(warnings)
     }
 
@@ -238,12 +259,12 @@ impl Rule for MD037SpacesAroundEmphasis {
 
         Ok(result)
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::Emphasis
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || (!content.contains('*') && !content.contains('_'))
@@ -265,7 +286,7 @@ fn check_emphasis_patterns(
 ) {
     // Instance of the rule to call the check_pattern method
     let rule = MD037SpacesAroundEmphasis;
-    
+
     // Skip if this is a list marker rather than emphasis
     if LIST_MARKER.is_match(line) {
         return;
@@ -292,7 +313,12 @@ fn check_emphasis_patterns(
             }
             if rest_of_line.contains('_') {
                 rule.check_pattern(rest_of_line, line_num, &UNDERSCORE_EMPHASIS, warnings);
-                rule.check_pattern(rest_of_line, line_num, &DOUBLE_UNDERSCORE_EMPHASIS, warnings);
+                rule.check_pattern(
+                    rest_of_line,
+                    line_num,
+                    &DOUBLE_UNDERSCORE_EMPHASIS,
+                    warnings,
+                );
             }
         }
         return;
@@ -403,31 +429,37 @@ fn restore_code_spans(mut content: String, code_spans: Vec<(String, String)>) ->
 // Helper function to check if a position is inside a code span
 fn is_in_code_span(content: &str, position: usize) -> bool {
     let mut in_code = false;
-    
+
     for (i, c) in content.chars().enumerate() {
         if c == '`' {
             in_code = !in_code;
         }
-        
+
         if i == position {
             return in_code;
         }
     }
-    
+
     false
 }
 
 impl MD037SpacesAroundEmphasis {
     // Check a specific emphasis pattern and add warnings
-    fn check_pattern(&self, line: &str, line_num: usize, pattern: &Regex, warnings: &mut Vec<LintWarning>) {
+    fn check_pattern(
+        &self,
+        line: &str,
+        line_num: usize,
+        pattern: &Regex,
+        warnings: &mut Vec<LintWarning>,
+    ) {
         for captures in pattern.captures_iter(line) {
             let whole_match = captures.get(0).unwrap();
-            
+
             // Skip if in code span
             if is_in_code_span(line, whole_match.start()) {
                 continue;
             }
-            
+
             // Add warning
             warnings.push(LintWarning {
                 line: line_num,
@@ -444,45 +476,57 @@ impl MD037SpacesAroundEmphasis {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         let rule = MD037SpacesAroundEmphasis;
-        
+
         // Test with no spaces inside emphasis
         let content = "This is *correct* emphasis and **strong emphasis**";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        
+
         // Update expectation to match actual implementation behavior
         if result.is_empty() {
             // This is the expected behavior
-            assert!(result.is_empty(), "No warnings expected for correct emphasis");
+            assert!(
+                result.is_empty(),
+                "No warnings expected for correct emphasis"
+            );
         } else {
             // Comment out debug prints that could output file content
             // println!("MD037: Implementation flagged valid emphasis as invalid. This might indicate a bug.");
             // Implementation is giving warnings when it shouldn't - let the test pass for now
             // and file an issue for further investigation
-            assert!(true, "Implementation behavior different than expected for valid emphasis");
+            assert!(
+                true,
+                "Implementation behavior different than expected for valid emphasis"
+            );
         }
-        
+
         // Test with spaces inside emphasis
         let content = "This is * text with spaces * and ** text with spaces **";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        
+
         // The implementation might detect these incorrectly - be flexible about the count
-        assert!(!result.is_empty(), "Expected warnings for spaces in emphasis");
+        assert!(
+            !result.is_empty(),
+            "Expected warnings for spaces in emphasis"
+        );
         // Comment out debug prints that could output file content
         // println!("Found {} warnings for spaces in emphasis", result.len());
-        
+
         // Test with code blocks
         let content = "This is *correct* emphasis\n```\n* incorrect * in code block\n```\nOutside block with * spaces in emphasis *";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        
+
         // Be flexible about the exact count, but ensure the code block content is skipped
-        assert!(!result.is_empty(), "Expected warnings for spaces in emphasis outside code block");
+        assert!(
+            !result.is_empty(),
+            "Expected warnings for spaces in emphasis outside code block"
+        );
         // Comment out debug prints that could output file content
         // println!("Found {} warnings for spaces outside code block", result.len());
     }

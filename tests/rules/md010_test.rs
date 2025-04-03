@@ -102,23 +102,30 @@ fn test_mixed_indentation() {
 #[test]
 fn test_html_comments_with_tabs() {
     let rule = MD010NoHardTabs::default();
-    
+
     // Single line HTML comment with tabs
     let content = "<!-- This comment has a \t tab -->\nNormal line";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 0, "Should ignore tabs in single-line HTML comments");
-    
+    assert_eq!(
+        result.len(),
+        0,
+        "Should ignore tabs in single-line HTML comments"
+    );
+
     // Multi-line HTML comment with tabs
     let content = "<!-- Start of comment\nUser: \t\tuser\nPassword:\tpass\n-->\nNormal\tline";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 1, "Should only flag tab in normal line, not in multi-line comment");
+    assert_eq!(
+        result.len(),
+        1,
+        "Should only flag tab in normal line, not in multi-line comment"
+    );
     assert_eq!(result[0].line, 5);
-    
+
     // Test fix for content with HTML comments
     let fixed = rule.fix(content).unwrap();
     assert_eq!(
-        fixed,
-        "<!-- Start of comment\nUser: \t\tuser\nPassword:\tpass\n-->\nNormal    line",
+        fixed, "<!-- Start of comment\nUser: \t\tuser\nPassword:\tpass\n-->\nNormal    line",
         "Should preserve tabs in HTML comments but fix tabs in normal text"
     );
 }

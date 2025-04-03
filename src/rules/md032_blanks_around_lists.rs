@@ -1,8 +1,8 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_block_utils::CodeBlockUtils;
 use crate::rules::front_matter_utils::FrontMatterUtils;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::document_structure::document_structure_from_str;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -109,19 +109,23 @@ impl MD032BlanksAroundLists {
             // Additional check for ordered lists to avoid regex when possible
             if let Some(idx) = trimmed.find('.') {
                 // Verify it's a number followed by a period and a space
-                if idx > 0 && idx < trimmed.len() - 1 && trimmed.as_bytes().get(idx + 1) == Some(&b' ') {
+                if idx > 0
+                    && idx < trimmed.len() - 1
+                    && trimmed.as_bytes().get(idx + 1) == Some(&b' ')
+                {
                     return true;
                 }
             }
             // Fall back to regex for complex cases
             return LIST_ITEM_REGEX.is_match(line);
-        } else if (first_char == '-' || first_char == '*' || first_char == '+') 
-                && trimmed.len() > 1 
-                && trimmed.as_bytes()[1] == b' ' {
+        } else if (first_char == '-' || first_char == '*' || first_char == '+')
+            && trimmed.len() > 1
+            && trimmed.as_bytes()[1] == b' '
+        {
             // Fast path for simple unordered list items
             return true;
         }
-        
+
         // Use regex as fallback for complex cases
         LIST_ITEM_REGEX.is_match(line)
     }
@@ -142,7 +146,7 @@ impl MD032BlanksAroundLists {
         if let Some(first_non_space) = line.as_bytes().iter().position(|&b| b != b' ') {
             return first_non_space >= 2;
         }
-        
+
         false
     }
 }
@@ -175,20 +179,23 @@ impl Rule for MD032BlanksAroundLists {
         let mut result = Vec::with_capacity(lines.len() + 10);
 
         // Fast path check - if no list markers are present, return content as is
-        if !content.contains(['-', '*', '+', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0']) {
+        if !content.contains([
+            '-', '*', '+', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+        ]) {
             return Ok(content.to_string());
         }
 
         // Pre-compute which lines are in code blocks or front matter - only when needed
         let mut excluded_lines = vec![false; lines.len()];
-        let has_code_blocks = content.contains("```") || content.contains("~~~") || content.contains("    ");
+        let has_code_blocks =
+            content.contains("```") || content.contains("~~~") || content.contains("    ");
         let has_front_matter = content.starts_with("---\n") || content.starts_with("---\r\n");
-        
+
         if has_code_blocks || has_front_matter {
             for (i, _) in lines.iter().enumerate() {
-                excluded_lines[i] = 
-                    (has_front_matter && FrontMatterUtils::is_in_front_matter(&content, i)) ||
-                    (has_code_blocks && CodeBlockUtils::is_in_code_block(&content, i));
+                excluded_lines[i] = (has_front_matter
+                    && FrontMatterUtils::is_in_front_matter(&content, i))
+                    || (has_code_blocks && CodeBlockUtils::is_in_code_block(&content, i));
             }
         }
 
@@ -245,7 +252,7 @@ impl Rule for MD032BlanksAroundLists {
         if self.should_skip(content) {
             return Ok(Vec::new());
         }
-        
+
         // Use document structure to check only for lists
         if !self.has_relevant_elements(content, structure) {
             return Ok(Vec::new());
@@ -254,7 +261,7 @@ impl Rule for MD032BlanksAroundLists {
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Pre-compute empty lines
         let mut is_empty_vec = vec![false; lines.len()];
         for (i, line) in lines.iter().enumerate() {
@@ -272,12 +279,12 @@ impl Rule for MD032BlanksAroundLists {
         // Get list boundaries from document structure
         let list_starts = structure.get_list_start_indices();
         let list_ends = structure.get_list_end_indices();
-        
+
         // Process each list
         for i in 0..list_starts.len().min(list_ends.len()) {
             let start_idx = list_starts[i];
             let mut end_idx = list_ends[i];
-            
+
             // Extend the list end to include indented content
             for j in end_idx..lines.len() {
                 if is_list_content_vec[j] {
@@ -286,9 +293,12 @@ impl Rule for MD032BlanksAroundLists {
                     break;
                 }
             }
-            
+
             // Check for blank line before list (unless at document start)
-            if start_idx > 0 && !is_empty_vec[start_idx - 1] && !structure.is_in_code_block(start_idx) {
+            if start_idx > 0
+                && !is_empty_vec[start_idx - 1]
+                && !structure.is_in_code_block(start_idx)
+            {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: start_idx + 1,
@@ -301,9 +311,12 @@ impl Rule for MD032BlanksAroundLists {
                     }),
                 });
             }
-            
+
             // Check for blank line after list (unless at document end)
-            if end_idx < lines.len() - 1 && !is_empty_vec[end_idx + 1] && !structure.is_in_code_block(end_idx + 1) {
+            if end_idx < lines.len() - 1
+                && !is_empty_vec[end_idx + 1]
+                && !structure.is_in_code_block(end_idx + 1)
+            {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: end_idx + 2,
@@ -320,13 +333,15 @@ impl Rule for MD032BlanksAroundLists {
 
         Ok(warnings)
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || 
-        !content.contains(['-', '*', '+', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'])
+        content.is_empty()
+            || !content.contains([
+                '-', '*', '+', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+            ])
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::List
@@ -347,25 +362,25 @@ mod tests {
     #[test]
     fn test_with_document_structure() {
         let rule = MD032BlanksAroundLists;
-        
+
         // Test case 1: List without blank lines
         let content = "Paragraph\n- Item 1\n- Item 2\nAnother paragraph";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
         assert_eq!(warnings.len(), 2); // Should warn about missing blank lines before and after
-        
+
         // Test case 2: Lists with proper blank lines
         let content = "Paragraph\n\n- Item 1\n- Item 2\n\nAnother paragraph";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
         assert_eq!(warnings.len(), 0); // No warnings
-        
+
         // Test case 3: List at beginning of document
         let content = "- Item 1\n- Item 2\n\nParagraph";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
         assert_eq!(warnings.len(), 0); // No warnings for missing blank line before
-        
+
         // Test case 4: List at end of document
         let content = "Paragraph\n\n- Item 1\n- Item 2";
         let structure = document_structure_from_str(content);

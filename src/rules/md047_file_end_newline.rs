@@ -25,10 +25,10 @@ impl Rule for MD047FileEndNewline {
 
         // Check if file ends with newline
         let has_trailing_newline = content.ends_with('\n');
-        
+
         // Check if file has multiple trailing newlines
         let has_multiple_newlines = content.ends_with("\n\n");
-        
+
         // Only issue warning if there's no newline or more than one
         if !has_trailing_newline || has_multiple_newlines {
             let lines: Vec<&str> = content.lines().collect();
@@ -36,7 +36,7 @@ impl Rule for MD047FileEndNewline {
             let last_column = lines.last().map_or(1, |line| line.len() + 1);
 
             warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                rule_name: Some(self.name()),
                 message: String::from("File should end with a single newline character"),
                 line: last_line,
                 column: last_column,
@@ -76,7 +76,7 @@ impl Rule for MD047FileEndNewline {
 
         // Handle multiple trailing newlines
         let mut result = content.to_string();
-        
+
         // If there are multiple newlines, trim them down to just one
         if content.ends_with("\n\n") {
             // Preserve any whitespace at the end but only have one newline
@@ -97,7 +97,10 @@ mod tests {
         let rule = MD047FileEndNewline;
         let content = "";
         let result = rule.check(content).unwrap();
-        assert!(result.is_empty(), "Empty content should not trigger warnings");
+        assert!(
+            result.is_empty(),
+            "Empty content should not trigger warnings"
+        );
     }
 
     #[test]
@@ -105,7 +108,10 @@ mod tests {
         let rule = MD047FileEndNewline;
         let content = "# Test\n";
         let result = rule.check(content).unwrap();
-        assert!(result.is_empty(), "Content with single trailing newline should not trigger warnings");
+        assert!(
+            result.is_empty(),
+            "Content with single trailing newline should not trigger warnings"
+        );
     }
 
     #[test]
@@ -113,10 +119,17 @@ mod tests {
         let rule = MD047FileEndNewline;
         let content = "# Test";
         let result = rule.check(content).unwrap();
-        assert_eq!(result.len(), 1, "Content without trailing newline should trigger a warning");
-        
+        assert_eq!(
+            result.len(),
+            1,
+            "Content without trailing newline should trigger a warning"
+        );
+
         let fixed = rule.fix(content).unwrap();
-        assert_eq!(fixed, "# Test\n", "Fixed content should have a trailing newline");
+        assert_eq!(
+            fixed, "# Test\n",
+            "Fixed content should have a trailing newline"
+        );
     }
 
     #[test]
@@ -124,20 +137,34 @@ mod tests {
         let rule = MD047FileEndNewline;
         let content = "# Test\n\n";
         let result = rule.check(content).unwrap();
-        assert_eq!(result.len(), 1, "Content with multiple trailing newlines should trigger a warning");
-        
+        assert_eq!(
+            result.len(),
+            1,
+            "Content with multiple trailing newlines should trigger a warning"
+        );
+
         let fixed = rule.fix(content).unwrap();
-        assert_eq!(fixed, "# Test\n", "Fixed content should have exactly one trailing newline");
+        assert_eq!(
+            fixed, "# Test\n",
+            "Fixed content should have exactly one trailing newline"
+        );
     }
-    
+
     #[test]
     fn test_only_whitespace() {
         let rule = MD047FileEndNewline;
         let content = "  \n\n";
         let result = rule.check(content).unwrap();
-        assert_eq!(result.len(), 1, "Content with only whitespace and multiple newlines should trigger a warning");
-        
+        assert_eq!(
+            result.len(),
+            1,
+            "Content with only whitespace and multiple newlines should trigger a warning"
+        );
+
         let fixed = rule.fix(content).unwrap();
-        assert_eq!(fixed, "  \n", "Fixed content should have exactly one trailing newline");
+        assert_eq!(
+            fixed, "  \n",
+            "Fixed content should have exactly one trailing newline"
+        );
     }
 }

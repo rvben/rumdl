@@ -1,7 +1,7 @@
-use crate::utils::range_utils::LineIndex;
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
-use crate::utils::markdown_elements::{ElementType, MarkdownElements};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::markdown_elements::{ElementType, MarkdownElements};
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -29,12 +29,12 @@ impl MD018NoMissingSpaceAtx {
         let content = &line[hashes.end()..];
         format!("{} {}", hashes.as_str(), content)
     }
-    
+
     // Calculate the byte range for a specific line in the content
     fn get_line_byte_range(&self, content: &str, line_num: usize) -> std::ops::Range<usize> {
         let mut current_line = 1;
         let mut start_byte = 0;
-        
+
         for (i, c) in content.char_indices() {
             if current_line == line_num && c == '\n' {
                 return start_byte..i;
@@ -45,12 +45,12 @@ impl MD018NoMissingSpaceAtx {
                 }
             }
         }
-        
+
         // If we're looking for the last line and it doesn't end with a newline
         if current_line == line_num {
             return start_byte..content.len();
         }
-        
+
         // Fallback if line not found (shouldn't happen)
         0..0
     }
@@ -73,10 +73,10 @@ impl Rule for MD018NoMissingSpaceAtx {
 
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        
+
         // Use MarkdownElements to detect all headings
         let headings = MarkdownElements::detect_headings(content);
-        
+
         // Process each line to check for ATX headings without proper spacing
         let lines: Vec<&str> = content.lines().collect();
 
@@ -89,17 +89,16 @@ impl Rule for MD018NoMissingSpaceAtx {
             // Check if this is an ATX heading without space
             if self.is_atx_heading_without_space(line) {
                 // Make sure this is a heading, not just a line starting with #
-                let is_heading = headings.iter().any(|h| 
-                    h.element_type == ElementType::Heading && 
-                    h.start_line == line_num
-                );
-                
+                let is_heading = headings
+                    .iter()
+                    .any(|h| h.element_type == ElementType::Heading && h.start_line == line_num);
+
                 if is_heading {
                     let hashes = ATX_NO_SPACE_PATTERN.captures(line).unwrap().get(1).unwrap();
                     let line_range = self.get_line_byte_range(content, line_num + 1);
-                    
+
                     warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         message: format!(
                             "No space after {} in ATX style heading",
                             "#".repeat(hashes.as_str().len())
@@ -124,13 +123,13 @@ impl Rule for MD018NoMissingSpaceAtx {
         if content.is_empty() {
             return Ok(String::new());
         }
-        
+
         let line_index = LineIndex::new(content.to_string());
         let mut result = String::new();
 
         // Use MarkdownElements to detect all headings
         let headings = MarkdownElements::detect_headings(content);
-        
+
         let lines: Vec<&str> = content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
@@ -139,11 +138,10 @@ impl Rule for MD018NoMissingSpaceAtx {
                 result.push_str(line);
             } else if self.is_atx_heading_without_space(line) {
                 // Make sure this is a heading, not just a line starting with #
-                let is_heading = headings.iter().any(|h| 
-                    h.element_type == ElementType::Heading && 
-                    h.start_line == i
-                );
-                
+                let is_heading = headings
+                    .iter()
+                    .any(|h| h.element_type == ElementType::Heading && h.start_line == i);
+
                 if is_heading {
                     result.push_str(&self.fix_atx_heading(line));
                 } else {
@@ -172,26 +170,26 @@ impl Rule for MD018NoMissingSpaceAtx {
         if structure.heading_lines.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Process only heading lines using structure.heading_lines
         for &line_num in &structure.heading_lines {
             let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-            
+
             // Skip if out of bounds
             if line_idx >= lines.len() {
                 continue;
             }
-            
+
             let line = lines[line_idx];
-            
+
             // Check if this is an ATX heading without space
             if self.is_atx_heading_without_space(line) {
                 let hashes = ATX_NO_SPACE_PATTERN.captures(line).unwrap().get(1).unwrap();
                 let line_range = self.get_line_byte_range(content, line_num);
-                
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     message: format!(
@@ -208,15 +206,15 @@ impl Rule for MD018NoMissingSpaceAtx {
                 });
             }
         }
-        
+
         Ok(warnings)
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::Heading
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !content.contains('#')
@@ -233,17 +231,17 @@ impl DocumentStructureExtensions for MD018NoMissingSpaceAtx {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         let rule = MD018NoMissingSpaceAtx;
-        
+
         // Test with correct space
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert!(result.is_empty());
-        
+
         // Test with missing space
         let content = "#Heading 1\n## Heading 2\n###Heading 3";
         let structure = DocumentStructure::new(content);

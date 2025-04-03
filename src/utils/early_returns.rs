@@ -1,11 +1,11 @@
-use crate::rule::LintResult;
 use super::regex_cache;
+use crate::rule::LintResult;
 
 /// Trait for implementing early returns in rules
 pub trait EarlyReturns {
     /// Check if this rule can be skipped based on content analysis
     fn can_skip(&self, content: &str) -> bool;
-    
+
     /// Returns the empty result if the rule can be skipped
     fn early_return_if_skippable(&self, content: &str) -> Option<LintResult> {
         if self.can_skip(content) {
@@ -23,17 +23,23 @@ pub fn should_skip_heading_rule(content: &str) -> bool {
 
 /// Common early return checks for list-related rules
 pub fn should_skip_list_rule(content: &str) -> bool {
-    content.is_empty() || (!content.contains('*') && !content.contains('-') && !content.contains('+') && !content.contains(". "))
+    content.is_empty()
+        || (!content.contains('*')
+            && !content.contains('-')
+            && !content.contains('+')
+            && !content.contains(". "))
 }
 
 /// Common early return checks for code block related rules
 pub fn should_skip_code_block_rule(content: &str) -> bool {
-    content.is_empty() || (!content.contains("```") && !content.contains("~~~") && !content.contains("    "))
+    content.is_empty()
+        || (!content.contains("```") && !content.contains("~~~") && !content.contains("    "))
 }
 
 /// Common early return checks for link-related rules
 pub fn should_skip_link_rule(content: &str) -> bool {
-    content.is_empty() || (!content.contains('[') && !content.contains('(') && !content.contains("]:"))
+    content.is_empty()
+        || (!content.contains('[') && !content.contains('(') && !content.contains("]:"))
 }
 
 /// Common early return checks for inline HTML rules
@@ -79,15 +85,16 @@ pub fn has_headings(content: &str) -> bool {
 /// Check if the content potentially contains unordered list markers
 #[inline]
 pub fn has_unordered_list_markers(content: &str) -> bool {
-    regex_cache::has_list_markers(content) && 
-    (content.contains('*') || content.contains('-') || content.contains('+'))
+    regex_cache::has_list_markers(content)
+        && (content.contains('*') || content.contains('-') || content.contains('+'))
 }
 
 /// Check if the content potentially contains ordered list markers
 #[inline]
 pub fn has_ordered_list_markers(content: &str) -> bool {
-    regex_cache::has_list_markers(content) && 
-    content.contains('.') && content.contains(|c: char| c.is_ascii_digit())
+    regex_cache::has_list_markers(content)
+        && content.contains('.')
+        && content.contains(|c: char| c.is_ascii_digit())
 }
 
 /// Check if the content potentially contains HTML tags
@@ -113,5 +120,4 @@ pub fn contains_any_of(content: &str, chars: &[char]) -> bool {
 #[inline]
 pub fn is_empty_or_trivial(content: &str) -> bool {
     content.is_empty() || content.trim().is_empty()
-} 
- 
+}

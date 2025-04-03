@@ -32,10 +32,22 @@ mod exclude_tests {
         let double_star_patterns = vec!["docs/**/*.md".to_string()];
         let direct_subdir_pattern = vec!["docs/subdir/*.md".to_string()];
 
-        assert!(should_exclude("docs/subdir/test.md", &double_star_patterns, false));
+        assert!(should_exclude(
+            "docs/subdir/test.md",
+            &double_star_patterns,
+            false
+        ));
 
-        assert!(should_exclude("docs/subdir/test.md", &direct_subdir_pattern, false));
-        assert!(!should_exclude("docs/other-subdir/test.md", &direct_subdir_pattern, false));
+        assert!(should_exclude(
+            "docs/subdir/test.md",
+            &direct_subdir_pattern,
+            false
+        ));
+        assert!(!should_exclude(
+            "docs/other-subdir/test.md",
+            &direct_subdir_pattern,
+            false
+        ));
     }
 
     #[test]
@@ -44,13 +56,25 @@ mod exclude_tests {
         let direct_subdir_pattern = vec!["docs/subdir/*.md".to_string()];
 
         // Double star pattern should match files in subdirectories
-        assert!(should_exclude("docs/subdir/test.md", &double_star_patterns, false));
+        assert!(should_exclude(
+            "docs/subdir/test.md",
+            &double_star_patterns,
+            false
+        ));
 
         // Direct subdir pattern should match files in that subdir
-        assert!(should_exclude("docs/subdir/test.md", &direct_subdir_pattern, false));
+        assert!(should_exclude(
+            "docs/subdir/test.md",
+            &direct_subdir_pattern,
+            false
+        ));
 
         // Direct subdir pattern should not match files in other subdirs
-        assert!(!should_exclude("docs/other-subdir/test.md", &direct_subdir_pattern, false));
+        assert!(!should_exclude(
+            "docs/other-subdir/test.md",
+            &direct_subdir_pattern,
+            false
+        ));
     }
 
     #[test]
@@ -69,7 +93,11 @@ mod exclude_tests {
     #[test]
     fn test_invalid_patterns() {
         let exclude_patterns = vec!["[invalid".to_string()];
-        assert!(should_exclude("file_with_[invalid_pattern.md", &exclude_patterns, false));
+        assert!(should_exclude(
+            "file_with_[invalid_pattern.md",
+            &exclude_patterns,
+            false
+        ));
         assert!(!should_exclude("normal_file.md", &exclude_patterns, false));
     }
 }

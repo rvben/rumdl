@@ -1,6 +1,6 @@
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
     // Optimized list detection patterns with anchors and non-capturing groups
@@ -146,10 +146,14 @@ impl ListUtils {
             if trimmed.chars().all(|c| c == '-' || c.is_whitespace()) {
                 return false;
             }
-            
+
             // Check for table delimiter rows without pipes (e.g., in cases where pipes are optional)
             // These have dashes and possibly colons for alignment
-            if trimmed.contains('-') && trimmed.chars().all(|c| c == '-' || c == ':' || c.is_whitespace()) {
+            if trimmed.contains('-')
+                && trimmed
+                    .chars()
+                    .all(|c| c == '-' || c == ':' || c.is_whitespace())
+            {
                 return false;
             }
         }
@@ -160,7 +164,9 @@ impl ListUtils {
         }
 
         // Handle potential regex errors gracefully
-        UNORDERED_LIST_NO_SPACE_PATTERN.is_match(line).unwrap_or(false)
+        UNORDERED_LIST_NO_SPACE_PATTERN
+            .is_match(line)
+            .unwrap_or(false)
             || ORDERED_LIST_NO_SPACE_PATTERN.is_match(line)
     }
 
@@ -331,23 +337,37 @@ mod tests {
         assert!(!ListUtils::is_list_item_without_space("__Bold text__"));
         assert!(!ListUtils::is_list_item_without_space("*Italic text*"));
         assert!(!ListUtils::is_list_item_without_space("_Italic text_"));
-        
+
         // Table cells with bold/emphasis (should return false)
-        assert!(!ListUtils::is_list_item_without_space("| **Heading** | Content |"));
+        assert!(!ListUtils::is_list_item_without_space(
+            "| **Heading** | Content |"
+        ));
         assert!(!ListUtils::is_list_item_without_space("**Bold** | Normal"));
-        assert!(!ListUtils::is_list_item_without_space("| Cell 1 | **Bold** |"));
-        
+        assert!(!ListUtils::is_list_item_without_space(
+            "| Cell 1 | **Bold** |"
+        ));
+
         // Horizontal rules (should return false)
         assert!(!ListUtils::is_list_item_without_space("---"));
         assert!(!ListUtils::is_list_item_without_space("----------"));
         assert!(!ListUtils::is_list_item_without_space("   ---   "));
-        
+
         // Table delimiter rows (should return false)
-        assert!(!ListUtils::is_list_item_without_space("|--------|---------|"));
-        assert!(!ListUtils::is_list_item_without_space("|:-------|:-------:|"));
-        assert!(!ListUtils::is_list_item_without_space("| ------ | ------- |"));
-        assert!(!ListUtils::is_list_item_without_space("---------|----------|"));
-        assert!(!ListUtils::is_list_item_without_space(":--------|:--------:"));
+        assert!(!ListUtils::is_list_item_without_space(
+            "|--------|---------|"
+        ));
+        assert!(!ListUtils::is_list_item_without_space(
+            "|:-------|:-------:|"
+        ));
+        assert!(!ListUtils::is_list_item_without_space(
+            "| ------ | ------- |"
+        ));
+        assert!(!ListUtils::is_list_item_without_space(
+            "---------|----------|"
+        ));
+        assert!(!ListUtils::is_list_item_without_space(
+            ":--------|:--------:"
+        ));
     }
 
     #[test]
@@ -358,7 +378,7 @@ mod tests {
         assert!(ListUtils::is_list_item("+ Item"));
         assert!(ListUtils::is_list_item("1. Item"));
         assert!(ListUtils::is_list_item("  - Indented item"));
-        
+
         // Not list items
         assert!(!ListUtils::is_list_item("Regular text"));
         assert!(!ListUtils::is_list_item(""));

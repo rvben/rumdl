@@ -112,7 +112,7 @@ impl Rule for MD010NoHardTabs {
 
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Pre-compute which lines are part of HTML comments
         let html_comment_lines = Self::find_html_comment_lines(&lines);
 
@@ -121,7 +121,7 @@ impl Rule for MD010NoHardTabs {
             if html_comment_lines[line_num] {
                 continue;
             }
-            
+
             // Skip if in code block and code_blocks is false
             if !self.code_blocks && Self::is_in_code_block(&lines, line_num) {
                 continue;
@@ -154,7 +154,7 @@ impl Rule for MD010NoHardTabs {
                 };
 
                 warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                    rule_name: Some(self.name()),
                     line: line_num + 1,
                     column: pos + 1,
                     message,
@@ -175,7 +175,7 @@ impl Rule for MD010NoHardTabs {
 
         let mut result = String::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Pre-compute which lines are part of HTML comments
         let html_comment_lines = Self::find_html_comment_lines(&lines);
 

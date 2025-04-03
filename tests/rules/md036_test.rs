@@ -46,7 +46,10 @@ fn test_multiple_emphasis() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "\n# First emphasis\n\nNormal line\n\n# Second emphasis\n");
+    assert_eq!(
+        fixed,
+        "\n# First emphasis\n\nNormal line\n\n# Second emphasis\n"
+    );
 }
 
 #[test]

@@ -11,6 +11,7 @@ clean:
 
 fmt:
 	cargo fmt
+	cargo clippy --fix --allow-dirty --allow-staged
 
 check:
 	cargo check

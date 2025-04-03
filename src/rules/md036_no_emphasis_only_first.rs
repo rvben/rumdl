@@ -1,6 +1,6 @@
-use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -21,7 +21,11 @@ lazy_static! {
 pub struct MD036NoEmphasisOnlyFirst;
 
 impl MD036NoEmphasisOnlyFirst {
-    fn is_entire_line_emphasized(line: &str, content: &str, line_num: usize) -> Option<(usize, String)> {
+    fn is_entire_line_emphasized(
+        line: &str,
+        content: &str,
+        line_num: usize,
+    ) -> Option<(usize, String)> {
         let line = line.trim();
 
         // Fast path for empty lines and lines that don't contain emphasis markers
@@ -35,8 +39,10 @@ impl MD036NoEmphasisOnlyFirst {
         }
 
         // Skip if line is in a list, blockquote, or code block
-        if LIST_MARKER.is_match(line) || BLOCKQUOTE_MARKER.is_match(line) || 
-           HeadingUtils::is_in_code_block(content, line_num) {
+        if LIST_MARKER.is_match(line)
+            || BLOCKQUOTE_MARKER.is_match(line)
+            || HeadingUtils::is_in_code_block(content, line_num)
+        {
             return None;
         }
 
@@ -129,7 +135,7 @@ impl Rule for MD036NoEmphasisOnlyFirst {
 
             if let Some((level, text)) = Self::is_entire_line_emphasized(line, content, i) {
                 warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                    rule_name: Some(self.name()),
                     line: i + 1,
                     column: 1,
                     message: format!("Emphasis used instead of a heading: '{}'", text),

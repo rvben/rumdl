@@ -77,18 +77,18 @@ pub trait Rule {
     fn fix(&self, _content: &str) -> Result<String, LintError> {
         Err(LintError::FixFailed("Fix not implemented".to_string()))
     }
-    
+
     /// Enhanced check method using document structure
     /// By default, calls the regular check method if not overridden
     fn check_with_structure(&self, content: &str, _structure: &DocumentStructure) -> LintResult {
         self.check(content)
     }
-    
+
     /// Check if this rule should quickly skip processing based on content
     fn should_skip(&self, _content: &str) -> bool {
         false
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::Other // Default implementation returns Other

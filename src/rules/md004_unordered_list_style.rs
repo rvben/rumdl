@@ -1,6 +1,8 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::document_structure::{
+    DocumentStructure, DocumentStructureExtensions, ListMarkerType,
+};
 use crate::utils::range_utils::LineIndex;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions, ListMarkerType};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -155,16 +157,16 @@ impl Rule for MD004UnorderedListStyle {
         if structure.list_lines.is_empty() {
             return Ok(vec![]);
         }
-        
+
         // Get only unordered list items from the structure
         let unordered_items = structure.get_list_items_by_type(ListMarkerType::Unordered);
         if unordered_items.is_empty() {
             return Ok(vec![]);
         }
-        
+
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        
+
         // Track the first marker style for the "consistent" option
         let first_marker = match self.style {
             UnorderedListStyle::Consistent => {
@@ -175,15 +177,15 @@ impl Rule for MD004UnorderedListStyle {
                     // Default to asterisk if no items found
                     Some('*')
                 }
-            },
+            }
             specific_style => Some(Self::get_marker_char(specific_style)),
         };
-        
+
         // Process all unordered list items
         for item in unordered_items {
             if let Some(target_style) = first_marker {
                 let item_marker = item.marker.chars().next().unwrap_or('*');
-                
+
                 if item_marker != target_style {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
@@ -195,14 +197,19 @@ impl Rule for MD004UnorderedListStyle {
                             item_marker, target_style
                         ),
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(item.line_number, item.indentation + 1),
-                            replacement: format!("{}{} ", " ".repeat(item.indentation), target_style),
+                            range: line_index
+                                .line_col_to_byte_range(item.line_number, item.indentation + 1),
+                            replacement: format!(
+                                "{}{} ",
+                                " ".repeat(item.indentation),
+                                target_style
+                            ),
                         }),
                     });
                 }
             }
         }
-        
+
         Ok(warnings)
     }
 
@@ -261,10 +268,11 @@ impl Rule for MD004UnorderedListStyle {
     fn category(&self) -> RuleCategory {
         RuleCategory::List
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
+        content.is_empty()
+            || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
 }
 
@@ -278,24 +286,24 @@ impl DocumentStructureExtensions for MD004UnorderedListStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         // Test with consistent style
         let rule = MD004UnorderedListStyle::default();
-        
+
         // Test with consistent markers
         let content = "* Item 1\n* Item 2\n* Item 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert!(result.is_empty());
-        
+
         // Test with inconsistent markers
         let content = "* Item 1\n- Item 2\n+ Item 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should flag the - and + markers
-        
+
         // Test specific style
         let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
         let content = "* Item 1\n- Item 2\n+ Item 3";
@@ -303,4 +311,4 @@ mod tests {
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should flag the * and + markers
     }
-} 
+}

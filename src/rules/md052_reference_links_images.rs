@@ -1,7 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use fancy_regex::Regex as FancyRegex;
 use std::collections::{HashMap, HashSet};
 
 lazy_static! {
@@ -70,7 +70,7 @@ impl MD052ReferenceLinkImages {
 
         spans
     }
-    
+
     /// Check if a position is within an inline code span
     fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
         spans.iter().any(|&(start, end)| pos >= start && pos < end)
@@ -156,19 +156,22 @@ impl MD052ReferenceLinkImages {
             if in_code_block || in_example_section || LIST_ITEM_REGEX.is_match(line) {
                 continue;
             }
-            
+
             // Detect inline code spans in this line
             let inline_code_spans = self.compute_inline_code_spans(line);
 
             // Check for undefined references in reference links
-            if let Ok(captures) = REF_LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+            if let Ok(captures) = REF_LINK_REGEX
+                .captures_iter(line)
+                .collect::<Result<Vec<_>, _>>()
+            {
                 for cap in captures {
                     if let Some(full_match) = cap.get(0) {
                         // Skip if inside inline code span
                         if self.is_in_code_span(&inline_code_spans, full_match.start()) {
                             continue;
                         }
-                        
+
                         let reference = if let Some(ref_match) = cap.get(2) {
                             if ref_match.as_str().is_empty() {
                                 cap.get(1).map(|m| m.as_str().to_string())
@@ -193,14 +196,17 @@ impl MD052ReferenceLinkImages {
             }
 
             // Check for undefined references in reference images
-            if let Ok(captures) = REF_IMAGE_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+            if let Ok(captures) = REF_IMAGE_REGEX
+                .captures_iter(line)
+                .collect::<Result<Vec<_>, _>>()
+            {
                 for cap in captures {
                     if let Some(full_match) = cap.get(0) {
                         // Skip if inside inline code span
                         if self.is_in_code_span(&inline_code_spans, full_match.start()) {
                             continue;
                         }
-                        
+
                         let reference = if let Some(ref_match) = cap.get(2) {
                             if ref_match.as_str().is_empty() {
                                 cap.get(1).map(|m| m.as_str().to_string())
@@ -225,14 +231,17 @@ impl MD052ReferenceLinkImages {
             }
 
             // Check for undefined shortcut references
-            if let Ok(captures) = SHORTCUT_REF_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+            if let Ok(captures) = SHORTCUT_REF_REGEX
+                .captures_iter(line)
+                .collect::<Result<Vec<_>, _>>()
+            {
                 for cap in captures {
                     if let Some(full_match) = cap.get(0) {
                         // Skip if inside inline code span
                         if self.is_in_code_span(&inline_code_spans, full_match.start()) {
                             continue;
                         }
-                        
+
                         // Skip if it's part of an inline link/image or a reference definition
                         if let Ok(is_inline_link) = INLINE_LINK_REGEX.is_match(line) {
                             if is_inline_link {
@@ -282,7 +291,7 @@ impl Rule for MD052ReferenceLinkImages {
 
         for (line_num, col, reference) in self.find_undefined_references(content, &references) {
             warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                rule_name: Some(self.name()),
                 line: line_num + 1,
                 column: col + 1,
                 message: format!("Reference '{}' not found", reference),

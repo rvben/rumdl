@@ -194,7 +194,11 @@ fn test_fragment_with_complex_content() {
 
     // The implementation correctly handles formatting in headings
     // by stripping it when generating fragments, so the link should match
-    assert_eq!(0, warnings.len(), "Link should correctly match the heading with stripped formatting");
+    assert_eq!(
+        0,
+        warnings.len(),
+        "Link should correctly match the heading with stripped formatting"
+    );
 }
 
 #[test]
@@ -211,7 +215,11 @@ fn test_nested_formatting_in_fragments() {
     let warnings = result.unwrap();
 
     // Test that nested formatting is correctly handled
-    assert_eq!(0, warnings.len(), "Link should match heading with nested bold and italic formatting");
+    assert_eq!(
+        0,
+        warnings.len(),
+        "Link should match heading with nested bold and italic formatting"
+    );
 }
 
 #[test]
@@ -228,7 +236,11 @@ fn test_multiple_formatting_styles() {
     let warnings = result.unwrap();
 
     // Test that different styles of formatting are handled correctly
-    assert_eq!(0, warnings.len(), "Link should match heading with mixed formatting styles");
+    assert_eq!(
+        0,
+        warnings.len(),
+        "Link should match heading with mixed formatting styles"
+    );
 }
 
 #[test]
@@ -245,7 +257,11 @@ fn test_complex_nested_formatting() {
     let warnings = result.unwrap();
 
     // Test that complex mixed formatting is handled correctly
-    assert_eq!(0, warnings.len(), "Link should match heading with complex formatting");
+    assert_eq!(
+        0,
+        warnings.len(),
+        "Link should match heading with complex formatting"
+    );
 }
 
 #[test]
@@ -265,7 +281,10 @@ fn test_formatting_edge_cases() {
     // This test may require adjustments based on expected behavior
     // The implementation should consistently generate the same fragment ID
     // Note: first link should be correct when partial bold is properly stripped
-    assert!(warnings.len() <= 1, "At least one link should match the heading with partial formatting");
+    assert!(
+        warnings.len() <= 1,
+        "At least one link should match the heading with partial formatting"
+    );
 }
 
 #[test]
@@ -327,30 +346,41 @@ fn test_performance_md051() {
 #[test]
 fn test_inline_code_spans() {
     let rule = MD051LinkFragments::new();
-    
+
     // Test links in inline code spans (these should be ignored)
     let content = "# Real Heading\n\nThis is a real link: [Link](somepath#real-heading)\n\nThis is a code example: `[Example](#missing-section)`";
 
     let result = rule.check(content).unwrap();
-    
+
     // We should only have 0 warnings - the link in inline code should be ignored
-    assert_eq!(result.len(), 0, "Link in inline code span should be ignored");
-    
+    assert_eq!(
+        result.len(),
+        0,
+        "Link in inline code span should be ignored"
+    );
+
     // Test with multiple code spans and mix of valid and invalid links
     let content = "# Heading One\n\n`[Invalid](#missing)` and [Valid](#heading-one) and `[Another Invalid](#nowhere)`";
-    
+
     let result = rule.check(content).unwrap();
-    
+
     // Only the valid link should be checked, the ones in code spans should be ignored
-    assert_eq!(result.len(), 0, "Only links outside code spans should be checked");
-    
+    assert_eq!(
+        result.len(),
+        0,
+        "Only links outside code spans should be checked"
+    );
+
     // Test with a fragment link in inline code followed by a real invalid link
     let content = "# Heading One\n\n`[Example](#missing-section)` and [Invalid Link](#section-two)";
-    
+
     let result = rule.check(content).unwrap();
-    
+
     // Only the real invalid link should be caught
     assert_eq!(result.len(), 1, "Only real invalid links should be caught");
     assert_eq!(result[0].line, 3, "Warning should be on line 3");
-    assert!(result[0].message.contains("section-two"), "Warning should be about 'section-two'");
+    assert!(
+        result[0].message.contains("section-two"),
+        "Warning should be about 'section-two'"
+    );
 }

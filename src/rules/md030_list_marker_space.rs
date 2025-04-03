@@ -1,6 +1,6 @@
 use crate::utils::range_utils::LineIndex;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -153,18 +153,21 @@ impl Rule for MD030ListMarkerSpace {
         if content.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         // Skip if no list markers
-        if !content.contains('*') && !content.contains('-') && !content.contains('+') &&
-           !content.contains(|c: char| c.is_ascii_digit()) {
+        if !content.contains('*')
+            && !content.contains('-')
+            && !content.contains('+')
+            && !content.contains(|c: char| c.is_ascii_digit())
+        {
             return Ok(Vec::new());
         }
-        
+
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Precompute list states
         let (is_list_line, multi_line) = self.precompute_states(&lines);
 
@@ -206,15 +209,18 @@ impl Rule for MD030ListMarkerSpace {
         if content.is_empty() {
             return Ok(String::new());
         }
-        
+
         // Skip if no list markers
-        if !content.contains('*') && !content.contains('-') && !content.contains('+') &&
-           !content.contains(|c: char| c.is_ascii_digit()) {
+        if !content.contains('*')
+            && !content.contains('-')
+            && !content.contains('+')
+            && !content.contains(|c: char| c.is_ascii_digit())
+        {
             return Ok(content.to_string());
         }
 
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Precompute list states
         let (is_list_line, multi_line) = self.precompute_states(&lines);
 
@@ -243,17 +249,19 @@ impl Rule for MD030ListMarkerSpace {
 
         Ok(result)
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::List
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() ||
-            (!content.contains('*') && !content.contains('-') && !content.contains('+') &&
-             !content.contains(|c: char| c.is_ascii_digit()))
+        content.is_empty()
+            || (!content.contains('*')
+                && !content.contains('-')
+                && !content.contains('+')
+                && !content.contains(|c: char| c.is_ascii_digit()))
     }
 }
 
@@ -267,34 +275,50 @@ impl DocumentStructureExtensions for MD030ListMarkerSpace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         let rule = MD030ListMarkerSpace::default();
-        
+
         // Test with correct spacing
         let content = "* Item 1\n* Item 2\n  * Nested item\n1. Ordered item";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(result.is_empty(), "Correctly spaced list markers should not generate warnings");
-        
+        assert!(
+            result.is_empty(),
+            "Correctly spaced list markers should not generate warnings"
+        );
+
         // Test with incorrect spacing
         let content = "*  Item 1 (too many spaces)\n* Item 2\n1.   Ordered item (too many spaces)";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(result.len(), 2, "Should have warnings for both items with incorrect spacing");
-        
+        assert_eq!(
+            result.len(),
+            2,
+            "Should have warnings for both items with incorrect spacing"
+        );
+
         // Test with multiline items
         let content = "* Item 1\n  continued on next line\n* Item 2";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(result.is_empty(), "Default spacing for single and multiline is 1");
-        
+        assert!(
+            result.is_empty(),
+            "Default spacing for single and multiline is 1"
+        );
+
         // Test with custom spacing settings
         let custom_rule = MD030ListMarkerSpace::new(1, 2, 1, 2);
         let content = "* Item 1\n  continued on next line\n*  Item 2 with 2 spaces";
         let structure = DocumentStructure::new(content);
-        let result = custom_rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(result.len(), 2, "Should have warnings for both items (wrong spacing)");
+        let result = custom_rule
+            .check_with_structure(content, &structure)
+            .unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "Should have warnings for both items (wrong spacing)"
+        );
     }
 }

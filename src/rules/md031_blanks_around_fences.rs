@@ -1,6 +1,6 @@
-use crate::utils::range_utils::LineIndex;
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -135,33 +135,33 @@ impl Rule for MD031BlanksAroundFences {
 
         Ok(result.join("\n"))
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::CodeBlock
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
         // Skip if the content is empty or doesn't contain any code fence markers
         content.is_empty() || (!content.contains("```") && !content.contains("~~~"))
     }
-    
+
     /// Optimized check using document structure
     fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
         // Early return if no code blocks
         if !self.has_relevant_elements(content, structure) {
             return Ok(Vec::new());
         }
-        
+
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Process each code fence start and end
         for &start_line in &structure.fenced_code_block_starts {
             let line_num = start_line;
-            
+
             // Check for blank line before fence
             if line_num > 1 && !Self::is_empty_line(lines[line_num - 2]) {
                 warnings.push(LintWarning {
@@ -177,10 +177,10 @@ impl Rule for MD031BlanksAroundFences {
                 });
             }
         }
-        
+
         for &end_line in &structure.fenced_code_block_ends {
             let line_num = end_line;
-            
+
             // Check for blank line after fence
             if line_num < lines.len() && !Self::is_empty_line(lines[line_num]) {
                 warnings.push(LintWarning {
@@ -190,20 +190,22 @@ impl Rule for MD031BlanksAroundFences {
                     message: "No blank line after fenced code block".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num, lines[line_num - 1].len() + 1),
+                        range: line_index
+                            .line_col_to_byte_range(line_num, lines[line_num - 1].len() + 1),
                         replacement: format!("{}\n", lines[line_num - 1]),
                     }),
                 });
             }
         }
-        
+
         Ok(warnings)
     }
 }
 
 impl DocumentStructureExtensions for MD031BlanksAroundFences {
     fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
-        !doc_structure.fenced_code_block_starts.is_empty() || !doc_structure.fenced_code_block_ends.is_empty()
+        !doc_structure.fenced_code_block_starts.is_empty()
+            || !doc_structure.fenced_code_block_ends.is_empty()
     }
 }
 
@@ -211,37 +213,58 @@ impl DocumentStructureExtensions for MD031BlanksAroundFences {
 mod tests {
     use super::*;
     use crate::utils::document_structure::document_structure_from_str;
-    
+
     #[test]
     fn test_with_document_structure() {
         let rule = MD031BlanksAroundFences;
-        
+
         // Test with properly formatted code blocks
         let content = "# Test Code Blocks\n\n```rust\nfn main() {}\n```\n\nSome text here.";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
-        assert!(warnings.is_empty(), "Expected no warnings for properly formatted code blocks");
-        
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for properly formatted code blocks"
+        );
+
         // Test with missing blank line before
         let content = "# Test Code Blocks\n```rust\nfn main() {}\n```\n\nSome text here.";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(warnings.len(), 1, "Expected 1 warning for missing blank line before");
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning for missing blank line before"
+        );
         assert_eq!(warnings[0].line, 2, "Warning should be on line 2");
-        assert!(warnings[0].message.contains("before"), "Warning should be about blank line before");
-        
+        assert!(
+            warnings[0].message.contains("before"),
+            "Warning should be about blank line before"
+        );
+
         // Test with missing blank line after
         let content = "# Test Code Blocks\n\n```rust\nfn main() {}\n```\nSome text here.";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(warnings.len(), 1, "Expected 1 warning for missing blank line after");
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning for missing blank line after"
+        );
         assert_eq!(warnings[0].line, 5, "Warning should be on line 5");
-        assert!(warnings[0].message.contains("after"), "Warning should be about blank line after");
-        
+        assert!(
+            warnings[0].message.contains("after"),
+            "Warning should be about blank line after"
+        );
+
         // Test with missing blank lines both before and after
         let content = "# Test Code Blocks\n```rust\nfn main() {}\n```\nSome text here.";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(warnings.len(), 2, "Expected 2 warnings for missing blank lines before and after");
+        assert_eq!(
+            warnings.len(),
+            2,
+            "Expected 2 warnings for missing blank lines before and after"
+        );
     }
 }

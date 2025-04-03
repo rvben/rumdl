@@ -1,8 +1,8 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingUtils;
-use crate::utils::range_utils::LineIndex;
-use crate::utils::markdown_elements::{MarkdownElements, ElementType};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::markdown_elements::{ElementType, MarkdownElements};
+use crate::utils::range_utils::LineIndex;
 use crate::HeadingStyle;
 
 /// Rule MD001: Heading levels should only increment by one level at a time
@@ -100,9 +100,10 @@ impl Rule for MD001HeadingIncrement {
                         };
 
                         // Get the heading style for the fix
-                        let style = if line_num + 1 < lines.len() && 
-                           (lines[line_num + 1].trim().starts_with('=') || 
-                            lines[line_num + 1].trim().starts_with('-')) {
+                        let style = if line_num + 1 < lines.len()
+                            && (lines[line_num + 1].trim().starts_with('=')
+                                || lines[line_num + 1].trim().starts_with('-'))
+                        {
                             if lines[line_num + 1].trim().starts_with('=') {
                                 HeadingStyle::Setext1
                             } else {
@@ -114,8 +115,9 @@ impl Rule for MD001HeadingIncrement {
 
                         // Create a fix with the correct heading level
                         let fixed_level = prev_level + 1;
-                        let replacement = HeadingUtils::convert_heading_style(&heading.text, fixed_level, style);
-                        
+                        let replacement =
+                            HeadingUtils::convert_heading_style(&heading.text, fixed_level, style);
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             line: line_num + 1,
@@ -132,7 +134,7 @@ impl Rule for MD001HeadingIncrement {
                             }),
                         });
                     }
-                    
+
                     prev_level = level;
                 }
             }
@@ -157,7 +159,7 @@ impl Rule for MD001HeadingIncrement {
         for i in 0..structure.heading_lines.len() {
             let line_num = structure.heading_lines[i];
             let level = structure.heading_levels[i];
-            
+
             // Check if this heading level is more than one level deeper than the previous
             if prev_level > 0 && level > prev_level + 1 {
                 let adjusted_line_num = line_num - 1; // Convert 1-indexed to 0-indexed
@@ -169,15 +171,20 @@ impl Rule for MD001HeadingIncrement {
 
                 // Get the heading text
                 let heading_text = if adjusted_line_num < lines.len() {
-                    lines[adjusted_line_num].trim_start().trim_start_matches('#').trim().to_string()
+                    lines[adjusted_line_num]
+                        .trim_start()
+                        .trim_start_matches('#')
+                        .trim()
+                        .to_string()
                 } else {
                     String::new()
                 };
 
                 // Determine heading style
-                let style = if adjusted_line_num + 1 < lines.len() && 
-                    (lines[adjusted_line_num + 1].trim().starts_with('=') || 
-                     lines[adjusted_line_num + 1].trim().starts_with('-')) {
+                let style = if adjusted_line_num + 1 < lines.len()
+                    && (lines[adjusted_line_num + 1].trim().starts_with('=')
+                        || lines[adjusted_line_num + 1].trim().starts_with('-'))
+                {
                     if lines[adjusted_line_num + 1].trim().starts_with('=') {
                         HeadingStyle::Setext1
                     } else {
@@ -189,25 +196,22 @@ impl Rule for MD001HeadingIncrement {
 
                 // Create a fix with the correct heading level
                 let fixed_level = prev_level + 1;
-                let replacement = HeadingUtils::convert_heading_style(&heading_text, fixed_level as u32, style);
-                
+                let replacement =
+                    HeadingUtils::convert_heading_style(&heading_text, fixed_level as u32, style);
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: line_num,
                     column: indentation + 1,
-                    message: format!(
-                        "Heading level should be {} for this level",
-                        prev_level + 1
-                    ),
+                    message: format!("Heading level should be {} for this level", prev_level + 1),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index
-                            .line_col_to_byte_range(line_num, indentation + 1),
+                        range: line_index.line_col_to_byte_range(line_num, indentation + 1),
                         replacement: format!("{}{}", " ".repeat(indentation), replacement),
                     }),
                 });
             }
-            
+
             prev_level = level;
         }
 
@@ -222,8 +226,9 @@ impl Rule for MD001HeadingIncrement {
         let ends_with_newline = content.ends_with('\n');
 
         let headings = MarkdownElements::detect_headings(content);
-        let mut heading_map: std::collections::HashMap<usize, (u32, usize)> = std::collections::HashMap::new();
-        
+        let mut heading_map: std::collections::HashMap<usize, (u32, usize)> =
+            std::collections::HashMap::new();
+
         // Create a map of line number to (heading level, end line)
         for heading in headings {
             if heading.element_type == ElementType::Heading {
@@ -251,7 +256,7 @@ impl Rule for MD001HeadingIncrement {
                 } else {
                     HeadingStyle::Atx
                 };
-                
+
                 // Check if we need to fix the heading level
                 if level > prev_level + 1 {
                     let fixed_level = prev_level + 1;
@@ -265,10 +270,11 @@ impl Rule for MD001HeadingIncrement {
                         }
                         text.trim().to_string()
                     };
-                    
-                    let replacement = HeadingUtils::convert_heading_style(&text, fixed_level, style);
+
+                    let replacement =
+                        HeadingUtils::convert_heading_style(&text, fixed_level, style);
                     fixed_lines.push(format!("{}{}", " ".repeat(indentation), replacement));
-                    
+
                     // Update prev_level to the fixed level
                     prev_level = fixed_level;
                 } else {
@@ -304,7 +310,7 @@ impl Rule for MD001HeadingIncrement {
     fn category(&self) -> RuleCategory {
         RuleCategory::Heading
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !content.contains('#')
@@ -321,17 +327,17 @@ impl DocumentStructureExtensions for MD001HeadingIncrement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         let rule = MD001HeadingIncrement;
-        
+
         // Test with valid headings
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert!(result.is_empty());
-        
+
         // Test with invalid headings
         let content = "# Heading 1\n### Heading 3\n#### Heading 4";
         let structure = DocumentStructure::new(content);

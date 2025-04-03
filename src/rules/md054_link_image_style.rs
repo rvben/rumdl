@@ -315,7 +315,7 @@ impl Rule for MD054LinkImageStyle {
                         && !allowed_styles.contains(&style)
                     {
                         warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                            rule_name: Some(self.name()),
                             line: line_num + 1,
                             column: match_start + 1,
                             message: format!(

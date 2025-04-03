@@ -1,6 +1,6 @@
-use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::code_block_utils::CodeBlockUtils;
+use crate::utils::range_utils::LineIndex;
 
 /// Rule MD055: Table pipe style should be consistent
 ///
@@ -121,28 +121,36 @@ impl MD055TablePipeStyle {
     /// Check if a line is a delimiter row (contains only |, -, :, and whitespace)
     fn is_delimiter_row(&self, line: &str) -> bool {
         let trimmed = line.trim();
-        !trimmed.is_empty() && trimmed.chars().all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
+        !trimmed.is_empty()
+            && trimmed
+                .chars()
+                .all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
     }
 
     /// Fix a table row to match the target style
     fn fix_table_row(&self, line: &str, target_style: &str) -> String {
         let trimmed = line.trim();
-        
+
         // Don't modify empty lines
         if trimmed.is_empty() {
             return line.to_string();
         }
 
         // Preserve leading whitespace
-        let leading_whitespace = line.chars()
+        let leading_whitespace = line
+            .chars()
             .take_while(|c| c.is_whitespace())
             .collect::<String>();
 
         // Handle delimiter rows properly
         if self.is_delimiter_row(line) {
             // Extract the core content of the delimiter row without pipes
-            let row_content = trimmed.trim_start_matches('|').trim_end_matches('|').trim().to_string();
-            
+            let row_content = trimmed
+                .trim_start_matches('|')
+                .trim_end_matches('|')
+                .trim()
+                .to_string();
+
             // Apply the appropriate style
             match target_style {
                 "leading_and_trailing" => format!("{}| {} |", leading_whitespace, row_content),
@@ -155,22 +163,22 @@ impl MD055TablePipeStyle {
             // Split the line by pipes to get cells
             let parts: Vec<&str> = trimmed.split('|').collect();
             let mut cells = Vec::new();
-            
+
             let has_leading_pipe = trimmed.starts_with('|');
             let has_trailing_pipe = trimmed.ends_with('|');
-            
+
             // Process the cells correctly, accounting for leading/trailing pipes
             for (i, part) in parts.iter().enumerate() {
                 // Skip empty leading part if there's a leading pipe
                 if i == 0 && part.trim().is_empty() && has_leading_pipe {
                     continue;
                 }
-                
+
                 // Skip empty trailing part if there's a trailing pipe
                 if i == parts.len() - 1 && part.trim().is_empty() && has_trailing_pipe {
                     continue;
                 }
-                
+
                 cells.push(part.trim());
             }
 
@@ -178,22 +186,20 @@ impl MD055TablePipeStyle {
             let result = match target_style {
                 "leading_and_trailing" => {
                     format!("| {} |", cells.join(" | "))
-                },
-                "no_leading_or_trailing" => {
-                    cells.join(" | ")
-                },
+                }
+                "no_leading_or_trailing" => cells.join(" | "),
                 "leading_only" => {
                     format!("| {}", cells.join(" | "))
-                },
+                }
                 "trailing_only" => {
                     format!("{} |", cells.join(" | "))
-                },
+                }
                 _ => {
                     // Default to leading_and_trailing if an unsupported style is provided
                     format!("| {} |", cells.join(" | "))
                 }
             };
-            
+
             // Reapply the original indentation
             format!("{}{}", leading_whitespace, result)
         }
@@ -224,7 +230,11 @@ impl Rule for MD055TablePipeStyle {
 
         // Get the configured style explicitly and validate it
         let configured_style = match self.style.as_str() {
-            "leading_and_trailing" | "no_leading_or_trailing" | "leading_only" | "trailing_only" | "consistent" => self.style.as_str(),
+            "leading_and_trailing"
+            | "no_leading_or_trailing"
+            | "leading_only"
+            | "trailing_only"
+            | "consistent" => self.style.as_str(),
             _ => {
                 // Invalid style provided, default to "leading_and_trailing"
                 "leading_and_trailing"
@@ -239,7 +249,10 @@ impl Rule for MD055TablePipeStyle {
             };
 
             // Skip if this line is in a code block
-            if code_blocks.iter().any(|(start, end)| line_start >= *start && line_start < *end) {
+            if code_blocks
+                .iter()
+                .any(|(start, end)| line_start >= *start && line_start < *end)
+            {
                 continue;
             }
 
@@ -254,11 +267,11 @@ impl Rule for MD055TablePipeStyle {
 
                 // Check if this is a delimiter row
                 let _is_delimiter = self.is_delimiter_row(line);
-                
+
                 if !_is_delimiter {
                     // Only use normal rows to determine table style
                     let line_style = self.determine_pipe_style(line);
-                    
+
                     if let Some(style) = line_style {
                         // For "consistent" mode, use the first table's style
                         if table_style.is_none() && configured_style == "consistent" {
@@ -266,14 +279,14 @@ impl Rule for MD055TablePipeStyle {
                         }
                     }
                 }
-                
+
                 // Determine target style
                 let target_style = if configured_style == "consistent" {
                     table_style.unwrap_or("leading_and_trailing")
                 } else {
                     configured_style
                 };
-                
+
                 // Check if this line needs fixing - handle both normal rows and delimiter rows
                 let current_style = if _is_delimiter {
                     // For delimiter rows, determine style directly
@@ -293,13 +306,16 @@ impl Rule for MD055TablePipeStyle {
                         None => continue, // Skip if style can't be determined
                     }
                 };
-                
+
                 if current_style != target_style {
                     warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         line: i + 1,
                         column: 1,
-                        message: format!("Table pipe style should be {}", target_style.replace('_', " ")),
+                        message: format!(
+                            "Table pipe style should be {}",
+                            target_style.replace('_', " ")
+                        ),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range(i + 1, 1),
@@ -322,14 +338,18 @@ impl Rule for MD055TablePipeStyle {
     fn fix(&self, content: &str) -> Result<String, LintError> {
         let lines: Vec<&str> = content.lines().collect();
         let code_blocks = CodeBlockUtils::detect_code_blocks(content);
-        
+
         let mut result = String::new();
         let mut table_style = None;
         let mut in_table = false;
-        
+
         // Use the configured style but validate it first
         let configured_style = match self.style.as_str() {
-            "leading_and_trailing" | "no_leading_or_trailing" | "leading_only" | "trailing_only" | "consistent" => self.style.as_str(),
+            "leading_and_trailing"
+            | "no_leading_or_trailing"
+            | "leading_only"
+            | "trailing_only"
+            | "consistent" => self.style.as_str(),
             _ => {
                 // Invalid style provided, default to "leading_and_trailing"
                 "leading_and_trailing"
@@ -344,7 +364,10 @@ impl Rule for MD055TablePipeStyle {
             };
 
             // Don't modify lines in code blocks
-            if code_blocks.iter().any(|(start, end)| line_start >= *start && line_start < *end) {
+            if code_blocks
+                .iter()
+                .any(|(start, end)| line_start >= *start && line_start < *end)
+            {
                 result.push_str(line);
                 if i < lines.len() - 1 {
                     result.push('\n');
@@ -361,7 +384,7 @@ impl Rule for MD055TablePipeStyle {
 
                 // Check if this is a delimiter row
                 let _is_delimiter = self.is_delimiter_row(line);
-                
+
                 // Process the line regardless of whether it's a delimiter row
                 if let Some(style) = self.determine_pipe_style(line) {
                     // For "consistent" mode, use the first table's style
@@ -369,7 +392,7 @@ impl Rule for MD055TablePipeStyle {
                         table_style = Some(style);
                     }
                 }
-                
+
                 let target_style = if configured_style == "consistent" {
                     table_style.unwrap_or("leading_and_trailing")
                 } else {
@@ -410,33 +433,39 @@ mod tests {
     fn test_md055_delimiter_row_handling() {
         // Test with no_leading_or_trailing style
         let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
-        
+
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
         let result = rule.fix(content).unwrap();
-        
+
         // With the fixed implementation, the delimiter row should have pipes removed
         let expected = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1 | Data 2 | Data 3";
-        
+
         assert_eq!(result, expected);
-        
+
         // Test that the check method actually reports the delimiter row as an issue
         let warnings = rule.check(content).unwrap();
         let delimiter_warning = &warnings[1]; // Second warning should be for delimiter row
         assert_eq!(delimiter_warning.line, 2);
-        assert_eq!(delimiter_warning.message, "Table pipe style should be no leading or trailing");
-        
+        assert_eq!(
+            delimiter_warning.message,
+            "Table pipe style should be no leading or trailing"
+        );
+
         // Test with leading_and_trailing style
         let rule = MD055TablePipeStyle::new("leading_and_trailing");
-        
+
         let content = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1   | Data 2   | Data 3";
         let result = rule.fix(content).unwrap();
-        
+
         // Output the actual result for debugging
-        println!("Actual leading_and_trailing result:\n{}", result.replace('\n', "\\n"));
-        
+        println!(
+            "Actual leading_and_trailing result:\n{}",
+            result.replace('\n', "\\n")
+        );
+
         // The delimiter row should have pipes added with spacing as in the implementation
         let expected = "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
-        
+
         assert_eq!(result, expected);
     }
 
@@ -444,37 +473,40 @@ mod tests {
     fn test_md055_check_finds_delimiter_row_issues() {
         // Test that check() correctly identifies delimiter rows that don't match style
         let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
-        
+
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
         let warnings = rule.check(content).unwrap();
-        
+
         // Should have 3 warnings - header row, delimiter row, and data row
         assert_eq!(warnings.len(), 3);
-        
+
         // Specifically verify the delimiter row warning (line 2)
         let delimiter_warning = &warnings[1];
         assert_eq!(delimiter_warning.line, 2);
-        assert_eq!(delimiter_warning.message, "Table pipe style should be no leading or trailing");
+        assert_eq!(
+            delimiter_warning.message,
+            "Table pipe style should be no leading or trailing"
+        );
     }
 
     #[test]
     fn test_md055_real_world_example() {
         // Test with a real-world example having content before and after the table
         let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
-        
+
         let content = "# Table Example\n\nHere's a table with leading and trailing pipes:\n\n| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |\n| Data 4   | Data 5   | Data 6   |\n\nMore content after the table.";
-        
+
         let result = rule.fix(content).unwrap();
-        
+
         // The table should be fixed, with delimiter row pipes properly removed
         let expected = "# Table Example\n\nHere's a table with leading and trailing pipes:\n\nHeader 1 | Header 2 | Header 3\n----------|----------|----------\nData 1 | Data 2 | Data 3\nData 4 | Data 5 | Data 6\n\nMore content after the table.";
-        
+
         assert_eq!(result, expected);
-        
+
         // Ensure we get warnings for all table rows
         let warnings = rule.check(content).unwrap();
         assert_eq!(warnings.len(), 4); // All four table rows should have warnings
-        
+
         // The line numbers should match the correct positions in the original content
         assert_eq!(warnings[0].line, 5); // Header row
         assert_eq!(warnings[1].line, 6); // Delimiter row
@@ -486,39 +518,35 @@ mod tests {
     fn test_md055_invalid_style() {
         // Test with an invalid style setting
         let rule = MD055TablePipeStyle::new("leading_or_trailing"); // Invalid style
-        
+
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
         let result = rule.fix(content).unwrap();
-        
+
         // Output the actual result for debugging
-        println!("Actual result with invalid style:\n{}", result.replace('\n', "\\n"));
-        
+        println!(
+            "Actual result with invalid style:\n{}",
+            result.replace('\n', "\\n")
+        );
+
         // Should default to "leading_and_trailing" and fix any inconsistencies with that style
         let expected = "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
-        
+
         // Should match the expected output after processing with the default style
         assert_eq!(result, expected);
-        
+
         // Now check a content that needs actual modification
         let content = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1   | Data 2   | Data 3";
         let result = rule.fix(content).unwrap();
-        
+
         // Should add pipes to match the default "leading_and_trailing" style
         let expected = "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
         assert_eq!(result, expected);
-        
+
         // Check that warning messages also work with the fallback style
         let warnings = rule.check(content).unwrap();
-        
+
         // Since content doesn't have leading/trailing pipes but defaults to "leading_and_trailing",
         // there should be warnings for all rows
         assert_eq!(warnings.len(), 3);
     }
 }
-
-
-
-
-
-
-

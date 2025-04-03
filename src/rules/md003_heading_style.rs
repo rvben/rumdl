@@ -1,13 +1,14 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
-use crate::utils::markdown_elements::{MarkdownElements, ElementType, ElementQuality};
 use crate::utils::document_structure::DocumentStructure;
+use crate::utils::markdown_elements::{ElementQuality, ElementType, MarkdownElements};
 use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
     static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
-    static ref QUICK_HEADING_CHECK: Regex = Regex::new(r"(?m)^(\s*)#|^(\s*)[^\s].*\n(\s*)(=+|-+)\s*$").unwrap();
+    static ref QUICK_HEADING_CHECK: Regex =
+        Regex::new(r"(?m)^(\s*)#|^(\s*)[^\s].*\n(\s*)(=+|-+)\s*$").unwrap();
 }
 
 pub struct MD003HeadingStyle {
@@ -26,20 +27,21 @@ impl MD003HeadingStyle {
     pub fn new(style: HeadingStyle) -> Self {
         Self { style }
     }
-    
+
     /// Detects the first heading style in the document for "consistent" mode
     /// Note: This is only used as a fallback if DocumentStructure is not available
     fn detect_first_heading_style(&self, content: &str) -> Option<HeadingStyle> {
         lazy_static! {
-            static ref ATX_PATTERN: Regex = Regex::new(r"^(#{1,6})(\s+)([^#\n]+?)(?:\s+(#{1,6}))?\s*$").unwrap();
+            static ref ATX_PATTERN: Regex =
+                Regex::new(r"^(#{1,6})(\s+)([^#\n]+?)(?:\s+(#{1,6}))?\s*$").unwrap();
         }
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Check for front matter first
         let mut in_front_matter = false;
         let mut line_idx = 0;
-        
+
         // Skip front matter if present
         if !lines.is_empty() && lines[0].trim() == "---" {
             in_front_matter = true;
@@ -51,26 +53,28 @@ impl MD003HeadingStyle {
                 }
             }
         }
-        
+
         // Look for the first heading
         for i in line_idx..lines.len() {
             let line = lines[i];
-            
+
             // Skip if still in front matter
             if in_front_matter {
                 continue;
             }
-            
+
             // Check for ATX headings
             if ATX_PATTERN.is_match(line) {
                 // Check for closed ATX (with trailing hashes)
-                if line.trim().ends_with('#') && !line.trim().chars().filter(|&c| c == '#').count() == line.trim().len() {
+                if line.trim().ends_with('#')
+                    && !line.trim().chars().filter(|&c| c == '#').count() == line.trim().len()
+                {
                     return Some(HeadingStyle::AtxClosed);
                 } else {
                     return Some(HeadingStyle::Atx);
                 }
             }
-            
+
             // Check for Setext headings
             if i < lines.len() - 1 {
                 let next_line = lines[i + 1];
@@ -91,30 +95,37 @@ impl MD003HeadingStyle {
                 }
             }
         }
-        
+
         // Default to ATX style if no headings are found
         Some(HeadingStyle::Atx)
     }
-    
+
     /// Check if we should use consistent mode (detect first style)
     fn is_consistent_mode(&self) -> bool {
         // Check for the Consistent variant explicitly
         self.style == HeadingStyle::Consistent
     }
-    
+
     /// Gets the target heading style based on configuration and document content
-    fn get_target_style(&self, content: &str, structure: Option<&DocumentStructure>) -> HeadingStyle {
+    fn get_target_style(
+        &self,
+        content: &str,
+        structure: Option<&DocumentStructure>,
+    ) -> HeadingStyle {
         if !self.is_consistent_mode() {
             return self.style;
         }
-        
+
         // If DocumentStructure is available, use the pre-computed first_heading_style
         if let Some(doc_structure) = structure {
             // Use the pre-computed style from the structure
-            doc_structure.first_heading_style.unwrap_or(HeadingStyle::Atx)
+            doc_structure
+                .first_heading_style
+                .unwrap_or(HeadingStyle::Atx)
         } else {
             // Fallback to manual detection if structure isn't available
-            self.detect_first_heading_style(content).unwrap_or(HeadingStyle::Atx)
+            self.detect_first_heading_style(content)
+                .unwrap_or(HeadingStyle::Atx)
         }
     }
 }
@@ -133,25 +144,27 @@ impl Rule for MD003HeadingStyle {
         if content.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         // Quick check if there are any headings at all
         if !QUICK_HEADING_CHECK.is_match(content) {
             return Ok(Vec::new());
         }
-        
+
         let mut result = Vec::new();
-        
+
         // Get the target style - use the fallback method since no structure is available
         let target_style = self.get_target_style(content, None);
 
         // Get all headings using the MarkdownElements utility
         let headings = MarkdownElements::detect_headings(content);
-        
+
         for heading in headings {
-            if heading.element_type != ElementType::Heading || heading.quality != ElementQuality::Valid {
+            if heading.element_type != ElementType::Heading
+                || heading.quality != ElementQuality::Valid
+            {
                 continue; // Skip non-headings or invalid headings
             }
-            
+
             // Get the heading level
             if let Some(level_str) = &heading.metadata {
                 if let Ok(level) = level_str.parse::<u32>() {
@@ -172,13 +185,19 @@ impl Rule for MD003HeadingStyle {
                             HeadingStyle::Atx
                         }
                     };
-                    
+
                     // For Setext, levels 3+ must be ATX regardless of the target style
-                    let expected_style = if level > 2 && (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2) {
+                    let expected_style = if level > 2
+                        && (target_style == HeadingStyle::Setext1
+                            || target_style == HeadingStyle::Setext2)
+                    {
                         HeadingStyle::Atx
                     } else {
                         // For Setext, use the appropriate style based on level
-                        if (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2) && level <= 2 {
+                        if (target_style == HeadingStyle::Setext1
+                            || target_style == HeadingStyle::Setext2)
+                            && level <= 2
+                        {
                             if level == 1 {
                                 HeadingStyle::Setext1
                             } else {
@@ -188,7 +207,7 @@ impl Rule for MD003HeadingStyle {
                             target_style
                         }
                     };
-                    
+
                     if style != expected_style {
                         result.push(LintWarning {
                             rule_name: Some(self.name()),
@@ -196,8 +215,7 @@ impl Rule for MD003HeadingStyle {
                             column: 1,
                             message: format!(
                                 "Heading style should be {:?}, found {:?}",
-                                expected_style,
-                                style
+                                expected_style, style
                             ),
                             severity: Severity::Warning,
                             fix: None,
@@ -215,27 +233,29 @@ impl Rule for MD003HeadingStyle {
         if content.is_empty() {
             return Ok(String::new());
         }
-        
+
         // Quick check if there are any headings at all
         if !QUICK_HEADING_CHECK.is_match(content) {
             return Ok(content.to_string());
         }
-        
+
         let mut fixed_content = String::new();
         let mut last_processed_line = 0;
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Get the target style - use the fallback method since no structure is available
         let target_style = self.get_target_style(content, None);
-        
+
         // Get all headings using the MarkdownElements utility
         let headings = MarkdownElements::detect_headings(content);
-        
+
         for heading in headings {
-            if heading.element_type != ElementType::Heading || heading.quality != ElementQuality::Valid {
+            if heading.element_type != ElementType::Heading
+                || heading.quality != ElementQuality::Valid
+            {
                 continue; // Skip non-headings or invalid headings
             }
-            
+
             // Add any lines before this heading
             for i in last_processed_line..heading.start_line {
                 if !fixed_content.is_empty() {
@@ -243,7 +263,7 @@ impl Rule for MD003HeadingStyle {
                 }
                 fixed_content.push_str(lines.get(i).unwrap_or(&""));
             }
-            
+
             // Get the heading level
             if let Some(level_str) = &heading.metadata {
                 if let Ok(level) = level_str.parse::<u32>() {
@@ -264,13 +284,19 @@ impl Rule for MD003HeadingStyle {
                             HeadingStyle::Atx
                         }
                     };
-                    
+
                     // For Setext, levels 3+ must be ATX regardless of the target style
-                    let expected_style = if level > 2 && (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2) {
+                    let expected_style = if level > 2
+                        && (target_style == HeadingStyle::Setext1
+                            || target_style == HeadingStyle::Setext2)
+                    {
                         HeadingStyle::Atx
                     } else {
                         // For Setext, use the appropriate style based on level
-                        if (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2) && level <= 2 {
+                        if (target_style == HeadingStyle::Setext1
+                            || target_style == HeadingStyle::Setext2)
+                            && level <= 2
+                        {
                             if level == 1 {
                                 HeadingStyle::Setext1
                             } else {
@@ -280,7 +306,7 @@ impl Rule for MD003HeadingStyle {
                             target_style
                         }
                     };
-                    
+
                     // If this heading's style doesn't match the target, convert it
                     if style != expected_style {
                         // Get the text content from the heading
@@ -292,21 +318,23 @@ impl Rule for MD003HeadingStyle {
                             let line = lines.get(heading.start_line).unwrap_or(&"");
                             HeadingUtils::get_heading_text(line).unwrap_or_default()
                         };
-                        
+
                         // Get indentation
                         let indentation = if let Some(line) = lines.get(heading.start_line) {
-                            line.chars().take_while(|c| c.is_whitespace()).collect::<String>()
+                            line.chars()
+                                .take_while(|c| c.is_whitespace())
+                                .collect::<String>()
                         } else {
                             String::new()
                         };
-                        
+
                         // Convert heading to target style
                         let converted_heading = HeadingUtils::convert_heading_style(
                             &format!("{}{}", indentation, text_content),
                             level,
-                            expected_style
+                            expected_style,
                         );
-                        
+
                         // Add converted heading
                         if !fixed_content.is_empty() {
                             fixed_content.push('\n');
@@ -321,13 +349,13 @@ impl Rule for MD003HeadingStyle {
                             fixed_content.push_str(lines.get(i).unwrap_or(&""));
                         }
                     }
-                    
+
                     // Update last processed line
                     last_processed_line = heading.end_line + 1;
                 }
             }
         }
-        
+
         // Add any remaining lines
         for i in last_processed_line..lines.len() {
             if !fixed_content.is_empty() {
@@ -335,12 +363,12 @@ impl Rule for MD003HeadingStyle {
             }
             fixed_content.push_str(lines.get(i).unwrap_or(&""));
         }
-        
+
         // Preserve trailing newline
         if content.ends_with('\n') && !fixed_content.ends_with('\n') {
             fixed_content.push('\n');
         }
-        
+
         Ok(fixed_content)
     }
 
@@ -349,36 +377,38 @@ impl Rule for MD003HeadingStyle {
         if content.is_empty() || structure.heading_lines.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let mut result = Vec::new();
-        
+
         // Get the target style using the pre-computed value from DocumentStructure
         let target_style = self.get_target_style(content, Some(structure));
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Process only heading lines using structure.heading_lines
         for (i, &line_num) in structure.heading_lines.iter().enumerate() {
             // Skip headings in front matter
             if structure.is_in_front_matter(line_num) {
                 continue;
             }
-            
+
             let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-            
+
             // Get the heading level from the structure
             let level = *structure.heading_levels.get(i).unwrap_or(&1);
-            
+
             // Determine the current style of the heading
             let current_line = lines.get(line_idx).unwrap_or(&"");
             let next_line_idx = line_idx + 1;
-            
+
             let style = if next_line_idx < lines.len() {
                 let next_line = lines[next_line_idx];
                 // Check if it's a setext heading
                 if next_line.trim_start().starts_with('=') {
                     HeadingStyle::Setext1
-                } else if next_line.trim_start().starts_with('-') && !current_line.trim_start().starts_with('#') {
+                } else if next_line.trim_start().starts_with('-')
+                    && !current_line.trim_start().starts_with('#')
+                {
                     HeadingStyle::Setext2
                 } else if current_line.trim().ends_with('#') {
                     HeadingStyle::AtxClosed
@@ -393,13 +423,17 @@ impl Rule for MD003HeadingStyle {
                     HeadingStyle::Atx
                 }
             };
-            
+
             // For Setext, levels 3+ must be ATX regardless of the target style
-            let expected_style = if level > 2 && (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2) {
+            let expected_style = if level > 2
+                && (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2)
+            {
                 HeadingStyle::Atx
             } else {
                 // For Setext, use the appropriate style based on level
-                if (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2) && level <= 2 {
+                if (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2)
+                    && level <= 2
+                {
                     if level == 1 {
                         HeadingStyle::Setext1
                     } else {
@@ -409,7 +443,7 @@ impl Rule for MD003HeadingStyle {
                     target_style
                 }
             };
-            
+
             if style != expected_style {
                 result.push(LintWarning {
                     rule_name: Some(self.name()),
@@ -417,22 +451,21 @@ impl Rule for MD003HeadingStyle {
                     column: 1,
                     message: format!(
                         "Heading style should be {:?}, found {:?}",
-                        expected_style,
-                        style
+                        expected_style, style
                     ),
                     severity: Severity::Warning,
                     fix: None,
                 });
             }
         }
-        
+
         Ok(result)
     }
-    
+
     fn category(&self) -> RuleCategory {
         RuleCategory::Heading
     }
-    
+
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !QUICK_HEADING_CHECK.is_match(content)
     }
@@ -462,33 +495,58 @@ mod tests {
     fn test_front_matter() {
         let rule = MD003HeadingStyle::default();
         let content = "---\ntitle: Test\n---\n\n# Heading 1\n## Heading 2";
-        
+
         // Test using document structure which should properly detect front matter
         let structure = DocumentStructure::new(content);
-        assert!(structure.has_front_matter, "Document structure should detect front matter");
-        assert_eq!(structure.front_matter_range, Some((1, 3)), "Front matter should span lines 1-3");
-        
+        assert!(
+            structure.has_front_matter,
+            "Document structure should detect front matter"
+        );
+        assert_eq!(
+            structure.front_matter_range,
+            Some((1, 3)),
+            "Front matter should span lines 1-3"
+        );
+
         // Make test more resilient - print details if warnings are found
         let result = rule.check_with_structure(content, &structure).unwrap();
         if !result.is_empty() {
-            println!("MD003: Found {} warnings for front matter content, expected 0", result.len());
+            println!(
+                "MD003: Found {} warnings for front matter content, expected 0",
+                result.len()
+            );
             // Print details of the warnings to help debugging
             for warning in &result {
                 println!("  Warning at line {}: {}", warning.line, warning.message);
             }
             // Allow the test to pass for now but note the issue
-            assert!(true, "Implementation behavior with front matter needs investigation");
+            assert!(
+                true,
+                "Implementation behavior with front matter needs investigation"
+            );
         } else {
-            assert!(result.is_empty(), "No warnings expected for content with front matter");
+            assert!(
+                result.is_empty(),
+                "No warnings expected for content with front matter"
+            );
         }
-        
+
         // Also check the direct check method
         let result = rule.check(content).unwrap();
         if !result.is_empty() {
-            println!("MD003: Found {} warnings from direct check, expected 0", result.len());
-            assert!(true, "Implementation behavior with direct check needs investigation");
+            println!(
+                "MD003: Found {} warnings from direct check, expected 0",
+                result.len()
+            );
+            assert!(
+                true,
+                "Implementation behavior with direct check needs investigation"
+            );
         } else {
-            assert!(result.is_empty(), "No warnings expected for content with front matter");
+            assert!(
+                result.is_empty(),
+                "No warnings expected for content with front matter"
+            );
         }
     }
 
@@ -508,42 +566,66 @@ mod tests {
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        
+
         // Make test more resilient
         if !result.is_empty() {
-            println!("MD003: Found {} warnings for consistent ATX style, expected 0", result.len());
+            println!(
+                "MD003: Found {} warnings for consistent ATX style, expected 0",
+                result.len()
+            );
             for warning in &result {
                 println!("  Warning at line {}: {}", warning.line, warning.message);
             }
             // Allow the test to pass for now but note the issue
-            assert!(true, "Implementation behavior with Consistent style needs investigation");
+            assert!(
+                true,
+                "Implementation behavior with Consistent style needs investigation"
+            );
         } else {
-            assert!(result.is_empty(), "No warnings expected for consistent ATX style");
+            assert!(
+                result.is_empty(),
+                "No warnings expected for consistent ATX style"
+            );
         }
-        
+
         // Test with incorrect style
         let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
         let content = "# Heading 1 #\nHeading 2\n-----\n### Heading 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(!result.is_empty(), "Should have warnings for inconsistent heading styles");
-        println!("Found {} warnings for inconsistent heading styles", result.len());
-        
+        assert!(
+            !result.is_empty(),
+            "Should have warnings for inconsistent heading styles"
+        );
+        println!(
+            "Found {} warnings for inconsistent heading styles",
+            result.len()
+        );
+
         // Test with setext style
         let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
         let content = "Heading 1\n=========\nHeading 2\n---------\n### Heading 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        
+
         // The level 3 heading can't be setext, so it's valid as ATX
         if !result.is_empty() {
-            println!("MD003: Found {} warnings for setext style with level 3 ATX, expected 0", result.len());
+            println!(
+                "MD003: Found {} warnings for setext style with level 3 ATX, expected 0",
+                result.len()
+            );
             for warning in &result {
                 println!("  Warning at line {}: {}", warning.line, warning.message);
             }
-            assert!(true, "Implementation behavior with Setext1 style needs investigation");
+            assert!(
+                true,
+                "Implementation behavior with Setext1 style needs investigation"
+            );
         } else {
-            assert!(result.is_empty(), "No warnings expected for setext style with ATX for level 3");
+            assert!(
+                result.is_empty(),
+                "No warnings expected for setext style with ATX for level 3"
+            );
         }
     }
-} 
+}

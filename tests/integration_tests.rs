@@ -1,7 +1,7 @@
 use rumdl::rule::Rule;
+use rumdl::rules::MD036NoEmphasisOnlyFirst;
 use rumdl::MD015NoMissingSpaceAfterListMarker;
 use rumdl::MD053LinkImageReferenceDefinitions;
-use rumdl::rules::{MD036NoEmphasisOnlyFirst};
 
 #[test]
 fn cross_rule_md015_md053() {
@@ -29,11 +29,11 @@ fn cross_rule_md015_md053() {
 fn test_md036_for_emphasis_only_lines() {
     // Test for the proper purpose of MD036 - emphasis-only lines
     let content = "Normal text\n\n**This should be a heading**\n\nMore text";
-    
+
     // Apply MD036 (NoEmphasisOnlyFirst) fix
     let md036 = MD036NoEmphasisOnlyFirst {};
     let fixed_md036 = md036.fix(content).unwrap();
-    
+
     // The emphasis should be converted to a proper heading
     assert!(fixed_md036.contains("## This should be a heading"));
     assert!(!fixed_md036.contains("**This should be a heading**"));

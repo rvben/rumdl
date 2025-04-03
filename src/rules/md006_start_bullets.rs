@@ -1,6 +1,6 @@
 use crate::utils::range_utils::LineIndex;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -155,7 +155,7 @@ impl Rule for MD006StartBullets {
                 };
 
                 result.push(LintWarning {
-            rule_name: Some(self.name()),
+                    rule_name: Some(self.name()),
                     severity: Severity::Warning,
                     line: line_idx + 1, // 1-indexed line number
                     column: 1,
@@ -232,7 +232,7 @@ impl Rule for MD006StartBullets {
         if structure.list_lines.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         // Quick check to avoid unnecessary work
         if !content.contains('*') && !content.contains('-') && !content.contains('+') {
             return Ok(Vec::new());
@@ -242,18 +242,18 @@ impl Rule for MD006StartBullets {
         let mut result = Vec::new();
 
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Process only list lines using structure.list_lines
         for &line_num in &structure.list_lines {
             let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-            
+
             // Skip if out of bounds
             if line_idx >= lines.len() {
                 continue;
             }
-            
+
             let line = lines[line_idx];
-            
+
             // Skip lines in code blocks
             if structure.is_in_code_block(line_num) {
                 continue;
@@ -304,15 +304,16 @@ impl Rule for MD006StartBullets {
 
         Ok(result)
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::List
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
+        content.is_empty()
+            || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
 }
 
@@ -326,46 +327,67 @@ impl DocumentStructureExtensions for MD006StartBullets {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         let rule = MD006StartBullets;
-        
+
         // Test with properly formatted lists
         let content = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(result.is_empty(), "Properly formatted lists should not generate warnings");
-        
+        assert!(
+            result.is_empty(),
+            "Properly formatted lists should not generate warnings"
+        );
+
         // Test with improperly indented list - adjust expectations based on actual implementation
         let content = "  * Item 1\n  * Item 2\n    * Nested item";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        
+
         // If no warnings are generated, the test should be updated to match implementation behavior
         if result.is_empty() {
-            println!("MD006: The implementation doesn't flag indented top-level items as expected.");
+            println!(
+                "MD006: The implementation doesn't flag indented top-level items as expected."
+            );
             println!("This likely indicates a design decision or implementation limitation.");
             // For now, we update our expectations to match the actual behavior
-            assert!(true, "Implementation doesn't consider indented bullets as errors");
+            assert!(
+                true,
+                "Implementation doesn't consider indented bullets as errors"
+            );
         } else {
             // Otherwise verify the expected behavior
-            assert!(!result.is_empty(), "Improperly indented lists should generate warnings");
-            assert_eq!(result.len(), 2, "Should generate warnings for both improperly indented top-level items");
+            assert!(
+                !result.is_empty(),
+                "Improperly indented lists should generate warnings"
+            );
+            assert_eq!(
+                result.len(),
+                2,
+                "Should generate warnings for both improperly indented top-level items"
+            );
         }
-        
+
         // Test with mixed indentation
         let content = "* Item 1\n  * Item 2 (should be nested but isn't properly nested)";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        
+
         // Adjust expectations if implementation doesn't flag this
         if result.is_empty() {
             println!("MD006: The implementation doesn't flag the improperly nested item.");
             // For now, update expectations
-            assert!(true, "Implementation doesn't consider this item improperly nested");
+            assert!(
+                true,
+                "Implementation doesn't consider this item improperly nested"
+            );
         } else {
-            assert!(!result.is_empty(), "Improperly indented items should generate warnings");
+            assert!(
+                !result.is_empty(),
+                "Improperly indented items should generate warnings"
+            );
             assert_eq!(result.len(), 1, "Should generate a warning for Item 2");
         }
     }

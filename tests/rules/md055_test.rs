@@ -110,7 +110,11 @@ fn test_leading_only_style() {
     "#;
 
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 0, "Content with leading pipes only should not trigger warnings with leading_only style");
+    assert_eq!(
+        result.len(),
+        0,
+        "Content with leading pipes only should not trigger warnings with leading_only style"
+    );
 
     // Inconsistent with leading_only style (has trailing pipes)
     let content = r#"
@@ -120,13 +124,17 @@ fn test_leading_only_style() {
     "#;
 
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 3, "Content with both leading and trailing pipes should be flagged when style is leading_only");
-    
+    assert_eq!(
+        result.len(),
+        3,
+        "Content with both leading and trailing pipes should be flagged when style is leading_only"
+    );
+
     // Fix should correctly convert to leading_only style
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("| Header 1 | Header 2"));
     assert!(!fixed.contains("| Header 1 | Header 2 |"));
-    
+
     // After fixing, there should be no warnings
     let result = rule.check(&fixed).unwrap();
     assert_eq!(result.len(), 0);
@@ -144,7 +152,11 @@ Cell 1   | Cell 2   |
     "#;
 
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 0, "Content with trailing pipes only should not trigger warnings with trailing_only style");
+    assert_eq!(
+        result.len(),
+        0,
+        "Content with trailing pipes only should not trigger warnings with trailing_only style"
+    );
 
     // Inconsistent with trailing_only style (has leading pipes)
     let content = r#"
@@ -155,12 +167,12 @@ Cell 1   | Cell 2   |
 
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3, "Content with both leading and trailing pipes should be flagged when style is trailing_only");
-    
+
     // Fix should correctly convert to trailing_only style
     let fixed = rule.fix(content).unwrap();
     assert!(fixed.contains("Header 1 | Header 2 |"));
     assert!(!fixed.contains("| Header 1 | Header 2 |"));
-    
+
     // After fixing, there should be no warnings
     let result = rule.check(&fixed).unwrap();
     assert_eq!(result.len(), 0);
@@ -200,7 +212,7 @@ Cell 1   | Cell 2
     assert!(fixed.contains("| Cell 1 | Cell 2 |"));
     let result = rule.check(&fixed).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
-    
+
     // Test fix for no_leading_or_trailing style
     let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
     let content = r#"
@@ -214,7 +226,7 @@ Cell 1   | Cell 2
     assert!(!fixed.contains("Header 2 |"));
     let result = rule.check(&fixed).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
-    
+
     // Test fix for leading_only style
     let rule = MD055TablePipeStyle::new("leading_only");
     let content = r#"
@@ -227,7 +239,7 @@ Cell 1   | Cell 2   |
     assert!(!fixed.contains("| Header 1 | Header 2 |"));
     let result = rule.check(&fixed).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
-    
+
     // Test fix for trailing_only style
     let rule = MD055TablePipeStyle::new("trailing_only");
     let content = r#"

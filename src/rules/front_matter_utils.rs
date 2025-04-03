@@ -151,14 +151,17 @@ impl FrontMatterUtils {
             match front_matter_type {
                 FrontMatterType::Toml => {
                     // Handle TOML-style fields (key = value)
-                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap().captures(line) {
+                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#)
+                        .unwrap()
+                        .captures(line)
+                    {
                         let key = captures.get(1).unwrap().as_str().trim();
                         if key == field_name {
                             let value = captures.get(2).unwrap().as_str();
                             return Some(value);
                         }
                     }
-                },
+                }
                 _ => {
                     // Handle YAML/JSON-style fields (key: value)
                     if let Some(captures) = FRONT_MATTER_FIELD.captures(line) {
@@ -167,7 +170,7 @@ impl FrontMatterUtils {
                             let value = captures.get(2).unwrap().as_str().trim();
                             // Strip quotes if present
                             if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-                                return Some(&value[1..value.len()-1]);
+                                return Some(&value[1..value.len() - 1]);
                             }
                             return Some(value);
                         }
@@ -195,7 +198,7 @@ impl FrontMatterUtils {
         for line in front_matter {
             let line_indent = line.chars().take_while(|c| c.is_whitespace()).count();
             let line = line.trim();
-            
+
             // Handle indentation changes for nested fields
             if line_indent > indent_level {
                 // Going deeper
@@ -214,7 +217,10 @@ impl FrontMatterUtils {
             match front_matter_type {
                 FrontMatterType::Toml => {
                     // Handle TOML-style fields
-                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap().captures(line) {
+                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#)
+                        .unwrap()
+                        .captures(line)
+                    {
                         let key = captures.get(1).unwrap().as_str().trim();
                         let value = captures.get(2).unwrap().as_str();
                         let full_key = if current_prefix.is_empty() {
@@ -224,19 +230,20 @@ impl FrontMatterUtils {
                         };
                         fields.insert(full_key, value.to_string());
                     }
-                },
+                }
                 _ => {
                     // Handle YAML/JSON-style fields
                     if let Some(captures) = FRONT_MATTER_FIELD.captures(line) {
                         let key = captures.get(1).unwrap().as_str().trim();
                         let value = captures.get(2).unwrap().as_str().trim();
-                        
+
                         if key.ends_with(':') {
                             // This is a nested field marker
                             if current_prefix.is_empty() {
-                                current_prefix = key[..key.len()-1].to_string();
+                                current_prefix = key[..key.len() - 1].to_string();
                             } else {
-                                current_prefix = format!("{}.{}", current_prefix, &key[..key.len()-1]);
+                                current_prefix =
+                                    format!("{}.{}", current_prefix, &key[..key.len() - 1]);
                             }
                         } else {
                             // This is a field with a value
@@ -246,8 +253,11 @@ impl FrontMatterUtils {
                                 format!("{}.{}", current_prefix, key)
                             };
                             // Strip quotes if present
-                            let value = if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-                                &value[1..value.len()-1]
+                            let value = if value.starts_with('"')
+                                && value.ends_with('"')
+                                && value.len() >= 2
+                            {
+                                &value[1..value.len() - 1]
                             } else {
                                 value
                             };

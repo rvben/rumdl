@@ -140,5 +140,9 @@ fn test_with_front_matter() {
     let rule = MD003HeadingStyle::default();
     let content = "---\ntitle: \"Test Document\"\nauthor: \"Test Author\"\ndate: \"2024-04-03\"\n---\n\n# Heading 1\n## Heading 2\n### Heading 3";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Expected no warnings with front matter followed by ATX headings, but got {} warnings", result.len());
+    assert!(
+        result.is_empty(),
+        "Expected no warnings with front matter followed by ATX headings, but got {} warnings",
+        result.len()
+    );
 }

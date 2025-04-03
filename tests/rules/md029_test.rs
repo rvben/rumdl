@@ -93,11 +93,17 @@ final code
 ```"#;
 
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "List items with code blocks between them should maintain sequence");
+    assert!(
+        result.is_empty(),
+        "List items with code blocks between them should maintain sequence"
+    );
 
     // Test that it doesn't generate false positives
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, content, "Content should remain unchanged as it's already correct");
+    assert_eq!(
+        fixed, content,
+        "Content should remain unchanged as it's already correct"
+    );
 }
 
 #[test]
@@ -121,9 +127,15 @@ fn test_md029_nested_with_code_blocks() {
 
     let result = rule.check(content).unwrap();
     println!("Warnings: {:?}", result);
-    assert!(result.is_empty(), "Nested lists with code blocks should maintain correct sequence");
+    assert!(
+        result.is_empty(),
+        "Nested lists with code blocks should maintain correct sequence"
+    );
 
     // Test that it doesn't generate false positives
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, content, "Content should remain unchanged as it's already correct");
+    assert_eq!(
+        fixed, content,
+        "Content should remain unchanged as it's already correct"
+    );
 }

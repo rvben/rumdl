@@ -26,7 +26,7 @@ pub enum HeadingStyle {
     Setext1,   // Heading
     // =======
     Setext2, // Heading
-             // -------
+    // -------
     Consistent, // For maintaining consistency with the first found header style
 }
 
@@ -67,7 +67,9 @@ impl HeadingUtils {
                 let first_chars: Vec<char> = trimmed.chars().take(3).collect();
                 if first_chars.iter().all(|&c| c == '`' || c == '~') {
                     if let Some(current_fence) = fence_char {
-                        if first_chars[0] == current_fence && first_chars.iter().all(|&c| c == current_fence) {
+                        if first_chars[0] == current_fence
+                            && first_chars.iter().all(|&c| c == current_fence)
+                        {
                             in_code_block = false;
                             fence_char = None;
                         }
@@ -90,7 +92,7 @@ impl HeadingUtils {
         }
 
         let line = lines[line_num - 1];
-        
+
         // Skip if line is within a code block
         if Self::is_in_code_block(content, line_num - 1) {
             return None;
@@ -102,7 +104,7 @@ impl HeadingUtils {
             let opening_hashes = captures.get(2).map_or("", |m| m.as_str());
             let level = opening_hashes.len() as u32;
             let text = captures.get(4).map_or("", |m| m.as_str()).to_string();
-            
+
             let style = if let Some(closing) = captures.get(5) {
                 let closing_hashes = closing.as_str();
                 if closing_hashes.len() == opening_hashes.len() {
@@ -127,26 +129,30 @@ impl HeadingUtils {
         // Check for Setext style headings
         if line_num < lines.len() {
             let next_line = lines[line_num];
-            let line_indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
-            
+            let line_indentation = line
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .collect::<String>();
+
             // Skip empty lines - don't consider them as potential Setext headings
             if line.trim().is_empty() {
                 return None;
             }
-            
+
             // Skip list items - they shouldn't be considered as potential Setext headings
-            if line.trim_start().starts_with('-') || 
-               line.trim_start().starts_with('*') || 
-               line.trim_start().starts_with('+') ||
-               line.trim_start().starts_with("1.") {
+            if line.trim_start().starts_with('-')
+                || line.trim_start().starts_with('*')
+                || line.trim_start().starts_with('+')
+                || line.trim_start().starts_with("1.")
+            {
                 return None;
             }
-            
+
             // Skip front matter delimiters or lines within front matter
             if line.trim() == "---" || Self::is_in_front_matter(content, line_num - 1) {
                 return None;
             }
-            
+
             if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
                 let underline_indent = captures.get(1).map_or("", |m| m.as_str());
                 if underline_indent == line_indentation {
@@ -187,88 +193,140 @@ impl HeadingUtils {
         if text_content.trim().is_empty() {
             return String::new();
         }
-        
+
         // Validate heading level
         let level = level.clamp(1, 6);
-        let indentation = text_content.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+        let indentation = text_content
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect::<String>();
         let text_content = text_content.trim();
-        
+
         match style {
             HeadingStyle::Atx => {
-                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
+                format!(
+                    "{}{} {}",
+                    indentation,
+                    "#".repeat(level as usize),
+                    text_content
+                )
             }
             HeadingStyle::AtxClosed => {
-                format!("{}{} {} {}", indentation, "#".repeat(level as usize), text_content, "#".repeat(level as usize))
+                format!(
+                    "{}{} {} {}",
+                    indentation,
+                    "#".repeat(level as usize),
+                    text_content,
+                    "#".repeat(level as usize)
+                )
             }
             HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
                 if level > 2 {
                     // Fall back to ATX style for levels > 2
-                    format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
+                    format!(
+                        "{}{} {}",
+                        indentation,
+                        "#".repeat(level as usize),
+                        text_content
+                    )
                 } else {
-                    let underline_char = if level == 1 || style == HeadingStyle::Setext1 { '=' } else { '-' };
+                    let underline_char = if level == 1 || style == HeadingStyle::Setext1 {
+                        '='
+                    } else {
+                        '-'
+                    };
                     let visible_length = text_content.chars().count();
                     let underline_length = visible_length.max(3); // Ensure at least 3 underline chars
-                    format!("{}{}\n{}{}", indentation, text_content, indentation, underline_char.to_string().repeat(underline_length))
+                    format!(
+                        "{}{}\n{}{}",
+                        indentation,
+                        text_content,
+                        indentation,
+                        underline_char.to_string().repeat(underline_length)
+                    )
                 }
             }
             HeadingStyle::Consistent => {
                 // For Consistent style, default to ATX as it's the most commonly used
-                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
+                format!(
+                    "{}{} {}",
+                    indentation,
+                    "#".repeat(level as usize),
+                    text_content
+                )
             }
         }
     }
 
     /// Get the text content of a heading line
     pub fn get_heading_text(line: &str) -> Option<String> {
-        ATX_PATTERN.captures(line).map(|captures| captures.get(4).map_or("", |m| m.as_str()).trim().to_string())
+        ATX_PATTERN.captures(line).map(|captures| {
+            captures
+                .get(4)
+                .map_or("", |m| m.as_str())
+                .trim()
+                .to_string()
+        })
     }
 
     /// Detect emphasis-only lines
     pub fn is_emphasis_only_line(line: &str) -> bool {
         let trimmed = line.trim();
-        SINGLE_LINE_ASTERISK_EMPHASIS.is_match(trimmed) || 
-        SINGLE_LINE_UNDERSCORE_EMPHASIS.is_match(trimmed) || 
-        SINGLE_LINE_DOUBLE_ASTERISK_EMPHASIS.is_match(trimmed) || 
-        SINGLE_LINE_DOUBLE_UNDERSCORE_EMPHASIS.is_match(trimmed)
+        SINGLE_LINE_ASTERISK_EMPHASIS.is_match(trimmed)
+            || SINGLE_LINE_UNDERSCORE_EMPHASIS.is_match(trimmed)
+            || SINGLE_LINE_DOUBLE_ASTERISK_EMPHASIS.is_match(trimmed)
+            || SINGLE_LINE_DOUBLE_UNDERSCORE_EMPHASIS.is_match(trimmed)
     }
 
     /// Extract text from an emphasis-only line
     pub fn extract_emphasis_text(line: &str) -> Option<(String, u32)> {
         let trimmed = line.trim();
-        
+
         if let Some(caps) = SINGLE_LINE_ASTERISK_EMPHASIS.captures(trimmed) {
             return Some((caps.get(1).unwrap().as_str().trim().to_string(), 1));
         }
-        
+
         if let Some(caps) = SINGLE_LINE_UNDERSCORE_EMPHASIS.captures(trimmed) {
             return Some((caps.get(1).unwrap().as_str().trim().to_string(), 1));
         }
-        
+
         if let Some(caps) = SINGLE_LINE_DOUBLE_ASTERISK_EMPHASIS.captures(trimmed) {
             return Some((caps.get(1).unwrap().as_str().trim().to_string(), 2));
         }
-        
+
         if let Some(caps) = SINGLE_LINE_DOUBLE_UNDERSCORE_EMPHASIS.captures(trimmed) {
             return Some((caps.get(1).unwrap().as_str().trim().to_string(), 2));
         }
-        
+
         None
     }
 
     /// Convert emphasis to heading
     pub fn convert_emphasis_to_heading(line: &str) -> Option<String> {
         // Preserve the original indentation
-        let indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+        let indentation = line
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect::<String>();
         // Preserve trailing spaces at the end of the line
         let trailing = if line.ends_with(" ") {
-            line.chars().rev().take_while(|c| c.is_whitespace()).collect::<String>()
+            line.chars()
+                .rev()
+                .take_while(|c| c.is_whitespace())
+                .collect::<String>()
         } else {
             String::new()
         };
-        
+
         if let Some((text, level)) = Self::extract_emphasis_text(line) {
             // Preserve the original indentation and trailing spaces
-            Some(format!("{}{} {}{}", indentation, "#".repeat(level as usize), text, trailing))
+            Some(format!(
+                "{}{} {}{}",
+                indentation,
+                "#".repeat(level as usize),
+                text,
+                trailing
+            ))
         } else {
             None
         }
@@ -289,7 +347,8 @@ impl HeadingUtils {
             .collect::<String>();
 
         // Replace multiple consecutive hyphens with a single hyphen
-        let text_clean = text_with_hyphens.split('-')
+        let text_clean = text_with_hyphens
+            .split('-')
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
             .join("-");
@@ -304,28 +363,28 @@ impl HeadingUtils {
         if lines.is_empty() || line_number >= lines.len() {
             return false;
         }
-        
+
         // Check if the document starts with front matter
         if !lines[0].trim_start().eq("---") {
             return false;
         }
-        
+
         let mut in_front_matter = true;
         let mut found_closing = false;
-        
+
         // Skip the first line (opening delimiter)
         for (i, line) in lines.iter().enumerate().skip(1) {
             if i > line_number {
                 break;
             }
-            
+
             if line.trim_start().eq("---") {
                 found_closing = true;
                 in_front_matter = i > line_number;
                 break;
             }
         }
-        
+
         in_front_matter && !found_closing
     }
 }
@@ -360,28 +419,31 @@ pub fn is_setext_heading(lines: &[&str], index: usize) -> bool {
     if index >= lines.len() - 1 {
         return false;
     }
-    
+
     let current_line = lines[index];
     let next_line = lines[index + 1];
-    
+
     // Skip if current line is empty
     if current_line.trim().is_empty() {
         return false;
     }
-    
+
     // Check if next line is a setext heading marker with same indentation
-    let current_indentation = current_line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
-    
+    let current_indentation = current_line
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .collect::<String>();
+
     if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
         let underline_indent = captures.get(1).map_or("", |m| m.as_str());
         return underline_indent == current_indentation;
     }
-    
+
     if let Some(captures) = SETEXT_HEADING_2.captures(next_line) {
         let underline_indent = captures.get(1).map_or("", |m| m.as_str());
         return underline_indent == current_indentation;
     }
-    
+
     false
 }
 
@@ -391,28 +453,28 @@ pub fn get_heading_level(lines: &[&str], index: usize) -> u32 {
     if index >= lines.len() {
         return 0;
     }
-    
+
     let line = lines[index];
-    
+
     // Check for ATX style heading
     if let Some(captures) = ATX_PATTERN.captures(line) {
         let hashes = captures.get(2).map_or("", |m| m.as_str());
         return hashes.len() as u32;
     }
-    
+
     // Check for setext style heading
     if index < lines.len() - 1 {
         let next_line = lines[index + 1];
-        
+
         if SETEXT_HEADING_1.is_match(next_line) {
             return 1;
         }
-        
+
         if SETEXT_HEADING_2.is_match(next_line) {
             return 2;
         }
     }
-    
+
     0
 }
 
@@ -422,26 +484,33 @@ pub fn extract_heading_text(lines: &[&str], index: usize) -> String {
     if index >= lines.len() {
         return String::new();
     }
-    
+
     let line = lines[index];
-    
+
     // Extract from ATX heading
     if let Some(captures) = ATX_PATTERN.captures(line) {
-        return captures.get(4).map_or("", |m| m.as_str()).trim().to_string();
+        return captures
+            .get(4)
+            .map_or("", |m| m.as_str())
+            .trim()
+            .to_string();
     }
-    
+
     // Extract from setext heading
     if index < lines.len() - 1 {
         let next_line = lines[index + 1];
-        let line_indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
-        
+        let line_indentation = line
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect::<String>();
+
         if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
             let underline_indent = captures.get(1).map_or("", |m| m.as_str());
             if underline_indent == line_indentation {
                 return line[line_indentation.len()..].trim().to_string();
             }
         }
-        
+
         if let Some(captures) = SETEXT_HEADING_2.captures(next_line) {
             let underline_indent = captures.get(1).map_or("", |m| m.as_str());
             if underline_indent == line_indentation {
@@ -449,7 +518,7 @@ pub fn extract_heading_text(lines: &[&str], index: usize) -> String {
             }
         }
     }
-    
+
     line.trim().to_string()
 }
 
@@ -459,7 +528,7 @@ pub fn get_heading_indentation(lines: &[&str], index: usize) -> usize {
     if index >= lines.len() {
         return 0;
     }
-    
+
     let line = lines[index];
     line.len() - line.trim_start().len()
 }
@@ -481,22 +550,30 @@ pub fn is_front_matter_delimiter(line: &str) -> bool {
 pub fn remove_trailing_hashes(text: &str) -> String {
     let trimmed = text.trim_end();
     let mut result = trimmed.to_string();
-    
+
     if let Some(last_hash_index) = trimmed.rfind('#') {
-        if trimmed[last_hash_index..].chars().all(|c| c == '#' || c.is_whitespace()) {
-            result = trimmed[..trimmed.rfind('#').unwrap()].trim_end().to_string();
+        if trimmed[last_hash_index..]
+            .chars()
+            .all(|c| c == '#' || c.is_whitespace())
+        {
+            result = trimmed[..trimmed.rfind('#').unwrap()]
+                .trim_end()
+                .to_string();
         }
     }
-    
+
     result
 }
 
 /// Normalize a heading to the specified level
 #[inline]
 pub fn normalize_heading(line: &str, level: u32) -> String {
-    let indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+    let indentation = line
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .collect::<String>();
     let trimmed = line.trim_start();
-    
+
     if trimmed.starts_with('#') {
         if let Some(text) = HeadingUtils::get_heading_text(line) {
             format!("{}{} {}", indentation, "#".repeat(level as usize), text)
@@ -561,14 +638,20 @@ mod tests {
     fn test_empty_line_with_dashes() {
         // Test that an empty line followed by dashes is not considered a heading
         let content = "\n---";
-        
+
         // Empty line is at index 0, dashes at index 1
-        assert_eq!(HeadingUtils::parse_heading(content, 1), None, 
-                   "Empty line followed by dashes should not be detected as a heading");
-        
+        assert_eq!(
+            HeadingUtils::parse_heading(content, 1),
+            None,
+            "Empty line followed by dashes should not be detected as a heading"
+        );
+
         // Also test with a regular horizontal rule
         let content2 = "Some content\n\n---\nMore content";
-        assert_eq!(HeadingUtils::parse_heading(content2, 2), None,
-                   "Empty line followed by horizontal rule should not be detected as a heading");
+        assert_eq!(
+            HeadingUtils::parse_heading(content2, 2),
+            None,
+            "Empty line followed by horizontal rule should not be detected as a heading"
+        );
     }
 }

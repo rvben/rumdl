@@ -5,41 +5,52 @@ use std::process::Command;
 fn test_init_command_creates_and_loads_config() {
     let temp_dir = tempfile::tempdir().unwrap();
     let base_path = temp_dir.path();
-    
+
     // Run init command
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["init"])
         .output()
         .unwrap();
-    
+
     assert!(output.status.success(), "Init command failed");
-    assert!(base_path.join(".rumdl.toml").exists(), "Config file not created");
-    
+    assert!(
+        base_path.join(".rumdl.toml").exists(),
+        "Config file not created"
+    );
+
     // Create a test file with a heading level increment issue
-    fs::write(base_path.join("test.md"), "### Heading level 3\n# Heading level 1 after\n").unwrap();
-    
+    fs::write(
+        base_path.join("test.md"),
+        "### Heading level 3\n# Heading level 1 after\n",
+    )
+    .unwrap();
+
     // Run linter with default config (should detect MD001)
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["test.md"])
         .output()
         .unwrap();
-    
+
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let combined_output = format!("{}\n{}", stdout, stderr);
-    
-    // Verify that we've detected at least one rule violation 
-    assert!(!output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-            "Should detect at least one rule violation");
+
+    // Verify that we've detected at least one rule violation
+    assert!(
+        !output.status.success()
+            || combined_output.contains("warning")
+            || combined_output.contains("MD"),
+        "Should detect at least one rule violation"
+    );
 }
 
 #[test]
 fn test_utilities_via_complex_markdown() {
     let temp_dir = tempfile::tempdir().unwrap();
     let base_path = temp_dir.path();
-    
+
     // Create a complex Markdown file that tests multiple utilities
     let complex_md = r#"
 # Heading 1
@@ -91,41 +102,48 @@ Heading level jump coming:
 
 ___
 "#;
-    
+
     fs::write(base_path.join("complex.md"), complex_md).unwrap();
-    
+
     // Run linter with all rules enabled
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["complex.md", "--verbose"])
         .output()
         .unwrap();
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{}\n{}", stdout, stderr);
-    
+
     // Simply verify that the linter detected some issues with our complex file
-    assert!(!output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-            "Should detect at least some issues in the complex Markdown");
-    
+    assert!(
+        !output.status.success()
+            || combined_output.contains("warning")
+            || combined_output.contains("MD"),
+        "Should detect at least some issues in the complex Markdown"
+    );
+
     // Run the fix operation
     let _fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["complex.md", "--fix"])
         .output()
         .unwrap();
-    
+
     // Verify file was modified in some way
     let fixed_content = fs::read_to_string(base_path.join("complex.md")).unwrap();
-    assert!(complex_md != fixed_content, "File should be modified by fix operation");
+    assert!(
+        complex_md != fixed_content,
+        "File should be modified by fix operation"
+    );
 }
 
 #[test]
 fn test_multiple_rule_groups() {
     let temp_dir = tempfile::tempdir().unwrap();
     let base_path = temp_dir.path();
-    
+
     // Create a test file with various issues
     let test_content = r#"
 # Heading 1
@@ -143,30 +161,34 @@ Unnecessarily long line that exceeds the default line length limit and should tr
 
 Multiple blank lines above this one.
 "#;
-    
+
     fs::write(base_path.join("test.md"), test_content).unwrap();
-    
+
     // Run with default rules (should detect various issues)
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["test.md", "--verbose"])
         .output()
         .unwrap();
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{}\n{}", stdout, stderr);
-    
+
     // Simply verify that we detected some issues
-    assert!(!output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-            "Should detect some issues with the test file");
+    assert!(
+        !output.status.success()
+            || combined_output.contains("warning")
+            || combined_output.contains("MD"),
+        "Should detect some issues with the test file"
+    );
 }
 
 #[test]
 fn test_emphasis_and_heading_rules() {
     let temp_dir = tempfile::tempdir().unwrap();
     let base_path = temp_dir.path();
-    
+
     // Test file targeting specific low-coverage rules
     let test_content = r#"
 *This is an emphasized line that should be detected as a heading by MD036*
@@ -183,41 +205,48 @@ Text immediately below heading (MD022)
 
 **This is not a heading, because it's not on a line by itself**
 "#;
-    
+
     fs::write(base_path.join("test.md"), test_content).unwrap();
-    
+
     // Run linter for all rules
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["test.md", "--verbose"])
         .output()
         .unwrap();
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{}\n{}", stdout, stderr);
-    
+
     // Check if at least one rule violation was detected
-    assert!(!output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-            "Should detect at least one rule violation");
-    
+    assert!(
+        !output.status.success()
+            || combined_output.contains("warning")
+            || combined_output.contains("MD"),
+        "Should detect at least one rule violation"
+    );
+
     // Run the fix operation
     let _fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["test.md", "--fix", "--verbose"])
         .output()
         .unwrap();
-    
+
     // Verify some issues were fixed
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();
-    assert!(fixed_content != test_content, "File should be modified by fix operation");
+    assert!(
+        fixed_content != test_content,
+        "File should be modified by fix operation"
+    );
 }
 
 #[test]
 fn test_url_and_link_rules() {
     let temp_dir = tempfile::tempdir().unwrap();
     let base_path = temp_dir.path();
-    
+
     // Create a test file with various link and URL issues
     let test_content = r#"
 # Links and URLs Test
@@ -234,63 +263,76 @@ Bare URL: https://example.com
 
 Visit http://example.com for more information.
 "#;
-    
+
     fs::write(base_path.join("test.md"), test_content).unwrap();
-    
+
     // Run linter with default rules
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["test.md", "--verbose"])
         .output()
         .unwrap();
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{}\n{}", stdout, stderr);
-    
+
     // Check if at least one link-related issue was detected
-    assert!(!output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-            "Should detect at least one link-related issue");
-    
-    // Test fix operation 
+    assert!(
+        !output.status.success()
+            || combined_output.contains("warning")
+            || combined_output.contains("MD"),
+        "Should detect at least one link-related issue"
+    );
+
+    // Test fix operation
     let _fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["test.md", "--fix"])
         .output()
         .unwrap();
-    
+
     // Verify the file was modified
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();
-    assert!(fixed_content != test_content, "File should be modified by fix operation");
+    assert!(
+        fixed_content != test_content,
+        "File should be modified by fix operation"
+    );
 }
 
 #[test]
 fn test_profiling_features() {
     let temp_dir = tempfile::tempdir().unwrap();
     let base_path = temp_dir.path();
-    
+
     // Create a simple test file
-    fs::write(base_path.join("test.md"), "# Test Heading\n\nSimple content.\n").unwrap();
-    
+    fs::write(
+        base_path.join("test.md"),
+        "# Test Heading\n\nSimple content.\n",
+    )
+    .unwrap();
+
     // Run with verbose output that should include rule names
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["test.md", "--verbose"])
         .output()
         .unwrap();
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     // Check if verbose output contains rule names or summary
-    assert!(stdout.contains("Rules:") || stdout.contains("MD") || stdout.contains("Success:"),
-            "Should show rules or summary information");
+    assert!(
+        stdout.contains("Rules:") || stdout.contains("MD") || stdout.contains("Success:"),
+        "Should show rules or summary information"
+    );
 }
 
 #[test]
 fn test_low_coverage_rules() {
     let temp_dir = tempfile::tempdir().unwrap();
     let base_path = temp_dir.path();
-    
+
     // Create a test file specifically for testing low-coverage rules
     let test_content = r#"
 # Heading with Trailing Punctuation!
@@ -316,32 +358,39 @@ fn test_low_coverage_rules() {
 | Row 2    | Data 2   |
 | Row 3    | Data 3 With extra column | Extra |
 "#;
-    
+
     fs::write(base_path.join("test.md"), test_content).unwrap();
-    
+
     // Run linter with all rules
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["test.md", "--verbose"])
         .output()
         .unwrap();
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{}\n{}", stdout, stderr);
-    
+
     // Verify we detected some issues
-    assert!(!output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-            "Should detect some Markdown issues");
-    
+    assert!(
+        !output.status.success()
+            || combined_output.contains("warning")
+            || combined_output.contains("MD"),
+        "Should detect some Markdown issues"
+    );
+
     // Test fix for these rules
     let _fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["test.md", "--fix", "--verbose"])
         .output()
         .unwrap();
-    
+
     // Verify that at least some issues were fixed
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();
-    assert!(fixed_content != test_content, "File should be modified by fix operation");
-} 
+    assert!(
+        fixed_content != test_content,
+        "File should be modified by fix operation"
+    );
+}

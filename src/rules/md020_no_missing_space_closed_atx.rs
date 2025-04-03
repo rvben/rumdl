@@ -1,4 +1,4 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -10,9 +10,9 @@ lazy_static! {
         Regex::new(r"^(\s*)(#+)([^#\s].*?)\s(#+)\s*$").unwrap();
     static ref CLOSED_ATX_NO_SPACE_END_PATTERN: Regex =
         Regex::new(r"^(\s*)(#+)\s(.*?)([^#\s])(#+)\s*$").unwrap();
-    
+
     // Matches code fence blocks
-    static ref CODE_FENCE_PATTERN: Regex = 
+    static ref CODE_FENCE_PATTERN: Regex =
         Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
 }
 
@@ -64,12 +64,12 @@ impl MD020NoMissingSpaceClosedAtx {
             line.to_string()
         }
     }
-    
+
     // Calculate the byte range for a specific line in the content
     fn get_line_byte_range(&self, content: &str, line_num: usize) -> std::ops::Range<usize> {
         let mut current_line = 1;
         let mut start_byte = 0;
-        
+
         for (i, c) in content.char_indices() {
             if current_line == line_num && c == '\n' {
                 return start_byte..i;
@@ -80,12 +80,12 @@ impl MD020NoMissingSpaceClosedAtx {
                 }
             }
         }
-        
+
         // If we're looking for the last line and it doesn't end with a newline
         if current_line == line_num {
             return start_byte..content.len();
         }
-        
+
         // Fallback if line not found (shouldn't happen)
         0..0
     }
@@ -104,24 +104,24 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
         if content.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let mut warnings = Vec::new();
         let mut in_code_block = false;
-        
+
         for (i, line) in content.lines().enumerate() {
             let line_num = i + 1; // Convert to 1-indexed
-            
+
             // Handle code blocks
             if CODE_FENCE_PATTERN.is_match(line) {
                 in_code_block = !in_code_block;
                 continue;
             }
-            
+
             // Skip content inside code blocks
             if in_code_block {
                 continue;
             }
-            
+
             // Check if line matches closed ATX pattern without space
             if self.is_closed_atx_heading_without_space(line) {
                 let captures = if let Some(c) = CLOSED_ATX_NO_SPACE_PATTERN.captures(line) {
@@ -131,13 +131,13 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                 } else {
                     CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line).unwrap()
                 };
-                
+
                 let indentation = captures.get(1).unwrap();
                 let opening_hashes = captures.get(2).unwrap();
                 let line_range = self.get_line_byte_range(content, line_num);
-                
+
                 warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                    rule_name: Some(self.name()),
                     message: format!(
                         "Missing space inside hashes on closed ATX style heading with {} hashes",
                         opening_hashes.as_str().len()
@@ -160,7 +160,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
         if content.is_empty() {
             return Ok(String::new());
         }
-        
+
         let mut result = String::new();
         let mut in_code_block = false;
 
@@ -176,7 +176,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
             } else {
                 result.push_str(line);
             }
-            
+
             if i < content.lines().count() - 1 {
                 result.push('\n');
             }
@@ -196,21 +196,21 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
         if structure.heading_lines.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Process only heading lines using structure.heading_lines
         for &line_num in &structure.heading_lines {
             let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-            
+
             // Skip if out of bounds
             if line_idx >= lines.len() {
                 continue;
             }
-            
+
             let line = lines[line_idx];
-            
+
             // Check if line matches closed ATX pattern without space
             if self.is_closed_atx_heading_without_space(line) {
                 let captures = if let Some(c) = CLOSED_ATX_NO_SPACE_PATTERN.captures(line) {
@@ -218,17 +218,19 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                 } else if let Some(c) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
                     c
                 } else {
-                    CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line).unwrap_or_else(|| {
-                        // This shouldn't happen given the is_closed_atx_heading_without_space check,
-                        // but we'll handle it gracefully anyway
-                        CLOSED_ATX_NO_SPACE_PATTERN.captures(" # # ").unwrap()
-                    })
+                    CLOSED_ATX_NO_SPACE_END_PATTERN
+                        .captures(line)
+                        .unwrap_or_else(|| {
+                            // This shouldn't happen given the is_closed_atx_heading_without_space check,
+                            // but we'll handle it gracefully anyway
+                            CLOSED_ATX_NO_SPACE_PATTERN.captures(" # # ").unwrap()
+                        })
                 };
-                
+
                 let indentation = captures.get(1).unwrap();
                 let opening_hashes = captures.get(2).unwrap();
                 let line_range = self.get_line_byte_range(content, line_num);
-                
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     message: format!(
@@ -245,15 +247,15 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                 });
             }
         }
-        
+
         Ok(warnings)
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::Heading
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !content.contains('#')
@@ -270,17 +272,17 @@ impl DocumentStructureExtensions for MD020NoMissingSpaceClosedAtx {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         let rule = MD020NoMissingSpaceClosedAtx;
-        
+
         // Test with correct spacing
         let content = "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert!(result.is_empty());
-        
+
         // Test with missing spaces
         let content = "# Heading 1#\n## Heading 2 ##\n### Heading 3###";
         let structure = DocumentStructure::new(content);

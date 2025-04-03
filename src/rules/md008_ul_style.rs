@@ -1,6 +1,6 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
-use crate::utils::range_utils::LineIndex;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -9,7 +9,7 @@ lazy_static! {
     // This matches: optional blockquote markers (>), whitespace, list marker, space, and content
     static ref LIST_ITEM_RE: Regex = Regex::new(r"^((?:\s*>\s*)*\s*)([-*+])\s+(.*)$").unwrap();
     static ref CODE_BLOCK_MARKER: Regex = Regex::new(r"^(```|~~~)").unwrap();
-    
+
     // Regex for finding the first list marker in content
     static ref FIRST_LIST_MARKER_RE: Regex = Regex::new(r"(?m)^(\s*)([*+-])(\s+[^*+\-\s]|\s*$)").unwrap();
 }
@@ -61,9 +61,14 @@ impl MD008ULStyle {
     fn parse_list_item(line: &str) -> Option<(usize, char, usize)> {
         LIST_ITEM_RE.captures(line).map(|caps| {
             let whitespace = caps.get(1).map_or("", |m| m.as_str());
-            let marker = caps.get(2).map_or("", |m| m.as_str()).chars().next().unwrap();
+            let marker = caps
+                .get(2)
+                .map_or("", |m| m.as_str())
+                .chars()
+                .next()
+                .unwrap();
             let content = caps.get(3).map_or("", |m| m.as_str());
-            
+
             (whitespace.len(), marker, content.len())
         })
     }
@@ -89,13 +94,13 @@ impl MD008ULStyle {
 
         false
     }
-    
+
     /// Check if content contains any list items (for fast skipping)
     #[inline]
     fn contains_potential_list_items(content: &str) -> bool {
         content.contains('*') || content.contains('-') || content.contains('+')
     }
-    
+
     /// Precompute code blocks for faster checking
     fn precompute_code_blocks(content: &str) -> Vec<bool> {
         let lines: Vec<&str> = content.lines().collect();
@@ -111,7 +116,7 @@ impl MD008ULStyle {
 
         code_blocks
     }
-    
+
     /// Helper method to find the first list marker in content
     fn find_first_list_marker(content: &str) -> Option<String> {
         if let Some(captures) = FIRST_LIST_MARKER_RE.captures(content) {
@@ -119,10 +124,10 @@ impl MD008ULStyle {
                 return Some(marker.as_str().to_string());
             }
         }
-        
+
         None
     }
-    
+
     /// Get the style from StyleMode for checking list items
     fn get_style_from_mode(&self, content: &str) -> String {
         match &self.style_mode {
@@ -149,26 +154,26 @@ impl Rule for MD008ULStyle {
         if content.is_empty() || !Self::contains_potential_list_items(content) {
             return Ok(Vec::new());
         }
-        
+
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        
+
         // Precompute code blocks
         let code_blocks = Self::precompute_code_blocks(content);
 
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Get the target style based on mode
         let expected_style = self.get_style_from_mode(content);
-        
+
         let mut in_blockquote = false;
-        
+
         for (i, line) in lines.iter().enumerate() {
             // Skip code blocks
             if code_blocks.get(i).unwrap_or(&false) == &true {
                 continue;
             }
-            
+
             let trimmed = line.trim_start();
             // Track blockquote state
             if trimmed.starts_with('>') {
@@ -182,12 +187,12 @@ impl Rule for MD008ULStyle {
                 if in_blockquote {
                     continue;
                 }
-                
+
                 if marker.to_string() != expected_style {
                     let trimmed_line = line.trim_start();
                     // For regular list items, just use indentation
                     let line_start = " ".repeat(indent);
-                    
+
                     // Find the list marker position and content after it
                     let list_marker_pos = line.find(marker).unwrap_or(0);
                     let content_after_marker = if list_marker_pos + 1 < line.len() {
@@ -195,7 +200,7 @@ impl Rule for MD008ULStyle {
                     } else {
                         ""
                     };
-                    
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: i + 1,
@@ -207,48 +212,51 @@ impl Rule for MD008ULStyle {
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: format!("{}{}{}", line_start, expected_style, content_after_marker),
+                            replacement: format!(
+                                "{}{}{}",
+                                line_start, expected_style, content_after_marker
+                            ),
                         }),
                     });
                 }
             }
         }
-        
+
         Ok(warnings)
     }
-    
+
     /// Optimized check using document structure
     fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
         // Fast path - if content is empty or no list items, return empty result
         if content.is_empty() || structure.list_lines.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Get the target style based on mode
         let expected_style = self.get_style_from_mode(content);
-        
+
         let mut in_blockquote = false;
-        
+
         for &line_num in &structure.list_lines {
             let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-            
+
             // Skip if out of bounds
             if line_idx >= lines.len() {
                 continue;
             }
-            
+
             let line = lines[line_idx];
-            
-            // Skip code blocks 
+
+            // Skip code blocks
             if structure.is_in_code_block(line_num) {
                 continue;
             }
-            
+
             let trimmed = line.trim_start();
             // Track blockquote state
             if trimmed.starts_with('>') {
@@ -262,12 +270,12 @@ impl Rule for MD008ULStyle {
                 if in_blockquote {
                     continue;
                 }
-                
+
                 if marker.to_string() != expected_style {
                     let trimmed_line = line.trim_start();
                     // For regular list items, just use indentation
                     let line_start = " ".repeat(indent);
-                    
+
                     // Find the list marker position and content after it
                     let list_marker_pos = line.find(marker).unwrap_or(0);
                     let content_after_marker = if list_marker_pos + 1 < line.len() {
@@ -275,7 +283,7 @@ impl Rule for MD008ULStyle {
                     } else {
                         ""
                     };
-                    
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: line_num,
@@ -287,13 +295,16 @@ impl Rule for MD008ULStyle {
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range(line_num, 1),
-                            replacement: format!("{}{}{}", line_start, expected_style, content_after_marker),
+                            replacement: format!(
+                                "{}{}{}",
+                                line_start, expected_style, content_after_marker
+                            ),
                         }),
                     });
                 }
             }
         }
-        
+
         Ok(warnings)
     }
 
@@ -313,7 +324,8 @@ impl Rule for MD008ULStyle {
         let lines: Vec<&str> = content.lines().collect();
 
         // Create a map of line numbers with fixes
-        let mut line_fixes: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+        let mut line_fixes: std::collections::HashMap<usize, String> =
+            std::collections::HashMap::new();
         for warning in &warnings {
             if let Some(fix) = &warning.fix {
                 line_fixes.insert(warning.line, fix.replacement.clone());
@@ -337,23 +349,23 @@ impl Rule for MD008ULStyle {
         // Preserve ALL trailing newlines
         // Count trailing newlines in the original content
         let trailing_newlines_count = content.chars().rev().take_while(|&c| c == '\n').count();
-        
+
         // Ensure result has the same number of trailing newlines
         let result_trailing_newlines = result.chars().rev().take_while(|&c| c == '\n').count();
-        
+
         // Add any missing newlines
         if trailing_newlines_count > result_trailing_newlines {
             result.push_str(&"\n".repeat(trailing_newlines_count - result_trailing_newlines));
         }
-        
+
         Ok(result)
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::List
     }
-    
+
     /// Check if we should skip this rule based on content
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !Self::contains_potential_list_items(content)
@@ -369,68 +381,97 @@ impl DocumentStructureExtensions for MD008ULStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         // Test with consistent mode (default)
         let rule = MD008ULStyle::default();
-        
+
         // Test with valid style
         let content = "* Item 1\n* Item 2\n* Item 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(result.is_empty(), "Expected no warnings for correct style (*)");
-        
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for correct style (*)"
+        );
+
         // Test with different marker but consistent
         let content = "- Item 1\n- Item 2\n- Item 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(result.is_empty(), "Expected no warnings for consistent - style");
-        
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for consistent - style"
+        );
+
         // Test with specific style
         let rule = MD008ULStyle::with_mode('*', StyleMode::Specific("*".to_string()));
         let content = "- Item 1\n- Item 2\n- Item 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(result.len(), 3, "Expected warnings for - style with * rule in specific mode");
-        
+        assert_eq!(
+            result.len(),
+            3,
+            "Expected warnings for - style with * rule in specific mode"
+        );
+
         // Test with mixed styles
         let rule = MD008ULStyle::default(); // Consistent mode
         let content = "- Item 1\n* Item 2\n+ Item 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(result.len(), 2, "Expected warnings for * and + markers when - is first");
-        
+        assert_eq!(
+            result.len(),
+            2,
+            "Expected warnings for * and + markers when - is first"
+        );
+
         // Test with blockquote
         let rule = MD008ULStyle::default(); // Consistent mode
         let content = "> * Item 1\n> * Item 2\n> - Item 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(result.len(), 0, "Expected no warnings for blockquote content");
+        assert_eq!(
+            result.len(),
+            0,
+            "Expected no warnings for blockquote content"
+        );
     }
-    
+
     #[test]
     fn test_trailing_newlines_preservation() {
         let rule = MD008ULStyle::default();
-        
+
         // Test with multiple trailing newlines
         let content = "* Item 1\n* Item 2\n- Item 3\n\n\n";
         let result = rule.fix(content).unwrap();
-        assert_eq!(result, "* Item 1\n* Item 2\n* Item 3\n\n\n", "Should preserve all trailing newlines");
+        assert_eq!(
+            result, "* Item 1\n* Item 2\n* Item 3\n\n\n",
+            "Should preserve all trailing newlines"
+        );
     }
-    
+
     #[test]
     fn test_blockquote_handling() {
         let rule = MD008ULStyle::default();
-        
+
         // Test with blockquote content
         let content = "> * Item 1\n> * Item 2\n> - Item 3";
         let result = rule.check(content).unwrap();
-        assert_eq!(result.len(), 0, "Expected no warnings for list markers in blockquotes");
-        
+        assert_eq!(
+            result.len(),
+            0,
+            "Expected no warnings for list markers in blockquotes"
+        );
+
         // Mixed blockquote and regular list items
         let content = "> * Item 1\n* Item 2\n> - Item 3";
         let result = rule.check(content).unwrap();
-        assert_eq!(result.len(), 0, "Expected no warnings for mixed blockquote and list items");
+        assert_eq!(
+            result.len(),
+            0,
+            "Expected no warnings for mixed blockquote and list items"
+        );
     }
-} 
+}

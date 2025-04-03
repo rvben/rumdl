@@ -90,7 +90,7 @@ impl Rule for MD012NoMultipleBlanks {
                         "between content"
                     };
                     warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         severity: Severity::Warning,
                         message: format!(
                             "Multiple consecutive blank lines {} ({} > {})",
@@ -111,7 +111,7 @@ impl Rule for MD012NoMultipleBlanks {
         // Check for trailing blank lines
         if blank_count > self.maximum {
             warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                rule_name: Some(self.name()),
                 severity: Severity::Warning,
                 message: format!(
                     "Multiple consecutive blank lines at end of file ({} > {})",

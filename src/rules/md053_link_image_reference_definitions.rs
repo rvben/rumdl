@@ -51,7 +51,7 @@ type DefinitionCache = Rc<RefCell<HashMap<u64, Vec<(String, usize, usize)>>>>;
 /// - **Collapsed reference links/images**: `[text][]` or `![text][]`
 /// - **Shortcut reference links**: `[reference]` (must be defined elsewhere)
 /// - **Reference definitions**: `[reference]: URL "Optional Title"`
-/// - **Multi-line reference definitions**: 
+/// - **Multi-line reference definitions**:
 ///   ```markdown
 ///   [reference]: URL
 ///      "Optional title continued on next line"
@@ -107,7 +107,10 @@ impl MD053LinkImageReferenceDefinitions {
     /// Create a new instance of the MD053 rule
     pub fn new(ignored_definitions: Vec<String>) -> Self {
         Self {
-            ignored_definitions: ignored_definitions.into_iter().map(|s| s.to_lowercase()).collect(),
+            ignored_definitions: ignored_definitions
+                .into_iter()
+                .map(|s| s.to_lowercase())
+                .collect(),
             content_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
@@ -539,7 +542,9 @@ impl MD053LinkImageReferenceDefinitions {
             .collect();
 
         // Update the cache with the computed definitions
-        self.content_cache.borrow_mut().insert(hash, definitions.clone());
+        self.content_cache
+            .borrow_mut()
+            .insert(hash, definitions.clone());
 
         definitions
     }
@@ -588,7 +593,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         // Create warnings for unused references
         for (definition, start, _) in unused_refs {
             warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                rule_name: Some(self.name()),
                 line: start + 1, // 1-indexed line numbers
                 column: 1,
                 message: format!("Unused link/image reference definition: [{}]", definition),

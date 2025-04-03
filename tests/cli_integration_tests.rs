@@ -18,7 +18,11 @@ fn setup_test_files() -> tempfile::TempDir {
     fs::write(base_path.join("docs/doc1.md"), "# Doc 1\n").unwrap();
     fs::write(base_path.join("docs/temp/temp.md"), "# Temp\n").unwrap();
     fs::write(base_path.join("src/test.md"), "# Source\n").unwrap();
-    fs::write(base_path.join("subfolder/README.md"), "# Subfolder README\n").unwrap();
+    fs::write(
+        base_path.join("subfolder/README.md"),
+        "# Subfolder README\n",
+    )
+    .unwrap();
 
     // Print the created files for debugging
     println!("Created test files:");
@@ -49,13 +53,16 @@ fn test_cli_include_exclude() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     println!("Command status: {}", output.status);
     println!("Output:\n{}", stdout);
     println!("Error output:\n{}", stderr);
-    
+
     // Just check that the command executed successfully
-    assert!(output.status.success(), "Command should execute successfully");
+    assert!(
+        output.status.success(),
+        "Command should execute successfully"
+    );
 
     // Test exclude via CLI - exclude the temp directory
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
@@ -66,22 +73,35 @@ fn test_cli_include_exclude() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     println!("Output:\n{}", stdout);
-    
+
     // Just check that the command executed successfully
-    assert!(output.status.success(), "Command should execute successfully");
+    assert!(
+        output.status.success(),
+        "Command should execute successfully"
+    );
 
     // Test combined include and exclude via CLI
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args([".", "--include", "docs/doc1.md", "--exclude", "docs/temp", "--verbose"])
+        .args([
+            ".",
+            "--include",
+            "docs/doc1.md",
+            "--exclude",
+            "docs/temp",
+            "--verbose",
+        ])
         .output()
         .unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     println!("Output:\n{}", stdout);
-    
+
     // Just check that the command executed successfully
-    assert!(output.status.success(), "Command should execute successfully");
+    assert!(
+        output.status.success(),
+        "Command should execute successfully"
+    );
 }
 
 #[test]
@@ -104,9 +124,12 @@ include = ["docs/doc1.md"]
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     println!("Output:\n{}", stdout);
-    
+
     // Just check that the command executed successfully
-    assert!(output.status.success(), "Command should execute successfully");
+    assert!(
+        output.status.success(),
+        "Command should execute successfully"
+    );
 
     // Test combined include and exclude via config
     let config = r#"
@@ -124,9 +147,12 @@ exclude = ["docs/temp"]
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     println!("Output:\n{}", stdout);
-    
+
     // Just check that the command executed successfully
-    assert!(output.status.success(), "Command should execute successfully");
+    assert!(
+        output.status.success(),
+        "Command should execute successfully"
+    );
 }
 
 #[test]
@@ -150,9 +176,12 @@ include = ["src/**/*.md"]
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     println!("Output:\n{}", stdout);
-    
+
     // Just check that the command executed successfully
-    assert!(output.status.success(), "Command should execute successfully");
+    assert!(
+        output.status.success(),
+        "Command should execute successfully"
+    );
 }
 
 #[test]
@@ -175,7 +204,10 @@ include = ["README.md"]
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     println!("Output:\n{}", stdout);
-    
+
     // Just check that the command executed successfully
-    assert!(output.status.success(), "Command should execute successfully");
-} 
+    assert!(
+        output.status.success(),
+        "Command should execute successfully"
+    );
+}

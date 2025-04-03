@@ -48,7 +48,7 @@ impl MD057ExistingRelativeLinks {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Set the base path for resolving relative links
     pub fn with_path<P: AsRef<Path>>(self, path: P) -> Self {
         let path = path.as_ref();
@@ -57,28 +57,28 @@ impl MD057ExistingRelativeLinks {
         } else {
             Some(path.to_path_buf())
         };
-        
+
         *self.base_path.borrow_mut() = dir_path;
         self
     }
-    
+
     /// Configure whether to skip checking media files
     pub fn with_skip_media_files(mut self, skip_media_files: bool) -> Self {
         self.skip_media_files = skip_media_files;
         self
     }
-    
+
     /// Check if a URL is external
     fn is_external_url(&self, url: &str) -> bool {
         let debug = false; // Debug output disabled for normal operation
-        
+
         if url.is_empty() {
             if debug {
                 // println!("is_external_url: URL is empty");
             }
             return false;
         }
-        
+
         // If it starts with a protocol (http://, https://, ftp://, etc.), it's external
         if PROTOCOL_REGEX.is_match(url) {
             if debug {
@@ -86,7 +86,7 @@ impl MD057ExistingRelativeLinks {
             }
             return true;
         }
-        
+
         // Check for www. prefix which indicates an external URL
         if url.starts_with("www.") {
             if debug {
@@ -94,20 +94,25 @@ impl MD057ExistingRelativeLinks {
             }
             return true;
         }
-        
+
         // More restrictive domain check - must contain a dot and end with known TLD
         // But not check for media files extensions which are handled separately
-        if !self.is_media_file(url) && url.contains('.') && 
-           url.split('.').last().map_or(false, |tld| 
-               ["com", "org", "net", "io", "edu", "gov", "co", "uk", "de", 
-                "ru", "jp", "cn", "br", "in", "fr", "it", "nl", "ca", "es", "au", "ch"]
-                   .contains(&tld)) {
+        if !self.is_media_file(url)
+            && url.contains('.')
+            && url.split('.').last().map_or(false, |tld| {
+                [
+                    "com", "org", "net", "io", "edu", "gov", "co", "uk", "de", "ru", "jp", "cn",
+                    "br", "in", "fr", "it", "nl", "ca", "es", "au", "ch",
+                ]
+                .contains(&tld)
+            })
+        {
             if debug {
                 // println!("is_external_url: URL '{}' matches domain pattern with valid TLD", url);
             }
             return true;
         }
-        
+
         // Check for absolute paths
         if url.starts_with('/') {
             if debug {
@@ -115,34 +120,37 @@ impl MD057ExistingRelativeLinks {
             }
             return false; // Absolute paths within the site are not external
         }
-        
+
         // All other cases (relative paths, etc.) are not external
         if debug {
             // println!("is_external_url: URL '{}' is not external", url);
         }
         false
     }
-    
+
     /// Check if the URL is a fragment-only link (internal document link)
     fn is_fragment_only_link(&self, url: &str) -> bool {
         FRAGMENT_ONLY_REGEX.is_match(url)
     }
-    
+
     /// Check if the URL has a media file extension
     fn is_media_file(&self, url: &str) -> bool {
         MEDIA_FILES_REGEX.is_match(url)
     }
-    
+
     /// Determine if we should skip checking this media file
     fn should_skip_media_file(&self, url: &str) -> bool {
         self.skip_media_files && self.is_media_file(url)
     }
-    
+
     /// Resolve a relative link against the base path
     fn resolve_link_path(&self, link: &str) -> Option<PathBuf> {
-        self.base_path.borrow().as_ref().map(|base_path| base_path.join(link))
+        self.base_path
+            .borrow()
+            .as_ref()
+            .map(|base_path| base_path.join(link))
     }
-    
+
     /// Detect inline code spans in a line and return their ranges
     fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
         if !line.contains('`') {
@@ -167,7 +175,7 @@ impl MD057ExistingRelativeLinks {
 
         spans
     }
-    
+
     /// Check if a position is within an inline code span
     fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
         spans.iter().any(|&(start, end)| pos >= start && pos < end)
@@ -223,15 +231,19 @@ impl Rule for MD057ExistingRelativeLinks {
             if crate::rule::is_rule_disabled_at_line(content, self.name(), line_num) {
                 continue;
             }
-            
+
             // Detect inline code spans in this line
             let inline_code_spans = self.compute_inline_code_spans(line);
 
             // Find all links in the line
-            if let Ok(matches) = LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+            if let Ok(matches) = LINK_REGEX
+                .captures_iter(line)
+                .collect::<Result<Vec<_>, _>>()
+            {
                 for cap in matches {
-                    if let (Some(full_match), Some(_text_match), Some(url_match)) = 
-                           (cap.get(0), cap.get(1), cap.get(2)) {
+                    if let (Some(full_match), Some(_text_match), Some(url_match)) =
+                        (cap.get(0), cap.get(1), cap.get(2))
+                    {
                         // Skip links inside inline code spans
                         if self.is_in_code_span(&inline_code_spans, full_match.start()) {
                             if debug {
@@ -239,13 +251,13 @@ impl Rule for MD057ExistingRelativeLinks {
                             }
                             continue;
                         }
-                        
+
                         let mut url = url_match.as_str().trim();
-                        
+
                         if debug {
                             // println!("Found URL: '{}'", url);
                         }
-                        
+
                         // Clean the URL - remove trailing '>' if present
                         if url.ends_with('>') {
                             url = &url[..url.len() - 1];
@@ -253,7 +265,7 @@ impl Rule for MD057ExistingRelativeLinks {
                                 // println!("Cleaned URL: '{}'", url);
                             }
                         }
-                        
+
                         // Skip empty or external URLs
                         if url.is_empty() || self.is_external_url(url) {
                             if debug {
@@ -261,7 +273,7 @@ impl Rule for MD057ExistingRelativeLinks {
                             }
                             continue;
                         }
-                        
+
                         // Skip fragment-only links (internal document links)
                         if self.is_fragment_only_link(url) {
                             if debug {
@@ -269,15 +281,15 @@ impl Rule for MD057ExistingRelativeLinks {
                             }
                             continue;
                         }
-                        
+
                         // Check if it's a media file (for debugging)
                         let is_media = self.is_media_file(url);
                         let should_skip = self.should_skip_media_file(url);
-                        
+
                         if debug {
                             // println!("URL '{}': is_media={}, should_skip={}", url, is_media, should_skip);
                         }
-                        
+
                         // Skip media files if configured to do so
                         if should_skip {
                             if debug {
@@ -285,29 +297,29 @@ impl Rule for MD057ExistingRelativeLinks {
                             }
                             continue;
                         }
-                        
+
                         // Resolve the relative link against the base path
                         if let Some(resolved_path) = self.resolve_link_path(url) {
                             let exists = resolved_path.exists();
-                            
+
                             if debug {
                                 // println!("Resolved path: {:?}", resolved_path);
                                 // println!("Path exists? {}", exists);
                             }
-                            
+
                             // Check if the file exists
                             if !exists {
                                 let full_match = cap.get(0).unwrap();
-                                
+
                                 warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                                    rule_name: Some(self.name()),
                                     line: line_num + 1,
                                     column: full_match.start() + 1,
                                     message: format!("Relative link '{}' does not exist", url),
                                     severity: Severity::Warning,
                                     fix: None, // No automatic fix for missing files
                                 });
-                                
+
                                 if debug {
                                     // println!("Added warning for non-existent file: {}", url);
                                 }
@@ -342,48 +354,78 @@ mod tests {
     #[test]
     fn test_external_urls() {
         let rule = MD057ExistingRelativeLinks::new();
-        
+
         assert!(rule.is_external_url("https://example.com"));
         assert!(rule.is_external_url("http://example.com"));
         assert!(rule.is_external_url("ftp://example.com"));
         assert!(rule.is_external_url("www.example.com"));
         assert!(rule.is_external_url("example.com"));
-        
+
         assert!(!rule.is_external_url("./relative/path.md"));
         assert!(!rule.is_external_url("relative/path.md"));
         assert!(!rule.is_external_url("../parent/path.md"));
     }
-    
+
     #[test]
     fn test_media_files() {
         // Test with default settings (skip_media_files = true)
         let rule_default = MD057ExistingRelativeLinks::new();
-        
+
         // Test media file identification
-        assert!(rule_default.is_media_file("image.jpg"), "image.jpg should be identified as a media file");
-        assert!(rule_default.is_media_file("video.mp4"), "video.mp4 should be identified as a media file");
-        assert!(rule_default.is_media_file("document.pdf"), "document.pdf should be identified as a media file");
-        assert!(rule_default.is_media_file("path/to/audio.mp3"), "path/to/audio.mp3 should be identified as a media file");
-        
-        assert!(!rule_default.is_media_file("document.md"), "document.md should not be identified as a media file");
-        assert!(!rule_default.is_media_file("code.rs"), "code.rs should not be identified as a media file");
-        
+        assert!(
+            rule_default.is_media_file("image.jpg"),
+            "image.jpg should be identified as a media file"
+        );
+        assert!(
+            rule_default.is_media_file("video.mp4"),
+            "video.mp4 should be identified as a media file"
+        );
+        assert!(
+            rule_default.is_media_file("document.pdf"),
+            "document.pdf should be identified as a media file"
+        );
+        assert!(
+            rule_default.is_media_file("path/to/audio.mp3"),
+            "path/to/audio.mp3 should be identified as a media file"
+        );
+
+        assert!(
+            !rule_default.is_media_file("document.md"),
+            "document.md should not be identified as a media file"
+        );
+        assert!(
+            !rule_default.is_media_file("code.rs"),
+            "code.rs should not be identified as a media file"
+        );
+
         // Test media file skipping with default settings (skip_media_files = true)
-        assert!(rule_default.should_skip_media_file("image.jpg"), "image.jpg should be skipped with default settings");
-        assert!(!rule_default.should_skip_media_file("document.md"), "document.md should not be skipped");
-        
+        assert!(
+            rule_default.should_skip_media_file("image.jpg"),
+            "image.jpg should be skipped with default settings"
+        );
+        assert!(
+            !rule_default.should_skip_media_file("document.md"),
+            "document.md should not be skipped"
+        );
+
         // Test media file skipping with skip_media_files = false
         let rule_no_skip = MD057ExistingRelativeLinks::new().with_skip_media_files(false);
-        assert!(!rule_no_skip.should_skip_media_file("image.jpg"), "image.jpg should not be skipped when skip_media_files is false");
+        assert!(
+            !rule_no_skip.should_skip_media_file("image.jpg"),
+            "image.jpg should not be skipped when skip_media_files is false"
+        );
     }
 
     #[test]
     fn test_no_warnings_without_base_path() {
         let rule = MD057ExistingRelativeLinks::new();
         let content = "[Link](missing.md)";
-        
+
         let result = rule.check(content).unwrap();
-        assert!(result.is_empty(), "Should have no warnings without base path");
+        assert!(
+            result.is_empty(),
+            "Should have no warnings without base path"
+        );
     }
 
     #[test]
@@ -391,14 +433,17 @@ mod tests {
         // Create a temporary directory for test files
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
-        
+
         // Create an existing file
         let exists_path = base_path.join("exists.md");
-        File::create(&exists_path).unwrap().write_all(b"# Test File").unwrap();
-        
+        File::create(&exists_path)
+            .unwrap()
+            .write_all(b"# Test File")
+            .unwrap();
+
         // Verify the file exists
         assert!(exists_path.exists(), "exists.md should exist for this test");
-        
+
         // Create test content with both existing and missing links
         let content = r#"
 # Test Document
@@ -408,13 +453,13 @@ mod tests {
 [External Link](https://example.com)
 [Media Link](image.jpg)
         "#;
-        
+
         // Initialize rule with the base path
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
-        
+
         // Test the rule
         let result = rule.check(content).unwrap();
-        
+
         // Should have one warning for the missing.md link but not for the media file
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("missing.md"));
@@ -425,11 +470,14 @@ mod tests {
         // Create a temporary directory for test files
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
-        
+
         // Create an existing file
         let exists_path = base_path.join("exists.md");
-        File::create(&exists_path).unwrap().write_all(b"# Test File").unwrap();
-        
+        File::create(&exists_path)
+            .unwrap()
+            .write_all(b"# Test File")
+            .unwrap();
+
         // Create test content with angle bracket links
         let content = r#"
 # Test Document
@@ -438,16 +486,18 @@ mod tests {
 [Invalid Link](<missing.md>)
 [External Link](<https://example.com>)
     "#;
-        
+
         // Test with default settings
-        let rule = MD057ExistingRelativeLinks::new()
-            .with_path(base_path);
-        
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
         let result = rule.check(content).unwrap();
-        
+
         // Should have one warning for missing.md
         assert_eq!(result.len(), 1, "Should have exactly one warning");
-        assert!(result[0].message.contains("missing.md"), "Warning should mention missing.md");
+        assert!(
+            result[0].message.contains("missing.md"),
+            "Warning should mention missing.md"
+        );
     }
 
     #[test]
@@ -455,70 +505,86 @@ mod tests {
         // Create a temporary directory for test files
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
-        
+
         // Explicitly check that image.jpg doesn't exist in the test directory
         let image_path = base_path.join("image.jpg");
-        assert!(!image_path.exists(), "Test precondition failed: image.jpg should not exist");
-        
+        assert!(
+            !image_path.exists(),
+            "Test precondition failed: image.jpg should not exist"
+        );
+
         // Create a test content with a media link - make sure it's very explicit
         let content = "[Media Link](image.jpg)";
-        
+
         // Test with skip_media_files = true (default)
-        let rule_skip_media = MD057ExistingRelativeLinks::new()
-            .with_path(base_path);
-        
+        let rule_skip_media = MD057ExistingRelativeLinks::new().with_path(base_path);
+
         let result_skip = rule_skip_media.check(content).unwrap();
-        
+
         // Should have no warnings when media files are skipped
-        assert_eq!(result_skip.len(), 0, "Should have no warnings when skip_media_files is true");
-        
+        assert_eq!(
+            result_skip.len(),
+            0,
+            "Should have no warnings when skip_media_files is true"
+        );
+
         // Test with skip_media_files = false
         let rule_check_all = MD057ExistingRelativeLinks::new()
             .with_path(base_path)
             .with_skip_media_files(false);
-        
+
         // Debug: Verify media file identification and handling
         if false { // Set to false to disable debug output in tests
-            // println!("Is 'image.jpg' a media file? {}", rule_check_all.is_media_file("image.jpg"));
-            // println!("Should skip 'image.jpg'? {}", rule_check_all.should_skip_media_file("image.jpg"));
-            // println!("Skip media files setting: {}", rule_check_all.skip_media_files);
+             // println!("Is 'image.jpg' a media file? {}", rule_check_all.is_media_file("image.jpg"));
+             // println!("Should skip 'image.jpg'? {}", rule_check_all.should_skip_media_file("image.jpg"));
+             // println!("Skip media files setting: {}", rule_check_all.skip_media_files);
         }
-        
+
         // Ensure the file still doesn't exist
-        assert!(!image_path.exists(), "image.jpg should not exist for this test");
-        
+        assert!(
+            !image_path.exists(),
+            "image.jpg should not exist for this test"
+        );
+
         // Debug: Verify the path resolution
         if let Some(resolved) = rule_check_all.resolve_link_path("image.jpg") {
             if false { // Set to false to disable debug output
-                // println!("Resolved path: {:?}", resolved);
-                // println!("Path exists? {}", resolved.exists());
+                 // println!("Resolved path: {:?}", resolved);
+                 // println!("Path exists? {}", resolved.exists());
             } else {
                 // println!("Failed to resolve path");
             }
         } else {
             // println!("Failed to resolve path");
         }
-        
+
         let result_all = rule_check_all.check(content).unwrap();
-        
+
         if false { // Set to false to disable debug output in tests
-            // println!("Number of warnings: {}", result_all.len());
-            // for (i, warning) in result_all.iter().enumerate() {
-            //     println!("Warning {}: {}", i, warning.message);
-            // }
+             // println!("Number of warnings: {}", result_all.len());
+             // for (i, warning) in result_all.iter().enumerate() {
+             //     println!("Warning {}: {}", i, warning.message);
+             // }
         }
-        
+
         // Should warn about the missing media file
-        assert_eq!(result_all.len(), 1, "Should have one warning when skip_media_files is false");
-        assert!(result_all[0].message.contains("image.jpg"), "Warning should mention image.jpg");
+        assert_eq!(
+            result_all.len(),
+            1,
+            "Should have one warning when skip_media_files is false"
+        );
+        assert!(
+            result_all[0].message.contains("image.jpg"),
+            "Warning should mention image.jpg"
+        );
     }
-    
+
     #[test]
     fn test_inline_code_spans() {
         // Create a temporary directory for test files
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
-        
+
         // Create test content with links in inline code spans
         let content = r#"
 # Test Document
@@ -530,43 +596,72 @@ This is a code span with a link: `[Link](another-missing.md)`
 Some more text with `inline code [Link](yet-another-missing.md) embedded`.
 
     "#;
-        
+
         // Initialize rule with the base path
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
-        
+
         // Test the rule
         let result = rule.check(content).unwrap();
-        
+
         // Should only have warning for the normal link, not for links in code spans
         assert_eq!(result.len(), 1, "Should have exactly one warning");
-        assert!(result[0].message.contains("missing.md"), "Warning should be for missing.md");
-        assert!(!result.iter().any(|w| w.message.contains("another-missing.md")), 
-               "Should not warn about link in code span");
-        assert!(!result.iter().any(|w| w.message.contains("yet-another-missing.md")), 
-               "Should not warn about link in inline code");
+        assert!(
+            result[0].message.contains("missing.md"),
+            "Warning should be for missing.md"
+        );
+        assert!(
+            !result
+                .iter()
+                .any(|w| w.message.contains("another-missing.md")),
+            "Should not warn about link in code span"
+        );
+        assert!(
+            !result
+                .iter()
+                .any(|w| w.message.contains("yet-another-missing.md")),
+            "Should not warn about link in inline code"
+        );
     }
-    
+
     #[test]
     fn test_compute_inline_code_spans() {
         let rule = MD057ExistingRelativeLinks::new();
-        
+
         // Test with no backticks
         let spans = rule.compute_inline_code_spans("No code spans here");
-        assert!(spans.is_empty(), "Should have no spans when no backticks are present");
-        
+        assert!(
+            spans.is_empty(),
+            "Should have no spans when no backticks are present"
+        );
+
         // Test with a simple code span
         let spans = rule.compute_inline_code_spans("Text with `code span` in it");
         assert_eq!(spans.len(), 1, "Should detect one code span");
-        assert_eq!(spans[0], (10, 21), "Code span should be at the correct position");
-        
+        assert_eq!(
+            spans[0],
+            (10, 21),
+            "Code span should be at the correct position"
+        );
+
         // Test with multiple code spans
         let spans = rule.compute_inline_code_spans("Multiple `code` spans `in one` line");
         assert_eq!(spans.len(), 2, "Should detect two code spans");
-        assert_eq!(spans[0], (9, 15), "First code span should be at the correct position");
-        assert_eq!(spans[1], (22, 30), "Second code span should be at the correct position");
-        
+        assert_eq!(
+            spans[0],
+            (9, 15),
+            "First code span should be at the correct position"
+        );
+        assert_eq!(
+            spans[1],
+            (22, 30),
+            "Second code span should be at the correct position"
+        );
+
         // Test with unbalanced backticks
         let spans = rule.compute_inline_code_spans("Unbalanced `backtick");
-        assert!(spans.is_empty(), "Should not detect unbalanced backticks as spans");
+        assert!(
+            spans.is_empty(),
+            "Should not detect unbalanced backticks as spans"
+        );
     }
-} 
+}

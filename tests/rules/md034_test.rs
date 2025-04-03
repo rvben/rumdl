@@ -129,35 +129,46 @@ fn test_performance_md034() {
 
     // Generate a large document with a mix of bare URLs, proper links, and code blocks
     let mut content = String::with_capacity(500_000);
-    
+
     // Add a mix of content with URLs in various contexts
     for i in 0..1000 {
         // Regular text with bare URLs
         if i % 5 == 0 {
-            content.push_str(&format!("Paragraph {} with a bare URL https://example.com/page{} and some text.\n\n", i, i));
+            content.push_str(&format!(
+                "Paragraph {} with a bare URL https://example.com/page{} and some text.\n\n",
+                i, i
+            ));
         }
-        
         // Proper markdown links
         else if i % 5 == 1 {
-            content.push_str(&format!("Paragraph {} with a [proper link](https://example.com/page{}) and some text.\n\n", i, i));
+            content.push_str(&format!(
+                "Paragraph {} with a [proper link](https://example.com/page{}) and some text.\n\n",
+                i, i
+            ));
         }
-        
         // Auto-linked URLs
         else if i % 5 == 2 {
-            content.push_str(&format!("Paragraph {} with an auto-linked <https://example.com/page{}> and some text.\n\n", i, i));
+            content.push_str(&format!(
+                "Paragraph {} with an auto-linked <https://example.com/page{}> and some text.\n\n",
+                i, i
+            ));
         }
-        
         // Code blocks with URLs
         else if i % 5 == 3 {
-            content.push_str(&format!("```\ncode block {} with https://example.com/page{} url\n```\n\n", i, i));
+            content.push_str(&format!(
+                "```\ncode block {} with https://example.com/page{} url\n```\n\n",
+                i, i
+            ));
         }
-        
         // Inline code with URLs
         else {
-            content.push_str(&format!("Paragraph {} with `https://example.com/page{}` in code and some text.\n\n", i, i));
+            content.push_str(&format!(
+                "Paragraph {} with `https://example.com/page{}` in code and some text.\n\n",
+                i, i
+            ));
         }
     }
-    
+
     // Add a section with multiple URLs on the same line
     content.push_str("\n## Multiple URLs on same line\n\n");
     for i in 0..200 {
@@ -166,36 +177,58 @@ fn test_performance_md034() {
             i, i+1, i+2
         ));
     }
-    
+
     // Add some content without URLs to test the fast path
     content.push_str("\n## Content without URLs\n\n");
     for i in 0..100 {
-        content.push_str(&format!("This is paragraph {} without any URLs or links.\n\n", i));
+        content.push_str(&format!(
+            "This is paragraph {} without any URLs or links.\n\n",
+            i
+        ));
     }
-    
+
     println!("Generated test content of {} bytes", content.len());
 
     // Measure performance of check method
     let start = Instant::now();
     let result = rule.check(&content).unwrap();
     let check_duration = start.elapsed();
-    
+
     // Measure performance of fix method
     let start = Instant::now();
     let fixed = rule.fix(&content).unwrap();
     let fix_duration = start.elapsed();
-    
-    println!("MD034 check duration: {:?} for content length {}", check_duration, content.len());
+
+    println!(
+        "MD034 check duration: {:?} for content length {}",
+        check_duration,
+        content.len()
+    );
     println!("MD034 fix duration: {:?}", fix_duration);
     println!("Found {} warnings", result.len());
-    
+
     // Verify results
     assert!(!result.is_empty(), "Should have found bare URLs");
-    assert!(fixed.contains("<https://example.com/page0>"), "Should have fixed bare URLs");
-    assert!(!fixed.contains("code block 3 with <https://"), "Should not fix URLs in code blocks");
-    assert!(!fixed.contains("with `<https://"), "Should not fix URLs in inline code");
-    
+    assert!(
+        fixed.contains("<https://example.com/page0>"),
+        "Should have fixed bare URLs"
+    );
+    assert!(
+        !fixed.contains("code block 3 with <https://"),
+        "Should not fix URLs in code blocks"
+    );
+    assert!(
+        !fixed.contains("with `<https://"),
+        "Should not fix URLs in inline code"
+    );
+
     // Performance assertion - should complete in a reasonable time
-    assert!(check_duration.as_millis() < 100, "Check should complete in under 100ms");
-    assert!(fix_duration.as_millis() < 100, "Fix should complete in under 100ms");
+    assert!(
+        check_duration.as_millis() < 100,
+        "Check should complete in under 100ms"
+    );
+    assert!(
+        fix_duration.as_millis() < 100,
+        "Fix should complete in under 100ms"
+    );
 }
