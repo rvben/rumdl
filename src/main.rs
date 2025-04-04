@@ -1,12 +1,12 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process;
 use std::time::Instant;
 use walkdir::WalkDir;
 
-use rumdl::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use rumdl::rule::Rule;
 use rumdl::rules::code_block_utils::CodeBlockStyle;
 use rumdl::rules::code_fence_utils::CodeFenceStyle;
 use rumdl::rules::emphasis_style::EmphasisStyle;
@@ -240,8 +240,27 @@ fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
 }
 
 // Find all markdown files in the provided paths
-fn find_markdown_files(paths: &[String]) -> Vec<String> {
+fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> Vec<String> {
     let mut file_paths = Vec::new();
+    
+    // Extract exclude patterns
+    let mut exclude_patterns = Vec::new();
+    if let Some(exclude_str) = &cli.exclude {
+        exclude_patterns.extend(exclude_str.split(',').map(|s| s.trim().to_string()));
+    }
+    // Add patterns from config
+    exclude_patterns.extend(config.global.exclude.clone());
+    
+    // Extract include patterns
+    let mut include_patterns = Vec::new();
+    if let Some(include_str) = &cli.include {
+        include_patterns.extend(include_str.split(',').map(|s| s.trim().to_string()));
+    }
+    // Add patterns from config
+    include_patterns.extend(config.global.include.clone());
+    
+    // Use ignore_gitignore from CLI or config
+    let ignore_gitignore = cli.ignore_gitignore || config.global.ignore_gitignore;
 
     for path_str in paths {
         let path = Path::new(path_str);
@@ -258,7 +277,12 @@ fn find_markdown_files(paths: &[String]) -> Vec<String> {
         if path.is_file() {
             // Check if file is a markdown file
             if path.extension().map_or(false, |ext| ext == "md") {
-                file_paths.push(path_str.to_string());
+                // Apply exclude/include filters
+                let file_path = path_str.to_string();
+                if !rumdl::should_exclude(&file_path, &exclude_patterns, ignore_gitignore) 
+                    && rumdl::should_include(&file_path, &include_patterns) {
+                    file_paths.push(file_path);
+                }
             }
         } else if path.is_dir() {
             // Find markdown files in the directory
@@ -272,7 +296,11 @@ fn find_markdown_files(paths: &[String]) -> Vec<String> {
 
             for entry in walker {
                 let file_path = entry.path().to_string_lossy().to_string();
-                file_paths.push(file_path);
+                // Apply exclude/include filters
+                if !rumdl::should_exclude(&file_path, &exclude_patterns, ignore_gitignore) 
+                    && rumdl::should_include(&file_path, &include_patterns) {
+                    file_paths.push(file_path);
+                }
             }
         }
     }
@@ -492,7 +520,7 @@ fn process_file(
 }
 
 fn main() {
-    let timer = rumdl::profiling::ScopedTimer::new("main");
+    let _timer = rumdl::profiling::ScopedTimer::new("main");
 
     // Initialize CLI and parse arguments
     let cli = Cli::parse();
@@ -545,7 +573,7 @@ fn main() {
     let enabled_rules = get_enabled_rules(&cli, &config);
 
     // Find all markdown files to check
-    let file_paths = find_markdown_files(&cli.paths);
+    let file_paths = find_markdown_files(&cli.paths, &cli, &config);
     if file_paths.is_empty() {
         if !cli.quiet {
             println!("No markdown files found to check.");

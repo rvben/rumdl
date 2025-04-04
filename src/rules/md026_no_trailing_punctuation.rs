@@ -1,10 +1,8 @@
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::ops::Range;
-
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::document_structure::DocumentStructure;
-use crate::utils::range_utils::LineIndex;
 
 lazy_static! {
     // Match ATX headings (with or without closing hashes)
@@ -200,130 +198,6 @@ impl MD026NoTrailingPunctuation {
     // These are treated as code blocks in Markdown
     fn is_deeply_indented_heading(&self, line: &str) -> bool {
         line.starts_with("    ") && line.trim_start().starts_with('#')
-    }
-
-    // Add method to describe the configured punctuation characters
-    fn get_punctuation_description(&self) -> String {
-        let mut desc = "punctuation".to_string();
-        if self.punctuation.len() <= 10 {
-            desc = format!("punctuation '{}'", self.punctuation);
-        }
-        desc
-    }
-
-    // Count the number of trailing punctuation characters in a string
-    fn count_trailing_punctuation(&self, text: &str, re: &Regex) -> usize {
-        if let Some(captures) = re.captures(text.trim()) {
-            if let Some(m) = captures.get(1) {
-                return m.as_str().len();
-            }
-        }
-        0
-    }
-
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        // Early return if content is empty or no headings
-        if content.is_empty() || structure.heading_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let re = match self.get_punctuation_regex() {
-            Ok(re) => re,
-            Err(e) => {
-                return Err(LintError::FixFailed(format!(
-                    "Invalid regex pattern: {}",
-                    e
-                )))
-            }
-        };
-
-        let mut warnings = Vec::new();
-        let _line_index = LineIndex::new(content.to_string());
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Process each heading using heading line numbers from the document structure
-        for line_num in structure.heading_lines.iter() {
-            // Line numbers in the structure are 1-indexed
-            let line_idx = line_num - 1;
-
-            if line_idx >= lines.len() {
-                continue;
-            }
-
-            let line = lines[line_idx];
-            let heading_text = line.trim();
-
-            // Skip empty headings
-            if heading_text.is_empty() {
-                continue;
-            }
-
-            // Check for ATX headings
-            if heading_text.starts_with('#') {
-                // Get the heading text (after the # characters)
-                let mut heading_text = heading_text.trim_start_matches('#').trim_start();
-
-                // Handle closed ATX headings by removing trailing #
-                if heading_text.ends_with('#') {
-                    heading_text = heading_text.trim_end_matches('#').trim_end();
-                }
-
-                // Check for punctuation at the end of the heading
-                if self.has_trailing_punctuation(heading_text, &re) {
-                    let range = self.get_line_byte_range(content, *line_num);
-                    let trailing_punct_len = self.count_trailing_punctuation(line, &re);
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: line_idx + 1,
-                        column: 1,
-                        message: format!(
-                            "Heading should not end with {}",
-                            self.get_punctuation_description()
-                        ),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: Range {
-                                start: range.end - trailing_punct_len,
-                                end: range.end,
-                            },
-                            replacement: self.fix_atx_heading(line, &re),
-                        }),
-                    });
-                }
-            }
-            // Check for Setext headings
-            else {
-                // Only process first line of setext headings (the text, not the underline)
-                if line_idx + 1 < lines.len()
-                    && self.is_setext_underline(lines[line_idx + 1])
-                    && self.has_trailing_punctuation(line, &re)
-                {
-                    let range = self.get_line_byte_range(content, *line_num);
-                    let trailing_punct_len = self.count_trailing_punctuation(line, &re);
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: line_idx + 1,
-                        column: 1,
-                        message: format!(
-                            "Heading should not end with {}",
-                            self.get_punctuation_description()
-                        ),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: Range {
-                                start: range.end - trailing_punct_len,
-                                end: range.end,
-                            },
-                            replacement: self.fix_setext_heading(line, &re),
-                        }),
-                    });
-                }
-            }
-        }
-
-        Ok(warnings)
     }
 }
 

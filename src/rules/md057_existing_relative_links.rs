@@ -233,9 +233,9 @@ impl Rule for MD057ExistingRelativeLinks {
             return Ok(warnings);
         }
 
-        let base_path = base_path.unwrap();
+        let _base_path = base_path.unwrap();
         if debug {
-            // println!("Base path: {:?}", base_path);
+            // println!("Base path: {:?}", _base_path);
         }
 
         for (line_num, line) in content.lines().enumerate() {
@@ -313,11 +313,11 @@ impl Rule for MD057ExistingRelativeLinks {
                         }
 
                         // Check if it's a media file (for debugging)
-                        let is_media = self.is_media_file(url);
+                        let _is_media = self.is_media_file(url);
                         let should_skip = self.should_skip_media_file(url);
 
                         if debug {
-                            // println!("URL '{}': is_media={}, should_skip={}", url, is_media, should_skip);
+                            // println!("URL '{}': is_media={}, should_skip={}", url, _is_media, should_skip);
                         }
 
                         // Skip media files if configured to do so

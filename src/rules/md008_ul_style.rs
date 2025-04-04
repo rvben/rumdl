@@ -73,34 +73,6 @@ impl MD008ULStyle {
         })
     }
 
-    /// Determine if a line is in a code block
-    fn is_in_code_block(content: &str, line_idx: usize) -> bool {
-        let lines: Vec<&str> = content.lines().collect();
-        let mut in_code_block = false;
-
-        for (i, line) in lines.iter().enumerate() {
-            if i > line_idx {
-                break;
-            }
-
-            if CODE_BLOCK_MARKER.is_match(line.trim_start()) {
-                in_code_block = !in_code_block;
-            }
-
-            if i == line_idx {
-                return in_code_block;
-            }
-        }
-
-        false
-    }
-
-    /// Check if content contains any list items (for fast skipping)
-    #[inline]
-    fn contains_potential_list_items(content: &str) -> bool {
-        content.contains('*') || content.contains('-') || content.contains('+')
-    }
-
     /// Precompute code blocks for faster checking
     fn precompute_code_blocks(content: &str) -> Vec<bool> {
         let lines: Vec<&str> = content.lines().collect();
@@ -115,6 +87,12 @@ impl MD008ULStyle {
         }
 
         code_blocks
+    }
+
+    /// Check if content contains any list items (for fast skipping)
+    #[inline]
+    fn contains_potential_list_items(content: &str) -> bool {
+        content.contains('*') || content.contains('-') || content.contains('+')
     }
 
     /// Helper method to find the first list marker in content
@@ -189,7 +167,7 @@ impl Rule for MD008ULStyle {
                 }
 
                 if marker.to_string() != expected_style {
-                    let trimmed_line = line.trim_start();
+                    let _trimmed_line = line.trim_start();
                     // For regular list items, just use indentation
                     let line_start = " ".repeat(indent);
 
@@ -272,7 +250,7 @@ impl Rule for MD008ULStyle {
                 }
 
                 if marker.to_string() != expected_style {
-                    let trimmed_line = line.trim_start();
+                    let _trimmed_line = line.trim_start();
                     // For regular list items, just use indentation
                     let line_start = " ".repeat(indent);
 

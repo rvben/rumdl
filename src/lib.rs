@@ -13,7 +13,6 @@ pub use rules::*;
 
 use crate::rule::{LintResult, Rule};
 use globset::GlobBuilder;
-use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
 /// Collect patterns from .gitignore files

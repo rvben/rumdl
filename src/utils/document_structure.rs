@@ -354,29 +354,6 @@ impl DocumentStructure {
         }
     }
 
-    /// Detect lists in the document
-    fn detect_lists(&mut self, content: &str) {
-        lazy_static! {
-            // Modified regex to better capture list markers with or without content after them
-            static ref LIST_MARKER: Regex = Regex::new(r"^(\s*)([\*\+\-]|\d+\.)(\s+\S|\s*$)").unwrap();
-        }
-
-        // Clear existing data
-        self.list_lines.clear();
-
-        for (i, line) in content.lines().enumerate() {
-            // Skip lines in code blocks or front matter
-            if self.is_in_code_block(i + 1) || self.is_in_front_matter(i + 1) {
-                continue;
-            }
-
-            // Check for list markers using the improved regex
-            if LIST_MARKER.is_match(line) {
-                self.list_lines.push(i + 1);
-            }
-        }
-    }
-
     /// Detect front matter in the document
     fn detect_front_matter(&mut self, content: &str) {
         let lines: Vec<&str> = content.lines().collect();

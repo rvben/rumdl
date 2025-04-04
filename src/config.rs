@@ -27,23 +27,23 @@ pub struct Config {
 /// Global configuration options
 #[derive(Debug, Deserialize, Default)]
 pub struct GlobalConfig {
-    /// List of rules to disable
-    #[serde(default)]
-    pub disable: Vec<String>,
-
-    /// List of rules to enable exclusively (if provided, only these rules will run)
+    /// Enabled rules
     #[serde(default)]
     pub enable: Vec<String>,
 
-    /// List of file/directory patterns to exclude from linting
+    /// Disabled rules
+    #[serde(default)]
+    pub disable: Vec<String>,
+
+    /// Files to exclude
     #[serde(default)]
     pub exclude: Vec<String>,
 
-    /// List of file/directory patterns to include for linting (if empty, include all non-excluded files)
+    /// Files to include
     #[serde(default)]
     pub include: Vec<String>,
 
-    /// Whether to ignore .gitignore files
+    /// Ignore .gitignore file
     #[serde(default)]
     pub ignore_gitignore: bool,
 }
