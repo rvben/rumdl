@@ -12,7 +12,7 @@ disable = ["MD013"]
 enable = ["MD001", "MD003"]
 include = ["docs/*.md"]
 exclude = [".git"]
-respect_gitignore = true
+ignore_gitignore = false
 
 [MD013]
 line_length = 120
@@ -33,7 +33,7 @@ tables = true
     assert_eq!(config.global.enable, vec!["MD001", "MD003"]);
     assert_eq!(config.global.include, vec!["docs/*.md"]);
     assert_eq!(config.global.exclude, vec![".git"]);
-    assert!(config.global.respect_gitignore);
+    assert!(!config.global.ignore_gitignore);
 
     // Verify rule-specific settings
     let line_length =

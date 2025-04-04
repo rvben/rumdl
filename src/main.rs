@@ -58,13 +58,9 @@ struct Cli {
     #[arg(long)]
     include: Option<String>,
 
-    /// Respect .gitignore files when scanning directories
-    #[arg(long, default_value = "true")]
-    respect_gitignore: bool,
-
-    /// Debug gitignore patterns for a specific file
-    #[arg(long)]
-    debug_gitignore: bool,
+    /// Ignore .gitignore files when scanning directories
+    #[arg(long, default_value = "false")]
+    ignore_gitignore: bool,
 
     /// Show detailed output
     #[arg(short, long)]
@@ -113,6 +109,20 @@ fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
             headings,
             strict,
         ));
+    }
+    
+    // Replace MD043 with configured instance
+    if let Some(pos) = rules.iter().position(|r| r.name() == "MD043") {
+        let mut headings =
+            config::get_rule_config_value::<Vec<String>>(config, "MD043", "headings")
+                .unwrap_or_else(Vec::new);
+        
+        // Strip leading '#' and spaces from the configured headings to match the format of extracted headings
+        headings = headings.iter().map(|h| {
+            h.trim_start_matches(|c| c == '#' || c == ' ').to_string()
+        }).collect();
+        
+        rules[pos] = Box::new(MD043RequiredHeadings::new(headings));
     }
 
     // Replace MD053 with configured instance

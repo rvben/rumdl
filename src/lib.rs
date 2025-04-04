@@ -179,7 +179,7 @@ fn matches_gitignore_pattern(path: &str, pattern: &str) -> bool {
 pub fn should_exclude(
     file_path: &str,
     exclude_patterns: &[String],
-    respect_gitignore: bool,
+    ignore_gitignore: bool,
 ) -> bool {
     // Convert to absolute path
     let path = Path::new(file_path);
@@ -206,8 +206,8 @@ pub fn should_exclude(
     let normalized_path = relative_path.to_string_lossy();
     let normalized_path_str = normalized_path.as_ref();
 
-    // If respect_gitignore is true, check .gitignore patterns first
-    if respect_gitignore {
+    // Unless ignore_gitignore is true, check .gitignore patterns first
+    if !ignore_gitignore {
         let gitignore_patterns = collect_gitignore_patterns(file_path);
         for pattern in &gitignore_patterns {
             let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);

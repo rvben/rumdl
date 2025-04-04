@@ -38,7 +38,7 @@ mod init_command_tests {
         let config_content = fs::read_to_string(config_path).expect("Failed to read config file");
         assert!(config_content.contains("[global]"));
         assert!(config_content.contains("exclude ="));
-        assert!(config_content.contains("respect_gitignore ="));
+        assert!(config_content.contains("ignore_gitignore ="));
     }
 
     #[test]

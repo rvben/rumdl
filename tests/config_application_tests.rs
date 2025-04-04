@@ -34,7 +34,7 @@ fn create_test_config() -> Config {
             enable: vec![],
             include: vec![],
             exclude: vec![],
-            respect_gitignore: true,
+            ignore_gitignore: false,
         },
         rules,
     }

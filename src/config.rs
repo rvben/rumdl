@@ -43,9 +43,9 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub include: Vec<String>,
 
-    /// Whether to respect .gitignore files
+    /// Whether to ignore .gitignore files
     #[serde(default)]
-    pub respect_gitignore: bool,
+    pub ignore_gitignore: bool,
 }
 
 /// Load configuration from the specified file or search for a default config file
@@ -123,8 +123,8 @@ exclude = [
     "LICENSE.md",
 ]
 
-# Respect .gitignore files when scanning directories
-respect_gitignore = true
+# Ignore .gitignore files when scanning directories (default: false)
+ignore_gitignore = false
 
 # Rule-specific configurations (uncomment and modify as needed)
 
