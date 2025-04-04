@@ -1,12 +1,12 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::time::Instant;
 use walkdir::WalkDir;
 
-use rumdl::rule::Rule;
+use rumdl::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use rumdl::rules::code_block_utils::CodeBlockStyle;
 use rumdl::rules::code_fence_utils::CodeFenceStyle;
 use rumdl::rules::emphasis_style::EmphasisStyle;
@@ -385,9 +385,16 @@ fn process_file(
         }
     };
 
-    // Use the standard lint function - we've fixed the debug output in the lint functions
+    // Set the environment variable for the file path
+    // This allows rules like MD057 to know which file is being processed
+    std::env::set_var("RUMDL_FILE_PATH", file_path);
+
+    // Use the standard lint function
     let warnings_result = rumdl::lint(&content, rules);
 
+    // Clear the environment variable after processing
+    std::env::remove_var("RUMDL_FILE_PATH");
+    
     // Combine all warnings
     let mut all_warnings = warnings_result.unwrap_or_default();
 
@@ -439,8 +446,8 @@ fn process_file(
     // Fix issues if requested
     let mut warnings_fixed = 0;
     if fix {
+        // Skip rules that don't have fixes
         for rule in rules {
-            // Skip rules that don't have fixes
             if all_warnings
                 .iter()
                 .any(|w| w.rule_name == Some(rule.name()) && w.fix.is_some())

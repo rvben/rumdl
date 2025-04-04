@@ -48,11 +48,6 @@ pub enum Severity {
     Warning,
 }
 
-// Object-safe clone trait for Rule
-pub trait RuleClone {
-    fn clone_box(&self) -> Box<dyn Rule>;
-}
-
 /// Type of rule for selective processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleCategory {

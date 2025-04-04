@@ -4,7 +4,15 @@ use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::cell::RefCell;
+use std::env;
 use std::path::{Path, PathBuf};
+
+#[cfg(test)]
+use std::fs::File;
+#[cfg(test)]
+use std::io::Write;
+#[cfg(test)]
+use tempfile::tempdir;
 
 lazy_static! {
     // Match markdown links: [text](url) or [text](url "title") or [text](<url>)
@@ -20,6 +28,8 @@ lazy_static! {
     static ref MEDIA_FILES_REGEX: Regex = Regex::new(r"\.(pdf|mp4|mp3|avi|mov|flv|wmv|webm|ogg|wav|flac|aac|m4a|jpg|jpeg|png|gif|bmp|svg|webp|tiff|ico)$").unwrap();
     // Fragment-only links pattern (links to headings within the same document)
     static ref FRAGMENT_ONLY_REGEX: Regex = Regex::new(r"^#").unwrap();
+    // Current working directory
+    static ref CURRENT_DIR: PathBuf = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 }
 
 /// Rule MD057: Relative links should point to existing files
@@ -198,12 +208,32 @@ impl Rule for MD057ExistingRelativeLinks {
         let mut code_fence_marker = String::new();
         let debug = false; // Debug output disabled for normal operation
 
-        // If no base path is set, we can't validate relative links
-        if self.base_path.borrow().is_none() {
+        // Get the base path - using either the explicitly set path or try to determine from context
+        let base_path = if self.base_path.borrow().is_some() {
+            // Use the explicitly set base path if available
+            self.base_path.borrow().clone()
+        } else {
+            // Try to determine the base path from the file being processed
+            // First, check if we have a RUMDL_FILE_PATH environment variable
+            if let Ok(file_path) = env::var("RUMDL_FILE_PATH") {
+                let path = Path::new(&file_path);
+                if path.exists() {
+                    path.parent().map(|p| p.to_path_buf()).or_else(|| Some(CURRENT_DIR.clone()))
+                } else {
+                    Some(CURRENT_DIR.clone())
+                }
+            } else {
+                // If we can't determine the base path, use the current directory
+                Some(CURRENT_DIR.clone())
+            }
+        };
+
+        // If we still don't have a base path, we can't validate relative links
+        if base_path.is_none() {
             return Ok(warnings);
         }
 
-        let base_path = self.base_path.borrow();
+        let base_path = base_path.unwrap();
         if debug {
             // println!("Base path: {:?}", base_path);
         }
