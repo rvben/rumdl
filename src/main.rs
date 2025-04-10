@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process;
 use std::time::Instant;
 use walkdir::WalkDir;
+use std::fs;
 
 use rumdl::rule::Rule;
 use rumdl::rules::code_block_utils::CodeBlockStyle;
@@ -82,7 +83,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Initialize a new configuration file
-    Init,
+    Init {
+        /// Generate configuration for pyproject.toml instead of .rumdl.toml
+        #[arg(long)]
+        pyproject: bool,
+    },
 }
 
 // Helper function to apply configuration to rules that need it
@@ -652,7 +657,87 @@ fn main() {
     let cli = Cli::parse();
 
     // Handle init command separately
-    if let Some(Commands::Init) = cli.command {
+    if let Some(Commands::Init { pyproject }) = cli.command {
+        if pyproject {
+            // Handle pyproject.toml initialization
+            let config_content = config::generate_pyproject_config();
+            
+            if Path::new("pyproject.toml").exists() {
+                // pyproject.toml exists, ask to append
+                if !cli.quiet {
+                    println!("pyproject.toml already exists. Would you like to append rumdl configuration? [y/N]");
+                    print!("> ");
+                    io::stdout().flush().unwrap();
+                    
+                    let mut answer = String::new();
+                    io::stdin().read_line(&mut answer).unwrap();
+                    
+                    if answer.trim().eq_ignore_ascii_case("y") {
+                        // Append to existing file
+                        match fs::read_to_string("pyproject.toml") {
+                            Ok(content) => {
+                                // Check if [tool.rumdl] section already exists
+                                if content.contains("[tool.rumdl]") {
+                                    println!("The pyproject.toml file already contains a [tool.rumdl] section.");
+                                    println!("Please edit the file manually to avoid overwriting existing configuration.");
+                                    return;
+                                }
+                                
+                                // Append with a blank line for separation
+                                let new_content = format!("{}\n\n{}", content.trim_end(), config_content);
+                                match fs::write("pyproject.toml", new_content) {
+                                    Ok(_) => println!("Added rumdl configuration to pyproject.toml"),
+                                    Err(e) => {
+                                        eprintln!(
+                                            "{}: Failed to update pyproject.toml: {}",
+                                            "Error".red().bold(),
+                                            e
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                eprintln!(
+                                    "{}: Failed to read pyproject.toml: {}",
+                                    "Error".red().bold(),
+                                    e
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        println!("Aborted. No changes made to pyproject.toml");
+                    }
+                }
+            } else {
+                // Create new pyproject.toml with basic structure
+                let basic_content = r#"[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+"#;
+                let content = basic_content.to_owned() + &config_content;
+                
+                match fs::write("pyproject.toml", content) {
+                    Ok(_) => {
+                        if !cli.quiet {
+                            println!("Created pyproject.toml with rumdl configuration");
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!(
+                            "{}: Failed to create pyproject.toml: {}",
+                            "Error".red().bold(),
+                            e
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            }
+            return;
+        }
+        
         // Create default config file
         match config::create_default_config(".rumdl.toml") {
             Ok(_) => {

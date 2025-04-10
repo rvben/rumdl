@@ -663,7 +663,7 @@ fn test_rule_with_configuration() {
     let test_file = temp_dir.path().join("configurable_issue.md");
     fs::write(
         &test_file,
-        "# Configurable Issue\n\nThis line is exactly 70 characters long which is within default limits.\nThis line is a bit longer than the default and exceeds 70 characters but is less than 80.\n",
+        "# Configurable Issue\n\nThis line is exactly 70 characters long which is within default limits.\nThis line is a bit longer and has exactly 75 characters which exceeds 70 chars.\nThis line is much longer and definitely exceeds the default limit of 80 characters by a substantial margin including many extra words that ensure it is well over the limit of 80 characters making it extremely long and definitely triggering the MD013 rule with its default configuration.\n",
     ).unwrap();
     
     let test_file_path = test_file.to_str().unwrap();
@@ -677,32 +677,41 @@ fn test_rule_with_configuration() {
     let default_stdout = String::from_utf8_lossy(&default_output.stdout);
     println!("Default configuration output:\n{}", default_stdout);
     
-    // Check that no line length issues are reported with default config
-    assert!(!default_stdout.contains("[MD013]"), 
-            "Should not detect line length issues with default configuration");
+    // Check that line length issues are reported with default config (limit 80)
+    assert!(default_stdout.contains("[MD013]"), 
+            "Should detect line length issues over 80 characters with default configuration");
     
-    // Create a custom config file with lower line length limit
+    // Now create a custom config file with lower limit
     let config_file = temp_dir.path().join(".rumdl.toml");
     fs::write(
         &config_file,
-        r#"[MD013]
+        r#"
+[MD013]
 line_length = 70
 "#,
     ).unwrap();
     
-    // Run with custom configuration
+    // Run with custom configuration (line length 70)
     let custom_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .current_dir(temp_dir.path()) // Run from directory where config file is located
         .args(&[test_file_path])
+        .current_dir(temp_dir.path()) // Important: set working directory to where config file is
         .output()
         .expect("Failed to execute command");
         
     let custom_stdout = String::from_utf8_lossy(&custom_output.stdout);
     println!("Custom configuration output:\n{}", custom_stdout);
     
-    // Check that line length issues are now reported with custom config
-    assert!(custom_stdout.contains("[MD013]") && custom_stdout.contains("Line length"), 
-            "Should detect line length issues with custom configuration");
+    // Custom config should detect more issues (since limit is lower)
+    assert!(custom_stdout.contains("[MD013]"), 
+            "Should detect line length issues over 70 characters with custom configuration");
+    
+    // The custom configuration should detect the second line as an issue (over 70 chars)
+    // which the default configuration wouldn't detect (since it's under 80)
+    let default_issue_count = default_stdout.matches("[MD013]").count();
+    let custom_issue_count = custom_stdout.matches("[MD013]").count();
+    
+    assert!(custom_issue_count > default_issue_count, 
+            "Custom configuration should detect more issues than default configuration");
 }
 
 #[test]

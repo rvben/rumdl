@@ -5,3 +5,5 @@ mod comprehensive_integration_tests;
 mod init_command_test;
 mod rules;
 mod utils;
+mod output_format_tests;
+mod pyproject_config_tests;
