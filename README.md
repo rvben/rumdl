@@ -184,62 +184,80 @@ rumdl <command> [options]
 
 ## Configuration
 
-rumdl can be configured using a TOML configuration file. By default, it looks for `rumdl.toml` or `.rumdl.toml` in the current directory.
+rumdl can be configured in several ways:
 
-You can create a default configuration file using the `init` command:
+1. Using a `.rumdl.toml` file in your project directory
+2. Using the `[tool.rumdl]` section in your project's `pyproject.toml` file (for Python projects)
+3. Using command-line arguments
 
-```bash
-rumdl init
-```
+### Configuration File Example
 
-This will create a `.rumdl.toml` file in the current directory with default settings that you can customize.
-
-Example configuration file:
+Here's an example `.rumdl.toml` configuration file:
 
 ```toml
-# Global configuration options
-[global]
-# List of rules to disable
-disable = ["MD013", "MD033"]
+# Global settings
+line-length = 100
+exclude = ["node_modules", "build", "dist"]
+respect-gitignore = true
 
-# List of rules to enable exclusively (if provided, only these rules will run)
-# enable = ["MD001", "MD003", "MD004"]
+# Disable specific rules
+disabled-rules = ["MD013", "MD033"]
 
-# List of file/directory patterns to include for linting (if provided, only these will be linted)
-include = [
-    # Documentation files
-    "docs/**/*.md",
-    "README.md",
-    "CONTRIBUTING.md",
-]
+# Configure individual rules
+[MD007]
+indent = 2
 
-# List of file/directory patterns to exclude from linting
-exclude = [
-    # Common directories to exclude
-    ".git",
-    ".github",
-    "node_modules",
-    "vendor",
-    "dist",
-    "build",
+[MD013]
+line-length = 100
+code-blocks = false
+tables = false
 
-    # Specific files or patterns
-    "CHANGELOG.md",
-    "LICENSE.md",
-    "generated/*.md",
-    "**/temp_*.md",
-]
+[MD025]
+level = 1
+front-matter-title = "title"
 
-# Whether to respect .gitignore files when scanning directories
-respect_gitignore = false
+[MD044]
+names = ["rumdl", "Markdown", "GitHub"]
 
-# Rule-specific configurations
-[MD002]
-level = 1  # Expected level for first heading
-
-[MD003]
-style = "atx"  # Heading style (atx, atx_closed, setext)
+[MD048]
+code-fence-style = "backtick"
 ```
+
+### Initializing Configuration
+
+To create a configuration file, use the `init` command:
+
+```bash
+# Create a .rumdl.toml file (for any project)
+rumdl init
+
+# Create or update a pyproject.toml file with rumdl configuration (for Python projects)
+rumdl init --pyproject
+```
+
+### Configuration in pyproject.toml
+
+For Python projects, you can include rumdl configuration in your `pyproject.toml` file, keeping all project configuration in one place. Example:
+
+```toml
+[tool.rumdl]
+# Global options at root level
+line-length = 100
+disable = ["MD033"]
+include = ["docs/*.md", "README.md"]
+exclude = [".git", "node_modules"]
+ignore-gitignore = false
+
+# Rule-specific configuration
+[tool.rumdl.MD013]
+code_blocks = false
+tables = false
+
+[tool.rumdl.MD044]
+names = ["rumdl", "Markdown", "GitHub"]
+```
+
+Both kebab-case (`line-length`, `ignore-gitignore`) and snake_case (`line_length`, `ignore_gitignore`) formats are supported for compatibility with different Python tooling conventions.
 
 ## Output Style
 
