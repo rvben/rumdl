@@ -84,25 +84,6 @@ pub fn collect_gitignore_patterns(start_dir: &str) -> Vec<String> {
         }
     }
 
-    // Add some common patterns that are usually in .gitignore files
-    // but might not be in the specific project's .gitignore
-    let common_patterns = vec![
-        "node_modules",
-        ".git",
-        ".github",
-        ".vscode",
-        ".idea",
-        "dist",
-        "build",
-        "target",
-    ];
-
-    for pattern in common_patterns {
-        if !patterns.iter().any(|p| p == pattern) {
-            patterns.push(pattern.to_string());
-        }
-    }
-
     patterns
 }
 
@@ -233,32 +214,35 @@ pub fn should_exclude(
         // Normalize the pattern by removing leading ./ if present
         let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
 
-        // Handle directory patterns (ending with / or no glob chars)
-        if normalized_pattern.ends_with('/') || !normalized_pattern.contains('*') {
-            let dir_pattern = normalized_pattern.trim_end_matches('/');
-            // For directory patterns, we want to match the entire path component
-            let path_components: Vec<&str> = normalized_path_str.split('/').collect();
-            let pattern_components: Vec<&str> = dir_pattern.split('/').collect();
-
-            // Check if pattern components match at any position in the path
-            for i in 0..=path_components
-                .len()
-                .saturating_sub(pattern_components.len())
-            {
-                let mut matches = true;
-                for (j, pattern_part) in pattern_components.iter().enumerate() {
-                    if path_components.get(i + j) != Some(pattern_part) {
-                        matches = false;
-                        break;
-                    }
+        // Special case: Handle patterns ending with slash (directory patterns)
+        if normalized_pattern.ends_with('/') {
+            // Convert "dir/" to "dir/**/*" to match all files in that directory and subdirectories
+            let dir_glob_pattern = format!("{}**/*", normalized_pattern);
+            
+            let glob_result = GlobBuilder::new(&dir_glob_pattern)
+                .literal_separator(false)
+                .build()
+                .map(|glob| glob.compile_matcher());
+                
+            if let Ok(matcher) = glob_result {
+                if matcher.is_match(&normalized_path_str) {
+                    return true;
                 }
-                if matches {
+            } else {
+                // Fallback to prefix matching if glob fails
+                if normalized_path_str.starts_with(normalized_pattern) {
                     return true;
                 }
             }
+            
+            continue;
+        }
 
-            // If it's not a directory pattern (no /), also try as a literal string
-            if !normalized_pattern.contains('/') && normalized_path_str.contains(dir_pattern) {
+        // Handle invalid glob-like patterns as literal strings
+        if pattern.contains('[') && !pattern.contains(']')
+            || pattern.contains('{') && !pattern.contains('}')
+        {
+            if normalized_path_str.contains(normalized_pattern) {
                 return true;
             }
             continue;
@@ -314,6 +298,30 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
 
         // Normalize the pattern by removing leading ./ if present
         let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+
+        // Special case: Handle patterns ending with slash (directory patterns)
+        if normalized_pattern.ends_with('/') {
+            // Convert "dir/" to "dir/**/*" to match all files in that directory and subdirectories
+            let dir_glob_pattern = format!("{}**/*", normalized_pattern);
+            
+            let glob_result = GlobBuilder::new(&dir_glob_pattern)
+                .literal_separator(false)
+                .build()
+                .map(|glob| glob.compile_matcher());
+                
+            if let Ok(matcher) = glob_result {
+                if matcher.is_match(&normalized_path_str) {
+                    return true;
+                }
+            } else {
+                // Fallback to prefix matching if glob fails
+                if normalized_path_str.starts_with(normalized_pattern) {
+                    return true;
+                }
+            }
+            
+            continue;
+        }
 
         // Handle path traversal patterns (../ patterns)
         if normalized_pattern.contains("../") {
