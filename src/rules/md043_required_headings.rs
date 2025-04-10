@@ -382,11 +382,9 @@ impl Rule for MD043RequiredHeadings {
             }
             
             // Check for setext headings (requires next line)
-            if i + 1 < lines.len() {
-                if crate::rules::heading_utils::is_setext_heading(&lines, i) {
-                    has_heading = true;
-                    break;
-                }
+            if i + 1 < lines.len() && crate::rules::heading_utils::is_setext_heading(&lines, i) {
+                has_heading = true;
+                break;
             }
         }
         
