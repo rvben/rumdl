@@ -172,14 +172,10 @@ fn matches_gitignore_pattern(path: &str, pattern: &str) -> bool {
     }
 }
 
-/// Should exclude a file based on patterns
-///
-/// This function checks if a file should be excluded based on a list of glob patterns.
-pub fn should_exclude(
-    file_path: &str,
-    exclude_patterns: &[String],
-    ignore_gitignore: bool,
-) -> bool {
+/// Normalize a file path for pattern matching
+/// 
+/// This function converts a file path to a normalized form that can be used for pattern matching.
+fn normalize_path_for_matching(file_path: &str) -> String {
     // Convert to absolute path
     let path = Path::new(file_path);
     let absolute_path = if path.is_absolute() {
@@ -202,15 +198,31 @@ pub fn should_exclude(
     };
 
     // Convert to string for pattern matching
-    let normalized_path = relative_path.to_string_lossy();
-    let normalized_path_str = normalized_path.as_ref();
+    relative_path.to_string_lossy().to_string()
+}
+
+/// Should exclude a file based on patterns
+///
+/// This function checks if a file should be excluded based on a list of glob patterns.
+pub fn should_exclude(
+    file_path: &str,
+    exclude_patterns: &[String],
+    ignore_gitignore: bool,
+) -> bool {
+    // Skip empty patterns as an optimization
+    if exclude_patterns.is_empty() && ignore_gitignore {
+        return false;
+    }
+
+    // Get normalized path for pattern matching
+    let normalized_path_str = normalize_path_for_matching(file_path);
 
     // Unless ignore_gitignore is true, check .gitignore patterns first
     if !ignore_gitignore {
         let gitignore_patterns = collect_gitignore_patterns(file_path);
         for pattern in &gitignore_patterns {
             let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
-            if matches_gitignore_pattern(normalized_path_str, normalized_pattern) {
+            if matches_gitignore_pattern(&normalized_path_str, normalized_pattern) {
                 return true;
             }
         }
@@ -260,7 +272,7 @@ pub fn should_exclude(
 
         match glob_result {
             Ok(matcher) => {
-                if matcher.is_match(normalized_path_str) {
+                if matcher.is_match(&normalized_path_str) {
                     return true;
                 }
             }
@@ -286,30 +298,8 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
         return true;
     }
 
-    // Convert to absolute path
-    let path = Path::new(file_path);
-    let absolute_path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
-    };
-
-    // Get the path relative to the current directory
-    let relative_path = if let Ok(current_dir) = std::env::current_dir() {
-        if let Ok(stripped) = absolute_path.strip_prefix(&current_dir) {
-            stripped.to_path_buf()
-        } else {
-            absolute_path.clone()
-        }
-    } else {
-        absolute_path.clone()
-    };
-
-    // Convert to string for pattern matching
-    let normalized_path = relative_path.to_string_lossy();
-    let normalized_path_str = normalized_path.as_ref();
+    // Get normalized path for pattern matching
+    let normalized_path_str = normalize_path_for_matching(file_path);
 
     for pattern in include_patterns {
         // Special case: Treat invalid glob-like patterns as literal strings
@@ -336,7 +326,7 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
             // Try to normalize both paths for comparison
             // This handles cases like "./docs/../src/file.md" matching "src/file.md"
             if let Ok(normalized_pattern_path) = Path::new(normalized_pattern).canonicalize() {
-                if let Ok(normalized_file_path) = Path::new(normalized_path_str).canonicalize() {
+                if let Ok(normalized_file_path) = Path::new(&normalized_path_str).canonicalize() {
                     if normalized_pattern_path == normalized_file_path {
                         return true;
                     }
@@ -357,7 +347,7 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
                     .map(|glob| glob.compile_matcher());
 
                 if let Ok(matcher) = glob_result {
-                    if matcher.is_match(normalized_path_str) {
+                    if matcher.is_match(&normalized_path_str) {
                         return true;
                     }
                 }
@@ -370,111 +360,87 @@ pub fn should_include(file_path: &str, include_patterns: &[String]) -> bool {
                 .map(|glob| glob.compile_matcher())
             {
                 Ok(matcher) => {
-                    if matcher.is_match(normalized_path_str) {
+                    if matcher.is_match(&normalized_path_str) {
                         return true;
                     }
                 }
                 Err(_) => {
-                    // If pattern is invalid as a glob, treat it as a literal string
+                    // Treat as literal string if it's not a valid glob
                     if normalized_path_str.contains(normalized_pattern) {
                         return true;
                     }
                 }
             }
-
             continue;
         }
 
-        // Special case: If pattern has no slashes or wildcards, it only matches files in the root directory
-        if !normalized_pattern.contains('/')
-            && !normalized_pattern.contains('*')
-            && !normalized_pattern.contains('[')
-            && !normalized_pattern.contains('{')
-        {
-            // For patterns without slashes, they should only match files directly in the root directory
+        // Special case for certain valid glob characters
+        // that we want to handle as exact-match globs
 
+        // For exact filename matches, we want to match only the filename component
+        if !normalized_pattern.contains('/') && !normalized_pattern.contains('*') {
             // 1. Get just the filename part of the path
-            let file_name = Path::new(normalized_path_str)
+            let file_name = Path::new(&normalized_path_str)
                 .file_name()
-                .map(|s| s.to_string_lossy().to_string())
+                .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
 
             // 2. Check if the file is directly in the root (no directory component)
-            let parent = Path::new(normalized_path_str).parent();
-            let is_in_root =
-                parent.map_or(true, |p| p.as_os_str().is_empty() || p.as_os_str() == ".");
-
-            if file_name == normalized_pattern && is_in_root {
+            let _parent = Path::new(&normalized_path_str).parent();
+            
+            // 3. If it matches the file name directly, include it
+            if file_name == normalized_pattern {
                 return true;
             }
-            continue;
-        }
 
-        // Handle directory patterns (ending with / or no glob chars)
-        if normalized_pattern.ends_with('/')
-            || (!normalized_pattern.contains('*')
-                && !normalized_pattern.contains('[')
-                && !normalized_pattern.contains('{'))
-        {
-            let dir_pattern = normalized_pattern.trim_end_matches('/');
-            // For directory patterns, we want to match the entire path component
-            let path_components: Vec<&str> = normalized_path_str.split('/').collect();
-            let pattern_components: Vec<&str> = dir_pattern.split('/').collect();
+            // 4. Try with a specific glob pattern to match either the filename in any directory
+            // or a subdirectory with this name
+            let glob_pattern = format!("**/{}", normalized_pattern);
+            let glob_result = GlobBuilder::new(&glob_pattern)
+                .literal_separator(true)
+                .build()
+                .map(|glob| glob.compile_matcher());
 
-            // Check if pattern components match at any position in the path
-            for i in 0..=path_components
-                .len()
-                .saturating_sub(pattern_components.len())
-            {
-                let mut matches = true;
-                for (j, pattern_part) in pattern_components.iter().enumerate() {
-                    if path_components.get(i + j) != Some(pattern_part) {
-                        matches = false;
-                        break;
-                    }
-                }
-                if matches {
+            if let Ok(matcher) = glob_result {
+                if matcher.is_match(&normalized_path_str) {
                     return true;
                 }
             }
 
-            // If it's not a directory pattern (no /), also try as a literal string
-            if !normalized_pattern.contains('/') && normalized_path_str.contains(dir_pattern) {
-                return true;
-            }
+            // Skip further checks
             continue;
         }
 
-        // Try to create a glob pattern for complex pattern matching
-        // First try with literal_separator=true (more strict)
+        // First, try with exact glob pattern
         let glob_result = GlobBuilder::new(normalized_pattern)
-            .literal_separator(true) // Make sure * doesn't match /
+            .literal_separator(true)
             .build()
             .map(|glob| glob.compile_matcher());
 
         match glob_result {
             Ok(matcher) => {
-                if matcher.is_match(normalized_path_str) {
+                if matcher.is_match(&normalized_path_str) {
                     return true;
-                } else {
-                    // If the strict match failed, try with literal_separator=false for complex patterns
-                    if normalized_pattern.contains('[') || normalized_pattern.contains('{') {
-                        // For complex glob patterns, we need a more flexible match
-                        let flexible_glob_result = GlobBuilder::new(normalized_pattern)
-                            .literal_separator(false) // Allow * to match /
-                            .build()
-                            .map(|glob| glob.compile_matcher());
+                }
 
-                        if let Ok(flexible_matcher) = flexible_glob_result {
-                            if flexible_matcher.is_match(normalized_path_str) {
-                                return true;
-                            }
+                // If it doesn't match with exact pattern, try with a more flexible pattern
+                // This adds ** prefix if not already there
+                if !normalized_pattern.starts_with("**") {
+                    let flexible_pattern = format!("**/{}", normalized_pattern);
+                    let flexible_glob_result = GlobBuilder::new(&flexible_pattern)
+                        .literal_separator(true)
+                        .build()
+                        .map(|glob| glob.compile_matcher());
+
+                    if let Ok(flexible_matcher) = flexible_glob_result {
+                        if flexible_matcher.is_match(&normalized_path_str) {
+                            return true;
                         }
                     }
                 }
             }
             Err(_) => {
-                // If pattern is invalid as a glob, treat it as a literal string
+                // If glob compilation fails, treat it as a literal string
                 if normalized_path_str.contains(normalized_pattern) {
                     return true;
                 }

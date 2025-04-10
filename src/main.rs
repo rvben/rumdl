@@ -261,6 +261,21 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
     
     // Use ignore_gitignore from CLI or config
     let ignore_gitignore = cli.ignore_gitignore || config.global.ignore_gitignore;
+    
+    // Cache of gitignore patterns by directory to avoid repeated collection
+    let mut gitignore_cache: std::collections::HashMap<std::path::PathBuf, Vec<String>> = std::collections::HashMap::new();
+
+    // Track which explicitly provided paths were excluded
+    let mut explicit_paths_excluded = Vec::new();
+    
+    // Check if we have explicit paths and include patterns simultaneously
+    let has_explicit_paths = !paths.is_empty();
+    let has_include_patterns = !include_patterns.is_empty();
+    let bypass_include_patterns = has_explicit_paths && has_include_patterns;
+    
+    if bypass_include_patterns && cli.verbose {
+        println!("Note: Include patterns will be ignored for explicitly provided paths");
+    }
 
     for path_str in paths {
         let path = Path::new(path_str);
@@ -274,18 +289,40 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
             process::exit(1);
         }
 
+        // Track if this explicit path produced any files
+        let mut path_produced_files = false;
+
         if path.is_file() {
             // Check if file is a markdown file
             if path.extension().map_or(false, |ext| ext == "md") {
-                // Apply exclude/include filters
+                // Apply exclude filters but bypass gitignore and include patterns for explicit paths
                 let file_path = path_str.to_string();
-                if !rumdl::should_exclude(&file_path, &exclude_patterns, ignore_gitignore) 
-                    && rumdl::should_include(&file_path, &include_patterns) {
+                
+                // Check explicit exclude patterns (but not gitignore)
+                let excluded_by_patterns = rumdl::should_exclude(&file_path, &exclude_patterns, true);
+                
+                // For explicitly provided files, bypass include patterns
+                let included_by_patterns = bypass_include_patterns || 
+                                          rumdl::should_include(&file_path, &include_patterns);
+                
+                if !excluded_by_patterns && included_by_patterns {
                     file_paths.push(file_path);
+                    // We don't need to track path_produced_files for single files
+                    // since we already know they were explicitly provided
+                } else {
+                    // This explicit path was excluded by patterns
+                    if excluded_by_patterns {
+                        explicit_paths_excluded.push((path_str.clone(), "exclude patterns"));
+                    } else {
+                        explicit_paths_excluded.push((path_str.clone(), "include patterns"));
+                    }
                 }
             }
         } else if path.is_dir() {
-            // Find markdown files in the directory
+            // For directories, we need to track which files are explicitly provided
+            // versus which are found during directory traversal
+            
+            // First, collect all possible markdown files in the directory
             let walker = WalkDir::new(path)
                 .follow_links(true)
                 .into_iter()
@@ -293,15 +330,100 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
                 .filter(|e| {
                     e.file_type().is_file() && e.path().extension().map_or(false, |ext| ext == "md")
                 });
-
+            
+            let mut candidate_files = Vec::new();
             for entry in walker {
-                let file_path = entry.path().to_string_lossy().to_string();
-                // Apply exclude/include filters
-                if !rumdl::should_exclude(&file_path, &exclude_patterns, ignore_gitignore) 
-                    && rumdl::should_include(&file_path, &include_patterns) {
-                    file_paths.push(file_path);
+                candidate_files.push(entry.path().to_string_lossy().to_string());
+            }
+            
+            // If no markdown files found in this directory at all
+            if candidate_files.is_empty() {
+                if cli.verbose {
+                    println!("No markdown files found in directory: {}", path_str);
+                }
+                explicit_paths_excluded.push((path_str.clone(), "no markdown files found"));
+                continue;
+            }
+            
+            // First check if any files would pass our filters
+            let mut filter_only_files = Vec::new();
+            let mut gitignore_only_files = Vec::new();
+            
+            // Collect gitignore patterns for only the root directory
+            let root_gitignore_patterns = if !ignore_gitignore {
+                let patterns = rumdl::collect_gitignore_patterns(path_str);
+                gitignore_cache.insert(path.to_path_buf(), patterns.clone());
+                patterns
+            } else {
+                Vec::new()
+            };
+            
+            for file_path in &candidate_files {
+                // Check each filter separately to determine why files are excluded
+                let excluded_by_patterns = rumdl::should_exclude(file_path, &exclude_patterns, true);
+                let excluded_by_gitignore = if ignore_gitignore {
+                    false
+                } else {
+                    rumdl::should_exclude(file_path, &root_gitignore_patterns, true)
+                };
+                
+                // For explicitly provided paths, bypass include patterns as well
+                let included_by_patterns = bypass_include_patterns || 
+                                          rumdl::should_include(file_path, &include_patterns);
+                
+                // For explicitly provided paths, bypass gitignore but respect exclude filters
+                if !excluded_by_patterns && included_by_patterns {
+                    // Include the file regardless of gitignore status since this is an explicit path
+                    file_paths.push(file_path.clone());
+                    path_produced_files = true;
+                } else {
+                    // Track why files were excluded
+                    if excluded_by_patterns {
+                        filter_only_files.push(file_path.clone());
+                    } else if !included_by_patterns {
+                        filter_only_files.push(file_path.clone());
+                    } else if excluded_by_gitignore {
+                        gitignore_only_files.push(file_path.clone());
+                    }
                 }
             }
+            
+            // If we didn't find any files in this explicitly provided path
+            if !path_produced_files {
+                if !filter_only_files.is_empty() {
+                    // Check which filter is causing the exclusion
+                    if bypass_include_patterns {
+                        // If we're bypassing include patterns, it must be exclude patterns
+                        explicit_paths_excluded.push((path_str.clone(), "exclude patterns"));
+                    } else {
+                        // It could be either exclude or include patterns
+                        explicit_paths_excluded.push((path_str.clone(), "exclude/include patterns"));
+                    }
+                } else if !gitignore_only_files.is_empty() {
+                    // This shouldn't happen with our new logic, but just in case
+                    explicit_paths_excluded.push((path_str.clone(), ".gitignore patterns"));
+                }
+                // We've already checked for empty candidate_files above
+            }
+        }
+    }
+    
+    // Print warnings for explicitly provided paths that were excluded
+    for (path, reason) in explicit_paths_excluded {
+        if reason == "include patterns" && bypass_include_patterns {
+            // This shouldn't happen anymore with our bypass logic
+            eprintln!(
+                "{}: Internal error: Path '{}' was still excluded by include patterns despite bypass logic",
+                "Warning".yellow().bold(),
+                path
+            );
+        } else {
+            eprintln!(
+                "{}: Path '{}' contains no included Markdown files due to {}. Use appropriate flags to modify filtering behavior.",
+                "Warning".yellow().bold(),
+                path,
+                reason
+            );
         }
     }
 
@@ -445,15 +567,19 @@ fn process_file(
         return (false, 0, 0, 0);
     }
 
-    // Print warnings - only in non-fix mode or verbose mode
-    if (!fix || verbose) && !quiet {
+    // Print warnings regardless of fix mode (unless in quiet mode)
+    if !quiet {
         // Print the individual warnings
         for warning in &all_warnings {
             let rule_name = warning.rule_name.unwrap_or("unknown");
 
             // Add fix indicator if this warning has a fix
             let fix_indicator = if warning.fix.is_some() {
-                " [fixed]"
+                if fix {
+                    " [fixed]"
+                } else {
+                    " [*]"
+                }
             } else {
                 ""
             };
