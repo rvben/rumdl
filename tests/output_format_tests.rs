@@ -1,5 +1,6 @@
 use std::fs;
 use std::process::Command;
+use std::env;
 
 fn setup_test_files() -> tempfile::TempDir {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -22,6 +23,20 @@ fn setup_test_files() -> tempfile::TempDir {
     fs::write(
         base_path.join("multi_issue.md"),
         "# Heading 1\n# Heading 1 duplicate\nThis line has trailing spaces.  \n\n\nMultiple blank lines above.\n```\nCode block with no language\n```\nNo newline at end",
+    )
+    .unwrap();
+
+    // Create a file with an unfixable issue - MD013 (line length)
+    fs::write(
+        base_path.join("unfixable_issue.md"),
+        "# Unfixable Issue\n\nThis is a very long line that exceeds the default line length limit of 80 characters which cannot be automatically fixed by the linter.\n",
+    )
+    .unwrap();
+
+    // Create a file with both fixable and unfixable issues
+    fs::write(
+        base_path.join("mixed_issues.md"),
+        "# Mixed Issues\nThis line has trailing spaces.  \n\nThis paragraph contains * spaced emphasis * that should be fixable.\nThis line should have a newline at the end but doesn't",
     )
     .unwrap();
 
@@ -261,4 +276,493 @@ fn test_multi_issue_output_format() {
             "The count of [fixed] labels ({}) should match the summary count ({})",
             fix_mode_fixed_issues, summary_fixed_count);
     }
+}
+
+#[test]
+fn test_fixable_issues_labeling() {
+    // Create temporary markdown files
+    let temp_dir = setup_test_files();
+    
+    // Create a file with a fixable issue - MD037 (spaces inside emphasis markers)
+    let test_file = temp_dir.path().join("fixable_issue.md");
+    fs::write(
+        &test_file,
+        "# Fixable Issue\n\nThis paragraph contains * spaced emphasis *.\n",
+    ).unwrap();
+    
+    let test_file_path = test_file.to_str().unwrap();
+    
+    // Run the linter
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path])
+        .output()
+        .expect("Failed to execute command");
+        
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("Fixable issue output:\n{}", stdout);
+    
+    // Verify MD037 emphasis spaces issue is reported
+    assert!(stdout.contains("[MD037]") && stdout.contains("Spaces inside emphasis"),
+            "Should detect spaces inside emphasis issue");
+    
+    // Verify issue has a [*] label, indicating it's fixable
+    if stdout.contains("[MD037]") {
+        let md037_line = stdout.lines()
+            .find(|line| line.contains("[MD037]"))
+            .unwrap_or("");
+        assert!(md037_line.contains("[*]"), 
+                "MD037 should have [*] label indicating it's fixable");
+    }
+    
+    // Run with fix mode and ensure the issue is fixed
+    let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path, "--fix"])
+        .output()
+        .expect("Failed to execute command");
+        
+    let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
+    println!("Fixable issue with --fix output:\n{}", fix_stdout);
+    
+    // Verify the issue is marked as fixed
+    assert!(fix_stdout.contains("[MD037]") && fix_stdout.contains("Spaces inside emphasis"),
+            "Spaces inside emphasis issue should be reported with fix");
+    
+    if fix_stdout.contains("[MD037]") {
+        let md037_line = fix_stdout.lines()
+            .find(|line| line.contains("[MD037]"))
+            .unwrap_or("");
+        assert!(md037_line.contains("[fixed]"), 
+                "Fixed issue (MD037) should have [fixed] label");
+    }
+    
+    // Verify the content was actually fixed
+    let content = fs::read_to_string(test_file_path).expect("Failed to read file");
+    assert!(content.contains("*spaced emphasis*"), 
+            "Spaces inside emphasis should be fixed in the file content");
+}
+
+#[test]
+fn test_truly_unfixable_issues_labeling() {
+    // Create temporary markdown files
+    let temp_dir = setup_test_files();
+    
+    // Create a file with an unfixable issue - MD013 (line length)
+    let test_file = temp_dir.path().join("unfixable_issue.md");
+    // Create content with a very long line that exceeds default line length (80 chars)
+    fs::write(
+        &test_file,
+        "# Truly Unfixable Issue\n\nThis paragraph contains a very long line that definitely exceeds the maximum line length limit and cannot be automatically fixed by the linter because line wrapping requires manual intervention.\n",
+    ).unwrap();
+    
+    // Create a custom config file with a small line_length to ensure MD013 is triggered
+    let config_file = temp_dir.path().join("custom_rumdl.toml");
+    fs::write(
+        &config_file,
+        "[MD013]\nline_length = 20\n",
+    ).unwrap();
+    
+    let test_file_path = test_file.to_str().unwrap();
+    let config_file_path = config_file.to_str().unwrap();
+    
+    // Run the linter with custom config
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path, "--config", config_file_path])
+        .output()
+        .expect("Failed to execute command");
+        
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("Truly unfixable issue output:\n{}", stdout);
+    
+    // Verify MD013 line length issue is reported
+    assert!(stdout.contains("[MD013]") && stdout.contains("Line length"),
+            "Should detect line length issue");
+    
+    // Verify issue does NOT have a [*] label, indicating it's NOT fixable
+    if stdout.contains("[MD013]") {
+        let md013_line = stdout.lines()
+            .find(|line| line.contains("[MD013]"))
+            .unwrap_or("");
+        assert!(!md013_line.contains("[*]"), 
+                "MD013 should NOT have [*] label since it's not fixable");
+    }
+    
+    // Run with fix mode and ensure the issue is NOT fixed
+    let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path, "--fix", "--config", config_file_path])
+        .output()
+        .expect("Failed to execute command");
+        
+    let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
+    println!("Truly unfixable issue with --fix output:\n{}", fix_stdout);
+    
+    // Verify the issue is still reported and NOT marked as fixed
+    assert!(fix_stdout.contains("[MD013]") && fix_stdout.contains("Line length"),
+            "Line length issue should still be reported after fix attempt");
+    
+    if fix_stdout.contains("[MD013]") {
+        let md013_line = fix_stdout.lines()
+            .find(|line| line.contains("[MD013]"))
+            .unwrap_or("");
+        assert!(!md013_line.contains("[fixed]"), 
+                "Unfixable issue (MD013) should NOT have [fixed] label");
+    }
+    
+    // Verify the content was NOT fixed
+    let content = fs::read_to_string(test_file_path).expect("Failed to read file");
+    // The long line should still be long
+    assert!(content.contains("This paragraph contains a very long line"), 
+            "Line length should NOT be fixed in the file content");
+}
+
+#[test]
+fn test_mixed_fixable_unfixable_issues() {
+    // Create temporary markdown files
+    let temp_dir = setup_test_files();
+    
+    // Create a file with both fixable and unfixable issues
+    let test_file = temp_dir.path().join("mixed_issues.md");
+    fs::write(
+        &test_file,
+        "# Mixed Issues\nThis line has trailing spaces.  \n\nThis paragraph contains * spaced emphasis * that should be fixable.\nThis line is extremely long and exceeds the maximum line length which cannot be automatically fixed because line wrapping requires manual intervention by the user.\nThis line should have a newline at the end but doesn't",
+    ).unwrap();
+    
+    // Create a custom config file with a small line_length to ensure MD013 is triggered
+    let config_file = temp_dir.path().join("custom_rumdl.toml");
+    fs::write(
+        &config_file,
+        "[MD013]\nline_length = 20\n",
+    ).unwrap();
+    
+    let test_file_path = test_file.to_str().unwrap();
+    let config_file_path = config_file.to_str().unwrap();
+    
+    // Run the linter in normal mode with custom config
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path, "--config", config_file_path])
+        .output()
+        .expect("Failed to execute command");
+        
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("Mixed issues output:\n{}", stdout);
+    
+    // Check for fixable issues
+    assert!(stdout.contains("[MD022]") && stdout.contains("Heading should have"), 
+            "Should detect heading blank line issue (fixable)");
+    assert!(stdout.contains("[MD047]") && stdout.contains("newline"), 
+            "Should detect missing newline issue (fixable)");
+    assert!(stdout.contains("[MD037]") && stdout.contains("Spaces inside emphasis"),
+            "Should detect spaces inside emphasis issue (fixable)");
+    
+    // Check for unfixable issues
+    assert!(stdout.contains("[MD013]") && stdout.contains("Line length"),
+            "Should detect line length issue (unfixable)");
+    
+    // Check that fixable issues have [*] label
+    assert!(stdout.contains("[*]"), "Should detect at least one fixable issue with [*] label");
+    
+    // Check that MD013 doesn't have [*] label
+    if stdout.contains("[MD013]") {
+        let md013_line = stdout.lines()
+            .find(|line| line.contains("[MD013]"))
+            .unwrap_or("");
+        assert!(!md013_line.contains("[*]"), 
+                "MD013 should NOT have [*] label since it's not fixable");
+    }
+    
+    // Run with fix mode and custom config
+    let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path, "--fix", "--config", config_file_path])
+        .output()
+        .expect("Failed to execute command");
+        
+    let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
+    println!("Mixed issues with --fix output:\n{}", fix_stdout);
+    
+    // Check that fixable issues are fixed
+    assert!(fix_stdout.contains("[fixed]"), "Fixable issues should show [fixed] label");
+    
+    // Verify MD037 is marked as fixed
+    if fix_stdout.contains("[MD037]") {
+        let md037_line = fix_stdout.lines()
+            .find(|line| line.contains("[MD037]"))
+            .unwrap_or("");
+        assert!(md037_line.contains("[fixed]"), 
+                "MD037 should have [fixed] label after applying fixes");
+    }
+    
+    // Verify MD013 is NOT marked as fixed
+    if fix_stdout.contains("[MD013]") {
+        let md013_line = fix_stdout.lines()
+            .find(|line| line.contains("[MD013]"))
+            .unwrap_or("");
+        assert!(!md013_line.contains("[fixed]"), 
+                "MD013 should NOT have [fixed] label as it cannot be fixed automatically");
+    }
+    
+    // Verify the content was actually fixed for fixable issues only
+    let content = fs::read_to_string(test_file_path).expect("Failed to read file");
+    
+    // Check that the heading has a blank line below it now
+    assert!(content.contains("# Mixed Issues\n\n"), 
+            "Heading should have a blank line below it after fixing");
+    
+    // Check that emphasis spaces were fixed
+    assert!(content.contains("*spaced emphasis*"), 
+            "Spaces inside emphasis should be fixed in the file content");
+            
+    // Check that file ends with newline
+    assert!(content.ends_with('\n'), 
+            "Missing newline should be fixed in the file content");
+            
+    // Check that long line is still long (unfixed)
+    assert!(content.contains("This line is extremely long"), 
+            "Long line should remain unfixed in the content");
+}
+
+#[test]
+fn test_color_output_disabled() {
+    // Create temporary markdown files
+    let temp_dir = setup_test_files();
+    let test_file = temp_dir.path().join("single_file.md");
+    let test_file_path = test_file.to_str().unwrap();
+    
+    // Run with NO_COLOR environment variable to disable colored output
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("Failed to execute command");
+        
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("No color output:\n{}", stdout);
+    
+    // ANSI color codes start with ESC character (27) followed by [
+    // In Rust strings, this looks like \x1b[
+    assert!(!stdout.contains("\x1b["),
+            "Output should not contain ANSI color codes when NO_COLOR is set");
+}
+
+#[test]
+fn test_quiet_mode_output() {
+    // Create temporary markdown files
+    let temp_dir = setup_test_files();
+    let test_file = temp_dir.path().join("single_file.md");
+    let test_file_path = test_file.to_str().unwrap();
+    
+    // Run with --quiet flag
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path, "--quiet"])
+        .output()
+        .expect("Failed to execute command");
+        
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("Quiet mode output:\n{}", stdout);
+    
+    // Verify output is suppressed
+    assert!(stdout.is_empty(), 
+            "Quiet mode should suppress standard output, got: {}", stdout);
+    
+    // Run with --quiet and --fix to ensure it still fixes issues but doesn't output
+    let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path, "--quiet", "--fix"])
+        .output()
+        .expect("Failed to execute command");
+        
+    let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
+    assert!(fix_stdout.is_empty(), 
+            "Quiet mode with fix should suppress standard output, got: {}", fix_stdout);
+    
+    // Verify that fix was still applied by checking the content of the fixed file
+    let content = fs::read_to_string(test_file_path).expect("Failed to read file");
+    assert!(content.ends_with('\n'), 
+            "File should have been fixed (newline added) even in quiet mode");
+}
+
+#[test]
+fn test_verbose_mode_output() {
+    // Create temporary markdown files
+    let temp_dir = setup_test_files();
+    let test_file = temp_dir.path().join("single_file.md");
+    let test_file_path = test_file.to_str().unwrap();
+    
+    // Run with --verbose flag
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path, "--verbose"])
+        .output()
+        .expect("Failed to execute command");
+        
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("Verbose mode output:\n{}", stdout);
+    
+    // Verify verbose output includes file processing messages
+    assert!(stdout.contains("Processing file:"), 
+            "Verbose mode should include 'Processing file:' messages");
+            
+    // Verify verbose output includes list of rules
+    assert!(stdout.contains("Enabled rules:"), 
+            "Verbose mode should include list of enabled rules");
+    
+    // Verify the basic issues are still present in output
+    assert!(stdout.contains("[MD022]") || stdout.contains("[MD026]") || stdout.contains("[MD047]"), 
+            "Verbose mode should still show lint warnings");
+}
+
+#[test]
+fn test_exit_code_validation() {
+    // Create temporary markdown files
+    let temp_dir = setup_test_files();
+    
+    // Create a clean file with no issues
+    let clean_file = temp_dir.path().join("clean_file.md");
+    fs::write(&clean_file, "# Clean File\n\nThis file has no issues.\n").unwrap();
+    
+    // Create a file with issues
+    let issue_file = temp_dir.path().join("single_file.md");
+    
+    // Run linter on file with issues
+    let output_with_issues = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[issue_file.to_str().unwrap()])
+        .output()
+        .expect("Failed to execute command");
+    
+    // Run linter on clean file
+    let output_no_issues = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[clean_file.to_str().unwrap()])
+        .output()
+        .expect("Failed to execute command");
+    
+    // Verify exit code is non-zero when issues found
+    assert_ne!(output_with_issues.status.code(), Some(0),
+              "Exit code should be non-zero when issues are found");
+    
+    // Verify exit code is zero when no issues found
+    assert_eq!(output_no_issues.status.code(), Some(0),
+              "Exit code should be zero when no issues are found");
+    
+    // Verify fix mode results in exit code 0 if all issues fixed
+    let output_fix = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[issue_file.to_str().unwrap(), "--fix"])
+        .output()
+        .expect("Failed to execute command");
+    
+    // If exit code is 0, all issues were fixed. Otherwise, some were unfixable.
+    let fix_stdout = String::from_utf8_lossy(&output_fix.stdout);
+    if !fix_stdout.contains("issues") || fix_stdout.contains("Fixed: 0/") {
+        // No issues or no issues fixed
+        assert_eq!(output_fix.status.code(), Some(0), 
+                "Exit code should be 0 when no issues remain after fix");
+    }
+}
+
+#[test]
+fn test_rule_with_configuration() {
+    // Create temporary markdown files
+    let temp_dir = setup_test_files();
+    
+    // Create a file with customizable issues (line length can be configured)
+    let test_file = temp_dir.path().join("configurable_issue.md");
+    fs::write(
+        &test_file,
+        "# Configurable Issue\n\nThis line is exactly 70 characters long which is within default limits.\nThis line is a bit longer than the default and exceeds 70 characters but is less than 80.\n",
+    ).unwrap();
+    
+    let test_file_path = test_file.to_str().unwrap();
+    
+    // First run with default configuration (line length 80)
+    let default_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path])
+        .output()
+        .expect("Failed to execute command");
+        
+    let default_stdout = String::from_utf8_lossy(&default_output.stdout);
+    println!("Default configuration output:\n{}", default_stdout);
+    
+    // Check that no line length issues are reported with default config
+    assert!(!default_stdout.contains("[MD013]"), 
+            "Should not detect line length issues with default configuration");
+    
+    // Create a custom config file with lower line length limit
+    let config_file = temp_dir.path().join(".rumdl.toml");
+    fs::write(
+        &config_file,
+        r#"[MD013]
+line_length = 70
+"#,
+    ).unwrap();
+    
+    // Run with custom configuration
+    let custom_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .current_dir(temp_dir.path()) // Run from directory where config file is located
+        .args(&[test_file_path])
+        .output()
+        .expect("Failed to execute command");
+        
+    let custom_stdout = String::from_utf8_lossy(&custom_output.stdout);
+    println!("Custom configuration output:\n{}", custom_stdout);
+    
+    // Check that line length issues are now reported with custom config
+    assert!(custom_stdout.contains("[MD013]") && custom_stdout.contains("Line length"), 
+            "Should detect line length issues with custom configuration");
+}
+
+#[test]
+fn test_fixed_content_validation() {
+    // Create temporary markdown files
+    let temp_dir = setup_test_files();
+    
+    // Create a simple test file with specific fixable issues
+    let test_file = temp_dir.path().join("fixable_issues.md");
+    fs::write(
+        &test_file,
+        "# Missing Newline\nThis line does not end with a newline",
+    ).unwrap();
+    
+    let test_file_path = test_file.to_str().unwrap();
+    
+    // Save original content for comparison
+    let original_content = fs::read_to_string(&test_file).unwrap();
+    
+    // Run the linter to verify the issue exists
+    let check_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path])
+        .output()
+        .expect("Failed to execute command");
+        
+    let check_stdout = String::from_utf8_lossy(&check_output.stdout);
+    println!("Pre-fix output:\n{}", check_stdout);
+    
+    // Verify the file has the MD047 issue (missing newline)
+    assert!(check_stdout.contains("[MD047]") && check_stdout.contains("newline"), 
+            "Should detect missing newline issue");
+    
+    // Fix the file
+    let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path, "--fix"])
+        .output()
+        .expect("Failed to execute command");
+        
+    let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
+    println!("Fix output:\n{}", fix_stdout);
+    
+    // Check that content was actually modified
+    let fixed_content = fs::read_to_string(&test_file).unwrap();
+    assert_ne!(original_content, fixed_content, 
+              "Content should be modified after fixing");
+    
+    // Missing newline should be added
+    assert!(fixed_content.ends_with('\n'), 
+           "Fixed content should end with a newline");
+    
+    // Run linter again to verify no issues remain
+    let recheck_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(&[test_file_path])
+        .output()
+        .expect("Failed to execute command");
+        
+    let recheck_stdout = String::from_utf8_lossy(&recheck_output.stdout);
+    println!("Post-fix check output:\n{}", recheck_stdout);
+    
+    // The specific fixed issue should not be reported again
+    assert!(!recheck_stdout.contains("[MD047]"), 
+           "MD047 issue should be fixed");
 }
