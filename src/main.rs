@@ -1,11 +1,11 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use std::io::{self, Write};
+use std::fs;
 use std::path::Path;
 use std::process;
 use std::time::Instant;
 use walkdir::WalkDir;
-use std::fs;
 
 use rumdl::rule::Rule;
 use rumdl::rules::code_block_utils::CodeBlockStyle;
@@ -15,8 +15,6 @@ use rumdl::rules::strong_style::StrongStyle;
 use rumdl::rules::*;
 use rumdl::{
     MD046CodeBlockStyle, MD048CodeFenceStyle, MD049EmphasisStyle, MD050StrongStyle,
-    MD052ReferenceLinkImages, MD053LinkImageReferenceDefinitions, MD054LinkImageStyle,
-    MD055TablePipeStyle, MD056TableColumnCount, MD058BlanksAroundTables,
 };
 
 mod config;
@@ -34,11 +32,11 @@ struct Cli {
     config: Option<String>,
 
     /// Fix issues automatically where possible
-    #[arg(short, long)]
+    #[arg(short, long, default_value = "false")]
     fix: bool,
 
     /// List all available rules
-    #[arg(short, long)]
+    #[arg(short, long, default_value = "false")]
     list_rules: bool,
 
     /// Disable specific rules (comma-separated)
@@ -60,11 +58,11 @@ struct Cli {
     include: Option<String>,
 
     /// Ignore .gitignore files when scanning directories
-    #[arg(long, default_value = "false")]
+    #[arg(long, default_value = "false", help = "Ignore .gitignore files when scanning directories (does not apply to explicitly provided paths)")]
     ignore_gitignore: bool,
 
     /// Respect .gitignore files when scanning directories (takes precedence over ignore_gitignore)
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "true", help = "Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)")]
     respect_gitignore: bool,
 
     /// Show detailed output
@@ -268,15 +266,10 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
     // Add patterns from config
     include_patterns.extend(config.global.include.clone());
     
-    // Use ignore_gitignore from CLI or config
-    let ignore_gitignore = cli.ignore_gitignore || config.global.ignore_gitignore;
+    // Use ignore_gitignore from CLI or config - only applies to directory traversal with no explicit paths
+    // For explicitly provided paths we always bypass gitignore
+    let _ignore_gitignore = cli.ignore_gitignore || config.global.ignore_gitignore;
     
-    // Replace with new logic that prioritizes respect_gitignore
-    let respect_gitignore = cli.respect_gitignore && !ignore_gitignore;
-    
-    // Cache of gitignore patterns by directory to avoid repeated collection
-    let mut gitignore_cache: std::collections::HashMap<std::path::PathBuf, Vec<String>> = std::collections::HashMap::new();
-
     // Track which explicitly provided paths were excluded
     let mut explicit_paths_excluded = Vec::new();
     
@@ -307,7 +300,7 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
         if path.is_file() {
             // Check if file is a markdown file
             if path.extension().map_or(false, |ext| ext == "md") {
-                // Apply exclude filters but bypass gitignore and include patterns for explicit paths
+                // Apply exclude filters but bypass gitignore for explicit paths
                 let file_path = path_str.to_string();
                 
                 // Check explicit exclude patterns (but not gitignore)
@@ -361,31 +354,21 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
             let mut filter_only_files = Vec::new();
             let mut gitignore_only_files = Vec::new();
             
-            // Collect gitignore patterns for only the root directory
-            let root_gitignore_patterns = if respect_gitignore {
-                let patterns = rumdl::collect_gitignore_patterns(path_str);
-                gitignore_cache.insert(path.to_path_buf(), patterns.clone());
-                patterns
-            } else {
-                Vec::new()
-            };
+            // For explicitly provided paths, we bypass gitignore completely
             
             for file_path in &candidate_files {
                 // Check each filter separately to determine why files are excluded
                 let excluded_by_patterns = rumdl::should_exclude(file_path, &exclude_patterns, true);
-                let excluded_by_gitignore = if !respect_gitignore {
-                    false
-                } else {
-                    rumdl::should_exclude(file_path, &root_gitignore_patterns, true)
-                };
+                
+                // When path is explicitly provided, don't apply gitignore
+                let excluded_by_gitignore = false;
                 
                 // For explicitly provided paths, bypass include patterns as well
                 let included_by_patterns = bypass_include_patterns || 
                                           rumdl::should_include(file_path, &include_patterns);
                 
-                // For explicitly provided paths, bypass gitignore but respect exclude filters
-                if !excluded_by_patterns && included_by_patterns {
-                    // Include the file regardless of gitignore status since this is an explicit path
+                // Check both conditions
+                if !excluded_by_patterns && included_by_patterns && !excluded_by_gitignore {
                     file_paths.push(file_path.clone());
                     path_produced_files = true;
                 } else {

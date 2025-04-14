@@ -34,6 +34,9 @@
     - [Commands](#commands)
     - [Options](#options)
   - [Configuration](#configuration)
+    - [Configuration File Example](#configuration-file-example)
+    - [Initializing Configuration](#initializing-configuration)
+    - [Configuration in pyproject.toml](#configuration-in-pyprojecttoml)
   - [Output Style](#output-style)
     - [Output Format](#output-format)
   - [Development](#development)
@@ -137,6 +140,9 @@ rumdl --include "docs/*.md,README.md" .
 
 # Combine include and exclude patterns
 rumdl --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
+
+# Ignore gitignore rules
+rumdl --no-respect-gitignore .
 ```
 
 ## Rules
@@ -179,7 +185,9 @@ rumdl <command> [options]
 - `-e, --enable <rules>`: Enable only specific rules (comma-separated)
 - `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
 - `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
-- `--respect-gitignore`: Respect .gitignore files when scanning directories
+- `--respect-gitignore`: Respect .gitignore files when scanning directories (default: true)
+- `--no-respect-gitignore`: Don't respect .gitignore files (same as --ignore-gitignore)
+- `--ignore-gitignore`: Ignore .gitignore files when scanning directories (deprecated, use --no-respect-gitignore)
 - `-v, --verbose`: Show detailed output
 
 ## Configuration
