@@ -25,7 +25,8 @@ pub struct Config {
 }
 
 /// Global configuration options
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
+#[serde(default)]
 pub struct GlobalConfig {
     /// Enabled rules
     #[serde(default)]
@@ -46,6 +47,28 @@ pub struct GlobalConfig {
     /// Ignore .gitignore file
     #[serde(default)]
     pub ignore_gitignore: bool,
+    
+    /// Respect .gitignore files when scanning directories
+    #[serde(default = "default_respect_gitignore")]
+    pub respect_gitignore: bool,
+}
+
+fn default_respect_gitignore() -> bool {
+    true
+}
+
+// Add the Default impl
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self {
+            enable: Vec::new(),
+            disable: Vec::new(),
+            exclude: Vec::new(),
+            include: Vec::new(),
+            ignore_gitignore: false,
+            respect_gitignore: true,
+        }
+    }
 }
 
 /// Load configuration from the specified file or search for a default config file
@@ -133,6 +156,13 @@ fn load_config_from_pyproject(path: &str) -> Result<Config, ConfigError> {
                             }
                         }
                         
+                        if let Some(respect_gitignore) = rumdl_table.get("respect-gitignore")
+                            .or_else(|| rumdl_table.get("respect_gitignore")) {
+                            if let Ok(value) = bool::deserialize(respect_gitignore.clone()) {
+                                config.global.respect_gitignore = value;
+                            }
+                        }
+                        
                         // Handle line-length special case
                         if let Some(line_length) = rumdl_table.get("line-length")
                             .or_else(|| rumdl_table.get("line_length")) {
@@ -151,7 +181,8 @@ fn load_config_from_pyproject(path: &str) -> Result<Config, ConfigError> {
                         for (key, value) in rumdl_table {
                             // Skip keys that we've already processed as global options
                             if ["enable", "disable", "include", "exclude", "ignore-gitignore", 
-                                "ignore_gitignore", "line-length", "line_length"].contains(&key.as_str()) {
+                                "ignore_gitignore", "line-length", "line_length", 
+                                "respect-gitignore", "respect_gitignore"].contains(&key.as_str()) {
                                 continue;
                             }
                             
@@ -227,7 +258,10 @@ exclude = [
     "LICENSE.md",
 ]
 
-# Ignore .gitignore files when scanning directories (default: false)
+# Respect .gitignore files when scanning directories (default: true)
+respect_gitignore = true
+
+# Ignore .gitignore files when scanning directories (default: false, deprecated, use respect_gitignore instead)
 ignore_gitignore = false
 
 # Rule-specific configurations (uncomment and modify as needed)
@@ -293,25 +327,11 @@ pub fn get_rule_config_value<T: serde::de::DeserializeOwned>(
 
 /// Generate default rumdl configuration for pyproject.toml
 pub fn generate_pyproject_config() -> String {
-    r#"# rumdl configuration
+    let config_content = r#"
 [tool.rumdl]
 # Global configuration options
-line-length = 100  # Sets the line length for MD013 rule
-
-# List of rules to disable (uncomment and modify as needed)
-# disable = ["MD033"]
-
-# List of rules to enable exclusively (if provided, only these rules will run)
-# enable = ["MD001", "MD003", "MD004"]
-
-# List of file/directory patterns to include for linting
-# include = [
-#    "docs/*.md",
-#    "src/**/*.md",
-#    "README.md"
-# ]
-
-# List of file/directory patterns to exclude from linting
+line-length = 100
+disable = []
 exclude = [
     # Common directories to exclude
     ".git",
@@ -320,27 +340,32 @@ exclude = [
     "vendor",
     "dist",
     "build",
-    
-    # Specific files or patterns
-    "CHANGELOG.md",
-    "LICENSE.md",
 ]
+respect-gitignore = true
 
-# Ignore .gitignore files when scanning directories
-ignore-gitignore = false
+# Rule-specific configurations (uncomment and modify as needed)
 
-# Rule-specific configurations
-[tool.rumdl.MD013]
-# Override root-level line-length if needed
-# line_length = 80  
-code_blocks = false  # Exclude code blocks from line length check
-tables = false  # Exclude tables from line length check
-headings = true  # Include headings in line length check
+# [tool.rumdl.MD003]
+# style = "atx"  # Heading style (atx, atx_closed, setext)
+
+# [tool.rumdl.MD004]
+# style = "asterisk"  # Unordered list style (asterisk, plus, dash, consistent)
+
+# [tool.rumdl.MD007]
+# indent = 4  # Unordered list indentation
+
+# [tool.rumdl.MD013]
+# line_length = 100  # Line length
+# code_blocks = false  # Exclude code blocks from line length check
+# tables = false  # Exclude tables from line length check
+# headings = true  # Include headings in line length check
 
 # [tool.rumdl.MD044]
 # names = ["rumdl", "Markdown", "GitHub"]  # Proper names that should be capitalized correctly
 # code_blocks_excluded = true  # Exclude code blocks from proper name check
-"#.to_string()
+"#;
+
+    config_content.to_string()
 }
 
 #[cfg(test)]
@@ -362,7 +387,7 @@ disable = ["MD033"]
 enable = ["MD001", "MD004"]
 include = ["docs/*.md"]
 exclude = ["node_modules"]
-ignore-gitignore = true
+respect-gitignore = true
         "#;
         
         fs::write(&config_path, content).unwrap();
@@ -375,7 +400,7 @@ ignore-gitignore = true
         assert_eq!(config.global.enable, vec!["MD001".to_string(), "MD004".to_string()]);
         assert_eq!(config.global.include, vec!["docs/*.md".to_string()]);
         assert_eq!(config.global.exclude, vec!["node_modules".to_string()]);
-        assert_eq!(config.global.ignore_gitignore, true);
+        assert_eq!(config.global.respect_gitignore, true);
         
         // Check line_length was correctly added to MD013
         let line_length = get_rule_config_value::<usize>(&config, "MD013", "line_length");
@@ -391,7 +416,7 @@ ignore-gitignore = true
         let content = r#"
 [tool.rumdl]
 line_length = 150
-ignore_gitignore = true
+respect_gitignore = true
         "#;
         
         fs::write(&config_path, content).unwrap();
@@ -400,7 +425,7 @@ ignore_gitignore = true
         let config = load_config_from_pyproject(config_path.to_str().unwrap()).unwrap();
         
         // Check settings were correctly loaded
-        assert_eq!(config.global.ignore_gitignore, true);
+        assert_eq!(config.global.respect_gitignore, true);
         let line_length = get_rule_config_value::<usize>(&config, "MD013", "line_length");
         assert_eq!(line_length, Some(150));
     }

@@ -63,6 +63,10 @@ struct Cli {
     #[arg(long, default_value = "false")]
     ignore_gitignore: bool,
 
+    /// Respect .gitignore files when scanning directories (takes precedence over ignore_gitignore)
+    #[arg(long, default_value = "true")]
+    respect_gitignore: bool,
+
     /// Show detailed output
     #[arg(short, long)]
     verbose: bool,
@@ -267,6 +271,9 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
     // Use ignore_gitignore from CLI or config
     let ignore_gitignore = cli.ignore_gitignore || config.global.ignore_gitignore;
     
+    // Replace with new logic that prioritizes respect_gitignore
+    let respect_gitignore = cli.respect_gitignore && !ignore_gitignore;
+    
     // Cache of gitignore patterns by directory to avoid repeated collection
     let mut gitignore_cache: std::collections::HashMap<std::path::PathBuf, Vec<String>> = std::collections::HashMap::new();
 
@@ -355,7 +362,7 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
             let mut gitignore_only_files = Vec::new();
             
             // Collect gitignore patterns for only the root directory
-            let root_gitignore_patterns = if !ignore_gitignore {
+            let root_gitignore_patterns = if respect_gitignore {
                 let patterns = rumdl::collect_gitignore_patterns(path_str);
                 gitignore_cache.insert(path.to_path_buf(), patterns.clone());
                 patterns
@@ -366,7 +373,7 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
             for file_path in &candidate_files {
                 // Check each filter separately to determine why files are excluded
                 let excluded_by_patterns = rumdl::should_exclude(file_path, &exclude_patterns, true);
-                let excluded_by_gitignore = if ignore_gitignore {
+                let excluded_by_gitignore = if !respect_gitignore {
                     false
                 } else {
                     rumdl::should_exclude(file_path, &root_gitignore_patterns, true)

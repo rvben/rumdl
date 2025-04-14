@@ -1,5 +1,6 @@
 # rumdl configuration file
 
+# Global configuration options
 [global]
 include = [
     "docs/**/*.md",
@@ -7,6 +8,8 @@ include = [
 ]
 # Globally disable specific rules
 disable = []
+# Add respect_gitignore setting
+respect_gitignore = true
 
 [MD013]
 line_length = 200
