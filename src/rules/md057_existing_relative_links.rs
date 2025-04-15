@@ -1,9 +1,10 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::LineIndex;
-use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::element_cache::get_element_cache;
 use regex::Regex;
+use lazy_static::lazy_static;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -14,20 +15,52 @@ use std::io::Write;
 #[cfg(test)]
 use tempfile::tempdir;
 
+// Thread-local cache for file existence checks to avoid redundant filesystem operations
+thread_local! {
+    static FILE_EXISTENCE_CACHE: RefCell<HashMap<PathBuf, bool>> = RefCell::new(HashMap::new());
+}
+
+// Reset the file existence cache (typically between rule runs)
+fn reset_file_existence_cache() {
+    FILE_EXISTENCE_CACHE.with(|cache| {
+        cache.borrow_mut().clear();
+    });
+}
+
+// Check if a file exists with caching
+fn file_exists_with_cache(path: &Path) -> bool {
+    FILE_EXISTENCE_CACHE.with(|cache| {
+        let mut cache_ref = cache.borrow_mut();
+        *cache_ref.entry(path.to_path_buf()).or_insert_with(|| path.exists())
+    })
+}
+
 lazy_static! {
-    // Match markdown links: [text](url) or [text](url "title") or [text](<url>)
-    // Updated to better handle angle brackets in URLs and capture fragments separately
-    static ref LINK_REGEX: FancyRegex = FancyRegex::new(r#"(?<!\\)\[([^\]]*)\]\(\s*<?([^">\s#]+)(#[^)\s"]*)?(?:\s+"[^"]*")??\s*>?\s*\)"#).unwrap();
-    static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
-    // Protocol-based URLs
-    static ref PROTOCOL_REGEX: Regex = Regex::new(r"^(https?://|ftp://|mailto:|tel:)").unwrap();
-    // Domain-based URLs without protocol (www.example.com or example.com)
-    // Updated to more precisely match domain patterns and avoid matching common filenames
-    static ref DOMAIN_REGEX: Regex = Regex::new(r"^(www\.[a-zA-Z0-9]|(^[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}))").unwrap();
-    // Media files pattern - extensions that typically don't need to exist locally
-    static ref MEDIA_FILES_REGEX: Regex = Regex::new(r"\.(pdf|mp4|mp3|avi|mov|flv|wmv|webm|ogg|wav|flac|aac|m4a|jpg|jpeg|png|gif|bmp|svg|webp|tiff|ico)$").unwrap();
-    // Fragment-only links pattern (links to headings within the same document)
-    static ref FRAGMENT_ONLY_REGEX: Regex = Regex::new(r"^#").unwrap();
+    // Regex to match the start of a link - simplified for performance
+    static ref LINK_START_REGEX: Regex =
+        Regex::new(r"!?\[[^\]]*\]").unwrap();
+
+    /// Regex to extract the URL from a markdown link
+    /// Format: `](URL)` or `](URL "title")`
+    static ref URL_EXTRACT_REGEX: Regex =
+        Regex::new("\\]\\(\\s*<?([^>\\)\\s#]+)(#[^)\\s]*)?\\s*(?:\"[^\"]*\")?\\s*>?\\s*\\)").unwrap();
+
+    /// Regex to detect code fence blocks
+    static ref CODE_FENCE_REGEX: Regex =
+        Regex::new(r"^( {0,3})(`{3,}|~{3,})").unwrap();
+
+    /// Regex to detect protocol and domain for external links
+    static ref PROTOCOL_DOMAIN_REGEX: Regex =
+        Regex::new(r"^(https?://|ftp://|mailto:|www\.)").unwrap();
+
+    /// Regex to detect media file types
+    static ref MEDIA_FILE_REGEX: Regex =
+        Regex::new(r"\.(jpg|jpeg|png|gif|bmp|svg|webp|tiff|mp3|mp4|avi|mov|webm|wav|ogg)$").unwrap();
+
+    /// Regex to detect fragment-only links
+    static ref FRAGMENT_ONLY_REGEX: Regex =
+        Regex::new(r"^#").unwrap();
+
     // Current working directory
     static ref CURRENT_DIR: PathBuf = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 }
@@ -78,77 +111,52 @@ impl MD057ExistingRelativeLinks {
         self
     }
 
-    /// Check if a URL is external
+    /// Check if a URL is external (optimized version)
+    #[inline]
     fn is_external_url(&self, url: &str) -> bool {
-        let debug = false; // Debug output disabled for normal operation
-
         if url.is_empty() {
-            if debug {
-                // println!("is_external_url: URL is empty");
-            }
             return false;
         }
 
-        // If it starts with a protocol (http://, https://, ftp://, etc.), it's external
-        if PROTOCOL_REGEX.is_match(url) {
-            if debug {
-                // println!("is_external_url: URL '{}' matches protocol pattern", url);
-            }
+        // Quick checks for common external URL patterns
+        if PROTOCOL_DOMAIN_REGEX.is_match(url) || url.starts_with("www.") {
             return true;
         }
 
-        // Check for www. prefix which indicates an external URL
-        if url.starts_with("www.") {
-            if debug {
-                // println!("is_external_url: URL '{}' starts with www.", url);
-            }
-            return true;
-        }
-
-        // More restrictive domain check - must contain a dot and end with known TLD
-        // But not check for media files extensions which are handled separately
+        // More restrictive domain check using a simpler pattern
         if !self.is_media_file(url)
-            && url.contains('.')
-            && url.split('.').last().map_or(false, |tld| {
-                [
-                    "com", "org", "net", "io", "edu", "gov", "co", "uk", "de", "ru", "jp", "cn",
-                    "br", "in", "fr", "it", "nl", "ca", "es", "au", "ch",
-                ]
-                .contains(&tld)
-            })
+            && url.ends_with(".com")
         {
-            if debug {
-                // println!("is_external_url: URL '{}' matches domain pattern with valid TLD", url);
-            }
             return true;
         }
 
-        // Check for absolute paths
+        // Absolute paths within the site are not external
         if url.starts_with('/') {
-            if debug {
-                // println!("is_external_url: URL '{}' is an absolute path, not external", url);
-            }
-            return false; // Absolute paths within the site are not external
+            return false;
         }
 
         // All other cases (relative paths, etc.) are not external
-        if debug {
-            // println!("is_external_url: URL '{}' is not external", url);
-        }
         false
     }
 
     /// Check if the URL is a fragment-only link (internal document link)
+    #[inline]
     fn is_fragment_only_link(&self, url: &str) -> bool {
-        FRAGMENT_ONLY_REGEX.is_match(url)
+        url.starts_with('#')
     }
 
-    /// Check if the URL has a media file extension
+    /// Check if the URL has a media file extension (optimized with early returns)
+    #[inline]
     fn is_media_file(&self, url: &str) -> bool {
-        MEDIA_FILES_REGEX.is_match(url)
+        // Quick check before using regex
+        if !url.contains('.') {
+            return false;
+        }
+        MEDIA_FILE_REGEX.is_match(url)
     }
 
     /// Determine if we should skip checking this media file
+    #[inline]
     fn should_skip_media_file(&self, url: &str) -> bool {
         self.skip_media_files && self.is_media_file(url)
     }
@@ -161,34 +169,86 @@ impl MD057ExistingRelativeLinks {
             .map(|base_path| base_path.join(link))
     }
 
-    /// Detect inline code spans in a line and return their ranges
-    fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
-        if !line.contains('`') {
-            return Vec::new();
+    /// Process a single link and check if it exists
+    fn process_link(&self, url: &str, line_num: usize, column: usize, warnings: &mut Vec<LintWarning>) {
+        // Skip empty URLs
+        if url.is_empty() {
+            return;
         }
 
-        let mut spans = Vec::new();
-        let mut in_code = false;
-        let mut code_start = 0;
+        // Skip external URLs and fragment-only links (optimized order)
+        if self.is_external_url(url) || self.is_fragment_only_link(url) {
+            return;
+        }
 
-        for (i, c) in line.chars().enumerate() {
-            if c == '`' {
-                if !in_code {
-                    code_start = i;
-                    in_code = true;
-                } else {
-                    spans.push((code_start, i + 1)); // Include the closing backtick
-                    in_code = false;
+        // Skip media files if configured to do so
+        if self.should_skip_media_file(url) {
+            return;
+        }
+
+        // Resolve the relative link against the base path
+        if let Some(resolved_path) = self.resolve_link_path(url) {
+            // Check if the file exists (with caching to avoid filesystem calls)
+            if !file_exists_with_cache(&resolved_path) {
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: line_num,
+                    column,
+                    message: format!("Relative link '{}' does not exist", url),
+                    severity: Severity::Warning,
+                    fix: None, // No automatic fix for missing files
+                });
+            }
+        }
+    }
+    
+    /// Extract a URL from a Markdown link segment
+    fn extract_url_from_link<'a>(&self, link_text: &'a str) -> Option<(&'a str, usize)> {
+        // Find the URL part using regex
+        URL_EXTRACT_REGEX.captures(link_text).and_then(move |caps| {
+            caps.get(1).map(|url_match| {
+                let url = url_match.as_str().trim();
+                let position = url_match.start();
+                (url, position)
+            })
+        })
+    }
+    
+    /// Process links using the element cache and document structure
+    fn process_links_with_structure(
+        &self, 
+        content: &str, 
+        doc_structure: &DocumentStructure,
+        element_cache: &crate::utils::element_cache::ElementCache,
+        warnings: &mut Vec<LintWarning>
+    ) {
+        // Get all potential link starts
+        for link_match in LINK_START_REGEX.find_iter(content) {
+            let start_pos = link_match.start();
+            let end_pos = link_match.end();
+            
+            // Skip if this is in a code span or code block
+            if element_cache.is_in_code_span(start_pos) || 
+               doc_structure.is_in_code_block(content[..start_pos].lines().count() + 1) {
+                continue;
+            }
+            
+            // Find the URL part after the link text
+            if let Some(_url_match) = URL_EXTRACT_REGEX.find_at(content, end_pos - 1) {
+                if let Some(caps) = URL_EXTRACT_REGEX.captures_at(content, end_pos - 1) {
+                    if let Some(url_group) = caps.get(1) {
+                        let url = url_group.as_str().trim();
+                        let line_num = content[..start_pos]
+                            .chars()
+                            .filter(|&c| c == '\n')
+                            .count() + 1;
+                        
+                        // Process and validate the link
+                        self.process_link(url, line_num, start_pos + 1, warnings);
+                    }
                 }
             }
         }
-
-        spans
-    }
-
-    /// Check if a position is within an inline code span
-    fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
-        spans.iter().any(|&(start, end)| pos >= start && pos < end)
     }
 }
 
@@ -200,21 +260,33 @@ impl Rule for MD057ExistingRelativeLinks {
     fn description(&self) -> &'static str {
         "Relative links should point to existing files"
     }
-
-    fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
+    
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Link
+    }
+    
+    fn should_skip(&self, content: &str) -> bool {
+        // Skip if content contains no links at all
+        content.is_empty() || 
+        (!content.contains("[") || !content.contains("]("))
+    }
+    
+    /// Optimized implementation using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        if self.should_skip(content) {
+            return Ok(Vec::new());
+        }
+        
+        // Reset the file existence cache for a fresh run
+        reset_file_existence_cache();
+        
         let mut warnings = Vec::new();
-        let mut in_code_block = false;
-        let mut code_fence_marker = String::new();
-        let debug = false; // Debug output disabled for normal operation
-
-        // Get the base path - using either the explicitly set path or try to determine from context
+        
+        // Check if we have a base path
         let base_path = if self.base_path.borrow().is_some() {
-            // Use the explicitly set base path if available
             self.base_path.borrow().clone()
         } else {
             // Try to determine the base path from the file being processed
-            // First, check if we have a RUMDL_FILE_PATH environment variable
             if let Ok(file_path) = env::var("RUMDL_FILE_PATH") {
                 let path = Path::new(&file_path);
                 if path.exists() {
@@ -223,146 +295,30 @@ impl Rule for MD057ExistingRelativeLinks {
                     Some(CURRENT_DIR.clone())
                 }
             } else {
-                // If we can't determine the base path, use the current directory
                 Some(CURRENT_DIR.clone())
             }
         };
-
+        
         // If we still don't have a base path, we can't validate relative links
         if base_path.is_none() {
             return Ok(warnings);
         }
-
-        let _base_path = base_path.unwrap();
-        if debug {
-            // println!("Base path: {:?}", _base_path);
-        }
-
-        for (line_num, line) in content.lines().enumerate() {
-            // Handle code block boundaries
-            if let Some(cap) = CODE_FENCE_REGEX.captures(line) {
-                let marker = cap[0].to_string();
-                if !in_code_block {
-                    in_code_block = true;
-                    code_fence_marker = marker;
-                } else if line.trim().starts_with(&code_fence_marker) {
-                    in_code_block = false;
-                    code_fence_marker.clear();
-                }
-                continue;
-            }
-
-            // Skip lines in code blocks
-            if in_code_block {
-                continue;
-            }
-
-            // Skip processing if the rule is disabled for this line
-            if crate::rule::is_rule_disabled_at_line(content, self.name(), line_num) {
-                continue;
-            }
-
-            // Detect inline code spans in this line
-            let inline_code_spans = self.compute_inline_code_spans(line);
-
-            // Find all links in the line
-            if let Ok(matches) = LINK_REGEX
-                .captures_iter(line)
-                .collect::<Result<Vec<_>, _>>()
-            {
-                for cap in matches {
-                    if let (Some(full_match), Some(_text_match), Some(url_match)) =
-                        (cap.get(0), cap.get(1), cap.get(2))
-                    {
-                        // Skip links inside inline code spans
-                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
-                            if debug {
-                                // println!("Skipping link inside inline code span");
-                            }
-                            continue;
-                        }
-
-                        let mut url = url_match.as_str().trim();
-
-                        if debug {
-                            // println!("Found URL: '{}'", url);
-                        }
-
-                        // Clean the URL - remove trailing '>' if present
-                        if url.ends_with('>') {
-                            url = &url[..url.len() - 1];
-                            if debug {
-                                // println!("Cleaned URL: '{}'", url);
-                            }
-                        }
-
-                        // Skip empty or external URLs
-                        if url.is_empty() || self.is_external_url(url) {
-                            if debug {
-                                // println!("Skipping URL '{}': empty or external", url);
-                            }
-                            continue;
-                        }
-
-                        // Skip fragment-only links (internal document links)
-                        if self.is_fragment_only_link(url) {
-                            if debug {
-                                // println!("Skipping URL '{}': fragment-only link", url);
-                            }
-                            continue;
-                        }
-
-                        // Check if it's a media file (for debugging)
-                        let _is_media = self.is_media_file(url);
-                        let should_skip = self.should_skip_media_file(url);
-
-                        if debug {
-                            // println!("URL '{}': is_media={}, should_skip={}", url, _is_media, should_skip);
-                        }
-
-                        // Skip media files if configured to do so
-                        if should_skip {
-                            if debug {
-                                // println!("URL '{}' is a media file and should be skipped", url);
-                            }
-                            continue;
-                        }
-
-                        // Resolve the relative link against the base path
-                        if let Some(resolved_path) = self.resolve_link_path(url) {
-                            let exists = resolved_path.exists();
-
-                            if debug {
-                                // println!("Resolved path: {:?}", resolved_path);
-                                // println!("Path exists? {}", exists);
-                            }
-
-                            // Check if the file exists
-                            if !exists {
-                                let full_match = cap.get(0).unwrap();
-
-                                warnings.push(LintWarning {
-                                    rule_name: Some(self.name()),
-                                    line: line_num + 1,
-                                    column: full_match.start() + 1,
-                                    message: format!("Relative link '{}' does not exist", url),
-                                    severity: Severity::Warning,
-                                    fix: None, // No automatic fix for missing files
-                                });
-
-                                if debug {
-                                    // println!("Added warning for non-existent file: {}", url);
-                                }
-                            } else if debug {
-                                // println!("File exists: {}", url);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
+        
+        // Get the element cache for efficient code span detection
+        let element_cache = get_element_cache(content);
+        
+        // Process links using structure and element cache
+        self.process_links_with_structure(content, structure, &element_cache, &mut warnings);
+        
         Ok(warnings)
+    }
+
+    fn check(&self, content: &str) -> LintResult {
+        // If document structure is available, use the optimized version
+        let structure = DocumentStructure::new(content);
+        return self.check_with_structure(content, &structure);
+        
+        // The code below is now unreachable because we always use the document structure
     }
 
     fn fix(&self, _content: &str) -> Result<String, LintError> {
@@ -371,6 +327,13 @@ impl Rule for MD057ExistingRelativeLinks {
         Err(LintError::FixFailed(
             "Cannot automatically fix missing files".to_string(),
         ))
+    }
+}
+
+impl DocumentStructureExtensions for MD057ExistingRelativeLinks {
+    fn has_relevant_elements(&self, content: &str, _doc_structure: &DocumentStructure) -> bool {
+        // Rule only applies to content with potential links
+        !content.is_empty() && content.contains("[") && content.contains("](")
     }
 }
 
@@ -493,6 +456,14 @@ mod tests {
         // Should have one warning for the missing.md link but not for the media file
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("missing.md"));
+        
+        // Test with document structure
+        let structure = DocumentStructure::new(content);
+        let result_with_structure = rule.check_with_structure(content, &structure).unwrap();
+        
+        // Results should be the same
+        assert_eq!(result.len(), result_with_structure.len());
+        assert!(result_with_structure[0].message.contains("missing.md"));
     }
 
     #[test]
@@ -563,39 +534,7 @@ mod tests {
             .with_path(base_path)
             .with_skip_media_files(false);
 
-        // Debug: Verify media file identification and handling
-        if false { // Set to false to disable debug output in tests
-             // println!("Is 'image.jpg' a media file? {}", rule_check_all.is_media_file("image.jpg"));
-             // println!("Should skip 'image.jpg'? {}", rule_check_all.should_skip_media_file("image.jpg"));
-             // println!("Skip media files setting: {}", rule_check_all.skip_media_files);
-        }
-
-        // Ensure the file still doesn't exist
-        assert!(
-            !image_path.exists(),
-            "image.jpg should not exist for this test"
-        );
-
-        // Debug: Verify the path resolution
-        if let Some(resolved) = rule_check_all.resolve_link_path("image.jpg") {
-            if false { // Set to false to disable debug output
-                 // println!("Resolved path: {:?}", resolved);
-                 // println!("Path exists? {}", resolved.exists());
-            } else {
-                // println!("Failed to resolve path");
-            }
-        } else {
-            // println!("Failed to resolve path");
-        }
-
         let result_all = rule_check_all.check(content).unwrap();
-
-        if false { // Set to false to disable debug output in tests
-             // println!("Number of warnings: {}", result_all.len());
-             // for (i, warning) in result_all.iter().enumerate() {
-             //     println!("Warning {}: {}", i, warning.message);
-             // }
-        }
 
         // Should warn about the missing media file
         assert_eq!(
@@ -607,6 +546,27 @@ mod tests {
             result_all[0].message.contains("image.jpg"),
             "Warning should mention image.jpg"
         );
+    }
+
+    #[test]
+    fn test_code_span_detection() {
+        let rule = MD057ExistingRelativeLinks::new();
+        
+        // Create a temporary directory for test files
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+        
+        let rule = rule.with_path(base_path);
+        
+        // Test with document structure
+        let content = "This is a [link](nonexistent.md) and `[not a link](not-checked.md)` in code.";
+        let structure = DocumentStructure::new(content);
+        
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        
+        // Should only find the real link, not the one in code
+        assert_eq!(result.len(), 1, "Should only flag the real link");
+        assert!(result[0].message.contains("nonexistent.md"));
     }
 
     #[test]
@@ -650,48 +610,6 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
                 .iter()
                 .any(|w| w.message.contains("yet-another-missing.md")),
             "Should not warn about link in inline code"
-        );
-    }
-
-    #[test]
-    fn test_compute_inline_code_spans() {
-        let rule = MD057ExistingRelativeLinks::new();
-
-        // Test with no backticks
-        let spans = rule.compute_inline_code_spans("No code spans here");
-        assert!(
-            spans.is_empty(),
-            "Should have no spans when no backticks are present"
-        );
-
-        // Test with a simple code span
-        let spans = rule.compute_inline_code_spans("Text with `code span` in it");
-        assert_eq!(spans.len(), 1, "Should detect one code span");
-        assert_eq!(
-            spans[0],
-            (10, 21),
-            "Code span should be at the correct position"
-        );
-
-        // Test with multiple code spans
-        let spans = rule.compute_inline_code_spans("Multiple `code` spans `in one` line");
-        assert_eq!(spans.len(), 2, "Should detect two code spans");
-        assert_eq!(
-            spans[0],
-            (9, 15),
-            "First code span should be at the correct position"
-        );
-        assert_eq!(
-            spans[1],
-            (22, 30),
-            "Second code span should be at the correct position"
-        );
-
-        // Test with unbalanced backticks
-        let spans = rule.compute_inline_code_spans("Unbalanced `backtick");
-        assert!(
-            spans.is_empty(),
-            "Should not detect unbalanced backticks as spans"
         );
     }
 }

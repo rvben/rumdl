@@ -1,128 +1,67 @@
-use crate::utils::range_utils::LineIndex;
+use std::collections::HashMap;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::document_structure::{CodeSpan, DocumentStructure, DocumentStructureExtensions};
 
-#[derive(Debug, Default)]
-pub struct MD038NoSpaceInCode;
+/// MD038: Spaces inside code span elements
+///
+/// This rule is triggered when there are spaces inside code span elements.
+///
+/// For example:
+///
+/// ``` markdown
+/// ` some text`
+/// `some text `
+/// ` some text `
+/// ```
+///
+/// To fix this issue, remove the leading and trailing spaces within the code span markers:
+///
+/// ``` markdown
+/// `some text`
+/// ```
+#[derive(Debug, Clone)]
+pub struct MD038NoSpaceInCode {
+    pub enabled: bool,
+}
+
+impl Default for MD038NoSpaceInCode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MD038NoSpaceInCode {
-    fn is_in_code_block(&self, content: &str, line_num: usize) -> bool {
-        lazy_static! {
-            static ref FENCED_START: Regex =
-                Regex::new(r"^(?P<indent>\s*)(?P<fence>```|~~~)").unwrap();
-        }
-
-        let mut in_code_block = false;
-
-        let mut current_fence: Option<String> = None;
-
-        for (i, line) in content.lines().enumerate() {
-            if i + 1 > line_num {
-                break;
-            }
-
-            if !in_code_block {
-                if let Some(caps) = FENCED_START.captures(line) {
-                    in_code_block = true;
-                    current_fence = Some(caps.name("fence").unwrap().as_str().to_string());
-                }
-            } else if let Some(fence) = &current_fence {
-                if line.trim_start().starts_with(fence) && line.trim_end().ends_with(fence) {
-                    in_code_block = false;
-                    current_fence = None;
-                }
-            }
-        }
-
-        in_code_block
+    pub fn new() -> Self {
+        Self { enabled: true }
     }
 
-    fn check_line(&self, line: &str) -> Vec<(usize, String, String)> {
-        let mut issues = Vec::new();
+    /// Extract the actual content between backticks in a code span
+    fn extract_code_content<'a>(&self, code_span: &'a CodeSpan) -> &'a str {
+        &code_span.content
+    }
 
-        // Find all code spans and check for spaces
-
-        let mut in_code = false;
-
-        let mut start_pos = 0;
-
-        let chars: Vec<char> = line.chars().collect();
-
-        // Create a mapping from character indices to byte indices
-
-        let char_to_byte_indices: Vec<usize> =
-            line.char_indices().map(|(byte_idx, _)| byte_idx).collect();
-        // Add the length of the string as the last byte index
-
-        let byte_length = line.len();
-
-        for (i, &c) in chars.iter().enumerate() {
-            if c == '`' {
-                if !in_code {
-                    // Start of code span
-                    start_pos = i;
-                    in_code = true;
-                } else {
-                    // End of code span
-                    in_code = false;
-
-                    // Skip if this span is part of a longer span (e.g. ``code``)
-                    if i > 0 && chars[i - 1] == '`' {
-                        continue;
-                    }
-                    if i < chars.len() - 1 && chars[i + 1] == '`' {
-                        continue;
-                    }
-
-                    // Get the byte indices for safe slicing
-                    let start_byte = char_to_byte_indices[start_pos];
-                    let end_byte = if i + 1 < char_to_byte_indices.len() {
-                        char_to_byte_indices[i + 1] - 1
-                    } else {
-                        byte_length - 1
-                    };
-
-                    // Check for spaces at start and end (using character indices)
-                    let span = &line[start_byte..=end_byte];
-
-                    // Extract content between backticks
-                    let content_start_idx = if start_pos + 1 < chars.len() {
-                        start_pos + 1
-                    } else {
-                        start_pos
-                    };
-                    let content_end_idx = if i > 0 { i - 1 } else { i };
-
-                    // Handle the case where backticks are directly adjacent
-                    if content_start_idx <= content_end_idx {
-                        let content_start_byte = char_to_byte_indices[content_start_idx];
-                        let content_end_byte = if content_end_idx + 1 < char_to_byte_indices.len() {
-                            char_to_byte_indices[content_end_idx + 1] - 1
-                        } else {
-                            byte_length - 1
-                        };
-
-                        let content = &line[content_start_byte..=content_end_byte];
-
-                        if content.starts_with(' ') || content.ends_with(' ') {
-                            let trimmed = content.trim();
-                            if !trimmed.is_empty() {
-                                let fixed = format!("`{}`", trimmed);
-                                issues.push((
-                                    char_to_byte_indices[start_pos] + 1,
-                                    span.to_string(),
-                                    fixed,
-                                ));
-                            }
-                        }
-                    }
-                }
+    /// Check if a code span has leading or trailing spaces and return the original and fixed versions
+    fn check_space_issues(&self, code_span: &CodeSpan) -> Option<(String, String)> {
+        let code_content = self.extract_code_content(code_span);
+        
+        // Check for leading or trailing spaces
+        if code_content.starts_with(' ') || code_content.ends_with(' ') {
+            // Only fix if there's actual content after trimming
+            let trimmed = code_content.trim();
+            if !trimmed.is_empty() {
+                let original = format!("`{}`", code_content);
+                let fixed = format!("`{}`", trimmed);
+                return Some((original, fixed));
             }
         }
+        
+        None
+    }
 
-        issues
+    /// Check if the document has any code spans
+    fn has_code_spans(&self, structure: &DocumentStructure) -> bool {
+        !structure.code_spans.is_empty()
     }
 }
 
@@ -135,26 +74,52 @@ impl Rule for MD038NoSpaceInCode {
         "Spaces inside code span elements"
     }
 
-    fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Other
+    }
 
+    fn check(&self, content: &str) -> LintResult {
+        if !self.enabled {
+            return Ok(vec![]);
+        }
+
+        // Create document structure for processing
+        let structure = DocumentStructure::new(content);
+        
+        // If no code spans, return early
+        if !self.has_code_spans(&structure) {
+            return Ok(vec![]);
+        }
+
+        self.check_with_structure(content, &structure)
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
         let mut warnings = Vec::new();
 
-        for (i, line) in content.lines().enumerate() {
-            if !self.is_in_code_block(content, i + 1) {
-                for (column, _original, fixed) in self.check_line(line) {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column,
-                        message: "Spaces inside code span elements should be removed".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, column),
-                            replacement: fixed,
-                        }),
-                    });
-                }
+        // Get lines for position mapping
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Process code spans directly from document structure
+        for code_span in &structure.code_spans {
+            if let Some((original, fixed)) = self.check_space_issues(code_span) {
+                // Use line and column from the code span
+                let line_index = code_span.line - 1; // Adjust to 0-based for array indexing
+                // Get the content for debugging but not required for the warning
+                let _line_content = if line_index < lines.len() { lines[line_index] } else { "" };
+                
+                warnings.push(LintWarning {
+                    message: format!("Spaces inside code span elements: {}", original),
+                    line: code_span.line,
+                    column: code_span.start_col,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: (code_span.start_col - 1)..(code_span.end_col),
+                        replacement: fixed,
+                    }),
+                    rule_name: Some(self.name()),
+                });
             }
         }
 
@@ -162,38 +127,164 @@ impl Rule for MD038NoSpaceInCode {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
+        if !self.enabled {
+            return Ok(content.to_string());
+        }
 
-        let lines: Vec<&str> = content.lines().collect();
+        // Get warnings to identify what needs to be fixed
+        let warnings = self.check(content)?;
+        if warnings.is_empty() {
+            return Ok(content.to_string());
+        }
 
-        let mut result = String::new();
+        // Apply fixes in reverse order to avoid messing up positions
+        let mut fixed_content = content.to_string();
+        let mut warnings_by_line: HashMap<usize, Vec<LintWarning>> = HashMap::new();
 
-        for (i, &line) in lines.iter().enumerate() {
-            let mut current_line = line.to_string();
-
-            if !self.is_in_code_block(content, i + 1) {
-                // Sort issues by position in reverse order to avoid invalidating positions
-                let mut issues = self.check_line(line);
-                issues.sort_by(|a, b| b.0.cmp(&a.0));
-
-                for (pos, _original, fixed) in issues {
-                    let prefix = &current_line[..pos - 1];
-                    let suffix = &current_line[pos - 1 + _original.len()..];
-                    current_line = format!("{}{}{}", prefix, fixed, suffix);
+        // Group warnings by line for more efficient processing
+        for warning in warnings {
+            warnings_by_line
+                .entry(warning.line)
+                .or_insert_with(Vec::new)
+                .push(warning);
+        }
+        
+        // Process each line with fixes
+        for (_, mut line_warnings) in warnings_by_line {
+            // Sort warnings by column in reverse order (right to left)
+            line_warnings.sort_by(|a, b| b.column.cmp(&a.column));
+            
+            for warning in line_warnings {
+                if let Some(fix) = warning.fix {
+                    // Apply the fix
+                    let lines: Vec<&str> = fixed_content.lines().collect();
+                    let line_idx = warning.line - 1;
+                    if line_idx < lines.len() {
+                        let line = lines[line_idx];
+                        let start_pos = if warning.column > 0 { warning.column - 1 } else { 0 };
+                        let end_pos = fix.range.end;
+                        
+                        if start_pos <= line.len() && end_pos <= line.len() {
+                            let fixed_line = format!(
+                                "{}{}{}",
+                                &line[..start_pos],
+                                fix.replacement,
+                                &line[end_pos.min(line.len())..]
+                            );
+                            
+                            // Rebuild the content with the fixed line
+                            let mut new_content = String::new();
+                            for (i, l) in lines.iter().enumerate() {
+                                if i == line_idx {
+                                    new_content.push_str(&fixed_line);
+                                } else {
+                                    new_content.push_str(l);
+                                }
+                                if i < lines.len() - 1 {
+                                    new_content.push('\n');
+                                }
+                            }
+                            
+                            fixed_content = new_content;
+                        }
+                    }
                 }
             }
-
-            result.push_str(&current_line);
-            if i < lines.len() - 1 {
-                result.push('\n');
-            }
         }
 
-        // Ensure trailing newline is preserved
-        if content.ends_with('\n') {
-            result.push('\n');
+        // Ensure we maintain the final newline if it existed
+        if content.ends_with('\n') && !fixed_content.ends_with('\n') {
+            fixed_content.push('\n');
         }
 
-        Ok(result)
+        Ok(fixed_content)
+    }
+    
+    /// Check if content is likely to have code spans
+    fn should_skip(&self, content: &str) -> bool {
+        !content.contains('`')
     }
 }
+
+impl DocumentStructureExtensions for MD038NoSpaceInCode {
+    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+        !doc_structure.code_spans.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_md038_valid() {
+        let rule = MD038NoSpaceInCode::new();
+        
+        // Valid code spans - no spaces inside
+        let valid_cases = vec![
+            "This is `code` in a sentence.",
+            "This is a `longer code span` in a sentence.",
+            "This is `code with internal spaces` which is fine.",
+            "This is`` code with double backticks`` which is also fine.",
+            "Code span at `end of line`",
+            "`Start of line` code span",
+            "Multiple `code spans` in `one line` are fine",
+            "Code span with `symbols: !@#$%^&*()`",
+            "Empty code span `` is technically valid"
+        ];
+        
+        for case in valid_cases {
+            let result = rule.check(case).unwrap();
+            assert!(result.is_empty(), "Valid case should not have warnings: {}", case);
+        }
+    }
+
+    #[test]
+    fn test_md038_invalid() {
+        let rule = MD038NoSpaceInCode::new();
+        
+        // Invalid code spans - spaces inside backticks
+        let invalid_cases = vec![
+            "This is ` code` with leading space.",
+            "This is `code ` with trailing space.",
+            "This is ` code ` with both leading and trailing space.",
+            "Multiple ` code ` spans with `spaces ` in one line."
+        ];
+        
+        for case in invalid_cases {
+            let result = rule.check(case).unwrap();
+            assert!(!result.is_empty(), "Invalid case should have warnings: {}", case);
+        }
+    }
+
+    #[test]
+    fn test_md038_fix() {
+        let rule = MD038NoSpaceInCode::new();
+        
+        // Test cases with their expected fixed versions
+        let test_cases = vec![
+            ("This is ` code` with leading space.", "This is `code` with leading space."),
+            ("This is `code ` with trailing space.", "This is `code` with trailing space."),
+            ("This is ` code ` with both spaces.", "This is `code` with both spaces."),
+            ("Multiple ` code ` and `spans ` to fix.", "Multiple `code` and `spans` to fix.")
+        ];
+        
+        for (input, expected) in test_cases {
+            let result = rule.fix(input).unwrap();
+            assert_eq!(result, expected, "Fix did not produce expected output for: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_check_invalid_leading_space() {
+        let rule = MD038NoSpaceInCode::new();
+        
+        // Test specific case with leading space
+        let input = "This has a ` leading space` in code";
+        let result = rule.check(input).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+        assert!(result[0].fix.is_some());
+    }
+} 

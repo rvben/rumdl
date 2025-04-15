@@ -164,7 +164,7 @@ style = "asterisk"
     let test_content = "# Test\n\nThis is a line that exceeds 80 characters but not 150 characters. It's specifically designed for our test case.";
 
     // Run the linter with our configured rules
-    let warnings = rumdl::lint(test_content, &rules).expect("Linting should succeed");
+    let warnings = rumdl::lint(test_content, &rules, false).expect("Linting should succeed");
 
     // Verify no MD013 warnings because line_length is set to 150
     let md013_warnings = warnings
@@ -312,7 +312,7 @@ style = "asterisk"
 
     // Run the linter
     let test_content = fs::read_to_string(test_file_path).expect("Failed to read test file");
-    let warnings = rumdl::lint(&test_content, &rules).expect("Linting should succeed");
+    let warnings = rumdl::lint(&test_content, &rules, false).expect("Linting should succeed");
 
     // Verify results
     // 1. There should be no MD013 warnings (line is under 120 chars)

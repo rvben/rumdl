@@ -14,6 +14,7 @@ pub use rules::*;
 use crate::rule::{LintResult, Rule};
 use globset::GlobBuilder;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 /// Collect patterns from .gitignore files
 ///
@@ -479,10 +480,14 @@ fn normalize_path(path: &str) -> Option<String> {
 }
 
 /// Lint a file against the given rules
-pub fn lint(content: &str, rules: &[Box<dyn Rule>]) -> LintResult {
+pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResult {
     let mut warnings = Vec::new();
 
+    let _overall_start = Instant::now();
+    
     for rule in rules {
+        let _rule_start = Instant::now();
+        
         match rule.check(content) {
             Ok(rule_warnings) => {
                 warnings.extend(rule_warnings);
@@ -494,6 +499,22 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>]) -> LintResult {
                 return Err(e);
             }
         }
+        
+        // Only calculate rule duration and print timing info when in verbose mode and not in tests
+        #[cfg(not(test))]
+        if _verbose {
+            let rule_duration = _rule_start.elapsed();
+            if rule_duration.as_millis() > 500 {
+                eprintln!("Rule {} took {:?}", rule.name(), rule_duration);
+            }
+        }
+    }
+
+    // Only calculate and print overall timing in non-test mode and when verbose is enabled
+    #[cfg(not(test))]
+    if _verbose {
+        let total_duration = _overall_start.elapsed();
+        eprintln!("Total lint time: {:?}", total_duration);
     }
 
     // Only print warning counts in debug mode and when not running tests
@@ -692,7 +713,7 @@ pub fn lint_optimized(content: &str, rules: &[Box<dyn Rule>], optimize_flags: Op
                 return lint_with_structure(content, rules);
             }
         } else {
-            return lint(content, rules);
+            return lint(content, rules, false);
         }
     }
 }

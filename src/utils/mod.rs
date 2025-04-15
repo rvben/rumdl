@@ -4,6 +4,7 @@ pub mod early_returns;
 pub mod markdown_elements;
 pub mod range_utils;
 pub mod regex_cache;
+pub mod element_cache;
 
 pub use code_block_utils::CodeBlockUtils;
 pub use document_structure::DocumentStructure;

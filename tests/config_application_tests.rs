@@ -115,7 +115,7 @@ This is a line that exceeds the default 80 characters but is less than the confi
 "#;
 
     // Run the linter with modified rules
-    let warnings = rumdl::lint(test_content, &rules).expect("Linting should succeed");
+    let warnings = rumdl::lint(test_content, &rules, false).expect("Linting should succeed");
 
     // Check MD013 behavior - should not trigger on >80 but <120 chars
     let md013_warnings = warnings
@@ -167,7 +167,8 @@ fn test_config_priority() {
     // Test with a line that's 100 chars (exceeds default but within config)
     let line_100_chars = "# Test\n\n".to_owned() + &"A".repeat(98); // 98 A's + 2 chars for "# " = 100 chars
 
-    let warnings = rumdl::lint(&line_100_chars, &rules).expect("Linting should succeed");
+    // Run linting with our custom rule
+    let warnings = rumdl::lint(&line_100_chars, &rules, false).expect("Linting should succeed");
 
     // Should not trigger MD013 because config value is 120
     let md013_warnings = warnings
@@ -191,7 +192,7 @@ fn test_config_priority() {
     apply_rule_configs(&mut rules, &config);
 
     // Should now trigger MD013
-    let warnings = rumdl::lint(&line_100_chars, &rules).expect("Linting should succeed");
+    let warnings = rumdl::lint(&line_100_chars, &rules, false).expect("Linting should succeed");
     let md013_warnings = warnings
         .iter()
         .filter(|w| w.rule_name == Some("MD013"))
@@ -231,8 +232,8 @@ fn test_partial_rule_config() {
     // Test with a regular line that exceeds 80 chars but not 100 chars
     let test_content = "This is a regular line that is longer than 80 characters but shorter than 100 characters in length.";
 
-    // Run the linter
-    let warnings = rumdl::lint(test_content, &rules).expect("Linting should succeed");
+    // Run linting with our custom rule
+    let warnings = rumdl::lint(test_content, &rules, false).expect("Linting should succeed");
 
     // Should NOT trigger MD013 because line_length is set to 100
     let md013_warnings = warnings
@@ -261,8 +262,8 @@ fn test_partial_rule_config() {
     // Re-apply configs
     apply_rule_configs(&mut rules, &config);
 
-    // Run linter again
-    let warnings = rumdl::lint(test_content, &rules).expect("Linting should succeed");
+    // Run linting with our custom rule
+    let warnings = rumdl::lint(test_content, &rules, false).expect("Linting should succeed");
 
     // Now should trigger MD013 because line_length is less than the line length
     let md013_warnings = warnings
@@ -325,7 +326,7 @@ style = "dash"
 * Item with asterisk
 "#;
 
-    let warnings = rumdl::lint(test_content, &rules).expect("Linting should succeed");
+    let warnings = rumdl::lint(test_content, &rules, false).expect("Linting should succeed");
     let md004_warnings = warnings
         .iter()
         .filter(|w| w.rule_name == Some("MD004"))
@@ -410,7 +411,7 @@ line_length = 100
     // Test content that would be flagged by MD001/MD004 but not by MD013 with line_length 100
     let test_content =
         "#Test\n\n".to_owned() + &"A".repeat(90) + "\n\n## Some heading\n\n* Item 1\n+ Item 2";
-    let warnings = rumdl::lint(&test_content, &rules).expect("Linting should succeed");
+    let warnings = rumdl::lint(&test_content, &rules, false).expect("Linting should succeed");
 
     // Verify no warnings (MD013 has line_length 100 and the line is 90 chars)
     assert!(warnings.is_empty(), "No warnings should be generated because only MD013 is enabled and the line is under 100 chars");

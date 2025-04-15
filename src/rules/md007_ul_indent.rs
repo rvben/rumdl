@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::element_cache::{get_element_cache, ListMarkerType};
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -82,72 +83,43 @@ impl Rule for MD007ULIndent {
 
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-
-        let lines: Vec<&str> = content.lines().collect();
-        let mut list_levels: Vec<(usize, usize)> = Vec::new(); // (indent, nesting level)
-
-        for (i, line) in lines.iter().enumerate() {
-            if Self::is_in_code_block(content, i) {
+        
+        // Get cached document elements
+        let element_cache = get_element_cache(content);
+        
+        // Process each unordered list item from the cache
+        for list_item in element_cache.get_list_items() {
+            // Skip ordered list items
+            if let ListMarkerType::Ordered = list_item.marker_type {
                 continue;
             }
-
-            if let Some((indent, _marker, _content_len)) = Self::parse_list_item(line) {
-                // Determine the nesting level of this item
-                let nesting_level = if indent == 0 {
-                    // Top level item
-                    0
-                } else {
-                    // Find the appropriate nesting level based on previous items
-                    let mut level = 0;
-                    for &(prev_indent, prev_level) in list_levels.iter().rev() {
-                        if indent > prev_indent {
-                            level = prev_level + 1;
-                            break;
-                        } else if indent == prev_indent {
-                            level = prev_level;
-                            break;
-                        } else if indent < prev_indent {
-                            // Continue searching for a matching level
-                            continue;
-                        }
-                    }
-                    level
-                };
-
-                // Update list level tracking
-                list_levels.push((indent, nesting_level));
-
-                // Calculate expected indentation: level * indent spaces
-                let expected_indent = nesting_level * self.indent;
-
-                // If indentation doesn't match expected value
-                if indent != expected_indent {
-                    // Get the correct indentation
-                    let correct_indent = " ".repeat(expected_indent);
-                    let trimmed = line.trim_start();
-                    let replacement = format!("{}{}", correct_indent, trimmed);
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: indent + 1,
-                        message: format!(
-                            "Unordered list indentation should be {} spaces (level {}), found {}",
-                            expected_indent, nesting_level, indent
-                        ),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement,
-                        }),
-                    });
-                }
-            } else {
-                // Not a list item - clear levels if line is not blank
-                // This ensures that separate lists are treated independently
-                if !line.trim().is_empty() {
-                    list_levels.clear();
-                }
+            
+            // Calculate expected indentation: level * indent spaces
+            let expected_indent = list_item.nesting_level * self.indent;
+            
+            // If indentation doesn't match expected value
+            if list_item.indentation != expected_indent {
+                // Get the correct indentation
+                let correct_indent = " ".repeat(expected_indent);
+                let trimmed = content.lines().nth(list_item.line_number - 1)
+                    .map(|line| line.trim_start())
+                    .unwrap_or("");
+                let replacement = format!("{}{}", correct_indent, trimmed);
+                
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: list_item.line_number,
+                    column: list_item.indentation + 1,
+                    message: format!(
+                        "Unordered list indentation should be {} spaces (level {}), found {}",
+                        expected_indent, list_item.nesting_level, list_item.indentation
+                    ),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range(list_item.line_number, 1),
+                        replacement,
+                    }),
+                });
             }
         }
 
@@ -155,136 +127,58 @@ impl Rule for MD007ULIndent {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        // Early return if the document has no lists
-        if structure.list_lines.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
-
-        let lines: Vec<&str> = content.lines().collect();
-        let mut list_levels: Vec<(usize, usize)> = Vec::new(); // (indent, nesting level)
-
-        // Process only lines with list items, using the pre-computed list_lines
-        for &line_num in &structure.list_lines {
-            let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-
-            // Skip if out of bounds
-            if line_idx >= lines.len() {
-                continue;
-            }
-
-            let line = lines[line_idx];
-
-            // Skip lines in code blocks
-            if structure.is_in_code_block(line_num) {
-                continue;
-            }
-
-            if let Some((indent, _marker, _content_len)) = Self::parse_list_item(line) {
-                // Determine the nesting level of this item
-                let nesting_level = if indent == 0 {
-                    // Top level item
-                    0
-                } else {
-                    // Find the appropriate nesting level based on previous items
-                    let mut level = 0;
-                    for &(prev_indent, prev_level) in list_levels.iter().rev() {
-                        if indent > prev_indent {
-                            level = prev_level + 1;
-                            break;
-                        } else if indent == prev_indent {
-                            level = prev_level;
-                            break;
-                        } else if indent < prev_indent {
-                            // Continue searching for a matching level
-                            continue;
-                        }
-                    }
-                    level
-                };
-
-                // Update list level tracking
-                list_levels.push((indent, nesting_level));
-
-                // Calculate expected indentation: level * indent spaces
-                let expected_indent = nesting_level * self.indent;
-
-                // If indentation doesn't match expected value
-                if indent != expected_indent {
-                    // Get the correct indentation
-                    let correct_indent = " ".repeat(expected_indent);
-                    let trimmed = line.trim_start();
-                    let replacement = format!("{}{}", correct_indent, trimmed);
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: line_num,
-                        column: indent + 1,
-                        message: format!(
-                            "Unordered list indentation should be {} spaces (level {}), found {}",
-                            expected_indent, nesting_level, indent
-                        ),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num, 1),
-                            replacement,
-                        }),
-                    });
-                }
-            } else {
-                // Check if this line is not part of a list and not empty
-                // If so, we clear our list levels to ensure separate lists are treated independently
-                if !line.trim().is_empty() && !structure.list_lines.contains(&line_num) {
-                    list_levels.clear();
-                }
-            }
-        }
-
-        Ok(warnings)
+    fn check_with_structure(&self, content: &str, _structure: &DocumentStructure) -> LintResult {
+        // Simply call the normal check method since we aren't using the structure yet
+        self.check(content)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let warnings = self.check(content)?;
-
-        if warnings.is_empty() {
+        // Fast path - if content doesn't contain list markers, no list items exist
+        if !content.contains('*') && !content.contains('-') && !content.contains('+') {
             return Ok(content.to_string());
         }
-
-        let mut result = String::new();
+        
         let lines: Vec<&str> = content.lines().collect();
-
-        // Create a map of line numbers with fixes
-        let mut line_fixes: std::collections::HashMap<usize, String> =
-            std::collections::HashMap::new();
-        for warning in &warnings {
-            if let Some(fix) = &warning.fix {
-                line_fixes.insert(warning.line, fix.replacement.clone());
-            }
-        }
-
-        for (i, line) in lines.iter().enumerate() {
+        let mut result = Vec::with_capacity(lines.len());
+        
+        // Get cached document elements
+        let element_cache = get_element_cache(content);
+        
+        for (i, &line) in lines.iter().enumerate() {
             let line_num = i + 1;
-            if let Some(fixed_line) = line_fixes.get(&line_num) {
-                result.push_str(fixed_line);
+            
+            // Check if this is an unordered list item that needs fixing
+            if let Some(list_item) = element_cache.get_list_item(line_num) {
+                // Skip ordered list items
+                if let ListMarkerType::Ordered = list_item.marker_type {
+                    result.push(line.to_string());
+                    continue;
+                }
+                
+                // Calculate expected indentation
+                let expected_indent = list_item.nesting_level * self.indent;
+                
+                // If indentation needs correction
+                if list_item.indentation != expected_indent {
+                    let correct_indent = " ".repeat(expected_indent);
+                    let trimmed = line.trim_start();
+                    result.push(format!("{}{}", correct_indent, trimmed));
+                } else {
+                    result.push(line.to_string());
+                }
             } else {
-                result.push_str(line);
-            }
-
-            // Add newline for all lines except the last one, unless the original content ends with newline
-            if i < lines.len() - 1 {
-                result.push('\n');
+                // Not a list item, keep as is
+                result.push(line.to_string());
             }
         }
-
-        // Preserve trailing newline if present
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
+        
+        // Join lines and preserve trailing newline
+        let result_str = result.join("\n");
+        if content.ends_with('\n') && !result_str.ends_with('\n') {
+            Ok(result_str + "\n")
+        } else {
+            Ok(result_str)
         }
-
-        Ok(result)
     }
 
     /// Get the category of this rule for selective processing
@@ -301,7 +195,7 @@ impl Rule for MD007ULIndent {
 
 impl DocumentStructureExtensions for MD007ULIndent {
     fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
-        // This rule is only relevant if there are list items
+        // Use the document structure to check if there are any unordered list elements
         !doc_structure.list_lines.is_empty()
     }
 }

@@ -1,49 +1,43 @@
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::LineIndex;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-
+/// Rule MD039: Spaces inside link text
+///
+/// This rule is triggered when link text has leading or trailing spaces which can cause 
+/// unexpected rendering in some Markdown parsers.
 #[derive(Debug, Default)]
 pub struct MD039NoSpaceInLinks;
 
 impl MD039NoSpaceInLinks {
-    fn is_in_code_block(&self, content: &str, line_num: usize) -> bool {
-        let mut in_code_block = false;
+    pub fn new() -> Self {
+        Self
+    }
 
-        let mut fence_type = None;
-
-        let mut in_inline_code = false;
-
-        for (i, line) in content.lines().enumerate() {
-            if i + 1 == line_num {
-                // Count backticks in the current line up to this point
-                let backticks = line.chars().filter(|&c| c == '`').count();
-                in_inline_code = backticks % 2 == 1;
-                break;
+    /// Fast check to see if content has any potential links
+    #[inline]
+    fn has_links(&self, content: &str) -> bool {
+        content.contains('[') && content.contains("](")
+    }
+    
+    /// Check if the text has leading or trailing spaces, and return the fixed version if so
+    #[inline]
+    fn check_link_text(&self, text: &str) -> Option<String> {
+        if text.starts_with(' ') || text.ends_with(' ') {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                Some(trimmed.to_string())
+            } else {
+                None
             }
-
-            let trimmed = line.trim();
-            if let Some(fence) = fence_type {
-                if trimmed.starts_with(fence) {
-                    in_code_block = false;
-                    fence_type = None;
-                }
-            } else if trimmed.starts_with("```") {
-                in_code_block = true;
-                fence_type = Some("```");
-            } else if trimmed.starts_with("~~~") {
-                in_code_block = true;
-                fence_type = Some("~~~");
-            }
+        } else {
+            None
         }
-
-        in_code_block || in_inline_code
     }
 
     fn check_line(&self, line: &str) -> Vec<(usize, String, String)> {
         let mut issues = Vec::new();
-
         let chars: Vec<char> = line.chars().collect();
-
         let mut i = 0;
 
         while i < chars.len() {
@@ -135,23 +129,80 @@ impl Rule for MD039NoSpaceInLinks {
     fn description(&self) -> &'static str {
         "Spaces inside link text"
     }
+    
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Link
+    }
+    
+    fn should_skip(&self, content: &str) -> bool {
+        // Skip empty content or content without links
+        content.is_empty() || !self.has_links(content)
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Fast path - skip if no links
+        if structure.links.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut warnings = Vec::new();
+        let line_index = LineIndex::new(content.to_string());
+        
+        // Process all links from the document structure
+        for link in &structure.links {
+            if let Some(fixed_text) = self.check_link_text(&link.text) {
+                // Calculate the position for fixing
+                let start_col = link.start_col;
+                let line_num = link.line;
+                
+                // Calculate the byte position for the start of the link
+                let start_pos = line_index.line_col_to_byte_range(line_num, start_col).start;
+                
+                // Create fixed version of the entire link
+                let original = format!("[{}]({})", link.text, link.url);
+                let fixed = format!("[{}]({})", fixed_text, link.url);
+                
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: line_num,
+                    column: start_col,
+                    message: "Spaces inside link text should be removed".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: start_pos..start_pos + original.len(),
+                        replacement: fixed,
+                    }),
+                });
+            }
+        }
+        
+        Ok(warnings)
+    }
 
     fn check(&self, content: &str) -> LintResult {
-        let _line_index = LineIndex::new(content.to_string());
-
+        if self.should_skip(content) {
+            return Ok(Vec::new());
+        }
+        
+        // Get document structure for code block detection
+        let doc_structure = DocumentStructure::new(content);
+        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
         for (i, line) in content.lines().enumerate() {
-            if !self.is_in_code_block(content, i + 1) {
+            let line_num = i + 1;
+            // Skip lines in code blocks using centralized detection
+            if !doc_structure.is_in_code_block(line_num) {
                 for (column, _original, fixed) in self.check_line(line) {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
-                        line: i + 1,
+                        line: line_num,
                         column,
                         message: "Spaces inside link text should be removed".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, column),
+                            range: line_index.line_col_to_byte_range(line_num, column),
                             replacement: fixed,
                         }),
                     });
@@ -163,26 +214,116 @@ impl Rule for MD039NoSpaceInLinks {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-
+        if self.should_skip(content) {
+            return Ok(content.to_string());
+        }
+        
+        // Get document structure for code block detection
+        let doc_structure = DocumentStructure::new(content);
         let lines: Vec<&str> = content.lines().collect();
+        let mut result = String::with_capacity(content.len());
 
-        let mut result = String::new();
-
-        for i in 0..lines.len() {
-            let mut line = lines[i].to_string();
-            if !self.is_in_code_block(content, i + 1) {
-                for (_, original, fixed) in self.check_line(lines[i]) {
+        for (i, line) in lines.iter().enumerate() {
+            let mut line_str = line.to_string();
+            let line_num = i + 1;
+            
+            // Skip lines in code blocks using centralized detection
+            if !doc_structure.is_in_code_block(line_num) {
+                for (_, original, fixed) in self.check_line(line) {
                     // Use a safe replacement method
-                    line = line.replace(&original, &fixed);
+                    line_str = line_str.replace(&original, &fixed);
                 }
             }
-            result.push_str(&line);
+            
+            result.push_str(&line_str);
             if i < lines.len() - 1 {
                 result.push('\n');
             }
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_links() {
+        let rule = MD039NoSpaceInLinks::new();
+        let content = "[link](url) and [another link](url) here";
+        let result = rule.check(content).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_spaces_both_ends() {
+        let rule = MD039NoSpaceInLinks::new();
+        let content = "[ link ](url) and [ another link ](url) here";
+        let result = rule.check(content).unwrap();
+        assert_eq!(result.len(), 2);
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "[link](url) and [another link](url) here");
+    }
+
+    #[test]
+    fn test_space_at_start() {
+        let rule = MD039NoSpaceInLinks::new();
+        let content = "[ link](url) and [ another link](url) here";
+        let result = rule.check(content).unwrap();
+        assert_eq!(result.len(), 2);
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "[link](url) and [another link](url) here");
+    }
+
+    #[test]
+    fn test_space_at_end() {
+        let rule = MD039NoSpaceInLinks::new();
+        let content = "[link ](url) and [another link ](url) here";
+        let result = rule.check(content).unwrap();
+        assert_eq!(result.len(), 2);
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "[link](url) and [another link](url) here");
+    }
+
+    #[test]
+    fn test_link_in_code_block() {
+        let rule = MD039NoSpaceInLinks::new();
+        let content = "```\n[ link ](url)\n```\n[ link ](url)";
+        let result = rule.check(content).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "```\n[ link ](url)\n```\n[link](url)");
+    }
+
+    #[test]
+    fn test_multiple_links() {
+        let rule = MD039NoSpaceInLinks::new();
+        let content = "[ link ](url) and [ another ](url) in one line";
+        let result = rule.check(content).unwrap();
+        assert_eq!(result.len(), 2);
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "[link](url) and [another](url) in one line");
+    }
+
+    #[test]
+    fn test_link_with_internal_spaces() {
+        let rule = MD039NoSpaceInLinks::new();
+        let content = "[this is link](url) and [ this is also link ](url)";
+        let result = rule.check(content).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "[this is link](url) and [this is also link](url)");
+    }
+
+    #[test]
+    fn test_link_with_punctuation() {
+        let rule = MD039NoSpaceInLinks::new();
+        let content = "[ link! ](url) and [ link? ](url) here";
+        let result = rule.check(content).unwrap();
+        assert_eq!(result.len(), 2);
+        let fixed = rule.fix(content).unwrap();
+        assert_eq!(fixed, "[link!](url) and [link?](url) here");
     }
 }

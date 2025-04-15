@@ -183,9 +183,9 @@ fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
     rules.push(Box::new(MD034NoBareUrls {}));
     rules.push(Box::new(MD035HRStyle::default()));
     rules.push(Box::new(MD036NoEmphasisOnlyFirst {}));
-    rules.push(Box::new(MD037SpacesAroundEmphasis {}));
-    rules.push(Box::new(MD038NoSpaceInCode {}));
-    rules.push(Box::new(MD039NoSpaceInLinks {}));
+    rules.push(Box::new(MD037SpacesAroundEmphasis::default()));
+    rules.push(Box::new(MD038NoSpaceInCode::default()));
+    rules.push(Box::new(MD039NoSpaceInLinks::default()));
     rules.push(Box::new(MD040FencedCodeLanguage {}));
     rules.push(Box::new(MD041FirstLineHeading::default()));
     rules.push(Box::new(MD042NoEmptyLinks::new()));
@@ -512,6 +512,9 @@ fn process_file(
     verbose: bool,
     quiet: bool,
 ) -> (bool, usize, usize, usize) {
+    use std::time::Instant;
+
+    let start_time = Instant::now();
     if verbose && !quiet {
         println!("Processing file: {}", file_path);
     }
@@ -519,23 +522,22 @@ fn process_file(
     // Read file content
     let mut content = match std::fs::read_to_string(file_path) {
         Ok(content) => content,
-        Err(err) => {
-            eprintln!(
-                "{}: Could not read file {}: {}",
-                "Error".red().bold(),
-                file_path,
-                err
-            );
+        Err(e) => {
+            if !quiet {
+                eprintln!("Error reading file {}: {}", file_path, e);
+            }
             return (false, 0, 0, 0);
         }
     };
-
+    let _read_time = start_time.elapsed();
+    
+    let lint_start = Instant::now();
     // Set the environment variable for the file path
     // This allows rules like MD057 to know which file is being processed
     std::env::set_var("RUMDL_FILE_PATH", file_path);
 
     // Use the standard lint function
-    let warnings_result = rumdl::lint(&content, rules);
+    let warnings_result = rumdl::lint(&content, rules, verbose);
 
     // Clear the environment variable after processing
     std::env::remove_var("RUMDL_FILE_PATH");
@@ -635,6 +637,16 @@ fn process_file(
                 );
             }
         }
+    }
+
+    let lint_time = lint_start.elapsed();
+    if !quiet {
+        println!("Linting took: {:?}", lint_time);
+    }
+
+    let total_time = start_time.elapsed();
+    if !quiet {
+        println!("Total processing time for {}: {:?}", file_path, total_time);
     }
 
     (true, total_warnings, warnings_fixed, fixable_warnings)
