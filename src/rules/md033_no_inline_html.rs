@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 lazy_static! {
     // Refined regex patterns with better performance characteristics
-    static ref HTML_TAG_PATTERN: Regex = Regex::new(r"<(/?)([a-zA-Z][a-zA-Z0-9-]*)(?:\s+[^>]*)?(/?)>").unwrap();
+    static ref HTML_TAG_PATTERN: Regex = Regex::new(r"<(?:(/?)([a-zA-Z][a-zA-Z0-9-]*)(?:\s+[^>]*)?(?:(/?)>)?)").unwrap();
 
     // Pattern to quickly check for HTML tag presence (much faster than the full pattern)
     static ref HTML_TAG_QUICK_CHECK: Regex = Regex::new(r"</?[a-zA-Z]").unwrap();
@@ -199,62 +199,32 @@ impl Rule for MD033NoInlineHtml {
         // Pre-compute code blocks for fast lookup
         let code_block_lines = self.detect_code_blocks(content);
 
-        // Process each line
+        // Use iterators for efficient line processing
         for (i, line) in content.lines().enumerate() {
-            // Early skip optimizations
-            if line.trim().is_empty() {
-                continue;
-            }
-
             // Skip lines in code blocks
             if code_block_lines.contains(&i) {
                 continue;
             }
 
-            // Skip if no angle brackets in this line
-            if !line.contains('<') {
-                continue;
-            }
+            // Use the optimized HTML_TAG_PATTERN
+            for tag in HTML_TAG_PATTERN.find_iter(line) {
+                let tag_str = tag.as_str();
+                let tag_start = tag.start();
 
-            // Skip if line has HTML comments
-            if HTML_COMMENT_PATTERN.is_match(line) {
-                continue;
-            }
-
-            // Find potential HTML tags
-            for cap in HTML_TAG_FINDER.captures_iter(line) {
-                let html_tag = cap.get(0).unwrap().as_str();
-                let start_pos = cap.get(0).unwrap().start();
-
-                // Skip HTML comments
-                if self.is_html_comment(html_tag) {
+                // Skip allowed tags and tags in markdown links
+                if self.is_tag_allowed(tag_str) || self.is_in_markdown_link(line, tag_start) {
                     continue;
                 }
 
-                // Skip if part of markdown link
-                if self.is_in_markdown_link(line, start_pos) {
-                    continue;
-                }
-
-                // Skip if in code span
-                if line.contains(*BACKTICK) && self.is_in_code_span(line, start_pos) {
-                    continue;
-                }
-
-                // Check if tag is allowed
-                if !self.is_tag_allowed(html_tag) {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: start_pos + 1,
-                        message: format!("Found inline HTML tag: {}", html_tag),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, start_pos + 1),
-                            replacement: String::new(),
-                        }),
-                    });
-                }
+                // Add a warning for disallowed inline HTML
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: i + 1, // 1-indexed line numbers
+                    column: line_index.line_col_to_byte_range(i + 1, tag_start + 1).start,
+                    message: format!("Inline HTML is not allowed: {}", tag_str),
+                    severity: Severity::Warning,
+                    fix: None,
+                });
             }
         }
 
@@ -333,7 +303,7 @@ impl Rule for MD033NoInlineHtml {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: i + 1,
-                        column: start_pos + 1,
+                        column: line_index.line_col_to_byte_range(i + 1, start_pos + 1).start,
                         message: format!("Found inline HTML tag: {}", html_tag),
                         severity: Severity::Warning,
                         fix: Some(Fix {

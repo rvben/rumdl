@@ -123,12 +123,6 @@ impl MD053LinkImageReferenceDefinitions {
     /// The code block detection is robust and handles both fenced code blocks (```...```)
     /// and indented code blocks.
     fn find_code_blocks(&self, content: &str) -> Vec<(usize, usize)> {
-        // Use lazy_static to compile these patterns only once
-        lazy_static! {
-            static ref FENCED_START: Regex = Regex::new(r"^(```|~~~)").unwrap();
-            static ref INDENTED_CODE: Regex = Regex::new(r"^( {4}|\t)").unwrap();
-        }
-
         let lines: Vec<&str> = content.lines().collect();
         let mut code_blocks = Vec::new();
         let mut in_code_block = false;
