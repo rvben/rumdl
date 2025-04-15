@@ -7,14 +7,14 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
+use crate::utils::document_structure::DocumentStructure;
 
 lazy_static! {
     // Link reference format: [text][reference]
-    static ref LINK_REFERENCE_REGEX: Regex = Regex::new(r"\[([^\]]*)\]\s*\[([^\]]*)\]").unwrap();
+    static ref LINK_REFERENCE_REGEX: FancyRegex = FancyRegex::new(r"\[([^\]]*)\]\s*\[([^\]]*)\]").unwrap();
 
     // Image reference format: ![text][reference]
-    static ref IMAGE_REFERENCE_REGEX: Regex =
-        Regex::new(r"!\[([^\]]*)\]\s*\[([^\]]*)\]").unwrap();
+    static ref IMAGE_REFERENCE_REGEX: FancyRegex = FancyRegex::new(r"!\[([^\]]*)\]\s*\[([^\]]*)\]").unwrap();
 
     // Shortcut reference links: [reference] - must not be followed by a colon to avoid matching definitions
     static ref SHORTCUT_REFERENCE_REGEX: FancyRegex =
@@ -36,7 +36,15 @@ lazy_static! {
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
 }
 
-type DefinitionCache = Rc<RefCell<HashMap<u64, Vec<(String, usize, usize)>>>>;
+type DefinitionCache = Rc<RefCell<HashMap<u64, Vec<(String, usize, usize, usize)>>>>;
+
+// Move the ReferenceDefinition struct to the module level
+struct ReferenceDefinition {
+    id: String,
+    line: usize,
+    start_col: usize,
+    end_col: usize,
+}
 
 /// Rule MD053: Link and image reference definitions should be needed
 ///
@@ -123,75 +131,8 @@ impl MD053LinkImageReferenceDefinitions {
     /// The code block detection is robust and handles both fenced code blocks (```...```)
     /// and indented code blocks.
     fn find_code_blocks(&self, content: &str) -> Vec<(usize, usize)> {
-        let lines: Vec<&str> = content.lines().collect();
-        let mut code_blocks = Vec::new();
-        let mut in_code_block = false;
-        let mut start_line = 0;
-        let mut fence_char = '\0';
-        let mut fence_count = 0;
-        let mut skip_to = 0;
-
-        for (i, line) in lines.iter().enumerate() {
-            // Skip lines that were already processed as part of an indented code block
-            if i < skip_to {
-                continue;
-            }
-
-            let trimmed = line.trim();
-
-            // Quick check before using regex
-            if !in_code_block
-                && !trimmed.is_empty()
-                && (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
-            {
-                in_code_block = true;
-                start_line = i;
-                fence_char = trimmed.chars().next().unwrap();
-                fence_count = trimmed.chars().take_while(|&c| c == fence_char).count();
-            } else if in_code_block && !trimmed.is_empty() {
-                let potential_end =
-                    trimmed.starts_with(&fence_char.to_string().repeat(fence_count));
-                if potential_end
-                    && (trimmed.len() == fence_count
-                        || !trimmed
-                            .chars()
-                            .nth(fence_count)
-                            .unwrap()
-                            .is_ascii_alphanumeric())
-                {
-                    code_blocks.push((start_line, i));
-                    in_code_block = false;
-                    fence_char = '\0';
-                    fence_count = 0;
-                }
-            } else if !in_code_block && !trimmed.is_empty() {
-                // Check for indented code block with a simple string operation first
-                if line.starts_with("    ") || line.starts_with('\t') {
-                    let mut j = i;
-                    while j < lines.len()
-                        && (lines[j].starts_with("    ")
-                            || lines[j].starts_with('\t')
-                            || lines[j].trim().is_empty())
-                    {
-                        j += 1;
-                    }
-
-                    // Only add if it's at least 2 lines (including blank lines) to avoid false positives
-                    if j > i + 1 {
-                        code_blocks.push((i, j - 1));
-                        // Mark where to continue processing
-                        skip_to = j;
-                    }
-                }
-            }
-        }
-
-        // Handle unclosed code blocks at the end of the document
-        if in_code_block {
-            code_blocks.push((start_line, lines.len() - 1));
-        }
-
-        code_blocks
+        let document_structure = DocumentStructure::new(content);
+        document_structure.code_blocks.iter().map(|block| (block.start_line, block.end_line)).collect()
     }
 
     /// Check if a line range is inside a code block.
@@ -232,229 +173,164 @@ impl MD053LinkImageReferenceDefinitions {
         reference.replace("\\", "")
     }
 
-    /// Find all link and image reference usages in the content.
+    /// Find all link and image reference definitions in the content.
     ///
-    /// This method returns a tuple containing:
-    /// - A HashSet of all reference IDs found in usage (not in code blocks)
-    /// - A HashSet of all reference IDs found in code blocks (these are tracked separately
-    ///   because references used only in code blocks should still be considered unused
-    ///   according to standard Markdown linting practice)
-    ///
-    /// References in code blocks are tracked but not counted as valid usages.
-    fn find_usages(&self, content: &str) -> (HashSet<String>, HashSet<String>) {
-        let mut usages = HashSet::new();
-        let mut code_block_usages = HashSet::new();
-        let code_blocks = self.find_code_blocks(content);
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Collect all definitions to exclude them from shortcut reference detection
-        let mut definitions = HashSet::new();
-        for (i, line) in lines.iter().enumerate() {
-            if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line) {
-                if let Some(ref_capture) = caps.get(1) {
-                    // First add the definition with escaped characters (original form)
-                    definitions.insert((i, ref_capture.as_str().trim().to_lowercase()));
-
-                    // Also add the unescaped version of the definition
-                    let unescaped = Self::unescape_reference(ref_capture.as_str().trim());
-                    definitions.insert((i, unescaped.to_lowercase()));
-                }
-            }
-        }
-
-        // Process link references
-        for cap in LINK_REFERENCE_REGEX.captures_iter(content) {
-            if let Some(ref_capture) = cap.get(2) {
-                let ref_text = ref_capture.as_str().trim();
-                let line_idx = content[..ref_capture.start()].matches('\n').count();
-
-                let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
-
-                if ref_text.is_empty() {
-                    // Empty reference like [text][] uses text as the reference
-                    if let Some(text_capture) = cap.get(1) {
-                        let text_ref = text_capture.as_str().trim().to_lowercase();
-                        if !text_ref.is_empty() {
-                            if is_in_code {
-                                code_block_usages.insert(text_ref);
-                            } else {
-                                usages.insert(text_ref);
-                            }
-                        }
-                    }
-                } else if is_in_code {
-                    code_block_usages.insert(ref_text.to_lowercase());
-                } else {
-                    usages.insert(ref_text.to_lowercase());
-                }
-            }
-        }
-
-        // Process image references
-        for cap in IMAGE_REFERENCE_REGEX.captures_iter(content) {
-            if let Some(ref_capture) = cap.get(2) {
-                let ref_text = ref_capture.as_str().trim();
-                let line_idx = content[..ref_capture.start()].matches('\n').count();
-
-                let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
-
-                if ref_text.is_empty() {
-                    // Empty reference like ![text][] uses text as the reference
-                    if let Some(text_capture) = cap.get(1) {
-                        let text_ref = text_capture.as_str().trim().to_lowercase();
-                        if !text_ref.is_empty() {
-                            if is_in_code {
-                                code_block_usages.insert(text_ref);
-                            } else {
-                                usages.insert(text_ref);
-                            }
-                        }
-                    }
-                } else if is_in_code {
-                    code_block_usages.insert(ref_text.to_lowercase());
-                } else {
-                    usages.insert(ref_text.to_lowercase());
-                }
-            }
-        }
-
-        // Process shortcut references using FancyRegex
-        let matches = SHORTCUT_REFERENCE_REGEX.find_iter(content);
-        for m in matches.flatten() {
-            // Extract line number for code block check
-            let line_idx = content[..m.start()].matches('\n').count();
-
-            // Skip if this match is actually a definition
-            let ref_text = &content[m.start() + 1..m.end() - 1].trim().to_lowercase();
-            if definitions.contains(&(line_idx, ref_text.clone())) {
-                continue;
-            }
-
-            let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
-
-            // Extract the reference text from [reference]
-            if !ref_text.is_empty() {
-                if is_in_code {
-                    code_block_usages.insert(ref_text.to_string());
-                } else {
-                    usages.insert(ref_text.to_string());
-                }
-            }
-        }
-
-        // Process empty reference links [text][] using the alt text as the reference
-        for cap in EMPTY_LINK_REFERENCE_REGEX.captures_iter(content) {
-            if let Some(text_capture) = cap.get(1) {
-                let text = text_capture.as_str().trim();
-                let line_idx = content[..text_capture.start()].matches('\n').count();
-                if !text.is_empty() {
-                    let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
-                    if is_in_code {
-                        code_block_usages.insert(text.to_lowercase());
-                    } else {
-                        usages.insert(text.to_lowercase());
-                    }
-                }
-            }
-        }
-
-        // Process empty image references ![text][] using the alt text as the reference
-        for cap in EMPTY_IMAGE_REFERENCE_REGEX.captures_iter(content) {
-            if let Some(text_capture) = cap.get(1) {
-                let text = text_capture.as_str().trim();
-                let line_idx = content[..text_capture.start()].matches('\n').count();
-                if !text.is_empty() {
-                    let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
-                    if is_in_code {
-                        code_block_usages.insert(text.to_lowercase());
-                    } else {
-                        usages.insert(text.to_lowercase());
-                    }
-                }
-            }
-        }
-
-        // Add a second pass to find nested references in link and image references
-        // This finds cases like [![alt][img]][link] where [link] is the outer reference
-        for cap in LINK_REFERENCE_REGEX.captures_iter(content) {
-            if let Some(full_match) = cap.get(0) {
-                let full_text = full_match.as_str();
-                let line_idx = content[..full_match.start()].matches('\n').count();
-                let is_in_code = self.is_in_code_block(line_idx, &code_blocks);
-
-                // This regex finds the outer reference pattern in cases like [text][ref]
-                let outer_ref_regex = Regex::new(r"\]\s*\[([^\]]+)\]$").unwrap();
-                if let Some(outer_cap) = outer_ref_regex.captures(full_text) {
-                    if let Some(outer_ref) = outer_cap.get(1) {
-                        let outer_ref_text = outer_ref.as_str().trim().to_lowercase();
-                        if !outer_ref_text.is_empty() {
-                            if is_in_code {
-                                code_block_usages.insert(outer_ref_text);
-                            } else {
-                                usages.insert(outer_ref_text);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        (usages, code_block_usages)
-    }
-
-    // Find all reference definitions in the content
+    /// This method returns a HashMap where the key is the normalized reference ID and the value is a vector of (start_line, end_line) tuples.
     fn find_definitions(&self, content: &str) -> HashMap<String, Vec<(usize, usize)>> {
         let mut definitions: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
         let lines: Vec<&str> = content.lines().collect();
+        let code_blocks = self.find_code_blocks(content);
+        let mut in_front_matter = false;
+        let mut i = 0;
+        while i < lines.len() {
+            let line = lines[i];
+            // Front matter detection (YAML)
+            if i == 0 && line.trim_start().starts_with("---") {
+                in_front_matter = true;
+                i += 1;
+                while i < lines.len() && !lines[i].trim_start().starts_with("---") {
+                    i += 1;
+                }
+                i += 1;
+                continue;
+            }
+            if in_front_matter {
+                i += 1;
+                continue;
+            }
+            // Skip code blocks
+            if self.is_in_code_block(i, &code_blocks) {
+                i += 1;
+                continue;
+            }
+            // Reference definition
+            if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line) {
+                let ref_id = caps.get(1).unwrap().as_str().trim();
+                let mut start_line = i;
+                let mut end_line = i;
+                // Multi-line continuation
+                i += 1;
+                while i < lines.len() && CONTINUATION_REGEX.is_match(lines[i]) {
+                    end_line = i;
+                    i += 1;
+                }
+                // Normalize reference id: trim, unescape, and lowercase
+                let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
+                definitions.entry(normalized_id).or_insert_with(Vec::new).push((start_line, end_line));
+                continue;
+            }
+            i += 1;
+        }
+        definitions
+    }
+
+    /// Find all link and image reference usages in the content.
+    ///
+    /// This method returns a HashSet of all normalized reference IDs found in usage (not in code blocks, code spans, or front matter).
+    fn find_usages(&self, content: &str) -> HashSet<String> {
+        let lines: Vec<&str> = content.lines().collect();
+        let code_blocks = self.find_code_blocks(content);
+        let mut in_front_matter = false;
+        let mut usages: HashSet<String> = HashSet::new();
+        let mut in_code_span = false;
+
+        // Helper function to recursively extract all reference usages from a string
+        fn extract_references(s: &str, usages: &mut HashSet<String>) {
+            // Find all reference usages in this string
+            for caps in LINK_REFERENCE_REGEX.captures_iter(s).flatten() {
+                let ref_id = caps.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+                let normalized_id = MD053LinkImageReferenceDefinitions::unescape_reference(ref_id).to_lowercase();
+                usages.insert(normalized_id.clone());
+                // Recursively scan the link text for more references
+                if let Some(link_text) = caps.get(1) {
+                    extract_references(link_text.as_str(), usages);
+                }
+            }
+            for caps in IMAGE_REFERENCE_REGEX.captures_iter(s).flatten() {
+                let ref_id = caps.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+                let normalized_id = MD053LinkImageReferenceDefinitions::unescape_reference(ref_id).to_lowercase();
+                usages.insert(normalized_id.clone());
+                // Recursively scan the alt text for more references
+                if let Some(alt_text) = caps.get(1) {
+                    extract_references(alt_text.as_str(), usages);
+                }
+            }
+            for caps in SHORTCUT_REFERENCE_REGEX.captures_iter(s).flatten() {
+                let ref_id = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+                let normalized_id = MD053LinkImageReferenceDefinitions::unescape_reference(ref_id).to_lowercase();
+                usages.insert(normalized_id);
+            }
+            for caps in EMPTY_LINK_REFERENCE_REGEX.captures_iter(s) {
+                if let Some(cap) = caps.get(1) {
+                    let normalized_id = MD053LinkImageReferenceDefinitions::unescape_reference(cap.as_str().trim()).to_lowercase();
+                    usages.insert(normalized_id);
+                }
+            }
+            for caps in EMPTY_IMAGE_REFERENCE_REGEX.captures_iter(s) {
+                if let Some(cap) = caps.get(1) {
+                    let normalized_id = MD053LinkImageReferenceDefinitions::unescape_reference(cap.as_str().trim()).to_lowercase();
+                    usages.insert(normalized_id);
+                }
+            }
+        }
 
         for (i, line) in lines.iter().enumerate() {
-            if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line) {
-                if let Some(ref_capture) = caps.get(1) {
-                    let ref_text = ref_capture.as_str().trim();
-
-                    // If this is a multi-line definition, find where it ends
-                    let mut end_line = i;
-
-                    // Check if the definition continues to the next line
-                    // A continued definition line starts with whitespace and has non-whitespace content
-                    for (j, next_line) in lines.iter().enumerate().skip(i + 1) {
-                        if next_line.starts_with(" ")
-                            && !next_line.trim().is_empty()
-                            && !REFERENCE_DEFINITION_REGEX.is_match(next_line)
-                        {
-                            end_line = j;
-                        } else {
-                            break;
-                        }
+            // Front matter detection (YAML)
+            if i == 0 && line.trim_start().starts_with("---") {
+                in_front_matter = true;
+                continue;
+            }
+            if in_front_matter {
+                if line.trim_start().starts_with("---") {
+                    in_front_matter = false;
+                }
+                continue;
+            }
+            // Skip code blocks
+            if self.is_in_code_block(i, &code_blocks) {
+                continue;
+            }
+            // Code span detection (inline backticks)
+            let mut chars = line.chars().peekable();
+            let mut backtick_count = 0;
+            while let Some(c) = chars.next() {
+                if c == '`' {
+                    backtick_count += 1;
+                    while let Some('`') = chars.peek() {
+                        chars.next();
+                        backtick_count += 1;
                     }
-
-                    // Add both the original and unescaped forms to enable matching both
-                    let key = ref_text.to_lowercase();
-                    let range_entry = (i, end_line);
-
-                    if let Some(ranges) = definitions.get_mut(&key) {
-                        ranges.push(range_entry);
-                    } else {
-                        definitions.insert(key, vec![range_entry]);
-                    }
-
-                    // Also add the unescaped version for matching escaped references
-                    let unescaped_key = Self::unescape_reference(ref_text).to_lowercase();
-                    if unescaped_key != ref_text.to_lowercase() {
-                        if let Some(ranges) = definitions.get_mut(&unescaped_key) {
-                            // Only add if the range isn't already there
-                            if !ranges.contains(&range_entry) {
-                                ranges.push(range_entry);
+                    in_code_span = !in_code_span;
+                }
+            }
+            if in_code_span {
+                continue;
+            }
+            // Recursively extract all reference usages from this line
+            extract_references(line, &mut usages);
+        }
+        // Recursively mark as used any references that are referenced by other used references (nested references in definitions)
+        let definitions = self.find_definitions(content);
+        let mut all_usages = usages.clone();
+        let mut stack: Vec<String> = usages.iter().cloned().collect();
+        while let Some(used_id) = stack.pop() {
+            if let Some(ranges) = definitions.get(&used_id) {
+                for (start, end) in ranges {
+                    for line_idx in *start..=*end {
+                        if let Some(line) = lines.get(line_idx) {
+                            extract_references(line, &mut all_usages);
+                            // If new usages are found, add them to the stack
+                            for id in all_usages.iter() {
+                                if !stack.contains(id) && !usages.contains(id) {
+                                    stack.push(id.clone());
+                                }
                             }
-                        } else {
-                            definitions.insert(unescaped_key, vec![range_entry]);
                         }
                     }
                 }
             }
         }
-
-        definitions
+        all_usages
     }
 
     /// Compute a hash of the given content for caching purposes.
@@ -472,39 +348,22 @@ impl MD053LinkImageReferenceDefinitions {
     /// Note: References that are only used inside code blocks are still considered unused,
     /// as code blocks are treated as examples or documentation rather than actual content.
     fn get_unused_references(&self, content: &str) -> Vec<(String, usize, usize)> {
-        let (usages, _code_block_usages) = self.find_usages(content);
-        let cached_definitions = self.get_cached_definitions(content);
-        let code_blocks = self.find_code_blocks(content);
-
-        // Create a map to track which definition was used
-        let mut used_definitions = HashMap::new();
-
-        // Find which definitions are unused
-        cached_definitions
-            .into_iter()
-            .filter(|(key, start, end)| {
-                let original_key = key.clone();
-                let unescaped_key = Self::unescape_reference(key).to_lowercase();
-                let key_lower = key.to_lowercase();
-
-                // Check if the reference is used (either in its original or unescaped form)
-                // References used only in code blocks are considered unused
-                let is_used = usages.contains(key) || usages.contains(&unescaped_key);
-                let is_ignored = self.ignored_definitions.contains(&key_lower)
-                    || self.ignored_definitions.contains(&unescaped_key);
-                let is_in_code_block = self.is_inside_code_block(*start, *end, &code_blocks);
-
-                // Track which definition was used to avoid duplication in results
-                if is_used {
-                    used_definitions.insert(original_key.clone(), true);
+        let usages = self.find_usages(content);
+        let definitions = self.find_definitions(content);
+        let mut unused = Vec::new();
+        for (id, ranges) in definitions {
+            // Ignore if in ignored_definitions
+            if self.ignored_definitions.contains(&id) {
+                continue;
+            }
+            // If this id is not used anywhere, all its ranges are unused
+            if !usages.contains(&id) {
+                for (start, end) in ranges {
+                    unused.push((id.clone(), start, end));
                 }
-
-                !is_used
-                    && !is_ignored
-                    && !is_in_code_block
-                    && !used_definitions.contains_key(&original_key)
-            })
-            .collect::<Vec<_>>()
+            }
+        }
+        unused
     }
 
     // Get cached definitions for the given content.
@@ -512,7 +371,7 @@ impl MD053LinkImageReferenceDefinitions {
     /// This method uses a cache to store the definitions for each content hash.
     /// If the definitions for the given content are already cached, they are returned.
     /// Otherwise, the definitions are computed, cached, and then returned.
-    fn get_cached_definitions(&self, content: &str) -> Vec<(String, usize, usize)> {
+    fn get_cached_definitions(&self, content: &str) -> Vec<(String, usize, usize, usize)> {
         let hash = Self::content_hash(content);
 
         // First check if we already have this content cached
@@ -525,13 +384,11 @@ impl MD053LinkImageReferenceDefinitions {
         drop(cache);
 
         // Compute the definitions
-        let definitions: Vec<(String, usize, usize)> = self
+        let definitions: Vec<(String, usize, usize, usize)> = self
             .find_definitions(content)
             .into_iter()
-            .flat_map(|(s, e_vec)| {
-                e_vec
-                    .into_iter()
-                    .map(move |(start, end)| (s.clone(), start, end))
+            .flat_map(|(key, defs)| {
+                defs.into_iter().map(move |def| (key.clone(), def.0, def.1, def.1))
             })
             .collect();
 
@@ -585,7 +442,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         let mut warnings = Vec::new();
 
         // Create warnings for unused references
-        for (definition, start, _) in unused_refs {
+        for (definition, start, end) in unused_refs {
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 line: start + 1, // 1-indexed line numbers
@@ -612,11 +469,10 @@ impl Rule for MD053LinkImageReferenceDefinitions {
             return Ok(content.to_string());
         }
 
-        // Split the content into lines - directly get owned strings to avoid clone during push
-        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        // Split the content into lines
+        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
         // Create a set of line numbers to remove (unused references)
-        // Use a more efficient data structure for faster lookups
         let mut to_remove = std::collections::HashSet::with_capacity(unused_refs.len() * 2);
         for (_, start, end) in &unused_refs {
             for line in *start..=*end {
@@ -624,41 +480,17 @@ impl Rule for MD053LinkImageReferenceDefinitions {
             }
         }
 
-        // If there are many lines and few to remove, use this approach
-        if to_remove.len() < lines.len() / 10 {
-            // Build the result, skipping unused definitions
-            // Pre-allocate the result vector to the maximum expected size
-            let mut result = Vec::with_capacity(lines.len() - to_remove.len());
-            for (i, line) in lines.into_iter().enumerate() {
-                if !to_remove.contains(&i) {
-                    result.push(line);
-                }
+        // Build the result, skipping unused definitions
+        let mut result = Vec::with_capacity(lines.len() - to_remove.len());
+        for (i, line) in lines.into_iter().enumerate() {
+            if !to_remove.contains(&i) {
+                result.push(line);
             }
-
-            // Clean up formatting issues created by removals
-            self.clean_up_document_structure(&mut result);
-
-            // Join the lines with newlines - avoid empty check which is unnecessary
-            Ok(result.join("\n"))
-        } else {
-            // If there are many lines to remove, this alternative approach might be faster
-            let mut result: Vec<String> = lines
-                .into_iter()
-                .enumerate()
-                .filter_map(|(i, line)| {
-                    if !to_remove.contains(&i) {
-                        Some(line)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            // Clean up formatting issues created by removals
-            self.clean_up_document_structure(&mut result);
-
-            // Join the lines with newlines
-            Ok(result.join("\n"))
         }
+
+        // Clean up formatting issues created by removals
+        self.clean_up_document_structure(&mut result);
+
+        Ok(result.join("\n"))
     }
 }

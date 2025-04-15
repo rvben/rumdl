@@ -341,9 +341,8 @@ fn test_nested_references() {
     let rule = MD053LinkImageReferenceDefinitions::new(vec![]);
     let content = "[![alt][img]][link]\n\n[img]: /path/to/img.png\n[link]: http://example.com";
     let result = rule.check(content).unwrap();
-    // Current implementation doesn't properly detect nested references
-    // This test documents the current behavior
-    assert_eq!(result.len(), 1); // 'link' reference is not detected as used in the current implementation
+    // Both 'img' and 'link' are used according to CommonMark spec
+    assert_eq!(result.len(), 0); // No unused references
 }
 
 #[test]
@@ -376,9 +375,8 @@ fn test_fix_nested_references() {
     let rule = MD053LinkImageReferenceDefinitions::new(vec![]);
     let content = "[![alt][img1]][link1]\n\n[img1]: /path/to/img1.png\n[img2]: /path/to/img2.png\n[link1]: http://example1.com";
     let fixed = rule.fix(content).unwrap();
-    // Current implementation doesn't properly detect nested references
-    // Since 'link1' is not detected as used, it's removed
-    assert_eq!(fixed, "[![alt][img1]][link1]\n\n[img1]: /path/to/img1.png");
+    // Both 'img1' and 'link1' are used according to CommonMark spec
+    assert_eq!(fixed, "[![alt][img1]][link1]\n\n[img1]: /path/to/img1.png\n[link1]: http://example1.com");
 }
 
 #[test]

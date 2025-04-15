@@ -178,57 +178,9 @@ impl Rule for MD033NoInlineHtml {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        // Early return for empty content
-        if content.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Very fast early return - no angle brackets, no HTML
-        if !content.contains('<') {
-            return Ok(Vec::new());
-        }
-
-        // Quick check for HTML tag patterns before doing detailed processing
-        if !HTML_TAG_QUICK_CHECK.is_match(content) {
-            return Ok(Vec::new());
-        }
-
-        let mut warnings = Vec::new();
-        let line_index = LineIndex::new(content.to_string());
-
-        // Pre-compute code blocks for fast lookup
-        let code_block_lines = self.detect_code_blocks(content);
-
-        // Use iterators for efficient line processing
-        for (i, line) in content.lines().enumerate() {
-            // Skip lines in code blocks
-            if code_block_lines.contains(&i) {
-                continue;
-            }
-
-            // Use the optimized HTML_TAG_PATTERN
-            for tag in HTML_TAG_PATTERN.find_iter(line) {
-                let tag_str = tag.as_str();
-                let tag_start = tag.start();
-
-                // Skip allowed tags and tags in markdown links
-                if self.is_tag_allowed(tag_str) || self.is_in_markdown_link(line, tag_start) {
-                    continue;
-                }
-
-                // Add a warning for disallowed inline HTML
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: i + 1, // 1-indexed line numbers
-                    column: line_index.line_col_to_byte_range(i + 1, tag_start + 1).start,
-                    message: format!("Inline HTML is not allowed: {}", tag_str),
-                    severity: Severity::Warning,
-                    fix: None,
-                });
-            }
-        }
-
-        Ok(warnings)
+        // Use DocumentStructure for all code block and code span logic
+        let structure = DocumentStructure::new(content);
+        self.check_with_structure(content, &structure)
     }
 
     /// Optimized check using document structure
