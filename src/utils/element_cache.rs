@@ -1,7 +1,6 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::cell::RefCell;
-use std::path::Path;
 
 lazy_static! {
     // Efficient regex patterns
@@ -442,7 +441,7 @@ mod tests {
         let content = "# Heading\n\n- First item\n  - Nested item\n- Second item\n\n1. Ordered item\n   1. Nested ordered\n";
         let cache = ElementCache::new(content);
         
-        assert_eq!(cache.list_items.len(), 4);
+        assert_eq!(cache.list_items.len(), 5);
         
         // Check the first item
         assert_eq!(cache.list_items[0].line_number, 3);
@@ -463,6 +462,11 @@ mod tests {
         assert_eq!(cache.list_items[3].line_number, 7);
         assert_eq!(cache.list_items[3].marker, "1.");
         assert_eq!(cache.list_items[3].nesting_level, 0);
+        
+        // Check nested ordered list item
+        assert_eq!(cache.list_items[4].line_number, 8);
+        assert_eq!(cache.list_items[4].marker, "1.");
+        assert_eq!(cache.list_items[4].nesting_level, 1);
     }
     
     #[test]

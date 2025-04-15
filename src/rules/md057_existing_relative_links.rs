@@ -55,7 +55,7 @@ lazy_static! {
 
     /// Regex to detect media file types
     static ref MEDIA_FILE_REGEX: Regex =
-        Regex::new(r"\.(jpg|jpeg|png|gif|bmp|svg|webp|tiff|mp3|mp4|avi|mov|webm|wav|ogg)$").unwrap();
+        Regex::new(r"\.(jpg|jpeg|png|gif|bmp|svg|webp|tiff|mp3|mp4|avi|mov|webm|wav|ogg|pdf)$").unwrap();
 
     /// Regex to detect fragment-only links
     static ref FRAGMENT_ONLY_REGEX: Regex =
@@ -203,6 +203,7 @@ impl MD057ExistingRelativeLinks {
     }
     
     /// Extract a URL from a Markdown link segment
+    #[allow(dead_code)]
     fn extract_url_from_link<'a>(&self, link_text: &'a str) -> Option<(&'a str, usize)> {
         // Find the URL part using regex
         URL_EXTRACT_REGEX.captures(link_text).and_then(move |caps| {

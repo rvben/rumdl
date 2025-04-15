@@ -21,6 +21,7 @@ impl MD007ULIndent {
         Self { indent }
     }
 
+    #[allow(dead_code)]
     fn parse_list_item(line: &str) -> Option<(usize, char, usize)> {
         lazy_static! {
             static ref LIST_ITEM_RE: Regex = Regex::new(r"^(\s*)([-*+])\s+(.*)$").unwrap();
@@ -40,6 +41,7 @@ impl MD007ULIndent {
         })
     }
 
+    #[allow(dead_code)]
     fn is_in_code_block(content: &str, line_idx: usize) -> bool {
         lazy_static! {
             static ref CODE_BLOCK_MARKER: Regex = Regex::new(r"^(```|~~~)").unwrap();
