@@ -1,4 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::document_structure::DocumentStructure;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -46,19 +47,6 @@ impl MD013LineLength {
         }
     }
 
-    fn is_in_code_block(lines: &[&str], current_line: usize) -> bool {
-        let mut fence_count = 0;
-        for (i, line) in lines.iter().take(current_line + 1).enumerate() {
-            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
-                fence_count += 1;
-            }
-            if i == current_line && fence_count % 2 == 1 {
-                return true;
-            }
-        }
-        false
-    }
-
     fn is_in_table(lines: &[&str], current_line: usize) -> bool {
         // Check if current line is part of a table
         let current = lines[current_line].trim();
@@ -79,35 +67,7 @@ impl MD013LineLength {
         false
     }
 
-    fn is_heading(&self, lines: &[&str], current_line: usize) -> bool {
-        let line = lines[current_line];
-
-        // ATX headings
-        if line.trim_start().starts_with('#') {
-            return true;
-        }
-
-        // Setext headings (check for underline on next line)
-        if current_line + 1 < lines.len() {
-            let next = lines[current_line + 1].trim();
-            if !next.is_empty() && next.chars().all(|c| c == '=' || c == '-') {
-                return true;
-            }
-        }
-
-        // Check if current line is a setext underline
-        if !line.trim().is_empty()
-            && line.trim().chars().all(|c| c == '=' || c == '-')
-            && current_line > 0
-            && !lines[current_line - 1].trim().is_empty()
-        {
-            return true;
-        }
-
-        false
-    }
-
-    fn should_ignore_line(&self, line: &str, lines: &[&str], current_line: usize) -> bool {
+    fn should_ignore_line(&self, line: &str, lines: &[&str], current_line: usize, structure: &DocumentStructure) -> bool {
         if self.strict {
             return false;
         }
@@ -128,7 +88,7 @@ impl MD013LineLength {
         }
 
         // Code blocks with long strings
-        if Self::is_in_code_block(lines, current_line)
+        if structure.is_in_code_block(current_line + 1)
             && !line.trim().is_empty()
             && !line.contains(' ')
             && !line.contains('\t')
@@ -152,14 +112,19 @@ impl Rule for MD013LineLength {
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
+        let structure = DocumentStructure::new(content);
 
         for (line_num, &line) in lines.iter().enumerate() {
+            // Skip setext underline lines (=== or ---)
+            if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
+                continue;
+            }
             if line.len() > self.line_length {
                 // Check if line should be skipped based on configuration
-                let skip = (!self.code_blocks && Self::is_in_code_block(&lines, line_num))
+                let skip = (!self.code_blocks && structure.is_in_code_block(line_num + 1))
                     || (!self.tables && Self::is_in_table(&lines, line_num))
-                    || (!self.headings && self.is_heading(&lines, line_num))
-                    || self.should_ignore_line(line, &lines, line_num);
+                    || (!self.headings && structure.heading_lines.contains(&(line_num + 1)))
+                    || self.should_ignore_line(line, &lines, line_num, &structure);
 
                 if !skip {
                     warnings.push(LintWarning {
