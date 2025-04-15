@@ -25,78 +25,8 @@ lazy_static! {
 pub struct MD034NoBareUrls;
 
 impl MD034NoBareUrls {
-    // Method to quickly check if the rule needs to run at all
     pub fn should_skip(&self, content: &str) -> bool {
         !early_returns::has_urls(content)
-    }
-
-    // Optimized function to detect code blocks with cached results
-    #[inline]
-    fn is_in_code_block(&self, line_idx: usize, code_blocks: &[(usize, usize)]) -> bool {
-        // Binary search for improved performance with large documents
-        let mut low = 0;
-        let mut high = code_blocks.len();
-
-        while low < high {
-            let mid = low + (high - low) / 2;
-            let (start, end) = code_blocks[mid];
-
-            if line_idx < start {
-                high = mid;
-            } else if line_idx > end {
-                low = mid + 1;
-            } else {
-                return true;
-            }
-        }
-        false
-    }
-
-    // Fast binary search to check if a position is within any code span
-    #[inline]
-    fn is_in_code_span(&self, pos: usize, spans: &[(usize, usize)]) -> bool {
-        let mut low = 0;
-        let mut high = spans.len();
-
-        while low < high {
-            let mid = low + (high - low) / 2;
-            let (start, end) = spans[mid];
-
-            if pos < start {
-                high = mid;
-            } else if pos > end {
-                low = mid + 1;
-            } else {
-                return true;
-            }
-        }
-        false
-    }
-
-    // Compute inline code spans for a line
-    #[inline]
-    fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
-        let mut spans = Vec::new();
-        let mut in_code = false;
-        let mut start = 0;
-
-        // Fast path - no backticks
-        if !line.contains('`') {
-            return spans;
-        }
-
-        for (i, c) in line.char_indices() {
-            if c == '`' {
-                if in_code {
-                    spans.push((start, i));
-                    in_code = false;
-                } else {
-                    start = i;
-                    in_code = true;
-                }
-            }
-        }
-        spans
     }
 
     // Quick check if a URL is already within a markdown link
@@ -124,12 +54,12 @@ impl MD034NoBareUrls {
         false
     }
 
-    // Find all bare URLs in a line
-    fn find_bare_urls(
+    // Find all bare URLs in a line, using DocumentStructure for code span detection
+    fn find_bare_urls_with_structure(
         &self,
         line: &str,
         line_idx: usize,
-        spans: &[(usize, usize)],
+        structure: &crate::utils::document_structure::DocumentStructure,
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
 
@@ -143,8 +73,8 @@ impl MD034NoBareUrls {
             let url_end = url_match.end();
             let url = url_match.as_str();
 
-            // Skip if this URL is within a code span
-            if self.is_in_code_span(url_start, spans) {
+            // Skip if this URL is within a code span (using DocumentStructure)
+            if structure.is_in_code_span(line_idx + 1, url_start + 1) {
                 continue;
             }
 
@@ -169,36 +99,21 @@ impl MD034NoBareUrls {
         warnings
     }
 
-    // Detect code blocks in content
-    fn detect_code_blocks(&self, content: &str) -> Vec<(usize, usize)> {
-        let lines: Vec<&str> = content.split('\n').collect();
-        let mut code_blocks = Vec::new();
-        let mut in_code_block = false;
-        let mut start_line = 0;
-        let mut fence_char = "";
+    // New: check_with_structure using DocumentStructure for code block and code span detection
+    pub fn check_with_structure(&self, content: &str, structure: &crate::utils::document_structure::DocumentStructure) -> LintResult {
+        if self.should_skip(content) {
+            return Ok(vec![]);
+        }
 
-        for (i, line) in lines.iter().enumerate() {
-            if let Some(cap) = CODE_FENCE_RE.captures(line) {
-                let fence = cap.get(1).unwrap().as_str();
-                if !in_code_block {
-                    in_code_block = true;
-                    start_line = i;
-                    fence_char = fence;
-                } else if fence.starts_with(fence_char.chars().next().unwrap())
-                    && fence.len() >= fence_char.len()
-                {
-                    code_blocks.push((start_line, i));
-                    in_code_block = false;
-                }
+        let mut warnings = Vec::new();
+        for (i, line) in content.lines().enumerate() {
+            // Skip lines in code blocks
+            if structure.is_in_code_block(i + 1) {
+                continue;
             }
+            warnings.extend(self.find_bare_urls_with_structure(line, i, structure));
         }
-
-        // Handle unclosed code block
-        if in_code_block {
-            code_blocks.push((start_line, lines.len() - 1));
-        }
-
-        code_blocks
+        Ok(warnings)
     }
 }
 
@@ -212,40 +127,9 @@ impl Rule for MD034NoBareUrls {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        // Fast path - if content doesn't contain URL schemes, return empty result
-        if self.should_skip(content) {
-            return Ok(Vec::new());
-        }
-
-        let code_blocks = self.detect_code_blocks(content);
-        let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.split('\n').collect();
-
-        for (i, line) in lines.iter().enumerate() {
-            // Skip lines in code blocks
-            if self.is_in_code_block(i, &code_blocks) {
-                continue;
-            }
-
-            // Skip HTML blocks - simplified detection
-            if line.trim_start().starts_with('<') && line.trim_end().ends_with('>') {
-                continue;
-            }
-
-            // Skip front matter
-            if (i == 0 && *line == "---") || (i == 0 && *line == "+++") {
-                continue;
-            }
-
-            // Compute code spans for this line
-            let spans = self.compute_inline_code_spans(line);
-
-            // Find bare URLs in this line
-            let line_warnings = self.find_bare_urls(line, i, &spans);
-            warnings.extend(line_warnings);
-        }
-
-        Ok(warnings)
+        // Use DocumentStructure for all code block and code span logic
+        let structure = crate::utils::document_structure::DocumentStructure::new(content);
+        self.check_with_structure(content, &structure)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
@@ -254,13 +138,13 @@ impl Rule for MD034NoBareUrls {
             return Ok(content.to_string());
         }
 
-        let code_blocks = self.detect_code_blocks(content);
+        let structure = crate::utils::document_structure::DocumentStructure::new(content);
         let mut result = String::with_capacity(content.len() + 100);
         let lines: Vec<&str> = content.split('\n').collect();
 
         for (i, line) in lines.iter().enumerate() {
             // Skip processing lines in code blocks
-            if self.is_in_code_block(i, &code_blocks) {
+            if structure.is_in_code_block(i + 1) {
                 result.push_str(line);
                 if i < lines.len() - 1 {
                     result.push('\n');
@@ -280,10 +164,7 @@ impl Rule for MD034NoBareUrls {
                 continue;
             }
 
-            // Compute code spans
-            let spans = self.compute_inline_code_spans(line);
-
-            // Find bare URLs and fix them
+            // Find bare URLs and fix them using DocumentStructure for code span detection
             let mut last_end = 0;
             let mut has_url = false;
 
@@ -293,7 +174,7 @@ impl Rule for MD034NoBareUrls {
                 let url = url_match.as_str();
 
                 // Skip if URL is in a code span or already in a link
-                if self.is_in_code_span(url_start, &spans)
+                if structure.is_in_code_span(i + 1, url_start + 1)
                     || self.is_url_in_link(line, url_start, url_end)
                 {
                     continue;
@@ -350,19 +231,5 @@ mod tests {
     fn test_url_quick_check() {
         assert!(URL_QUICK_CHECK.is_match("This is a URL: https://example.com"));
         assert!(!URL_QUICK_CHECK.is_match("This has no URL"));
-    }
-
-    #[test]
-    fn test_is_in_code_span() {
-        let rule = MD034NoBareUrls;
-        let spans = vec![(5, 10), (15, 20), (25, 30)];
-
-        assert!(rule.is_in_code_span(7, &spans));
-        assert!(rule.is_in_code_span(5, &spans));
-        assert!(rule.is_in_code_span(10, &spans));
-        assert!(rule.is_in_code_span(15, &spans));
-        assert!(rule.is_in_code_span(20, &spans));
-        assert!(!rule.is_in_code_span(12, &spans));
-        assert!(!rule.is_in_code_span(31, &spans));
     }
 }
