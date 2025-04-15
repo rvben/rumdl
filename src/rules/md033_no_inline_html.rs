@@ -92,37 +92,6 @@ impl MD033NoInlineHtml {
         code_block_lines
     }
 
-    // Optimized code span detection using direct string scanning
-    #[inline]
-    fn is_in_code_span(&self, line: &str, position: usize) -> bool {
-        let mut in_code_span = false;
-        let mut code_start = 0;
-
-        // Fast linear scan which avoids regex overhead
-        for (pos, c) in line.char_indices() {
-            if c == *BACKTICK {
-                if !in_code_span {
-                    in_code_span = true;
-                    code_start = pos;
-                } else {
-                    // Found end of code span, check if position is within
-                    if position >= code_start && position <= pos {
-                        return true;
-                    }
-                    in_code_span = false;
-                }
-            }
-
-            // If we've passed the position and not in a code span, we can return early
-            if pos > position && !in_code_span {
-                return false;
-            }
-        }
-
-        // Check if position is in an unclosed code span
-        in_code_span && position >= code_start
-    }
-
     // Efficient check for allowed tags
     #[inline]
     fn is_tag_allowed(&self, tag: &str) -> bool {

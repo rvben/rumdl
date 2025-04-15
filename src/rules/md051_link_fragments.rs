@@ -1,6 +1,6 @@
-use crate::utils::range_utils::LineIndex;
+use crate::utils::document_structure::DocumentStructure;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -41,36 +41,6 @@ impl Default for MD051LinkFragments {
 impl MD051LinkFragments {
     pub fn new() -> Self {
         Self
-    }
-
-    /// Detect inline code spans in a line and return their ranges
-    fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
-        if !line.contains('`') {
-            return Vec::new();
-        }
-
-        let mut spans = Vec::new();
-        let mut in_code = false;
-        let mut code_start = 0;
-
-        for (i, c) in line.chars().enumerate() {
-            if c == '`' {
-                if !in_code {
-                    code_start = i;
-                    in_code = true;
-                } else {
-                    spans.push((code_start, i + 1)); // Include the closing backtick
-                    in_code = false;
-                }
-            }
-        }
-
-        spans
-    }
-
-    /// Check if a position is within an inline code span
-    fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
-        spans.iter().any(|&(start, end)| pos >= start && pos < end)
     }
 
     fn extract_headings(&self, content: &str) -> HashSet<String> {
@@ -209,27 +179,12 @@ impl Rule for MD051LinkFragments {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let line_index = LineIndex::new(content.to_string());
+        let structure = DocumentStructure::new(content);
         let mut warnings = Vec::new();
         let headings = self.extract_headings(content);
-        let mut in_code_block = false;
-        let mut code_fence_marker = String::new();
         let mut in_toc_section = false;
 
         for (line_num, line) in content.lines().enumerate() {
-            // Handle code block boundaries
-            if let Some(cap) = CODE_FENCE_REGEX.captures(line) {
-                let marker = cap[0].to_string();
-                if !in_code_block {
-                    in_code_block = true;
-                    code_fence_marker = marker;
-                } else if line.trim().starts_with(&code_fence_marker) {
-                    in_code_block = false;
-                    code_fence_marker.clear();
-                }
-                continue;
-            }
-
             // Check if we're entering a TOC section
             if TOC_SECTION_START.is_match(line) {
                 in_toc_section = true;
@@ -242,143 +197,51 @@ impl Rule for MD051LinkFragments {
             }
 
             // Skip lines in code blocks or TOC section
-            if in_code_block || in_toc_section {
+            if structure.is_in_code_block(line_num + 1) || in_toc_section {
                 continue;
             }
 
-            // Detect inline code spans in this line
-            let inline_code_spans = self.compute_inline_code_spans(line);
+            // Only check for links if line contains a link
+            if !line.contains('[') || !line.contains(')') {
+                continue;
+            }
 
-            // Check for invalid link fragments
-            if let Ok(captures) = LINK_REGEX
-                .captures_iter(line)
-                .collect::<Result<Vec<_>, _>>()
-            {
-                for cap in captures {
-                    // Skip links inside inline code spans
-                    if let Some(full_match) = cap.get(0) {
-                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
-                            continue;
-                        }
+            // Use regex to find all links with fragments
+            if let Ok(caps) = LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+                for cap in caps {
+                    let full_match = cap.get(0).unwrap();
+                    let url = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+                    let fragment = cap.get(3).map(|m| m.as_str()).unwrap_or("");
 
-                        let url = cap.get(2).map_or("", |m| m.as_str());
-                        let fragment = cap.get(3).map_or("", |m| m.as_str());
-                        let text = cap.get(1).map_or("", |m| m.as_str());
+                    // Only check internal links (not external URLs)
+                    if self.is_external_url(url) {
+                        continue;
+                    }
 
-                        // Skip validation for external URLs
-                        if !url.is_empty() && self.is_external_url(url) {
-                            continue;
-                        }
+                    // Skip if the link is inside a code span
+                    if structure.is_in_code_span(line_num + 1, full_match.start() + 1) {
+                        continue;
+                    }
 
-                        // Check if the fragment exists (case-insensitive)
-                        if !headings.contains(&fragment.to_lowercase()) {
-                            // Create the fix, accounting for shortcut links
-                            let replacement = if url.is_empty() {
-                                format!("[{}]", text)
-                            } else {
-                                format!("[{}]({})", text, url)
-                            };
-
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
-                                line: line_num + 1,
-                                column: full_match.start() + 1,
-                                message: format!("Link fragment '{}' does not exist", fragment),
-                                severity: Severity::Warning,
-                                fix: Some(Fix {
-                                    range: line_index.line_col_to_byte_range(
-                                        line_num + 1,
-                                        full_match.start() + 1,
-                                    ),
-                                    replacement,
-                                }),
-                            });
-                        }
+                    // Check if the fragment exists in headings
+                    if !headings.contains(&fragment.to_lowercase()) {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: line_num + 1,
+                            column: full_match.start() + 1,
+                            message: format!("Link fragment '#{}' does not exist in document headings.", fragment),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
                     }
                 }
             }
         }
-
         Ok(warnings)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = String::new();
-        let headings = self.extract_headings(content);
-        let mut in_code_block = false;
-        let mut code_fence_marker = String::new();
-
-        for line in content.lines() {
-            // Handle code block boundaries
-            if let Some(cap) = CODE_FENCE_REGEX.captures(line) {
-                let marker = cap[0].to_string();
-                if !in_code_block {
-                    in_code_block = true;
-                    code_fence_marker = marker;
-                } else if line.trim().starts_with(&code_fence_marker) {
-                    in_code_block = false;
-                    code_fence_marker.clear();
-                }
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-
-            // Lines in code blocks are left unchanged
-            if in_code_block {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-
-            // Detect inline code spans in this line
-            let inline_code_spans = self.compute_inline_code_spans(line);
-
-            // Process links in normal text
-            let mut processed_line = line.to_string();
-            if let Ok(matches) = LINK_REGEX
-                .captures_iter(line)
-                .collect::<Result<Vec<_>, _>>()
-            {
-                for cap in matches {
-                    if let Some(full_match) = cap.get(0) {
-                        // Skip links inside inline code spans
-                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
-                            continue;
-                        }
-
-                        let url = cap.get(2).map_or("", |m| m.as_str());
-                        let fragment = cap.get(3).map_or("", |m| m.as_str());
-                        let text = cap.get(1).map_or("", |m| m.as_str());
-
-                        // Skip validation for external URLs
-                        if !url.is_empty() && self.is_external_url(url) {
-                            continue;
-                        }
-
-                        // Check if the fragment exists (case-insensitive)
-                        if !headings.contains(&fragment.to_lowercase()) {
-                            let replacement = if url.is_empty() {
-                                format!("[{}]", text)
-                            } else {
-                                format!("[{}]({})", text, url)
-                            };
-                            processed_line =
-                                processed_line.replace(full_match.as_str(), &replacement);
-                        }
-                    }
-                }
-            }
-
-            result.push_str(&processed_line);
-            result.push('\n');
-        }
-
-        // Remove the trailing newline if the original content doesn't end with one
-        if !content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
-        }
-
-        Ok(result)
+        // No automatic fix for missing fragments, just return content as-is
+        Ok(content.to_string())
     }
 }

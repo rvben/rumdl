@@ -1,7 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::HashSet;
+use crate::utils::document_structure::DocumentStructure;
 
 lazy_static! {
     // Updated regex patterns that work with Unicode characters
@@ -113,140 +113,6 @@ impl MD054LinkImageStyle {
             _ => false,
         }
     }
-
-    /// Determine the style of a link using regex to safely handle Unicode
-    fn determine_link_style(&self, line: &str, start_idx: usize) -> Option<(String, usize, usize)> {
-        // Safe substring with Unicode awareness
-        let safe_substring = if start_idx < line.len() {
-            &line[start_idx..]
-        } else {
-            ""
-        };
-
-        if safe_substring.is_empty() {
-            return None;
-        }
-
-        // Check if this is a reference definition, not a link
-        if REFERENCE_DEF_RE.is_match(safe_substring) {
-            return None;
-        }
-
-        // Autolink: <https://example.com>
-        if let Some(cap) = AUTOLINK_RE.captures(safe_substring) {
-            let url = cap.get(1).unwrap().as_str();
-            if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("www.")
-            {
-                let _match_text = cap.get(0).unwrap().as_str();
-                let match_start = start_idx + cap.get(0).unwrap().start();
-                let match_end = start_idx + cap.get(0).unwrap().end();
-                return Some(("autolink".to_string(), match_start, match_end));
-            }
-        }
-
-        // Inline: [text](url)
-        if let Some(cap) = INLINE_RE.captures(safe_substring) {
-            let _match_text = cap.get(0).unwrap().as_str();
-            let match_start = start_idx + cap.get(0).unwrap().start();
-            let match_end = start_idx + cap.get(0).unwrap().end();
-
-            // Check if it's a URL inline (where text and URL are the same)
-            let text = cap.get(1).unwrap().as_str();
-            let url = cap.get(2).unwrap().as_str();
-            if text == url {
-                return Some(("url_inline".to_string(), match_start, match_end));
-            }
-
-            return Some(("inline".to_string(), match_start, match_end));
-        }
-
-        // Full: [text][reference]
-        if let Some(cap) = FULL_RE.captures(safe_substring) {
-            let _match_text = cap.get(0).unwrap().as_str();
-            let match_start = start_idx + cap.get(0).unwrap().start();
-            let match_end = start_idx + cap.get(0).unwrap().end();
-            return Some(("full".to_string(), match_start, match_end));
-        }
-
-        // Collapsed: [text][]
-        if let Some(cap) = COLLAPSED_RE.captures(safe_substring) {
-            let _match_text = cap.get(0).unwrap().as_str();
-            let match_start = start_idx + cap.get(0).unwrap().start();
-            let match_end = start_idx + cap.get(0).unwrap().end();
-            return Some(("collapsed".to_string(), match_start, match_end));
-        }
-
-        // Shortcut: [text]
-        if let Some(cap) = SHORTCUT_RE.captures(safe_substring) {
-            let _match_text = cap.get(0).unwrap().as_str();
-            let match_start = start_idx + cap.get(0).unwrap().start();
-            let match_end = start_idx + cap.get(0).unwrap().end();
-
-            // Make sure it's not the start of an inline, full, or collapsed reference
-            if safe_substring.len() > _match_text.len() {
-                let next_char = &safe_substring[_match_text.len()..].chars().next().unwrap();
-                if *next_char == '(' || *next_char == '[' {
-                    return None;
-                }
-            }
-
-            return Some(("shortcut".to_string(), match_start, match_end));
-        }
-
-        None
-    }
-
-    /// Check if a position is inside a code block or code span
-    fn is_in_code(&self, lines: &[&str], line_num: usize, col: usize) -> bool {
-        // Check if in code block
-        let mut in_code_block = false;
-        let mut code_fence = "";
-
-        for (i, line) in lines.iter().enumerate().take(line_num + 1) {
-            let trimmed = line.trim();
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                if !in_code_block {
-                    in_code_block = true;
-                    code_fence = if trimmed.starts_with("```") {
-                        "```"
-                    } else {
-                        "~~~"
-                    };
-                } else if trimmed.starts_with(code_fence) {
-                    in_code_block = false;
-                }
-            }
-
-            if i == line_num && in_code_block {
-                return true;
-            }
-        }
-
-        // Check if in inline code span
-        if line_num < lines.len() {
-            let line = lines[line_num];
-            let mut in_code_span = false;
-            let mut last_backtick_pos = 0;
-
-            let char_indices: Vec<(usize, char)> = line.char_indices().collect();
-            for (i, (byte_pos, c)) in char_indices.iter().enumerate() {
-                if *c == '`' {
-                    if !in_code_span {
-                        in_code_span = true;
-                        last_backtick_pos = i;
-                    } else {
-                        in_code_span = false;
-                    }
-                }
-
-                if *byte_pos == col && in_code_span && i > last_backtick_pos {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
 }
 
 impl Rule for MD054LinkImageStyle {
@@ -259,88 +125,150 @@ impl Rule for MD054LinkImageStyle {
     }
 
     fn check(&self, content: &str) -> LintResult {
+        let structure = DocumentStructure::new(content);
         let mut warnings = Vec::new();
-        let mut found_styles = HashSet::new();
         let lines: Vec<&str> = content.lines().collect();
 
-        // First pass: determine which styles are used
         for (line_num, line) in lines.iter().enumerate() {
-            let mut start_idx = 0;
+            if structure.is_in_code_block(line_num + 1) {
+                continue;
+            }
+            // Skip reference definition lines
+            if REFERENCE_DEF_RE.is_match(line) {
+                continue;
+            }
+            let mut idx = 0;
+            let line_chars: Vec<char> = line.chars().collect();
+            while idx < line_chars.len() {
+                let byte_idx = line_chars[..idx].iter().map(|c| c.len_utf8()).sum::<usize>();
+                let slice = &line[byte_idx..];
 
-            // Use a safer approach to iterate through the line
-            while start_idx < line.len() {
-                if let Some((style, match_start, match_end)) =
-                    self.determine_link_style(line, start_idx)
-                {
-                    if !self.is_in_code(&lines, line_num, match_start) {
-                        found_styles.insert(style.clone());
+                // Strict priority: full -> collapsed -> inline/url_inline -> autolink -> shortcut
+                // 1. Full reference
+                if let Some(cap) = FULL_RE.captures(slice) {
+                    let m = cap.get(0).unwrap();
+                    let match_start_byte = byte_idx + m.start();
+                    let match_end_byte = byte_idx + m.end();
+                    let match_start_char = line[..match_start_byte].chars().count();
+                    let match_end_char = line[..match_end_byte].chars().count();
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) {
+                        if !self.full {
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                line: line_num + 1,
+                                column: match_start_char + 1,
+                                message: "Link/image style 'full' is not consistent with document".to_string(),
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
                     }
-                    // Ensure we're making progress to avoid infinite loops
-                    if match_end > start_idx {
-                        start_idx = match_end;
-                    } else {
-                        start_idx += 1;
-                    }
-                } else {
-                    // Make sure we advance by at least one character
-                    let next_char_width =
-                        line[start_idx..].chars().next().map_or(1, |c| c.len_utf8());
-                    start_idx += next_char_width;
+                    idx = match_end_char;
+                    continue;
                 }
+                // 2. Collapsed reference
+                if let Some(cap) = COLLAPSED_RE.captures(slice) {
+                    let m = cap.get(0).unwrap();
+                    let match_start_byte = byte_idx + m.start();
+                    let match_end_byte = byte_idx + m.end();
+                    let match_start_char = line[..match_start_byte].chars().count();
+                    let match_end_char = line[..match_end_byte].chars().count();
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) {
+                        if !self.collapsed {
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                line: line_num + 1,
+                                column: match_start_char + 1,
+                                message: "Link/image style 'collapsed' is not consistent with document".to_string(),
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
+                    }
+                    idx = match_end_char;
+                    continue;
+                }
+                // 3. Inline/url_inline
+                if let Some(cap) = INLINE_RE.captures(slice) {
+                    let m = cap.get(0).unwrap();
+                    let match_start_byte = byte_idx + m.start();
+                    let match_end_byte = byte_idx + m.end();
+                    let match_start_char = line[..match_start_byte].chars().count();
+                    let match_end_char = line[..match_end_byte].chars().count();
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) {
+                        let text = cap.get(1).unwrap().as_str();
+                        let url = cap.get(2).unwrap().as_str();
+                        let style = if text == url { "url_inline" } else { "inline" };
+                        if !self.is_style_allowed(style) {
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                line: line_num + 1,
+                                column: match_start_char + 1,
+                                message: format!("Link/image style '{}' is not consistent with document", style),
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
+                    }
+                    idx = match_end_char;
+                    continue;
+                }
+                // 4. Autolink
+                if let Some(cap) = AUTOLINK_RE.captures(slice) {
+                    let m = cap.get(0).unwrap();
+                    let match_start_byte = byte_idx + m.start();
+                    let match_end_byte = byte_idx + m.end();
+                    let match_start_char = line[..match_start_byte].chars().count();
+                    let match_end_char = line[..match_end_byte].chars().count();
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) {
+                        if !self.autolink {
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                line: line_num + 1,
+                                column: match_start_char + 1,
+                                message: "Link/image style 'autolink' is not consistent with document".to_string(),
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
+                    }
+                    idx = match_end_char;
+                    continue;
+                }
+                // 5. Shortcut (only if not followed by '[', '[]', or '][')
+                if let Some(cap) = SHORTCUT_RE.captures(slice) {
+                    let m = cap.get(0).unwrap();
+                    let match_start_byte = byte_idx + m.start();
+                    let match_end_byte = byte_idx + m.end();
+                    let match_start_char = line[..match_start_byte].chars().count();
+                    let match_end_char = line[..match_end_byte].chars().count();
+                    let after = &line[match_end_byte..];
+                    // Only match as shortcut if not followed by '[', '[]', or ']['
+                    if after.starts_with('[')
+                        || after.starts_with("[]")
+                        || after.starts_with("][") {
+                        idx += 1;
+                        continue;
+                    }
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) {
+                        if !self.shortcut {
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                line: line_num + 1,
+                                column: match_start_char + 1,
+                                message: "Link/image style 'shortcut' is not consistent with document".to_string(),
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
+                    }
+                    idx = match_end_char;
+                    continue;
+                }
+                // No match, advance by 1
+                idx += 1;
             }
         }
-
-        // Determine which styles are allowed based on configuration and found styles
-        let allowed_styles: Vec<String> = found_styles
-            .iter()
-            .filter(|style| self.is_style_allowed(style))
-            .cloned()
-            .collect();
-
-        // If all found styles are allowed, no warnings
-        if allowed_styles.len() == found_styles.len() {
-            return Ok(warnings);
-        }
-
-        // Second pass: flag links that don't use the allowed styles
-        for (line_num, line) in lines.iter().enumerate() {
-            let mut start_idx = 0;
-
-            // Use a safer approach to iterate through the line
-            while start_idx < line.len() {
-                if let Some((style, match_start, match_end)) =
-                    self.determine_link_style(line, start_idx)
-                {
-                    if !self.is_in_code(&lines, line_num, match_start)
-                        && !allowed_styles.contains(&style)
-                    {
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num + 1,
-                            column: match_start + 1,
-                            message: format!(
-                                "Link/image style '{}' is not consistent with document",
-                                style
-                            ),
-                            severity: Severity::Warning,
-                            fix: None, // Automatic fixing is complex, so we leave it manual for now
-                        });
-                    }
-                    // Ensure we're making progress to avoid infinite loops
-                    if match_end > start_idx {
-                        start_idx = match_end;
-                    } else {
-                        start_idx += 1;
-                    }
-                } else {
-                    // Make sure we advance by at least one character
-                    let next_char_width =
-                        line[start_idx..].chars().next().map_or(1, |c| c.len_utf8());
-                    start_idx += next_char_width;
-                }
-            }
-        }
-
         Ok(warnings)
     }
 

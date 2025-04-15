@@ -1,13 +1,9 @@
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::rc::Rc;
-
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use crate::utils::document_structure::DocumentStructure;
+use crate::rule::{Rule, LintResult, LintWarning, Severity, LintError};
 
 lazy_static! {
     // Link reference format: [text][reference]
@@ -34,16 +30,6 @@ lazy_static! {
     // Code block regex
     static ref CODE_BLOCK_START_REGEX: Regex = Regex::new(r"^```").unwrap();
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
-}
-
-type DefinitionCache = Rc<RefCell<HashMap<u64, Vec<(String, usize, usize, usize)>>>>;
-
-// Move the ReferenceDefinition struct to the module level
-struct ReferenceDefinition {
-    id: String,
-    line: usize,
-    start_col: usize,
-    end_col: usize,
 }
 
 /// Rule MD053: Link and image reference definitions should be needed
@@ -99,14 +85,12 @@ struct ReferenceDefinition {
 #[derive(Clone)]
 pub struct MD053LinkImageReferenceDefinitions {
     ignored_definitions: HashSet<String>,
-    content_cache: DefinitionCache,
 }
 
 impl Default for MD053LinkImageReferenceDefinitions {
     fn default() -> Self {
         Self {
             ignored_definitions: HashSet::new(),
-            content_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 }
@@ -119,7 +103,6 @@ impl MD053LinkImageReferenceDefinitions {
                 .into_iter()
                 .map(|s| s.to_lowercase())
                 .collect(),
-            content_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -133,23 +116,6 @@ impl MD053LinkImageReferenceDefinitions {
     fn find_code_blocks(&self, content: &str) -> Vec<(usize, usize)> {
         let document_structure = DocumentStructure::new(content);
         document_structure.code_blocks.iter().map(|block| (block.start_line, block.end_line)).collect()
-    }
-
-    /// Check if a line range is inside a code block.
-    ///
-    /// This method determines if the given line range (start to end) is completely
-    /// contained within any code block in the content.
-    ///
-    /// This is used to avoid flagging unused references that are defined inside code blocks.
-    fn is_inside_code_block(
-        &self,
-        start: usize,
-        end: usize,
-        code_blocks: &[(usize, usize)],
-    ) -> bool {
-        code_blocks
-            .iter()
-            .any(|(block_start, block_end)| *block_start <= start && *block_end >= end)
     }
 
     /// Check if a line is inside a code block.
@@ -206,7 +172,7 @@ impl MD053LinkImageReferenceDefinitions {
             // Reference definition
             if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line) {
                 let ref_id = caps.get(1).unwrap().as_str().trim();
-                let mut start_line = i;
+                let start_line = i;
                 let mut end_line = i;
                 // Multi-line continuation
                 i += 1;
@@ -224,7 +190,7 @@ impl MD053LinkImageReferenceDefinitions {
         definitions
     }
 
-    /// Find all link and image reference usages in the content.
+    /// Find all link and image reference reference usages in the content.
     ///
     /// This method returns a HashSet of all normalized reference IDs found in usage (not in code blocks, code spans, or front matter).
     fn find_usages(&self, content: &str) -> HashSet<String> {
@@ -292,13 +258,10 @@ impl MD053LinkImageReferenceDefinitions {
             }
             // Code span detection (inline backticks)
             let mut chars = line.chars().peekable();
-            let mut backtick_count = 0;
             while let Some(c) = chars.next() {
                 if c == '`' {
-                    backtick_count += 1;
                     while let Some('`') = chars.peek() {
                         chars.next();
-                        backtick_count += 1;
                     }
                     in_code_span = !in_code_span;
                 }
@@ -333,14 +296,6 @@ impl MD053LinkImageReferenceDefinitions {
         all_usages
     }
 
-    /// Compute a hash of the given content for caching purposes.
-    /// This uses the DefaultHasher for better performance than the previous fast_hash implementation.
-    fn content_hash(content: &str) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        content.hash(&mut hasher);
-        hasher.finish()
-    }
-
     /// Get unused references with their line ranges.
     ///
     /// This method uses the cached definitions to improve performance.
@@ -364,40 +319,6 @@ impl MD053LinkImageReferenceDefinitions {
             }
         }
         unused
-    }
-
-    // Get cached definitions for the given content.
-    ///
-    /// This method uses a cache to store the definitions for each content hash.
-    /// If the definitions for the given content are already cached, they are returned.
-    /// Otherwise, the definitions are computed, cached, and then returned.
-    fn get_cached_definitions(&self, content: &str) -> Vec<(String, usize, usize, usize)> {
-        let hash = Self::content_hash(content);
-
-        // First check if we already have this content cached
-        let cache = self.content_cache.borrow();
-        if let Some(cached) = cache.get(&hash) {
-            return cached.clone();
-        }
-
-        // If not cached, release the borrow and compute the definitions
-        drop(cache);
-
-        // Compute the definitions
-        let definitions: Vec<(String, usize, usize, usize)> = self
-            .find_definitions(content)
-            .into_iter()
-            .flat_map(|(key, defs)| {
-                defs.into_iter().map(move |def| (key.clone(), def.0, def.1, def.1))
-            })
-            .collect();
-
-        // Update the cache with the computed definitions
-        self.content_cache
-            .borrow_mut()
-            .insert(hash, definitions.clone());
-
-        definitions
     }
 
     /// Helper method to clean up document structure after removing lines
@@ -442,7 +363,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         let mut warnings = Vec::new();
 
         // Create warnings for unused references
-        for (definition, start, end) in unused_refs {
+        for (definition, start, _) in unused_refs {
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 line: start + 1, // 1-indexed line numbers
@@ -470,7 +391,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         }
 
         // Split the content into lines
-        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
         // Create a set of line numbers to remove (unused references)
         let mut to_remove = std::collections::HashSet::with_capacity(unused_refs.len() * 2);
