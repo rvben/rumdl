@@ -152,76 +152,63 @@ impl Rule for MD003HeadingStyle {
 
         let mut result = Vec::new();
 
-        // Get the target style - use the fallback method since no structure is available
-        let target_style = self.get_target_style(content, None);
+        // Create DocumentStructure and use it for heading info
+        let structure = DocumentStructure::new(content);
+        let target_style = self.get_target_style(content, Some(&structure));
 
-        // Get all headings using the MarkdownElements utility
-        let headings = MarkdownElements::detect_headings(content);
-
-        for heading in headings {
-            if heading.element_type != ElementType::Heading
-                || heading.quality != ElementQuality::Valid
-            {
-                continue; // Skip non-headings or invalid headings
-            }
-
-            // Get the heading level
-            if let Some(level_str) = &heading.metadata {
-                if let Ok(level) = level_str.parse::<u32>() {
-                    // Determine the current style of the heading
-                    let style = if heading.end_line > heading.start_line {
-                        // Setext heading (has an underline)
-                        if level == 1 {
-                            HeadingStyle::Setext1
-                        } else {
-                            HeadingStyle::Setext2
-                        }
-                    } else {
-                        // ATX heading
-                        let line = content.lines().nth(heading.start_line).unwrap_or("");
-                        if line.trim().ends_with('#') {
-                            HeadingStyle::AtxClosed
-                        } else {
-                            HeadingStyle::Atx
-                        }
-                    };
-
-                    // For Setext, levels 3+ must be ATX regardless of the target style
-                    let expected_style = if level > 2
-                        && (target_style == HeadingStyle::Setext1
-                            || target_style == HeadingStyle::Setext2)
-                    {
-                        HeadingStyle::Atx
-                    } else {
-                        // For Setext, use the appropriate style based on level
-                        if (target_style == HeadingStyle::Setext1
-                            || target_style == HeadingStyle::Setext2)
-                            && level <= 2
-                        {
-                            if level == 1 {
-                                HeadingStyle::Setext1
-                            } else {
-                                HeadingStyle::Setext2
-                            }
-                        } else {
-                            target_style
-                        }
-                    };
-
-                    if style != expected_style {
-                        result.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: heading.start_line + 1, // Convert to 1-indexed
-                            column: 1,
-                            message: format!(
-                                "Heading style should be {:?}, found {:?}",
-                                expected_style, style
-                            ),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    }
+        let lines: Vec<&str> = content.lines().collect();
+        for (idx, &line_num) in structure.heading_lines.iter().enumerate() {
+            let level = structure.heading_levels[idx];
+            let region = structure.heading_regions[idx];
+            // Determine the current style of the heading
+            let style = if region.0 != region.1 {
+                // Setext heading (has an underline)
+                if level == 1 {
+                    HeadingStyle::Setext1
+                } else {
+                    HeadingStyle::Setext2
                 }
+            } else {
+                // ATX heading
+                let line = lines.get(line_num - 1).map_or("", |v| *v);
+                if line.trim().ends_with('#') {
+                    HeadingStyle::AtxClosed
+                } else {
+                    HeadingStyle::Atx
+                }
+            };
+
+            // For Setext, levels 3+ must be ATX regardless of the target style
+            let expected_style = if level > 2
+                && (target_style == HeadingStyle::Setext1
+                    || target_style == HeadingStyle::Setext2)
+            {
+                HeadingStyle::Atx
+            } else if (target_style == HeadingStyle::Setext1
+                || target_style == HeadingStyle::Setext2)
+                && level <= 2
+            {
+                if level == 1 {
+                    HeadingStyle::Setext1
+                } else {
+                    HeadingStyle::Setext2
+                }
+            } else {
+                target_style
+            };
+
+            if style != expected_style {
+                result.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: line_num,
+                    column: 1,
+                    message: format!(
+                        "Heading style should be {:?} (found {:?})",
+                        expected_style, style
+                    ),
+                    severity: Severity::Warning,
+                    fix: None,
+                });
             }
         }
 
@@ -277,7 +264,7 @@ impl Rule for MD003HeadingStyle {
                         }
                     } else {
                         // ATX heading
-                        let line = content.lines().nth(heading.start_line).unwrap_or("");
+                        let line = lines.get(heading.start_line).map_or("", |v| *v);
                         if line.trim().ends_with('#') {
                             HeadingStyle::AtxClosed
                         } else {
@@ -315,7 +302,7 @@ impl Rule for MD003HeadingStyle {
                             lines.get(heading.start_line).unwrap_or(&"").to_string()
                         } else {
                             // ATX heading
-                            let line = lines.get(heading.start_line).unwrap_or(&"");
+                            let line = lines.get(heading.start_line).map_or("", |v| *v);
                             HeadingUtils::get_heading_text(line).unwrap_or_default()
                         };
 

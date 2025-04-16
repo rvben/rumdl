@@ -206,40 +206,16 @@ impl Rule for MD002FirstHeadingH1 {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let mut result = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-        let start_line = self.skip_front_matter(content);
-
-        for (i, _) in lines.iter().enumerate().skip(start_line) {
-            if let Some((_, _, level, _)) = self.parse_heading(content, i + 1) {
-                if level != self.level {
-                    result.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: 1,
-                        message: format!(
-                            "First heading should be level {}, found level {}",
-                            self.level, level
-                        ),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: Range {
-                                start: i + 1,
-                                end: i + 1,
-                            },
-                            replacement: format!(
-                                "{}{}",
-                                "#".repeat(self.level as usize),
-                                " ".repeat(i + 1 - start_line)
-                            ),
-                        }),
-                    });
-                }
-                break;
-            }
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(vec![]);
         }
 
-        Ok(result)
+        let structure = DocumentStructure::new(content);
+        if structure.heading_lines.is_empty() {
+            return Ok(vec![]);
+        }
+        self.check_with_structure(content, &structure)
     }
 
     /// Optimized check using document structure
@@ -310,67 +286,36 @@ impl Rule for MD002FirstHeadingH1 {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let mut result = String::new();
-        let mut _i = 0;
         let lines: Vec<&str> = content.lines().collect();
-        let mut first_heading_fixed = false;
-        let start_line = self.skip_front_matter(content);
+        let ends_with_newline = content.ends_with('\n');
+        let structure = DocumentStructure::new(content);
+        let mut fixed_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
 
-        // Copy front matter if present
-        for line in lines.iter().take(start_line) {
-            result.push_str(line);
-            result.push('\n');
-        }
-        _i = start_line;
-
-        while _i < lines.len() {
-            if !first_heading_fixed {
-                if let Some((indent, text, level, style)) = self.parse_heading(content, _i + 1) {
-                    if level != self.level {
-                        let fixed = match style {
-                            HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
-                                format!("{}{} {}", indent, "#".repeat(self.level as usize), text)
-                            }
-                            HeadingStyle::AtxClosed => {
-                                format!(
-                                    "{}{} {} {}",
-                                    indent,
-                                    "#".repeat(self.level as usize),
-                                    text,
-                                    "#".repeat(self.level as usize)
-                                )
-                            }
-                            _ => {
-                                format!("{}{} {}", indent, "#".repeat(self.level as usize), text)
-                            }
-                        };
-                        result.push_str(&fixed);
-                        if style == HeadingStyle::Setext1 || style == HeadingStyle::Setext2 {
-                            _i += 1; // Skip the underline line
-                        }
+        if let Some((&first_heading_line, &first_heading_level)) = structure.heading_lines.first().zip(structure.heading_levels.first()) {
+            if first_heading_level != self.level as usize {
+                let idx = first_heading_line - 1; // 0-indexed
+                let region = structure.heading_regions[0];
+                let start = region.0 - 1;
+                let end = region.1 - 1;
+                let style = if start != end {
+                    if lines.get(end).map_or("", |l| l.trim()).starts_with('=') {
+                        HeadingStyle::Setext1
                     } else {
-                        result.push_str(lines[_i]);
+                        HeadingStyle::Setext2
                     }
-                    first_heading_fixed = true;
                 } else {
-                    result.push_str(lines[_i]);
-                }
-            } else {
-                result.push_str(lines[_i]);
+                    HeadingStyle::Atx
+                };
+                let text = lines[start].trim_start_matches('#').trim();
+                let replacement = crate::rules::heading_utils::HeadingUtils::convert_heading_style(text, self.level, style);
+                fixed_lines[start] = replacement.clone();
             }
-
-            // Add newline if not at the end of the file
-            if _i < lines.len() - 1 {
-                result.push('\n');
-            }
-            _i += 1;
         }
 
-        // Preserve final newline if present in original
-        if content.ends_with('\n') {
+        let mut result = fixed_lines.join("\n");
+        if ends_with_newline {
             result.push('\n');
         }
-
         Ok(result)
     }
 

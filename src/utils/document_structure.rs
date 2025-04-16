@@ -14,6 +14,8 @@ pub struct DocumentStructure {
     pub heading_lines: Vec<usize>,
     /// Heading levels (1-6) for each heading
     pub heading_levels: Vec<usize>,
+    /// NEW: Heading regions (start_line, end_line) for each heading (ATX: start==end, Setext: start=content, end=marker)
+    pub heading_regions: Vec<(usize, usize)>,
     /// Line numbers of list items (1-indexed)
     pub list_lines: Vec<usize>,
     /// Whether the document contains front matter
@@ -181,6 +183,7 @@ impl DocumentStructure {
             has_code_blocks: false,
             heading_lines: Vec::new(),
             heading_levels: Vec::new(),
+            heading_regions: Vec::new(),
             list_lines: Vec::new(),
             has_front_matter: false,
             front_matter_range: None,
@@ -295,6 +298,7 @@ impl DocumentStructure {
         // Clear existing data
         self.heading_lines.clear();
         self.heading_levels.clear();
+        self.heading_regions.clear();
         self.first_heading_style = None;
 
         let lines: Vec<&str> = content.lines().collect();
@@ -315,6 +319,7 @@ impl DocumentStructure {
                 let level = captures[2].len();
                 self.heading_lines.push(i + 1);
                 self.heading_levels.push(level);
+                self.heading_regions.push((i + 1, i + 1)); // ATX: start==end
 
                 // If this is the first heading detected, set the style
                 if self.first_heading_style.is_none() {
@@ -336,6 +341,7 @@ impl DocumentStructure {
                 let level = if line.trim().starts_with('=') { 1 } else { 2 };
                 self.heading_lines.push(i); // The heading is the previous line
                 self.heading_levels.push(level);
+                self.heading_regions.push((i, i + 1)); // Setext: (content, marker)
 
                 // If this is the first heading detected, set the style
                 if self.first_heading_style.is_none() {
