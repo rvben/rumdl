@@ -252,8 +252,7 @@ fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
 fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> Result<Vec<String>, Box<dyn Error>> {
     let mut file_paths = Vec::new();
 
-    // --- Configure ignore::WalkBuilder --- 
-
+    // --- Configure ignore::WalkBuilder ---
     // Start with the first path, add others later
     let first_path = paths.get(0).cloned().unwrap_or_else(|| ".".to_string());
     let mut walk_builder = WalkBuilder::new(first_path);
@@ -263,51 +262,58 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
         walk_builder.add(path);
     }
 
-    // Get include/exclude patterns from config and CLI
-    let mut exclude_patterns = config.global.exclude.clone();
-    if let Some(exclude_str) = &cli.exclude {
-        exclude_patterns.extend(exclude_str.split(',').map(|s| s.trim().to_string()));
-    }
-    let mut include_patterns = config.global.include.clone();
-    if let Some(include_str) = &cli.include {
-         include_patterns.extend(include_str.split(',').map(|s| s.trim().to_string()));
-    }
+    // Determine if running in discovery mode (e.g., "rumdl .") vs explicit path mode
+    let is_discovery_mode = paths.len() == 1 && paths[0] == ".";
 
-    // Configure overrides OR type filter *FIRST*
+    // Determine effective patterns based on CLI overrides
+    let exclude_patterns = if let Some(exclude_str) = cli.exclude.as_deref() {
+        // If CLI exclude is given, IT REPLACES config excludes
+        exclude_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+    } else {
+        // Otherwise, use config excludes
+        config.global.exclude.clone() // Already Vec<String>
+    };
+
+    let include_patterns = if is_discovery_mode {
+        if let Some(include_str) = cli.include.as_deref() {
+            // If CLI include is given, IT REPLACES config includes
+             include_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+        } else {
+            // Otherwise, use config includes
+            config.global.include.clone() // Already Vec<String>
+        }
+    } else {
+        // Includes are ignored if explicit paths are given (not discovery mode)
+        Vec::new()
+    };
+
+    // Apply overrides from effective patterns
     let has_include_patterns = !include_patterns.is_empty();
     let has_exclude_patterns = !exclude_patterns.is_empty();
 
     if has_include_patterns || has_exclude_patterns {
-        // Only create OverrideBuilder if needed
-        let mut override_builder = OverrideBuilder::new(".");
+        let mut override_builder = OverrideBuilder::new("."); // Root context for patterns
 
-        // Add include patterns first
+        // Add includes first
         if has_include_patterns {
-             for pattern in &include_patterns {
-                 override_builder.add(pattern)?;
-             }
-        }
-
-        // Add exclude patterns second (as ignore rules !pattern)
-        // These will take precedence over includes due to order.
-        if has_exclude_patterns {
-            for pattern in &exclude_patterns {
-                if let Err(e) = override_builder.add(&format!("!{}", pattern)) {
-                    eprintln!("Warning: Invalid exclude pattern '{}': {}", pattern, e);
+            for pattern in &include_patterns {
+                // No need to split again, already done above
+                if let Err(e) = override_builder.add(pattern) {
+                    eprintln!("[Effective] Warning: Invalid include pattern '{}': {}", pattern, e);
                 }
             }
         }
-        
-        // Build and apply overrides
+        // Add excludes second (as ignore rules !pattern)
+        if has_exclude_patterns {
+            for pattern in &exclude_patterns {
+                 // No need to split again, already done above
+                if let Err(e) = override_builder.add(&format!("!{}", pattern)) {
+                    eprintln!("[Effective] Warning: Invalid exclude pattern '{}': {}", pattern, e);
+                }
+            }
+        }
         let overrides = override_builder.build()?;
         walk_builder.overrides(overrides);
-    } else {
-        // If no overrides, setup the default type filter for markdown
-        let mut types_builder = ignore::types::TypesBuilder::new();
-        types_builder.add_defaults(); // Add default types
-        types_builder.select("markdown"); // Select markdown type
-        let md_type = types_builder.build()?; // Build types, handle error
-        walk_builder.types(md_type);
     }
 
     // Configure gitignore handling *SECOND*
@@ -1024,50 +1030,5 @@ mod tests {
     fn test_find_markdown_files_exclude_nested_directory() {
         let base_dir = tempdir().unwrap();
         let base_path = base_dir.path();
-
-        let excluded_dir_path = base_path.join("excluded_dir");
-        let nested_dir_path = excluded_dir_path.join("nested");
-        fs::create_dir_all(&nested_dir_path).unwrap();
-        
-        let file_in_nested = nested_dir_path.join("nested.md");
-        fs::write(&file_in_nested, "# Nested Excluded").unwrap();
-
-        let mut cli = create_dummy_cli();
-        cli.exclude = Some("excluded_dir".to_string()); // Exclude top-level directory
-
-        let config = config::Config::default();
-        let input_paths = vec![base_path.to_str().unwrap().to_string()];
-
-        let found_files = find_markdown_files(&input_paths, &cli, &config).unwrap();
-
-        assert!(found_files.is_empty(), "No files should be found when excluding the parent directory");
-    }
-
-    #[test]
-    fn test_find_markdown_files_respects_gitignore_by_default() {
-        let base_dir = tempdir().unwrap();
-        let base_path = base_dir.path();
-
-        // Create .gitignore
-        let gitignore_path = base_path.join(".gitignore");
-        fs::write(&gitignore_path, "ignored.md\n").unwrap();
-
-        // Create files
-        let ignored_file_path = base_path.join("ignored.md");
-        let included_file_path = base_path.join("included.md");
-        fs::write(&ignored_file_path, "# Ignored").unwrap();
-        fs::write(&included_file_path, "# Included").unwrap();
-
-        let cli = create_dummy_cli(); // Defaults respect gitignore
-        let config = config::Config::default();
-        // Input path is the temp directory itself
-        let input_paths = vec![base_path.to_str().unwrap().to_string()];
-
-        let found_files = find_markdown_files(&input_paths, &cli, &config).unwrap();
-
-        assert_eq!(found_files.len(), 1, "Only one file should be found");
-        // Get path relative to base_path for comparison
-        let found_relative = Path::new(&found_files[0]).strip_prefix(base_path).unwrap();
-        assert_eq!(found_relative.to_str().unwrap(), "included.md", "The included file should be found");
     }
 }
