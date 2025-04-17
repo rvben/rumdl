@@ -390,6 +390,8 @@ impl Rule for MD043RequiredHeadings {
         
         !has_heading
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD043RequiredHeadings {

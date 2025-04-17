@@ -23,7 +23,11 @@ fn test_valid_nested_list() {
     * Deeply nested item
   * Item 3";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty());
+    assert!(
+        result.is_empty(),
+        "Valid nested lists should not generate warnings, found: {:?}",
+        result
+    );
 }
 
 #[test]

@@ -67,7 +67,7 @@ impl MD013LineLength {
         false
     }
 
-    fn should_ignore_line(&self, line: &str, lines: &[&str], current_line: usize, structure: &DocumentStructure) -> bool {
+    fn should_ignore_line(&self, line: &str, _lines: &[&str], current_line: usize, structure: &DocumentStructure) -> bool {
         if self.strict {
             return false;
         }
@@ -155,4 +155,6 @@ impl Rule for MD013LineLength {
         // - Code blocks and tables
         Ok(content.to_string())
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

@@ -216,4 +216,6 @@ impl Rule for MD012NoMultipleBlanks {
 
         Ok(output)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

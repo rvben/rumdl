@@ -199,18 +199,8 @@ impl MD026NoTrailingPunctuation {
     fn is_deeply_indented_heading(&self, line: &str) -> bool {
         line.starts_with("    ") && line.trim_start().starts_with('#')
     }
-}
 
-impl Rule for MD026NoTrailingPunctuation {
-    fn name(&self) -> &'static str {
-        "MD026"
-    }
-
-    fn description(&self) -> &'static str {
-        "Trailing punctuation in heading"
-    }
-
-    fn check(&self, content: &str) -> LintResult {
+    fn check_with_structure(&self, content: &str, structure: &crate::utils::document_structure::DocumentStructure) -> LintResult {
         if content.is_empty() {
             return Ok(Vec::new());
         }
@@ -229,229 +219,147 @@ impl Rule for MD026NoTrailingPunctuation {
         let line_index = LineIndex::new(content.to_string());
         let lines: Vec<&str> = content.lines().collect();
 
-        // Track setext heading underline lines to skip them when processing
-        let mut setext_underlines = Vec::new();
-
-        // First identify all setext underlines to avoid processing them as content
-        for (i, line) in lines.iter().enumerate() {
-            if i > 0 && self.is_setext_underline(line) {
-                setext_underlines.push(i);
-            }
-        }
-
-        // Process each line for headings
-        for (line_num, line) in lines.iter().enumerate() {
-            // Skip setext underlines - we only want to process the content line
-            if setext_underlines.contains(&line_num) {
-                continue;
-            }
+        for (idx, &line_num) in structure.heading_lines.iter().enumerate() {
+            let region = structure.heading_regions[idx];
+            let heading_line = region.0; // Always the content line for both ATX and setext
 
             // Skip front matter content
-            if self.is_in_front_matter(&lines, line_num) {
+            if self.is_in_front_matter(&lines, heading_line) {
                 continue;
             }
 
             // Skip deeply indented headings (4+ spaces) as they are considered code blocks
-            if self.is_deeply_indented_heading(line) {
+            if self.is_deeply_indented_heading(lines[heading_line - 1]) {
                 continue;
             }
 
             // Check if it's a code block, but don't skip lightly indented headings
-            if line_index.is_code_block(line_num + 1) && !INDENTED_HEADING_RE.is_match(line) {
+            if line_index.is_code_block(heading_line + 1) && !INDENTED_HEADING_RE.is_match(lines[heading_line - 1]) {
                 continue;
             }
 
-            // Process indented ATX headings (1-3 spaces)
-            if INDENTED_HEADING_RE.is_match(line) {
-                if let Some(heading_text) = self.extract_atx_heading_text(line) {
-                    if self.has_trailing_punctuation(&heading_text, &re) {
-                        let last_char = heading_text.trim().chars().last().unwrap_or(' ');
+            // For ATX headings
+            if region.0 == region.1 {
+                if INDENTED_HEADING_RE.is_match(lines[heading_line - 1]) {
+                    if let Some(heading_text) = self.extract_atx_heading_text(lines[heading_line - 1]) {
+                        if self.has_trailing_punctuation(&heading_text, &re) {
+                            let last_char = heading_text.trim().chars().last().unwrap_or(' ');
 
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num + 1,
-                            column: 1,
-                            message: format!(
-                                "Heading '{}' should not end with punctuation '{}'",
-                                heading_text.trim(),
-                                last_char
-                            ),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: self.get_line_byte_range(content, line_num + 1),
-                                replacement: self.fix_atx_heading(line, &re),
-                            }),
-                        });
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                line: heading_line,
+                                column: 1,
+                                message: format!(
+                                    "Heading '{}' should not end with punctuation '{}'",
+                                    heading_text.trim(),
+                                    last_char
+                                ),
+                                severity: Severity::Warning,
+                                fix: Some(Fix {
+                                    range: self.get_line_byte_range(content, heading_line),
+                                    replacement: self.fix_atx_heading(lines[heading_line - 1], &re),
+                                }),
+                            });
+                        }
+                    }
+                } else if ATX_HEADING_RE.is_match(lines[heading_line - 1]) {
+                    if let Some(heading_text) = self.extract_atx_heading_text(lines[heading_line - 1]) {
+                        if self.has_trailing_punctuation(&heading_text, &re) {
+                            let last_char = heading_text.trim().chars().last().unwrap_or(' ');
+
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                line: heading_line,
+                                column: 1,
+                                message: format!(
+                                    "Heading '{}' should not end with punctuation '{}'",
+                                    heading_text.trim(),
+                                    last_char
+                                ),
+                                severity: Severity::Warning,
+                                fix: Some(Fix {
+                                    range: self.get_line_byte_range(content, heading_line),
+                                    replacement: self.fix_atx_heading(lines[heading_line - 1], &re),
+                                }),
+                            });
+                        }
                     }
                 }
-            }
-            // Process regular ATX headings
-            else if ATX_HEADING_RE.is_match(line) {
-                if let Some(heading_text) = self.extract_atx_heading_text(line) {
-                    if self.has_trailing_punctuation(&heading_text, &re) {
-                        let last_char = heading_text.trim().chars().last().unwrap_or(' ');
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num + 1,
-                            column: 1,
-                            message: format!(
-                                "Heading '{}' should not end with punctuation '{}'",
-                                heading_text.trim(),
-                                last_char
-                            ),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: self.get_line_byte_range(content, line_num + 1),
-                                replacement: self.fix_atx_heading(line, &re),
-                            }),
-                        });
-                    }
+            } else {
+                // Setext heading: check the content line for trailing punctuation
+                if self.has_trailing_punctuation(lines[heading_line - 1], &re) {
+                    let last_char = lines[heading_line - 1].trim().chars().last().unwrap_or(' ');
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: heading_line,
+                        column: 1,
+                        message: format!(
+                            "Heading '{}' should not end with punctuation '{}'",
+                            lines[heading_line - 1].trim(),
+                            last_char
+                        ),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: self.get_line_byte_range(content, heading_line),
+                            replacement: self.fix_setext_heading(lines[heading_line - 1], &re),
+                        }),
+                    });
                 }
-            }
-            // Process setext headings (if the next line is a setext underline)
-            else if line_num + 1 < lines.len()
-                && self.is_setext_underline(lines[line_num + 1])
-                && self.has_trailing_punctuation(line, &re)
-            {
-                let last_char = line.trim().chars().last().unwrap_or(' ');
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num + 1,
-                    column: 1,
-                    message: format!(
-                        "Heading '{}' should not end with punctuation '{}'",
-                        line.trim(),
-                        last_char
-                    ),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: self.get_line_byte_range(content, line_num + 1),
-                        replacement: self.fix_setext_heading(line, &re),
-                    }),
-                });
             }
         }
 
         Ok(warnings)
     }
+}
+
+impl Rule for MD026NoTrailingPunctuation {
+    fn name(&self) -> &'static str {
+        "MD026"
+    }
+
+    fn description(&self) -> &'static str {
+        "Trailing punctuation in heading"
+    }
+
+    fn check(&self, content: &str) -> LintResult {
+        let structure = crate::utils::document_structure::DocumentStructure::new(content);
+        self.check_with_structure(content, &structure)
+    }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        if content.is_empty() {
-            return Ok(content.to_string());
-        }
-
-        let re = match self.get_punctuation_regex() {
-            Ok(re) => re,
-            Err(e) => {
-                return Err(LintError::FixFailed(format!(
-                    "Invalid regex pattern: {}",
-                    e
-                )))
-            }
-        };
-
         let lines: Vec<&str> = content.lines().collect();
-        let mut output_lines = Vec::new();
+        let ends_with_newline = content.ends_with('\n');
+        let structure = crate::utils::document_structure::DocumentStructure::new(content);
+        let mut fixed_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        let re = self.get_punctuation_regex().unwrap();
 
-        // Track setext heading underline lines
-        let mut setext_underlines = Vec::new();
-
-        // First identify all setext underlines
-        for (i, line) in lines.iter().enumerate() {
-            if i > 0 && self.is_setext_underline(line) {
-                setext_underlines.push(i);
+        for (idx, &line_num) in structure.heading_lines.iter().enumerate() {
+            let region = structure.heading_regions[idx];
+            let start = region.0 - 1;
+            let _end = region.1 - 1;
+            // Only fix if the heading line exists
+            if start < lines.len() {
+                // Remove trailing punctuation from the heading text
+                let line = lines[start];
+                // ATX or Setext
+                if region.0 == region.1 {
+                    // ATX
+                    let fixed = self.fix_atx_heading(line, &re);
+                    fixed_lines[start] = fixed;
+                } else {
+                    // Setext (multi-line)
+                    let fixed = self.fix_setext_heading(line, &re);
+                    fixed_lines[start] = fixed;
+                }
             }
         }
 
-        // Track if we're in front matter
-        let mut in_front_matter = false;
-        let mut front_matter_marker_count = 0;
-
-        // Process each line
-        let mut i = 0;
-        while i < lines.len() {
-            let line = lines[i];
-
-            // Handle front matter markers
-            if line.trim() == "---" {
-                front_matter_marker_count += 1;
-                in_front_matter = front_matter_marker_count == 1; // After second marker, we're out of front matter
-                output_lines.push(line.to_string());
-                i += 1;
-                continue;
-            }
-
-            // Preserve front matter lines unchanged
-            if in_front_matter {
-                output_lines.push(line.to_string());
-                i += 1;
-                continue;
-            }
-
-            // Skip deeply indented headings - they're treated as code blocks
-            if self.is_deeply_indented_heading(line) {
-                output_lines.push(line.to_string());
-                i += 1;
-                continue;
-            }
-
-            // Process indented ATX headings (1-3 spaces)
-            if INDENTED_HEADING_RE.is_match(line) {
-                if let Some(heading_text) = self.extract_atx_heading_text(line) {
-                    if self.has_trailing_punctuation(&heading_text, &re) {
-                        output_lines.push(self.fix_atx_heading(line, &re));
-                    } else {
-                        output_lines.push(line.to_string());
-                    }
-                } else {
-                    output_lines.push(line.to_string());
-                }
-                i += 1;
-            }
-            // Process regular ATX headings
-            else if ATX_HEADING_RE.is_match(line) {
-                if let Some(heading_text) = self.extract_atx_heading_text(line) {
-                    if self.has_trailing_punctuation(&heading_text, &re) {
-                        output_lines.push(self.fix_atx_heading(line, &re));
-                    } else {
-                        output_lines.push(line.to_string());
-                    }
-                } else {
-                    output_lines.push(line.to_string());
-                }
-                i += 1;
-            }
-            // Process setext headings
-            else if i + 1 < lines.len() && self.is_setext_underline(lines[i + 1]) {
-                if self.has_trailing_punctuation(line, &re) {
-                    output_lines.push(self.fix_setext_heading(line, &re));
-                } else {
-                    output_lines.push(line.to_string());
-                }
-
-                // Add the underline
-                output_lines.push(lines[i + 1].to_string());
-                i += 2;
-            }
-            // Skip handling of setext underlines - they're handled with their content line
-            else if setext_underlines.contains(&i) {
-                i += 1;
-            }
-            // Not a heading - preserve as is
-            else {
-                output_lines.push(line.to_string());
-                i += 1;
-            }
+        let mut result = fixed_lines.join("\n");
+        if ends_with_newline {
+            result.push('\n');
         }
-
-        // Preserve trailing newline if original content had it
-        let result = output_lines.join("\n");
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            return Ok(format!("{}\n", result));
-        }
-
         Ok(result)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

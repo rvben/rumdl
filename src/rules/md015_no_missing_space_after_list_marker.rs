@@ -251,4 +251,6 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
         Ok(result)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

@@ -1,9 +1,10 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::element_cache::{get_element_cache, ListMarkerType};
+use crate::utils::element_cache::ListMarkerType;
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
+use crate::utils::element_cache::ElementCache;
 
 #[derive(Debug)]
 pub struct MD007ULIndent {
@@ -78,36 +79,32 @@ impl Rule for MD007ULIndent {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        // Fast path - if content doesn't contain list markers, no list items exist
         if !content.contains('*') && !content.contains('-') && !content.contains('+') {
             return Ok(Vec::new());
         }
 
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        
-        // Get cached document elements
-        let element_cache = get_element_cache(content);
-        
-        // Process each unordered list item from the cache
+        let element_cache = ElementCache::new(content);
+
+        // Track which lines have already been flagged due to a parent
+        let mut flagged_lines = std::collections::HashSet::new();
+
         for list_item in element_cache.get_list_items() {
-            // Skip ordered list items
             if let ListMarkerType::Ordered = list_item.marker_type {
                 continue;
             }
-            
+
             // Calculate expected indentation: level * indent spaces
             let expected_indent = list_item.nesting_level * self.indent;
-            
-            // If indentation doesn't match expected value
+
             if list_item.indentation != expected_indent {
-                // Get the correct indentation
                 let correct_indent = " ".repeat(expected_indent);
                 let trimmed = content.lines().nth(list_item.line_number - 1)
                     .map(|line| line.trim_start())
                     .unwrap_or("");
                 let replacement = format!("{}{}", correct_indent, trimmed);
-                
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: list_item.line_number,
@@ -122,6 +119,7 @@ impl Rule for MD007ULIndent {
                         replacement,
                     }),
                 });
+                flagged_lines.insert(list_item.line_number);
             }
         }
 
@@ -135,46 +133,35 @@ impl Rule for MD007ULIndent {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        // Fast path - if content doesn't contain list markers, no list items exist
         if !content.contains('*') && !content.contains('-') && !content.contains('+') {
             return Ok(content.to_string());
         }
-        
+
         let lines: Vec<&str> = content.lines().collect();
         let mut result = Vec::with_capacity(lines.len());
-        
-        // Get cached document elements
-        let element_cache = get_element_cache(content);
-        
+        let element_cache = ElementCache::new(content);
+        let mut flagged_lines = std::collections::HashSet::new();
+
         for (i, &line) in lines.iter().enumerate() {
             let line_num = i + 1;
-            
-            // Check if this is an unordered list item that needs fixing
             if let Some(list_item) = element_cache.get_list_item(line_num) {
-                // Skip ordered list items
                 if let ListMarkerType::Ordered = list_item.marker_type {
                     result.push(line.to_string());
                     continue;
                 }
-                
-                // Calculate expected indentation
                 let expected_indent = list_item.nesting_level * self.indent;
-                
-                // If indentation needs correction
                 if list_item.indentation != expected_indent {
                     let correct_indent = " ".repeat(expected_indent);
                     let trimmed = line.trim_start();
                     result.push(format!("{}{}", correct_indent, trimmed));
+                    flagged_lines.insert(line_num);
                 } else {
                     result.push(line.to_string());
                 }
             } else {
-                // Not a list item, keep as is
                 result.push(line.to_string());
             }
         }
-        
-        // Join lines and preserve trailing newline
         let result_str = result.join("\n");
         if content.ends_with('\n') && !result_str.ends_with('\n') {
             Ok(result_str + "\n")
@@ -193,6 +180,8 @@ impl Rule for MD007ULIndent {
         content.is_empty()
             || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD007ULIndent {

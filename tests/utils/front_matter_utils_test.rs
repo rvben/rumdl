@@ -434,20 +434,6 @@ regex: \\d+\\.\\d+\n\
         Some(&"\\d+\\.\\d+".to_string())
     );
 
-    // Test TOML with single quotes - this needs a proper implementation
-    let toml_single_quotes = "+++\n\
-title = 'Single quoted'\n\
-path = 'C:\\Users\\Test'\n\
-+++\n\
-# Heading";
-
-    // Currently the implementation has inconsistent handling of single quotes
-    // Single quotes are preserved in YAML but stripped in TOML
-    // Skipping this assertion until the implementation is consistent
-    // let single_quote_fields = FrontMatterUtils::extract_front_matter_fields(toml_single_quotes);
-    // assert_eq!(single_quote_fields.get("title"), Some(&"Single quoted".to_string()));
-    // assert_eq!(single_quote_fields.get("path"), Some(&"C:\\Users\\Test".to_string()));
-
     // Mixed delimiter edge case
     let mixed_delimiters = "---\n\
 title: YAML Content\n\

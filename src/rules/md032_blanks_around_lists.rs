@@ -346,6 +346,8 @@ impl Rule for MD032BlanksAroundLists {
     fn category(&self) -> RuleCategory {
         RuleCategory::List
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD032BlanksAroundLists {

@@ -88,6 +88,12 @@ pub trait Rule {
     fn category(&self) -> RuleCategory {
         RuleCategory::Other // Default implementation returns Other
     }
+
+    fn as_any(&self) -> &dyn std::any::Any;
+
+    fn as_maybe_document_structure(&self) -> Option<&dyn MaybeDocumentStructure> {
+        None
+    }
 }
 
 /// Extension trait to add downcasting capabilities to Rule
@@ -181,4 +187,36 @@ pub fn is_rule_disabled_by_comment(content: &str, rule_name: &str) -> bool {
     // Check if the rule is disabled at the end of the file
     let lines: Vec<&str> = content.lines().collect();
     is_rule_disabled_at_line(content, rule_name, lines.len())
+}
+
+// Helper trait for dynamic dispatch to check_with_structure
+pub trait MaybeDocumentStructure {
+    fn check_with_structure_opt(
+        &self,
+        content: &str,
+        structure: &crate::utils::document_structure::DocumentStructure,
+    ) -> Option<LintResult>;
+}
+
+impl<T> MaybeDocumentStructure for T
+where
+    T: Rule + crate::utils::document_structure::DocumentStructureExtensions + 'static,
+{
+    fn check_with_structure_opt(
+        &self,
+        content: &str,
+        structure: &crate::utils::document_structure::DocumentStructure,
+    ) -> Option<LintResult> {
+        Some(self.check_with_structure(content, structure))
+    }
+}
+
+impl MaybeDocumentStructure for dyn Rule {
+    fn check_with_structure_opt(
+        &self,
+        _content: &str,
+        _structure: &crate::utils::document_structure::DocumentStructure,
+    ) -> Option<LintResult> {
+        None
+    }
 }

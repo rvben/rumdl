@@ -125,6 +125,8 @@ impl Rule for MD042NoEmptyLinks {
         // Skip if there are no links in the content
         !content.contains('[')
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD042NoEmptyLinks {

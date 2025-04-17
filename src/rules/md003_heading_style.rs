@@ -456,6 +456,8 @@ impl Rule for MD003HeadingStyle {
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !QUICK_HEADING_CHECK.is_match(content)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 #[cfg(test)]
@@ -497,44 +499,16 @@ mod tests {
 
         // Make test more resilient - print details if warnings are found
         let result = rule.check_with_structure(content, &structure).unwrap();
-        if !result.is_empty() {
-            println!(
-                "MD003: Found {} warnings for front matter content, expected 0",
-                result.len()
-            );
-            // Print details of the warnings to help debugging
-            for warning in &result {
-                println!("  Warning at line {}: {}", warning.line, warning.message);
-            }
-            // Allow the test to pass for now but note the issue
-            assert!(
-                true,
-                "Implementation behavior with front matter needs investigation"
-            );
-        } else {
-            assert!(
-                result.is_empty(),
-                "No warnings expected for content with front matter"
-            );
-        }
-
+        assert!(
+            result.is_empty(),
+            "No warnings expected for content with front matter, found: {:?}", result
+        );
         // Also check the direct check method
         let result = rule.check(content).unwrap();
-        if !result.is_empty() {
-            println!(
-                "MD003: Found {} warnings from direct check, expected 0",
-                result.len()
-            );
-            assert!(
-                true,
-                "Implementation behavior with direct check needs investigation"
-            );
-        } else {
-            assert!(
-                result.is_empty(),
-                "No warnings expected for content with front matter"
-            );
-        }
+        assert!(
+            result.is_empty(),
+            "No warnings expected for content with front matter, found: {:?}", result
+        );
     }
 
     #[test]
@@ -555,25 +529,10 @@ mod tests {
         let result = rule.check_with_structure(content, &structure).unwrap();
 
         // Make test more resilient
-        if !result.is_empty() {
-            println!(
-                "MD003: Found {} warnings for consistent ATX style, expected 0",
-                result.len()
-            );
-            for warning in &result {
-                println!("  Warning at line {}: {}", warning.line, warning.message);
-            }
-            // Allow the test to pass for now but note the issue
-            assert!(
-                true,
-                "Implementation behavior with Consistent style needs investigation"
-            );
-        } else {
-            assert!(
-                result.is_empty(),
-                "No warnings expected for consistent ATX style"
-            );
-        }
+        assert!(
+            result.is_empty(),
+            "No warnings expected for consistent ATX style, found: {:?}", result
+        );
 
         // Test with incorrect style
         let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
@@ -584,35 +543,16 @@ mod tests {
             !result.is_empty(),
             "Should have warnings for inconsistent heading styles"
         );
-        println!(
-            "Found {} warnings for inconsistent heading styles",
-            result.len()
-        );
 
         // Test with setext style
         let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
         let content = "Heading 1\n=========\nHeading 2\n---------\n### Heading 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-
         // The level 3 heading can't be setext, so it's valid as ATX
-        if !result.is_empty() {
-            println!(
-                "MD003: Found {} warnings for setext style with level 3 ATX, expected 0",
-                result.len()
-            );
-            for warning in &result {
-                println!("  Warning at line {}: {}", warning.line, warning.message);
-            }
-            assert!(
-                true,
-                "Implementation behavior with Setext1 style needs investigation"
-            );
-        } else {
-            assert!(
-                result.is_empty(),
-                "No warnings expected for setext style with ATX for level 3"
-            );
-        }
+        assert!(
+            result.is_empty(),
+            "No warnings expected for setext style with ATX for level 3, found: {:?}", result
+        );
     }
 }

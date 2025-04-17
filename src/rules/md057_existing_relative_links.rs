@@ -1,6 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::element_cache::get_element_cache;
+use crate::utils::element_cache::ElementCache;
 use regex::Regex;
 use lazy_static::lazy_static;
 use std::cell::RefCell;
@@ -8,12 +8,6 @@ use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 
-#[cfg(test)]
-use std::fs::File;
-#[cfg(test)]
-use std::io::Write;
-#[cfg(test)]
-use tempfile::tempdir;
 
 // Thread-local cache for file existence checks to avoid redundant filesystem operations
 thread_local! {
@@ -220,7 +214,7 @@ impl MD057ExistingRelativeLinks {
         &self, 
         content: &str, 
         doc_structure: &DocumentStructure,
-        element_cache: &crate::utils::element_cache::ElementCache,
+        element_cache: &ElementCache,
         warnings: &mut Vec<LintWarning>
     ) {
         // Get all potential link starts
@@ -306,7 +300,7 @@ impl Rule for MD057ExistingRelativeLinks {
         }
         
         // Get the element cache for efficient code span detection
-        let element_cache = get_element_cache(content);
+        let element_cache = ElementCache::new(content);
         
         // Process links using structure and element cache
         self.process_links_with_structure(content, structure, &element_cache, &mut warnings);
@@ -329,6 +323,8 @@ impl Rule for MD057ExistingRelativeLinks {
             "Cannot automatically fix missing files".to_string(),
         ))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD057ExistingRelativeLinks {

@@ -263,6 +263,8 @@ impl Rule for MD030ListMarkerSpace {
                 && !content.contains('+')
                 && !content.contains(|c: char| c.is_ascii_digit()))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD030ListMarkerSpace {

@@ -1,6 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::markdown_elements::{ElementType, MarkdownElements};
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -51,105 +50,33 @@ impl Rule for MD019NoMultipleSpaceAtx {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        // Early return for empty content
-        if content.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
-
-        // Use MarkdownElements to detect all headings
-        let headings = MarkdownElements::detect_headings(content);
-
-        // Process each line to check for ATX headings with multiple spaces
-        let lines: Vec<&str> = content.lines().collect();
-
-        for (line_num, line) in lines.iter().enumerate() {
-            // Skip lines in code blocks
-            if line_index.is_code_block(line_num) {
-                continue;
-            }
-
-            // Check if this is an ATX heading with multiple spaces
-            if self.is_atx_heading_with_multiple_spaces(line) {
-                // Make sure this is a heading, not just a line starting with #
-                let is_heading = headings
-                    .iter()
-                    .any(|h| h.element_type == ElementType::Heading && h.start_line == line_num);
-
-                if is_heading {
-                    let hashes = ATX_MULTIPLE_SPACE_PATTERN
-                        .captures(line)
-                        .unwrap()
-                        .get(1)
-                        .unwrap();
-                    let spaces = self.count_spaces_after_hashes(line);
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: format!(
-                            "Multiple spaces ({}) after {} in ATX style heading",
-                            spaces,
-                            "#".repeat(hashes.as_str().len())
-                        ),
-                        line: line_num + 1,
-                        column: hashes.end() + 1,
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num + 1, 1),
-                            replacement: self.fix_atx_heading(line),
-                        }),
-                    });
-                }
-            }
-        }
-
-        Ok(warnings)
+        let structure = DocumentStructure::new(content);
+        self.check_with_structure(content, &structure)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        // Early return for empty content
         if content.is_empty() {
             return Ok(String::new());
         }
-
-        let line_index = LineIndex::new(content.to_string());
-        let mut result = String::new();
-
-        // Use MarkdownElements to detect all headings
-        let headings = MarkdownElements::detect_headings(content);
-
+        let structure = DocumentStructure::new(content);
         let lines: Vec<&str> = content.lines().collect();
-
+        let mut result = String::new();
         for (i, line) in lines.iter().enumerate() {
-            // Skip lines in code blocks
-            if line_index.is_code_block(i) {
-                result.push_str(line);
-            } else if self.is_atx_heading_with_multiple_spaces(line) {
-                // Make sure this is a heading, not just a line starting with #
-                let is_heading = headings
-                    .iter()
-                    .any(|h| h.element_type == ElementType::Heading && h.start_line == i);
-
-                if is_heading {
-                    result.push_str(&self.fix_atx_heading(line));
-                } else {
-                    result.push_str(line);
-                }
+            // Only process heading lines
+            let is_heading_line = structure.heading_lines.iter().any(|&ln| ln == i + 1);
+            if is_heading_line && self.is_atx_heading_with_multiple_spaces(line) {
+                result.push_str(&self.fix_atx_heading(line));
             } else {
                 result.push_str(line);
             }
-
             if i < lines.len() - 1 {
                 result.push('\n');
             }
         }
-
         // Preserve trailing newline if original had it
         if content.ends_with('\n') && !result.ends_with('\n') {
             result.push('\n');
         }
-
         Ok(result)
     }
 
@@ -213,6 +140,8 @@ impl Rule for MD019NoMultipleSpaceAtx {
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !content.contains('#')
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD019NoMultipleSpaceAtx {

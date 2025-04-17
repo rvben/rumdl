@@ -221,6 +221,8 @@ impl Rule for MD034NoBareUrls {
     fn should_skip(&self, content: &str) -> bool {
         !regex_cache::contains_url(content)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 #[cfg(test)]

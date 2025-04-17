@@ -65,4 +65,6 @@ impl Rule for MD027MultipleSpacesBlockquote {
         // Preserve trailing newline if original content had one
         Ok(result.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

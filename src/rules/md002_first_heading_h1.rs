@@ -3,7 +3,6 @@ use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::ops::Range;
 
 lazy_static! {
     static ref HEADING_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})\s+(.+?)(?:\s+#*)?$").unwrap();
@@ -220,103 +219,103 @@ impl Rule for MD002FirstHeadingH1 {
 
     /// Optimized check using document structure
     fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        // Early return if no headings
-        if structure.heading_lines.is_empty() {
-            return Ok(vec![]);
-        }
-
         let mut result = Vec::new();
-
-        // Get the first heading
+        if structure.heading_lines.is_empty() {
+            return Ok(result);
+        }
         let first_heading_line = structure.heading_lines[0];
         let first_heading_level = structure.heading_levels[0];
-
-        // Check if the level matches the required level
         if first_heading_level as u32 != self.level {
-            // Get the line from the content
-            let line_idx = first_heading_line - 1; // Convert 1-indexed to 0-indexed
-
-            let lines: Vec<&str> = content.lines().collect();
-            let line = if line_idx < lines.len() {
-                lines[line_idx]
-            } else {
-                return Ok(vec![]); // Error condition, shouldn't happen
-            };
-
-            // Determine heading style
-            let _style = if line_idx + 1 < lines.len()
-                && (lines[line_idx + 1].trim().starts_with('=')
-                    || lines[line_idx + 1].trim().starts_with('-'))
-            {
-                if lines[line_idx + 1].trim().starts_with('=') {
-                    HeadingStyle::Setext1
-                } else {
-                    HeadingStyle::Setext2
-                }
-            } else if line.trim_end().ends_with('#') {
-                HeadingStyle::AtxClosed
-            } else {
-                HeadingStyle::Atx
-            };
-
+            let message = format!(
+                "First heading should be level {}, found level {}",
+                self.level, first_heading_level
+            );
+            let fix = self.parse_heading(content, first_heading_line)
+                .map(|(_indent, text, _level, style)| {
+                    let replacement = crate::rules::heading_utils::HeadingUtils::convert_heading_style(
+                        &text,
+                        self.level,
+                        style,
+                    );
+                    Fix {
+                        range: first_heading_line..first_heading_line,
+                        replacement,
+                    }
+                });
             result.push(LintWarning {
-                rule_name: Some(self.name()),
+                message,
                 line: first_heading_line,
                 column: 1,
-                message: format!(
-                    "First heading should be level {}, found level {}",
-                    self.level, first_heading_level
-                ),
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: Range {
-                        start: first_heading_line,
-                        end: first_heading_line,
-                    },
-                    replacement: format!(
-                        "{}{}",
-                        "#".repeat(self.level as usize),
-                        " ".repeat(first_heading_line - 1)
-                    ),
-                }),
+                fix,
+                rule_name: Some(self.name()),
             });
         }
-
         Ok(result)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let lines: Vec<&str> = content.lines().collect();
-        let ends_with_newline = content.ends_with('\n');
         let structure = DocumentStructure::new(content);
-        let mut fixed_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
-
-        if let Some((&first_heading_line, &first_heading_level)) = structure.heading_lines.first().zip(structure.heading_levels.first()) {
-            if first_heading_level != self.level as usize {
-                let idx = first_heading_line - 1; // 0-indexed
-                let region = structure.heading_regions[0];
-                let start = region.0 - 1;
-                let end = region.1 - 1;
-                let style = if start != end {
-                    if lines.get(end).map_or("", |l| l.trim()).starts_with('=') {
-                        HeadingStyle::Setext1
-                    } else {
-                        HeadingStyle::Setext2
-                    }
-                } else {
-                    HeadingStyle::Atx
+        if structure.heading_lines.is_empty() {
+            return Ok(content.to_string());
+        }
+        let first_heading_line = structure.heading_lines[0];
+        let first_heading_level = structure.heading_levels[0];
+        if first_heading_level == self.level as usize {
+            return Ok(content.to_string());
+        }
+        let lines: Vec<&str> = content.lines().collect();
+        let mut fixed_lines = Vec::new();
+        let mut i = 0;
+        while i < lines.len() {
+            if i + 1 < lines.len() {
+                // Detect setext h2 heading (Heading + -------)
+                let is_setext_h2 = {
+                    let line = lines[i];
+                    let next = lines[i + 1];
+                    !line.trim().is_empty()
+                        && next.trim().chars().all(|c| c == '-')
+                        && next.trim().len() >= 3
                 };
-                let text = lines[start].trim_start_matches('#').trim();
-                let replacement = crate::rules::heading_utils::HeadingUtils::convert_heading_style(text, self.level, style);
-                fixed_lines[start] = replacement.clone();
+                if is_setext_h2 && i == first_heading_line - 1 {
+                    // Replace with setext h1 and skip underline, preserve heading text and blank lines
+                    let heading_text = lines[i].trim_end();
+                    fixed_lines.push(format!("{}", heading_text));
+                    fixed_lines.push("=======".to_string());
+                    i += 2;
+                    // Preserve any blank lines after the heading underline
+                    while i < lines.len() && lines[i].trim().is_empty() {
+                        fixed_lines.push(lines[i].to_string());
+                        i += 1;
+                    }
+                    continue;
+                }
             }
+            if i == first_heading_line - 1 {
+                // ATX or closed ATX heading: preserve indentation and closing hashes if present
+                let (indent, text, _level, style) = self.parse_heading(content, i + 1).unwrap_or_else(|| ("".to_string(), "".to_string(), 1, HeadingStyle::Atx));
+                let heading_text = text.trim();
+                match style {
+                    HeadingStyle::AtxClosed => {
+                        // Preserve closed ATX: # Heading #
+                        fixed_lines.push(format!("{}# {} #", indent, heading_text));
+                    }
+                    HeadingStyle::Atx => {
+                        // Standard ATX: # Heading
+                        fixed_lines.push(format!("{}# {}", indent, heading_text));
+                    }
+                    _ => {
+                        // Fallback: ATX
+                        fixed_lines.push(format!("{}# {}", indent, heading_text));
+                    }
+                }
+                i += 1;
+                continue;
+            }
+            fixed_lines.push(lines[i].to_string());
+            i += 1;
         }
-
-        let mut result = fixed_lines.join("\n");
-        if ends_with_newline {
-            result.push('\n');
-        }
-        Ok(result)
+        Ok(fixed_lines.join("\n"))
     }
 
     /// Get the category of this rule for selective processing
@@ -329,6 +328,8 @@ impl Rule for MD002FirstHeadingH1 {
         content.is_empty()
             || (!content.contains('#') && !content.contains('=') && !content.contains('-'))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD002FirstHeadingH1 {

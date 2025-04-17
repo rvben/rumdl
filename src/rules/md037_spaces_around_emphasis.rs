@@ -278,6 +278,8 @@ impl Rule for MD037SpacesAroundEmphasis {
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || (!content.contains('*') && !content.contains('_'))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD037SpacesAroundEmphasis {

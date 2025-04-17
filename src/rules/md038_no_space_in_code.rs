@@ -204,6 +204,8 @@ impl Rule for MD038NoSpaceInCode {
     fn should_skip(&self, content: &str) -> bool {
         !content.contains('`')
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD038NoSpaceInCode {

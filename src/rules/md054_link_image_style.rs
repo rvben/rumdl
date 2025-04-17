@@ -279,4 +279,6 @@ impl Rule for MD054LinkImageStyle {
             "Automatic fixing of link styles is not implemented. Please fix manually.".to_string(),
         ))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

@@ -244,4 +244,6 @@ impl Rule for MD051LinkFragments {
         // No automatic fix for missing fragments, just return content as-is
         Ok(content.to_string())
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

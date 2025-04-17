@@ -243,6 +243,8 @@ impl Rule for MD039NoSpaceInLinks {
 
         Ok(result)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 #[cfg(test)]

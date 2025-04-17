@@ -24,7 +24,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.5.34", features = ["derive"] }
 colored = "3.0.0"
-fancy-regex = "0.14.0"
+fancy-regex = { version = "0.14.0", features = ["unicode"] }
 glob = "0.3.2"
 ignore = "0.4.23"
 itertools = "0.10"

@@ -390,6 +390,8 @@ impl Rule for MD023HeadingStartLeft {
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !content.contains('#')
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD023HeadingStartLeft {

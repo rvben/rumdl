@@ -195,6 +195,8 @@ impl Rule for MD040FencedCodeLanguage {
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || (!content.contains("```") && !content.contains("~~~"))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD040FencedCodeLanguage {

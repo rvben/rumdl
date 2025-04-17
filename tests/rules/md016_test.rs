@@ -124,7 +124,10 @@ fn test_preserve_indentation() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "  *  Item 1\n    *   Item 2\n      *    Item 3";
     let result = rule.fix(content).unwrap();
-    assert_eq!(result, "  * Item 1\n    *   Item 2\n      *    Item 3");
+    if result != "  * Item 1\n    * Item 2\n      * Item 3" {
+        println!("[DEBUG] Actual result: {:?}", result);
+    }
+    assert_eq!(result, "  * Item 1\n    * Item 2\n      * Item 3");
 }
 
 #[test]

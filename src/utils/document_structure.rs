@@ -1,6 +1,7 @@
 use crate::rules::heading_utils::HeadingStyle;
 use lazy_static::lazy_static;
 use regex::Regex;
+use fancy_regex::Regex as FancyRegex;
 
 /// A struct that contains pre-computed information about a markdown document structure
 /// to avoid redundant parsing of the same elements by multiple rules.
@@ -264,9 +265,11 @@ impl DocumentStructure {
             // For fenced code blocks, skip the start and end lines (the "```" lines)
             if let CodeBlockType::Fenced = block.block_type {
                 // Mark only the lines between fences as in code block
-                for i in (start + 1)..(end - 1) {
-                    if i < self.in_code_block.len() {
-                        self.in_code_block[i] = true;
+                if end > start + 1 {
+                    for i in (start + 1)..(end - 1) {
+                        if i < self.in_code_block.len() {
+                            self.in_code_block[i] = true;
+                        }
                     }
                 }
             } else {
@@ -317,6 +320,13 @@ impl DocumentStructure {
             // Check for ATX headings (both with and without spaces)
             if let Some(captures) = ATX_HEADING.captures(line) {
                 let level = captures[2].len();
+                // Extract heading text after hashes and whitespace
+                let mut chars = line.trim().chars();
+                while chars.next() == Some('#') {}
+                let heading_text = chars.as_str().trim();
+                if heading_text.is_empty() {
+                    continue; // Skip empty ATX headings
+                }
                 self.heading_lines.push(i + 1);
                 self.heading_levels.push(level);
                 self.heading_regions.push((i + 1, i + 1)); // ATX: start==end
@@ -338,8 +348,12 @@ impl DocumentStructure {
                !self.is_in_front_matter(i) && // Check that previous line is not in front matter
                SETEXT_HEADING_UNDERLINE.is_match(line)
             {
+                let content_line = lines[i - 1].trim();
+                if content_line.is_empty() {
+                    continue; // Skip empty Setext headings
+                }
                 let level = if line.trim().starts_with('=') { 1 } else { 2 };
-                self.heading_lines.push(i); // The heading is the previous line
+                self.heading_lines.push(i); // The heading is the previous line (content line)
                 self.heading_levels.push(level);
                 self.heading_regions.push((i, i + 1)); // Setext: (content, marker)
 
@@ -841,42 +855,33 @@ impl DocumentStructure {
 
     /// OPTIMIZATION 3: Detect list items with detailed information
     fn detect_list_items(&mut self, content: &str) {
+        // Use fancy-regex for advanced Markdown list item detection
+        // - Allow any number of spaces/tabs before the marker
+        // - Marker must be *, +, or -
+        // - At least one space/tab after the marker
+        // - Use lookbehind to ensure marker is at the start or after whitespace
+        // - Use Unicode support for whitespace
         lazy_static! {
-            // Regex for unordered list items
-            static ref UL_MARKER: Regex = Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
-            // Regex for ordered list items
-            static ref OL_MARKER: Regex = Regex::new(r"^(\s*)(\d+\.)(\s+)(.*)$").unwrap();
-            // Regex for task list items
-            static ref TASK_MARKER: Regex = Regex::new(r"^(\s*)([*+-])(\s+)\[([ xX])\](.*)$").unwrap();
+            static ref UL_MARKER: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
+            static ref OL_MARKER: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>\d+\.)(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
+            static ref TASK_MARKER: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)\[(?P<checked>[ xX])\](?P<content>.*)$").unwrap();
         }
-
-        // Clear existing data
         self.list_items.clear();
         self.list_lines.clear();
-
         let lines: Vec<&str> = content.lines().collect();
-
         for (line_num, line) in lines.iter().enumerate() {
-            // Skip lines in code blocks or front matter
             if self.is_in_code_block(line_num + 1) || self.is_in_front_matter(line_num + 1) {
                 continue;
             }
-
-            // Skip empty lines
             if line.trim().is_empty() {
                 continue;
             }
-
-            // Check for task list items first (they're a subset of unordered list items)
-            if let Some(cap) = TASK_MARKER.captures(line) {
-                let indentation = cap.get(1).map_or("", |m| m.as_str()).len();
-                let marker = cap.get(2).map_or("", |m| m.as_str()).to_string();
-                let content = cap.get(5).map_or("", |m| m.as_str()).to_string();
-
-                // Record the list line
+            // Use fancy-regex for advanced matching
+            if let Ok(Some(cap)) = TASK_MARKER.captures(line) {
+                let indentation = cap.name("indent").map_or(0, |m| m.as_str().len());
+                let marker = cap.name("marker").map_or("", |m| m.as_str()).to_string();
+                let content = cap.name("content").map_or("", |m| m.as_str()).to_string();
                 self.list_lines.push(line_num + 1);
-
-                // Add detailed list item info
                 self.list_items.push(ListItem {
                     line_number: line_num + 1,
                     indentation,
@@ -884,17 +889,13 @@ impl DocumentStructure {
                     marker_type: ListMarkerType::Task,
                     content,
                 });
+                continue;
             }
-            // Check for unordered list items
-            else if let Some(cap) = UL_MARKER.captures(line) {
-                let indentation = cap.get(1).map_or("", |m| m.as_str()).len();
-                let marker = cap.get(2).map_or("", |m| m.as_str()).to_string();
-                let content = cap.get(4).map_or("", |m| m.as_str()).to_string();
-
-                // Record the list line
+            if let Ok(Some(cap)) = UL_MARKER.captures(line) {
+                let indentation = cap.name("indent").map_or(0, |m| m.as_str().len());
+                let marker = cap.name("marker").map_or("", |m| m.as_str()).to_string();
+                let content = cap.name("content").map_or("", |m| m.as_str()).to_string();
                 self.list_lines.push(line_num + 1);
-
-                // Add detailed list item info
                 self.list_items.push(ListItem {
                     line_number: line_num + 1,
                     indentation,
@@ -902,17 +903,13 @@ impl DocumentStructure {
                     marker_type: ListMarkerType::Unordered,
                     content,
                 });
+                continue;
             }
-            // Check for ordered list items
-            else if let Some(cap) = OL_MARKER.captures(line) {
-                let indentation = cap.get(1).map_or("", |m| m.as_str()).len();
-                let marker = cap.get(2).map_or("", |m| m.as_str()).to_string();
-                let content = cap.get(4).map_or("", |m| m.as_str()).to_string();
-
-                // Record the list line
+            if let Ok(Some(cap)) = OL_MARKER.captures(line) {
+                let indentation = cap.name("indent").map_or(0, |m| m.as_str().len());
+                let marker = cap.name("marker").map_or("", |m| m.as_str()).to_string();
+                let content = cap.name("content").map_or("", |m| m.as_str()).to_string();
                 self.list_lines.push(line_num + 1);
-
-                // Add detailed list item info
                 self.list_items.push(ListItem {
                     line_number: line_num + 1,
                     indentation,
@@ -920,6 +917,7 @@ impl DocumentStructure {
                     marker_type: ListMarkerType::Ordered,
                     content,
                 });
+                continue;
             }
         }
     }
@@ -1094,5 +1092,67 @@ mod tests {
         assert!(structure.is_in_code_block(7)); // code line 2
         assert!(!structure.is_in_code_block(8)); // ```
         assert!(!structure.is_in_code_block(10)); // More text.
+    }
+
+    #[test]
+    fn test_headings_edge_cases() {
+        // ATX, closed ATX, Setext, mixed styles
+        let content = "  # ATX Heading\n# Closed ATX Heading #\nSetext H1\n=======\nSetext H2\n-------\n\n# ATX Again\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.heading_lines, vec![1, 2, 3, 5, 8]);
+        assert_eq!(structure.heading_levels, vec![1, 1, 1, 2, 1]);
+
+        // Headings in code blocks and front matter (should be ignored)
+        let content = "---\ntitle: Test\n---\n# Heading 1\n\n```\n# Not a heading\n```\n# Heading 2\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.heading_lines, vec![4, 9]);
+        assert_eq!(structure.heading_levels, vec![1, 1]);
+
+        // Empty headings
+        let content = "#\n## \n###  \n# Not Empty\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.heading_lines, vec![4]);
+        assert_eq!(structure.heading_levels, vec![1]);
+
+        // Headings with trailing whitespace
+        let content = "# Heading \n# Heading\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.heading_lines, vec![1, 2]);
+        assert_eq!(structure.heading_levels, vec![1, 1]);
+
+        // Headings with indentation
+        let content = "   # Indented\n    # Not a heading (too much indent)\n# Valid\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.heading_lines, vec![1, 3]);
+        assert_eq!(structure.heading_levels, vec![1, 1]);
+
+        // Multiple duplicates and edge line numbers
+        let content = "# Dup\n# Dup\n# Unique\n# Dup\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.heading_lines, vec![1, 2, 3, 4]);
+        assert_eq!(structure.heading_levels, vec![1, 1, 1, 1]);
+
+        // Headings after code blocks/front matter
+        let content = "```\n# Not a heading\n```\n# Real Heading\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.heading_lines, vec![4]);
+        assert_eq!(structure.heading_levels, vec![1]);
+
+        let content = "---\ntitle: Test\n---\n# Heading\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.heading_lines, vec![4]);
+        assert_eq!(structure.heading_levels, vec![1]);
+
+        // Setext headings with blank lines before/after
+        let content = "\nSetext\n=======\n\nSetext2\n-------\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.heading_lines, vec![2, 5]);
+        assert_eq!(structure.heading_levels, vec![1, 2]);
+
+        // Headings with special characters
+        let content = "# Heading!@#$%^&*()\nSetext Special\n=======\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.heading_lines, vec![1, 2]);
+        assert_eq!(structure.heading_levels, vec![1, 1]);
     }
 }

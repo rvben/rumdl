@@ -86,6 +86,8 @@ impl Rule for MD047FileEndNewline {
 
         Ok(result)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 #[cfg(test)]

@@ -265,4 +265,6 @@ impl Rule for MD056TableColumnCount {
             Ok(result.join("\n"))
         }
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

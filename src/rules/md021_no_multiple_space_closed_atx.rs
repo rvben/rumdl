@@ -96,105 +96,33 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        if content.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut warnings = Vec::new();
-        let mut in_code_block = false;
-
-        for (i, line) in content.lines().enumerate() {
-            let line_num = i + 1; // Convert to 1-indexed
-
-            // Handle code blocks
-            if CODE_FENCE_PATTERN.is_match(line.trim()) {
-                in_code_block = !in_code_block;
-                continue;
-            }
-
-            // Skip content inside code blocks
-            if in_code_block {
-                continue;
-            }
-
-            // Check if line matches closed ATX pattern with multiple spaces
-            if self.is_closed_atx_heading_with_multiple_spaces(line) {
-                let captures = CLOSED_ATX_MULTIPLE_SPACE_PATTERN.captures(line).unwrap();
-                let indentation = captures.get(1).unwrap();
-                let opening_hashes = captures.get(2).unwrap();
-                let (start_spaces, end_spaces) = self.count_spaces(line);
-
-                let message = if start_spaces > 1 && end_spaces > 1 {
-                    format!(
-                        "Multiple spaces ({} at start, {} at end) inside hashes on closed ATX style heading with {} hashes",
-                        start_spaces,
-                        end_spaces,
-                        opening_hashes.as_str().len()
-                    )
-                } else if start_spaces > 1 {
-                    format!(
-                        "Multiple spaces ({}) after opening hashes on closed ATX style heading with {} hashes",
-                        start_spaces,
-                        opening_hashes.as_str().len()
-                    )
-                } else {
-                    format!(
-                        "Multiple spaces ({}) before closing hashes on closed ATX style heading with {} hashes",
-                        end_spaces,
-                        opening_hashes.as_str().len()
-                    )
-                };
-
-                let line_range = self.get_line_byte_range(content, line_num);
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message,
-                    line: line_num,
-                    column: indentation.end() + 1,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_range,
-                        replacement: self.fix_closed_atx_heading(line),
-                    }),
-                });
-            }
-        }
-
-        Ok(warnings)
+        let structure = DocumentStructure::new(content);
+        self.check_with_structure(content, &structure)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
         if content.is_empty() {
             return Ok(String::new());
         }
-
+        let structure = DocumentStructure::new(content);
+        let lines: Vec<&str> = content.lines().collect();
         let mut result = String::new();
-        let mut in_code_block = false;
-
-        for (i, line) in content.lines().enumerate() {
-            // Handle code blocks
-            if CODE_FENCE_PATTERN.is_match(line.trim()) {
-                in_code_block = !in_code_block;
-                result.push_str(line);
-            } else if in_code_block {
-                result.push_str(line);
-            } else if self.is_closed_atx_heading_with_multiple_spaces(line) {
+        for (i, line) in lines.iter().enumerate() {
+            // Only process heading lines
+            let is_heading_line = structure.heading_lines.iter().any(|&ln| ln == i + 1);
+            if is_heading_line && self.is_closed_atx_heading_with_multiple_spaces(line) {
                 result.push_str(&self.fix_closed_atx_heading(line));
             } else {
                 result.push_str(line);
             }
-
-            if i < content.lines().count() - 1 {
+            if i < lines.len() - 1 {
                 result.push('\n');
             }
         }
-
         // Preserve trailing newline if original had it
         if content.ends_with('\n') && !result.ends_with('\n') {
             result.push('\n');
         }
-
         Ok(result)
     }
 
@@ -275,6 +203,8 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !content.contains('#')
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD021NoMultipleSpaceClosedAtx {

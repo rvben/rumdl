@@ -1,6 +1,7 @@
-use crate::utils::element_cache::{get_element_cache, ListMarkerType};
+use crate::utils::element_cache::ListMarkerType;
 use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::element_cache::ElementCache;
 
 #[derive(Debug, Default)]
 pub struct MD016NoMultipleSpaceAfterListMarker {
@@ -44,10 +45,14 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
         let mut warnings = Vec::new();
         
         // Get cached document elements - this provides efficient access to lists and code blocks
-        let element_cache = get_element_cache(content);
+        let element_cache = ElementCache::new(content);
         
         // Process each list item from the cache
         for list_item in element_cache.get_list_items() {
+            // Skip list items inside code blocks
+            if element_cache.is_in_code_block(list_item.line_number) {
+                continue;
+            }
             // Check if this list item has multiple spaces after marker
             if list_item.spaces_after_marker > 1 {
                 // Create a warning with fix
@@ -60,8 +65,12 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
                 };
                 
                 // Generate the fixed line with exactly one space after marker
-                let indentation = " ".repeat(list_item.indentation);
-                let fixed_line = format!("{}{} {}", indentation, list_item.marker, list_item.content);
+                let indentation = &list_item.indent_str;
+                let fixed_line = if list_item.content.is_empty() {
+                    format!("{}{}", indentation, list_item.marker)
+                } else {
+                    format!("{}{} {}", indentation, list_item.marker, list_item.content)
+                };
                 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
@@ -85,49 +94,43 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
         if self.allow_multiple_spaces {
             return Ok(content.to_string());
         }
-        
-        // Fast path - check if content has any list markers
-        if !content.contains('*') && !content.contains('-') && !content.contains('+') && 
-           !content.contains("1.") && !content.contains("2.") {
-            return Ok(content.to_string());
-        }
-        
-        let element_cache = get_element_cache(content);
+        // Always reset the element cache to avoid stale data
+        crate::utils::element_cache::reset_element_cache();
+        // Force cache rebuild after reset
+        let element_cache = ElementCache::new(content);
         let lines: Vec<&str> = content.lines().collect();
         let mut result = String::new();
-        
         for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1;
-            
-            // Check if this line is a list item with multiple spaces
             if let Some(list_item) = element_cache.get_list_item(line_num) {
-                if list_item.spaces_after_marker > 1 {
-                    // Generate the fixed line
-                    let indentation = " ".repeat(list_item.indentation);
-                    let fixed_line = format!("{}{} {}", indentation, list_item.marker, list_item.content);
-                    result.push_str(&fixed_line);
-                } else {
-                    // Use the original line
+                let in_code_block = element_cache.is_in_code_block(line_num);
+                if in_code_block {
                     result.push_str(line);
+                } else {
+                    let indentation = &list_item.indent_str;
+                    let marker = &list_item.marker;
+                    let content = &list_item.content;
+                    let fixed_line = if content.is_empty() {
+                        format!("{}{}", indentation, marker)
+                    } else {
+                        format!("{}{} {}", indentation, marker, content)
+                    };
+                    result.push_str(&fixed_line);
                 }
             } else {
-                // Not a list item, keep as is
                 result.push_str(line);
             }
-            
-            // Add newline except for last line
             if i < lines.len() - 1 {
                 result.push('\n');
             }
         }
-        
-        // Ensure trailing newline is preserved
         if content.ends_with('\n') && !result.ends_with('\n') {
             result.push('\n');
         }
-        
         Ok(result)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 #[cfg(test)]
@@ -149,8 +152,10 @@ mod tests {
         assert_eq!(warnings2.len(), 3);
         
         // Mixed case
-        let content3 = "- Valid item\n-  Invalid item\n```\n-  Ignored in code block\n```";
+        let content3 = "- Valid item\n-  Invalid item\n```
+-  Ignored in code block\n```";
         let warnings3 = rule.check(content3).unwrap();
+        // Now both the second and fourth lines are detected as list items, but the fourth is in a code block and should not be flagged
         assert_eq!(warnings3.len(), 1);
         
         // Test with allow_multiple_spaces = true
@@ -171,8 +176,10 @@ mod tests {
         assert_eq!(fixed, expected);
         
         // Test with code blocks
-        let content2 = "- Valid item\n-  Invalid item\n```\n-  Ignored in code block\n```";
-        let expected2 = "- Valid item\n- Invalid item\n```\n-  Ignored in code block\n```";
+        let content2 = "- Valid item\n-  Invalid item\n```
+-  Ignored in code block\n```";
+        let expected2 = "- Valid item\n- Invalid item\n```
+-  Ignored in code block\n```";
         
         let fixed2 = rule.fix(content2).unwrap();
         assert_eq!(fixed2, expected2);

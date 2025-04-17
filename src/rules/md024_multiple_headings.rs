@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::markdown_elements::{ElementType, MarkdownElements};
 
 /// A rule that checks for multiple headings with the same content
 #[derive(Default)]
@@ -49,49 +48,8 @@ impl Rule for MD024MultipleHeadings {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        // Early return for empty content
-        if content.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let mut warnings = Vec::new();
-
-        // Track headings by their signature
-        let mut headings = HashMap::new();
-
-        // Detect all headings using the MarkdownElements utility
-        let detected_headings = MarkdownElements::detect_headings(content);
-
-        for heading in detected_headings {
-            // Skip non-heading elements (shouldn't happen) and empty headings
-            if heading.element_type != ElementType::Heading || heading.text.trim().is_empty() {
-                continue;
-            }
-
-            // Get the heading level from metadata
-            if let Some(level_str) = &heading.metadata {
-                if let Ok(level) = level_str.parse::<u32>() {
-                    let signature = self.get_heading_signature(&heading.text, level);
-
-                    // Check if we've seen this heading before
-                    if let Some(first_occurrence) = headings.get(&signature) {
-                        warnings.push(LintWarning {
-            rule_name: Some(self.name()),
-                            line: heading.start_line + 1,  // Convert 0-indexed to 1-indexed
-                            column: 1,
-                            message: format!("Multiple headings with the same content (first occurrence at line {})", first_occurrence),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    } else {
-                        // First occurrence
-                        headings.insert(signature, heading.start_line + 1); // Convert to 1-indexed
-                    }
-                }
-            }
-        }
-
-        Ok(warnings)
+        let structure = DocumentStructure::new(content);
+        self.check_with_structure(content, &structure)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
@@ -115,47 +73,31 @@ impl Rule for MD024MultipleHeadings {
 
         // Process only heading lines using structure.heading_lines and structure.heading_levels
         for (i, &line_num) in structure.heading_lines.iter().enumerate() {
-            // Get the line index (0-based)
-            let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-
-            // Skip if out of bounds
+            // Use heading_regions to get the correct line for heading text
+            let (content_line, _marker_line) = if i < structure.heading_regions.len() {
+                structure.heading_regions[i]
+            } else {
+                (line_num, line_num)
+            };
+            let line_idx = content_line - 1; // Convert 1-indexed to 0-indexed
             if line_idx >= lines.len() {
                 continue;
             }
-
-            // Get the heading text
-            let line = lines[line_idx];
-
-            // Extract the text content (strip hashes and whitespace for ATX headings)
-            let text = if line.trim().starts_with('#') {
-                // This is an ATX heading
-                let mut chars = line.trim().chars();
-                // Skip the hash symbols at the beginning
-                while chars.next() == Some('#') {}
-                chars.as_str().trim()
-            } else if i + 1 < structure.heading_lines.len() && line_idx + 1 < lines.len() {
-                // This could be a setext heading - check if the next line has = or -
-                let next_line = lines[line_idx + 1];
-                if next_line.trim().starts_with('=') || next_line.trim().starts_with('-') {
-                    line.trim()
-                } else {
-                    continue; // Not a heading we can process
-                }
+            let text = lines[line_idx].trim();
+            // Extract only the heading text (remove leading #, ##, etc. and whitespace)
+            let heading_text = if let Some(stripped) = text.strip_prefix('#') {
+                // Remove all leading '#' and whitespace
+                stripped.trim_start_matches('#').trim()
             } else {
-                continue; // Not a heading we can process
+                text // fallback, should not happen for valid headings
             };
-
-            // Get the heading level
             let level = if i < structure.heading_levels.len() {
                 structure.heading_levels[i] as u32
             } else {
-                // Fallback if the structure doesn't have the level
                 1
             };
-
             // Get the signature
-            let signature = self.get_heading_signature(text, level);
-
+            let signature = self.get_heading_signature(heading_text, level);
             // Check if we've seen this heading before
             if let Some(first_occurrence) = headings.get(&signature) {
                 warnings.push(LintWarning {
@@ -187,6 +129,8 @@ impl Rule for MD024MultipleHeadings {
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !content.contains('#')
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD024MultipleHeadings {
@@ -233,11 +177,11 @@ mod tests {
     fn test_with_document_structure() {
         let rule = MD024MultipleHeadings::default();
 
-        // Test with unique headings
+        // Test with unique headings (should NOT warn)
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(result.is_empty());
+        assert!(result.is_empty(), "Unique headings should not trigger MD024 warnings");
 
         // Test with duplicate headings
         let content = "# Heading\n## Subheading\n# Heading";

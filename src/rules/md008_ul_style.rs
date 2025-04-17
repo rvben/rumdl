@@ -348,6 +348,8 @@ impl Rule for MD008ULStyle {
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !Self::contains_potential_list_items(content)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl DocumentStructureExtensions for MD008ULStyle {

@@ -355,6 +355,8 @@ impl Rule for MD033NoInlineHtml {
     fn should_skip(&self, content: &str) -> bool {
         content.is_empty() || !content.contains('<') || !HTML_TAG_QUICK_CHECK.is_match(content)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 impl MD033NoInlineHtml {

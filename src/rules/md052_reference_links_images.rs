@@ -307,4 +307,6 @@ impl Rule for MD052ReferenceLinkImages {
         // No automatic fix available for undefined references
         Ok(content.to_string())
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

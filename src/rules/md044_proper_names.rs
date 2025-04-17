@@ -259,4 +259,6 @@ impl Rule for MD044ProperNames {
 
         Ok(new_lines.join("\n"))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

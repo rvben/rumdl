@@ -1,6 +1,7 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::cell::RefCell;
+use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
     // Efficient regex patterns
@@ -9,8 +10,8 @@ lazy_static! {
     static ref INDENTED_CODE_BLOCK_REGEX: Regex = Regex::new(r"^(\s{4,})(.+)$").unwrap();
     
     // List detection patterns
-    static ref UNORDERED_LIST_REGEX: Regex = Regex::new(r"^(\s*)([*+-])(\s+)").unwrap();
-    static ref ORDERED_LIST_REGEX: Regex = Regex::new(r"^(\s*)(\d+\.)(\s+)").unwrap();
+    static ref UNORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
+    static ref ORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>\d+\.)(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
     
     // Inline code span pattern
     static ref CODE_SPAN_REGEX: Regex = Regex::new(r"`+").unwrap();
@@ -54,11 +55,13 @@ pub enum ListMarkerType {
 pub struct ListItem {
     pub line_number: usize, // 1-indexed
     pub indentation: usize,
+    pub indent_str: String, // NEW: actual leading whitespace
     pub marker_type: ListMarkerType,
     pub marker: String,
     pub content: String,
     pub spaces_after_marker: usize,
     pub nesting_level: usize,
+    pub parent_line_number: Option<usize>,
 }
 
 /// Cache for Markdown document structural elements
@@ -186,22 +189,25 @@ impl ElementCache {
                     block_language = caps.get(3).map_or("", |m| m.as_str().trim()).to_string();
                     self.code_block_line_map[i] = true;
                 } else if INDENTED_CODE_BLOCK_REGEX.is_match(line) {
-                    // Indented code block
-                    self.code_block_line_map[i] = true;
-                    
-                    // For indented code blocks, we handle them as individual lines
-                    // We don't track them as blocks with start/end because they can be
-                    // interrupted by blank lines, etc.
-                    let start_pos = lines[0..i].join("\n").len() + if i > 0 { 1 } else { 0 };
-                    let end_pos = start_pos + line.len();
-                    
-                    self.code_blocks.push(CodeBlock {
-                        range: Range { start: start_pos, end: end_pos },
-                        block_type: CodeBlockType::Indented,
-                        start_line: i + 1, // 1-indexed
-                        end_line: i + 1, // 1-indexed
-                        language: None,
-                    });
+                    // Only mark as indented code block if not a list item
+                    let is_unordered_list = UNORDERED_LIST_REGEX.is_match(line).unwrap_or(false);
+                    let is_ordered_list = ORDERED_LIST_REGEX.is_match(line).unwrap_or(false);
+                    if !is_unordered_list && !is_ordered_list {
+                        // Indented code block
+                        self.code_block_line_map[i] = true;
+                        // For indented code blocks, we handle them as individual lines
+                        // We don't track them as blocks with start/end because they can be
+                        // interrupted by blank lines, etc.
+                        let start_pos = lines[0..i].join("\n").len() + if i > 0 { 1 } else { 0 };
+                        let end_pos = start_pos + line.len();
+                        self.code_blocks.push(CodeBlock {
+                            range: Range { start: start_pos, end: end_pos },
+                            block_type: CodeBlockType::Indented,
+                            start_line: i + 1, // 1-indexed
+                            end_line: i + 1, // 1-indexed
+                            language: None,
+                        });
+                    }
                 }
             }
             
@@ -250,114 +256,121 @@ impl ElementCache {
     fn populate_list_items(&mut self) {
         if let Some(content) = &self.content {
             let lines: Vec<&str> = content.lines().collect();
-            let mut list_levels: Vec<(usize, usize)> = Vec::new(); // (indent, level)
-            
+            let mut prev_items: Vec<(usize, usize)> = Vec::new(); // (nesting_level, line_number)
             for (i, line) in lines.iter().enumerate() {
-                // Skip lines in code blocks
-                if self.code_block_line_map[i] {
+                // Reset stack on blank lines
+                if line.trim().is_empty() {
+                    prev_items.clear(); // Reset nesting after blank line
                     continue;
                 }
-                
-                // Check if it's a list item
-                if let Some(item) = self.parse_list_item(line, i + 1, &mut list_levels) {
+                // Always try to match a list item, regardless of indentation
+                if let Some(item) = self.parse_list_item(line, i + 1, &mut prev_items) {
                     self.list_items.push(item);
                     self.list_line_map[i] = true;
+                    continue; // If it's a list item, do not treat as code block
                 }
+                // If not a list item, mark as code block if indented (4+ spaces)
+                // (This is for completeness, but code block map is handled elsewhere)
             }
         }
     }
     
     /// Parse a line as a list item and determine its nesting level
-    fn parse_list_item(&self, line: &str, line_num: usize, list_levels: &mut Vec<(usize, usize)>) -> Option<ListItem> {
-        // Try to match unordered list pattern
-        if let Some(captures) = UNORDERED_LIST_REGEX.captures(line) {
-            let indentation = captures.get(1).map_or(0, |m| m.as_str().len());
-            let marker = captures.get(2).unwrap().as_str();
-            let spaces = captures.get(3).map_or(0, |m| m.as_str().len());
-            let content_start = indentation + marker.len() + spaces;
-            let content = if content_start < line.len() {
-                line[content_start..].to_string()
-            } else {
-                String::new()
-            };
-            
-            // Determine marker type
-            let marker_type = match marker {
-                "*" => ListMarkerType::Asterisk,
-                "+" => ListMarkerType::Plus,
-                "-" => ListMarkerType::Minus,
-                _ => unreachable!(), // Regex ensures this
-            };
-            
-            // Calculate nesting level
-            let nesting_level = self.calculate_nesting_level(indentation, list_levels);
-            
-            return Some(ListItem {
-                line_number: line_num,
-                indentation,
-                marker_type,
-                marker: marker.to_string(),
-                content,
-                spaces_after_marker: spaces,
-                nesting_level,
-            });
+    fn parse_list_item(&self, line: &str, line_num: usize, prev_items: &mut Vec<(usize, usize)>) -> Option<ListItem> {
+        match UNORDERED_LIST_REGEX.captures(line) {
+            Ok(Some(captures)) => {
+                let indent_str = captures.name("indent").map_or("", |m| m.as_str()).to_string();
+                let indentation = indent_str.len();
+                let marker = captures.name("marker").unwrap().as_str();
+                let after = captures.name("after").map_or("", |m| m.as_str());
+                let spaces = after.len();
+                let raw_content = captures.name("content").map_or("", |m| m.as_str());
+                let content = raw_content.trim_start().to_string();
+                let marker_type = match marker {
+                    "*" => ListMarkerType::Asterisk,
+                    "+" => ListMarkerType::Plus,
+                    "-" => ListMarkerType::Minus,
+                    _ => unreachable!(),
+                };
+                let nesting_level = self.calculate_nesting_level(indentation, prev_items);
+                // Find parent: most recent previous item with lower nesting_level
+                let parent_line_number = prev_items.iter().rev()
+                    .find(|(level, _)| *level < nesting_level)
+                    .map(|(_, line_num)| *line_num);
+                return Some(ListItem {
+                    line_number: line_num,
+                    indentation,
+                    indent_str,
+                    marker_type,
+                    marker: marker.to_string(),
+                    content,
+                    spaces_after_marker: spaces,
+                    nesting_level,
+                    parent_line_number,
+                });
+            }
+            Ok(None) => {
+                // No debug output
+            }
+            Err(_) => {}
         }
-        
-        // Try to match ordered list pattern
-        if let Some(captures) = ORDERED_LIST_REGEX.captures(line) {
-            let indentation = captures.get(1).map_or(0, |m| m.as_str().len());
-            let marker = captures.get(2).unwrap().as_str();
-            let spaces = captures.get(3).map_or(0, |m| m.as_str().len());
-            let content_start = indentation + marker.len() + spaces;
-            let content = if content_start < line.len() {
-                line[content_start..].to_string()
-            } else {
-                String::new()
-            };
-            
-            // Calculate nesting level
-            let nesting_level = self.calculate_nesting_level(indentation, list_levels);
-            
-            return Some(ListItem {
-                line_number: line_num,
-                indentation,
-                marker_type: ListMarkerType::Ordered,
-                marker: marker.to_string(),
-                content,
-                spaces_after_marker: spaces,
-                nesting_level,
-            });
+        match ORDERED_LIST_REGEX.captures(line) {
+            Ok(Some(captures)) => {
+                let indent_str = captures.name("indent").map_or("", |m| m.as_str()).to_string();
+                let indentation = indent_str.len();
+                let marker = captures.name("marker").unwrap().as_str();
+                let spaces = captures.name("after").map_or(0, |m| m.as_str().len());
+                let content = captures.name("content").map_or("", |m| m.as_str()).trim_start().to_string();
+                let nesting_level = self.calculate_nesting_level(indentation, prev_items);
+                // Find parent: most recent previous item with lower nesting_level
+                let parent_line_number = prev_items.iter().rev()
+                    .find(|(level, _)| *level < nesting_level)
+                    .map(|(_, line_num)| *line_num);
+                return Some(ListItem {
+                    line_number: line_num,
+                    indentation,
+                    indent_str,
+                    marker_type: ListMarkerType::Ordered,
+                    marker: marker.to_string(),
+                    content,
+                    spaces_after_marker: spaces,
+                    nesting_level,
+                    parent_line_number,
+                });
+            }
+            Ok(None) => {}
+            Err(_) => {}
         }
-        
         None
     }
     
     /// Calculate the nesting level for a list item
-    fn calculate_nesting_level(&self, indent: usize, list_levels: &mut Vec<(usize, usize)>) -> usize {
-        // Determine the nesting level based on indentation
-        if indent == 0 {
-            // Top level item
-            list_levels.clear();
-            list_levels.push((0, 0));
-            0
-        } else {
-            // Find the appropriate nesting level based on indentation
-            let mut level = 0;
-            
-            for &(prev_indent, prev_level) in list_levels.iter().rev() {
-                if indent > prev_indent {
-                    level = prev_level + 1;
-                    break;
-                } else if indent == prev_indent {
-                    level = prev_level;
-                    break;
+    fn calculate_nesting_level(&self, indent: usize, prev_items: &mut Vec<(usize, usize)>) -> usize {
+        // CommonMark: a list item is nested if it is indented at least 2 spaces more than the previous list item
+        let mut nesting_level = 0;
+        if let Some(&(last_indent, last_level)) = prev_items.last() {
+            if indent >= last_indent + 2 {
+                // Nested under previous
+                nesting_level = last_level + 1;
+            } else {
+                // Walk back to find the most recent indent <= current indent
+                for &(prev_indent, prev_level) in prev_items.iter().rev() {
+                    if prev_indent <= indent {
+                        nesting_level = prev_level;
+                        break;
+                    }
                 }
             }
-            
-            // Update the list level tracking
-            list_levels.push((indent, level));
-            level
         }
+        // Remove stack entries with indent >= current indent
+        while let Some(&(prev_indent, _)) = prev_items.last() {
+            if prev_indent < indent {
+                break;
+            }
+            prev_items.pop();
+        }
+        prev_items.push((indent, nesting_level));
+        nesting_level
     }
 }
 
@@ -437,36 +450,74 @@ mod tests {
     }
     
     #[test]
-    fn test_list_item_detection() {
+    fn test_list_item_detection_simple() {
         let content = "# Heading\n\n- First item\n  - Nested item\n- Second item\n\n1. Ordered item\n   1. Nested ordered\n";
         let cache = ElementCache::new(content);
-        
         assert_eq!(cache.list_items.len(), 5);
-        
         // Check the first item
         assert_eq!(cache.list_items[0].line_number, 3);
         assert_eq!(cache.list_items[0].marker, "-");
         assert_eq!(cache.list_items[0].nesting_level, 0);
-        
         // Check the nested item
         assert_eq!(cache.list_items[1].line_number, 4);
         assert_eq!(cache.list_items[1].marker, "-");
         assert_eq!(cache.list_items[1].nesting_level, 1);
-        
         // Check the second list item
         assert_eq!(cache.list_items[2].line_number, 5);
         assert_eq!(cache.list_items[2].marker, "-");
         assert_eq!(cache.list_items[2].nesting_level, 0);
-        
         // Check ordered list item
         assert_eq!(cache.list_items[3].line_number, 7);
         assert_eq!(cache.list_items[3].marker, "1.");
         assert_eq!(cache.list_items[3].nesting_level, 0);
-        
         // Check nested ordered list item
         assert_eq!(cache.list_items[4].line_number, 8);
         assert_eq!(cache.list_items[4].marker, "1.");
         assert_eq!(cache.list_items[4].nesting_level, 1);
+    }
+
+    #[test]
+    fn test_list_item_detection_complex() {
+        let complex = "  * Level 1 item 1\n    - Level 2 item 1\n      + Level 3 item 1\n    - Level 2 item 2\n  * Level 1 item 2\n\n* Top\n  + Nested\n    - Deep\n      * Deeper\n        + Deepest\n";
+        let cache = ElementCache::new(complex);
+        // Should detect all 10 list items
+        assert_eq!(cache.list_items.len(), 10);
+        // Check markers and nesting levels
+        assert_eq!(cache.list_items[0].marker, "*");
+        assert_eq!(cache.list_items[0].nesting_level, 0);
+        assert_eq!(cache.list_items[1].marker, "-");
+        assert_eq!(cache.list_items[1].nesting_level, 1);
+        assert_eq!(cache.list_items[2].marker, "+");
+        assert_eq!(cache.list_items[2].nesting_level, 2);
+        assert_eq!(cache.list_items[3].marker, "-");
+        assert_eq!(cache.list_items[3].nesting_level, 1);
+        assert_eq!(cache.list_items[4].marker, "*");
+        assert_eq!(cache.list_items[4].nesting_level, 0);
+        assert_eq!(cache.list_items[5].marker, "*");
+        assert_eq!(cache.list_items[5].nesting_level, 0);
+        assert_eq!(cache.list_items[6].marker, "+");
+        assert_eq!(cache.list_items[6].nesting_level, 1);
+        assert_eq!(cache.list_items[7].marker, "-");
+        assert_eq!(cache.list_items[7].nesting_level, 2);
+        assert_eq!(cache.list_items[8].marker, "*");
+        assert_eq!(cache.list_items[8].nesting_level, 3);
+        assert_eq!(cache.list_items[9].marker, "+");
+        assert_eq!(cache.list_items[9].nesting_level, 4);
+        let expected_nesting = vec![0, 1, 2, 1, 0, 0, 1, 2, 3, 4];
+        let actual_nesting: Vec<_> = cache.list_items.iter().map(|item| item.nesting_level).collect();
+        assert_eq!(actual_nesting, expected_nesting, "Nesting levels should match expected values");
+    }
+
+    #[test]
+    fn test_list_item_detection_edge() {
+        let edge = "* Item 1\n\n    - Nested 1\n  + Nested 2\n\n* Item 2\n";
+        let cache = ElementCache::new(edge);
+        assert_eq!(cache.list_items.len(), 4);
+        // Per CommonMark, after a blank line, indented list items are not nested unless they are part of a continued list structure.
+        // All items should have nesting_level 0.
+        for item in &cache.list_items {
+            assert_eq!(item.nesting_level, 0);
+        }
     }
     
     #[test]
@@ -502,5 +553,32 @@ mod tests {
         assert_eq!(cache1.content.as_ref().unwrap(), content1);
         assert_eq!(cache2.content.as_ref().unwrap(), content1);
         assert_eq!(cache3.content.as_ref().unwrap(), content2);
+    }
+
+    #[test]
+    fn test_list_item_detection_deep_nesting_and_edge_cases() {
+        // Deeply nested unordered lists, mixed markers, excessive indentation, tabs, and blank lines
+        let content = "\
+* Level 1
+  - Level 2
+    + Level 3
+      * Level 4
+        - Level 5
+          + Level 6
+* Sibling 1
+    * Sibling 2
+\n    - After blank line, not nested\n\n\t* Tab indented\n        * 8 spaces indented\n* After excessive indent\n";
+        let cache = ElementCache::new(content);
+        // Should detect all lines that start with a valid unordered list marker
+        let expected_markers = vec!["*", "-", "+", "*", "-", "+", "*", "*", "-", "*", "*", "*"];
+        let expected_nesting = vec![0, 1, 2, 3, 4, 5, 0, 1, 0, 0, 1, 0];
+        let actual_nesting: Vec<_> = cache.list_items.iter().map(|item| item.nesting_level).collect();
+        assert_eq!(actual_nesting, expected_nesting, "Nesting levels should match expected values");
+        // Check that tab-indented and 8-space-indented items are detected
+        assert!(cache.list_items.iter().any(|item| item.marker == "*" && item.indentation >= 1), "Tab or 8-space indented item not detected");
+        // Check that after blank lines, items are not nested
+        let after_blank = cache.list_items.iter().find(|item| item.content.contains("After blank line"));
+        assert!(after_blank.is_some());
+        assert_eq!(after_blank.unwrap().nesting_level, 0, "Item after blank line should not be nested");
     }
 } 

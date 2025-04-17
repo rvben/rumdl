@@ -94,7 +94,7 @@ impl HeadingUtils {
         let line = lines[line_num - 1];
 
         // Skip if line is within a code block
-        if Self::is_in_code_block(content, line_num - 1) {
+        if Self::is_in_code_block(content, line_num) {
             return None;
         }
 
@@ -116,14 +116,15 @@ impl HeadingUtils {
                 HeadingStyle::Atx
             };
 
-            return Some(Heading {
-                text,
+            let heading = Heading {
+                text: text.clone(),
                 level,
-                style,
+                style: style.clone(),
                 line_number: line_num,
                 original_text: line.to_string(),
-                indentation,
-            });
+                indentation: indentation.clone(),
+            };
+            return Some(heading);
         }
 
         // Check for Setext style headings
@@ -156,26 +157,28 @@ impl HeadingUtils {
             if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
                 let underline_indent = captures.get(1).map_or("", |m| m.as_str());
                 if underline_indent == line_indentation {
-                    return Some(Heading {
+                    let heading = Heading {
                         text: line[line_indentation.len()..].to_string(),
                         level: 1,
                         style: HeadingStyle::Setext1,
                         line_number: line_num,
                         original_text: format!("{}\n{}", line, next_line),
-                        indentation: line_indentation,
-                    });
+                        indentation: line_indentation.clone(),
+                    };
+                    return Some(heading);
                 }
             } else if let Some(captures) = SETEXT_HEADING_2.captures(next_line) {
                 let underline_indent = captures.get(1).map_or("", |m| m.as_str());
                 if underline_indent == line_indentation {
-                    return Some(Heading {
+                    let heading = Heading {
                         text: line[line_indentation.len()..].to_string(),
                         level: 2,
                         style: HeadingStyle::Setext2,
                         line_number: line_num,
                         original_text: format!("{}\n{}", line, next_line),
-                        indentation: line_indentation,
-                    });
+                        indentation: line_indentation.clone(),
+                    };
+                    return Some(heading);
                 }
             }
         }

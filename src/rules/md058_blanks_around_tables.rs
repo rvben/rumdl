@@ -209,4 +209,6 @@ impl Rule for MD058BlanksAroundTables {
 
         Ok(result.join("\n"))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
