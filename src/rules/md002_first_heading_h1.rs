@@ -99,20 +99,6 @@ impl MD002FirstHeadingH1 {
         Self { level }
     }
 
-    fn skip_front_matter(&self, content: &str) -> usize {
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.is_empty() || !lines[0].trim_end().eq("---") {
-            return 0;
-        }
-
-        for (i, line) in lines.iter().enumerate().skip(1) {
-            if line.trim_end().eq("---") {
-                return i + 1;
-            }
-        }
-        0
-    }
-
     fn parse_heading(
         &self,
         content: &str,

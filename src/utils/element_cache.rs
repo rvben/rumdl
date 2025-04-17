@@ -570,7 +570,24 @@ mod tests {
 \n    - After blank line, not nested\n\n\t* Tab indented\n        * 8 spaces indented\n* After excessive indent\n";
         let cache = ElementCache::new(content);
         // Should detect all lines that start with a valid unordered list marker
-        let expected_markers = vec!["*", "-", "+", "*", "-", "+", "*", "*", "-", "*", "*", "*"];
+        let _expected_markers = vec!["*", "-", "+", "*", "-", "+", "*", "*", "-", "*", "*", "*"];
+        let _expected_indents = vec![0, 4, 8, 0, 4, 8, 0, 4, 8, 12, 16, 20];
+        let expected_content = vec![
+            "* Level 1",
+            "- Level 2",
+            "+ Level 3",
+            "* Level 4",
+            "- Level 5",
+            "+ Level 6",
+            "* Sibling 1",
+            "* Sibling 2",
+            "- After blank line, not nested",
+            "\t* Tab indented",
+            "        * 8 spaces indented",
+            "* After excessive indent"
+        ];
+        let actual_content: Vec<_> = cache.list_items.iter().map(|item| item.content.clone()).collect();
+        assert_eq!(actual_content, expected_content, "List item contents should match expected values");
         let expected_nesting = vec![0, 1, 2, 3, 4, 5, 0, 1, 0, 0, 1, 0];
         let actual_nesting: Vec<_> = cache.list_items.iter().map(|item| item.nesting_level).collect();
         assert_eq!(actual_nesting, expected_nesting, "Nesting levels should match expected values");

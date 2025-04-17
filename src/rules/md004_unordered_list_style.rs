@@ -1,11 +1,9 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{
-    DocumentStructure, DocumentStructureExtensions, ListMarkerType,
+    DocumentStructure, DocumentStructureExtensions
 };
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
 use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
@@ -40,15 +38,6 @@ impl MD004UnorderedListStyle {
         Self {
             style,
             after_marker: 1,
-        }
-    }
-
-    fn get_marker_char(style: UnorderedListStyle) -> char {
-        match style {
-            UnorderedListStyle::Asterisk => '*',
-            UnorderedListStyle::Plus => '+',
-            UnorderedListStyle::Dash => '-',
-            UnorderedListStyle::Consistent => '*', // Default, but will be overridden
         }
     }
 }

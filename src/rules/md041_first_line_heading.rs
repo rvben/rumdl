@@ -2,7 +2,6 @@ use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
-use regex::Regex;
 use crate::utils::document_structure::DocumentStructure;
 
 #[derive(Debug)]
@@ -34,57 +33,6 @@ impl MD041FirstLineHeading {
         }
 
         FrontMatterUtils::has_front_matter_field(content, "title:")
-    }
-
-    fn is_heading_line(&self, line: &str) -> Option<usize> {
-        // Check for ATX style heading
-
-        let re = Regex::new(r"^(#{1,6})(?:\s+.+)?(?:\s+#{0,})?$").unwrap();
-        if let Some(cap) = re.captures(line) {
-            return Some(cap[1].len());
-        }
-
-        // Check for Setext style heading would require next line,
-        // but not needed for this rule's implementation
-        None
-    }
-
-    fn find_first_heading(&self, content: &str) -> Option<(usize, usize)> {
-        let lines: Vec<&str> = content.lines().collect();
-
-        let mut in_front_matter = false;
-
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-
-            // Check for front matter
-            if i == 0 && trimmed == "---" {
-                in_front_matter = true;
-                continue;
-            }
-
-            if in_front_matter {
-                if trimmed == "---" {
-                    in_front_matter = false;
-                }
-                continue;
-            }
-
-            // Skip blank lines after front matter
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            // Check if line is a heading
-            if let Some(level) = self.is_heading_line(trimmed) {
-                return Some((i + 1, level));
-            } else {
-                // If we hit non-empty, non-heading content, no first heading exists
-                return None;
-            }
-        }
-
-        None
     }
 }
 

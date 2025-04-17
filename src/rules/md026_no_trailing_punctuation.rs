@@ -163,11 +163,6 @@ impl MD026NoTrailingPunctuation {
         )
     }
 
-    // Detect if a line is a setext heading underline
-    fn is_setext_underline(&self, line: &str) -> bool {
-        SETEXT_UNDERLINE_RE.is_match(line)
-    }
-
     // Check if we're in front matter (between --- markers)
     fn is_in_front_matter(&self, lines: &[&str], line_idx: usize) -> bool {
         if line_idx == 0 || lines.is_empty() {
@@ -219,7 +214,7 @@ impl MD026NoTrailingPunctuation {
         let line_index = LineIndex::new(content.to_string());
         let lines: Vec<&str> = content.lines().collect();
 
-        for (idx, &line_num) in structure.heading_lines.iter().enumerate() {
+        for (idx, &_line_num) in structure.heading_lines.iter().enumerate() {
             let region = structure.heading_regions[idx];
             let heading_line = region.0; // Always the content line for both ATX and setext
 
@@ -327,37 +322,63 @@ impl Rule for MD026NoTrailingPunctuation {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let lines: Vec<&str> = content.lines().collect();
-        let ends_with_newline = content.ends_with('\n');
+        // Parse the document structure to get heading info
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
-        let mut fixed_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+
+        let lines: Vec<&str> = content.lines().collect();
+        let mut fixed_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
         let re = self.get_punctuation_regex().unwrap();
 
-        for (idx, &line_num) in structure.heading_lines.iter().enumerate() {
-            let region = structure.heading_regions[idx];
-            let start = region.0 - 1;
-            let _end = region.1 - 1;
-            // Only fix if the heading line exists
-            if start < lines.len() {
-                // Remove trailing punctuation from the heading text
-                let line = lines[start];
-                // ATX or Setext
-                if region.0 == region.1 {
-                    // ATX
-                    let fixed = self.fix_atx_heading(line, &re);
-                    fixed_lines[start] = fixed;
-                } else {
-                    // Setext (multi-line)
-                    let fixed = self.fix_setext_heading(line, &re);
-                    fixed_lines[start] = fixed;
-                }
+        // Use _line_num as line number from structure.heading_lines is unused
+        for (idx, &_line_num) in structure.heading_lines.iter().enumerate() {
+            // Use heading_regions to get line indices
+            let region = structure.heading_regions[idx]; 
+            let start_line_idx = region.0.saturating_sub(1); // 1-based to 0-based
+
+            // Check bounds
+            if start_line_idx >= fixed_lines.len() {
+                continue;
+            }
+
+            // Fix based on heading type identified by region span
+            if region.0 == region.1 { // ATX heading (single line)
+                 let fixed = self.fix_atx_heading(&fixed_lines[start_line_idx], &re);
+                 fixed_lines[start_line_idx] = fixed;
+            } else { // Setext heading (content is on start_line_idx)
+                 let fixed = self.fix_setext_heading(&fixed_lines[start_line_idx], &re);
+                 fixed_lines[start_line_idx] = fixed;
             }
         }
-
-        let mut result = fixed_lines.join("\n");
-        if ends_with_newline {
-            result.push('\n');
+        
+        // Join lines back with original newline separators
+        // Need to handle original newline endings (e.g., CRLF vs LF)
+        let mut result = String::new();
+        let mut original_lines = content.lines().peekable();
+        let mut fixed_lines_iter = fixed_lines.into_iter();
+        
+        while let Some(fixed_line) = fixed_lines_iter.next() {
+            result.push_str(&fixed_line);
+            // Append original newline sequence if possible
+            if original_lines.next().is_some() {
+                 if original_lines.peek().is_some() {
+                      // Determine newline type from original content if possible (tricky)
+                      // For simplicity, using platform default for now
+                      #[cfg(windows)]
+                      result.push_str("\r\n");
+                      #[cfg(not(windows))]
+                      result.push('\n');
+                 } // Else: it was the last line, no newline needed after it based on original
+            } // Else: original content might have ended without newline?
         }
+        
+        // Handle case where content originally ended with a newline
+        if content.ends_with('\n') && !result.ends_with('\n') {
+             #[cfg(windows)]
+             result.push_str("\r\n");
+             #[cfg(not(windows))]
+             result.push('\n');
+        }
+
         Ok(result)
     }
 
