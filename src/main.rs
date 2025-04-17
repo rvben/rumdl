@@ -263,66 +263,67 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
         walk_builder.add(path);
     }
 
-    // Configure gitignore handling
+    // Get include/exclude patterns from config and CLI
+    let mut exclude_patterns = config.global.exclude.clone();
+    if let Some(exclude_str) = &cli.exclude {
+        exclude_patterns.extend(exclude_str.split(',').map(|s| s.trim().to_string()));
+    }
+    let mut include_patterns = config.global.include.clone();
+    if let Some(include_str) = &cli.include {
+         include_patterns.extend(include_str.split(',').map(|s| s.trim().to_string()));
+    }
+
+    // Configure overrides OR type filter *FIRST*
+    let has_include_patterns = !include_patterns.is_empty();
+    let has_exclude_patterns = !exclude_patterns.is_empty();
+
+    if has_include_patterns || has_exclude_patterns {
+        // Only create OverrideBuilder if needed
+        let mut override_builder = OverrideBuilder::new(".");
+
+        // Add include patterns first
+        if has_include_patterns {
+             for pattern in &include_patterns {
+                 override_builder.add(pattern)?;
+             }
+        }
+
+        // Add exclude patterns second (as ignore rules !pattern)
+        // These will take precedence over includes due to order.
+        if has_exclude_patterns {
+            for pattern in &exclude_patterns {
+                if let Err(e) = override_builder.add(&format!("!{}", pattern)) {
+                    eprintln!("Warning: Invalid exclude pattern '{}': {}", pattern, e);
+                }
+            }
+        }
+        
+        // Build and apply overrides
+        let overrides = override_builder.build()?;
+        walk_builder.overrides(overrides);
+    } else {
+        // If no overrides, setup the default type filter for markdown
+        let mut types_builder = ignore::types::TypesBuilder::new();
+        types_builder.add_defaults(); // Add default types
+        types_builder.select("markdown"); // Select markdown type
+        let md_type = types_builder.build()?; // Build types, handle error
+        walk_builder.types(md_type);
+    }
+
+    // Configure gitignore handling *SECOND*
     let use_gitignore = if cli.respect_gitignore {
         !cli.ignore_gitignore // If respect is true, only ignore if ignore_gitignore is false
     } else {
         false // If respect is false, always ignore gitignore
     };
     
-    walk_builder.ignore(use_gitignore);      // Ignore .ignore files
-    walk_builder.git_ignore(use_gitignore);  // Ignore .gitignore files
-    walk_builder.git_global(use_gitignore);  // Ignore global gitignore
-    walk_builder.git_exclude(use_gitignore); // Ignore .git/info/exclude
-    
-    // Configure hidden files (usually ignored by default, respect flags if needed)
-    walk_builder.hidden(true); // Typically you want to ignore hidden files/dirs
-
-    // Configure parent ignore files (e.g., ignore files in parent dirs)
-    walk_builder.parents(use_gitignore);
-
-    // --- Handle Overrides (Excludes/Includes) --- 
-
-    let mut override_builder = OverrideBuilder::new("."); // Base directory CWD
-
-    // Add explicit --exclude patterns (interpreted as ignore patterns)
-    let mut exclude_patterns = config.global.exclude.clone();
-    if let Some(exclude_str) = &cli.exclude {
-        exclude_patterns.extend(exclude_str.split(',').map(|s| s.trim().to_string()));
-    }
-    for pattern in exclude_patterns {
-        // Prepend ! to make it an ignore pattern for OverrideBuilder
-        // Need to handle potential errors adding the glob
-        if let Err(e) = override_builder.add(&format!("!{}", pattern)) {
-             eprintln!("Warning: Invalid exclude pattern '{}': {}", pattern, e);
-        }
-    }
-
-    // Add explicit --include patterns (these act as whitelist overrides)
-    // Note: include patterns override exclude patterns in OverrideBuilder
-    let mut include_patterns = config.global.include.clone();
-    if let Some(include_str) = &cli.include {
-         include_patterns.extend(include_str.split(',').map(|s| s.trim().to_string()));
-    }
-    // Only add include patterns if some were specified
-    if !include_patterns.is_empty() {
-        // Iterate over a slice to avoid moving the vector
-        for pattern in &include_patterns {
-            override_builder.add(pattern)?;
-        }
-    } else {
-         // Default include: *.md files (or specific types)
-         // Add standard markdown extensions if no specific include patterns
-         let mut types_builder = ignore::types::TypesBuilder::new();
-         types_builder.add_defaults(); // Add default types
-         types_builder.select("markdown"); // Select markdown type
-         let md_type = types_builder.build()?; // Build types, handle error
-         walk_builder.types(md_type);
-    }
-
-    // Build the override rules and add to WalkBuilder
-    let overrides = override_builder.build()?;
-    walk_builder.overrides(overrides);
+    walk_builder.ignore(use_gitignore);      // Enable/disable .ignore
+    walk_builder.git_ignore(use_gitignore); // Enable/disable .gitignore
+    walk_builder.git_global(use_gitignore);  // Enable/disable global gitignore
+    walk_builder.git_exclude(use_gitignore); // Enable/disable .git/info/exclude
+    walk_builder.parents(use_gitignore);        // Enable/disable parent ignores
+    walk_builder.hidden(true); // Keep hidden files ignored unconditionally
+    walk_builder.require_git(false); // Process git ignores even if no repo detected
 
     // --- Execute Walk --- 
 
@@ -333,19 +334,14 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
                 // We are primarily interested in files. ignore crate handles dir traversal.
                 // Check if it's a file and if it wasn't explicitly excluded by overrides
                 if path.is_file() {
-                    // If no specific include patterns were given, the Types filter already handled it.
-                    // If include patterns *were* given, the override rules handle inclusion/exclusion.
-                    // We just need to ensure it's a file.
-                     if include_patterns.is_empty() || path.extension().map_or(false, |ext| ext == "md" || ext == "markdown") {
-                        let file_path = path.to_string_lossy().to_string();
-                         // Clean the path before pushing
-                        let cleaned_path = if file_path.starts_with("./") {
-                            file_path[2..].to_string()
-                        } else {
-                            file_path
-                        };
-                        file_paths.push(cleaned_path);
-                     }
+                    let file_path = path.to_string_lossy().to_string();
+                    // Clean the path before pushing
+                    let cleaned_path = if file_path.starts_with("./") {
+                        file_path[2..].to_string()
+                    } else {
+                        file_path
+                    };
+                    file_paths.push(cleaned_path);
                 }
             }
             Err(err) => eprintln!("Error walking directory: {}", err),
@@ -1045,5 +1041,33 @@ mod tests {
         let found_files = find_markdown_files(&input_paths, &cli, &config).unwrap();
 
         assert!(found_files.is_empty(), "No files should be found when excluding the parent directory");
+    }
+
+    #[test]
+    fn test_find_markdown_files_respects_gitignore_by_default() {
+        let base_dir = tempdir().unwrap();
+        let base_path = base_dir.path();
+
+        // Create .gitignore
+        let gitignore_path = base_path.join(".gitignore");
+        fs::write(&gitignore_path, "ignored.md\n").unwrap();
+
+        // Create files
+        let ignored_file_path = base_path.join("ignored.md");
+        let included_file_path = base_path.join("included.md");
+        fs::write(&ignored_file_path, "# Ignored").unwrap();
+        fs::write(&included_file_path, "# Included").unwrap();
+
+        let cli = create_dummy_cli(); // Defaults respect gitignore
+        let config = config::Config::default();
+        // Input path is the temp directory itself
+        let input_paths = vec![base_path.to_str().unwrap().to_string()];
+
+        let found_files = find_markdown_files(&input_paths, &cli, &config).unwrap();
+
+        assert_eq!(found_files.len(), 1, "Only one file should be found");
+        // Get path relative to base_path for comparison
+        let found_relative = Path::new(&found_files[0]).strip_prefix(base_path).unwrap();
+        assert_eq!(found_relative.to_str().unwrap(), "included.md", "The included file should be found");
     }
 }
