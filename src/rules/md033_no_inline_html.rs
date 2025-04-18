@@ -5,6 +5,7 @@ use lazy_static::lazy_static;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
+use std::time::Instant;
 
 lazy_static! {
     // Refined regex patterns with better performance characteristics
@@ -29,7 +30,7 @@ static MARKDOWN_LINK_START: Lazy<&str> = Lazy::new(|| "](");
 
 #[derive(Debug)]
 pub struct MD033NoInlineHtml {
-    allowed: Vec<String>,
+    allowed: HashSet<String>,
 }
 
 impl Default for MD033NoInlineHtml {
@@ -41,12 +42,14 @@ impl Default for MD033NoInlineHtml {
 impl MD033NoInlineHtml {
     pub fn new() -> Self {
         Self {
-            allowed: Vec::new(),
+            allowed: HashSet::new(),
         }
     }
 
-    pub fn with_allowed(allowed: Vec<String>) -> Self {
-        Self { allowed }
+    pub fn with_allowed(allowed_vec: Vec<String>) -> Self {
+        Self {
+            allowed: allowed_vec.into_iter().collect(),
+        }
     }
 
     pub fn default() -> Self {
@@ -92,7 +95,7 @@ impl MD033NoInlineHtml {
         code_block_lines
     }
 
-    // Efficient check for allowed tags
+    // Efficient check for allowed tags using HashSet
     #[inline]
     fn is_tag_allowed(&self, tag: &str) -> bool {
         if self.allowed.is_empty() {
@@ -113,7 +116,7 @@ impl MD033NoInlineHtml {
             inner.split_whitespace().next().unwrap_or("")
         };
 
-        self.allowed.iter().any(|a| a == tag_name)
+        self.allowed.contains(tag_name)
     }
 
     // Check if a position is part of a markdown link
@@ -147,91 +150,57 @@ impl Rule for MD033NoInlineHtml {
     }
 
     fn check(&self, content: &str) -> LintResult {
-        // Use DocumentStructure for all code block and code span logic
         let structure = DocumentStructure::new(content);
         self.check_with_structure(content, &structure)
     }
 
     /// Optimized check using document structure
     fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        // Early return for empty content
-        if content.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Very fast early return - no angle brackets, no HTML
-        if !content.contains('<') {
-            return Ok(Vec::new());
-        }
-
-        // Quick check for HTML tag patterns before doing detailed processing
-        if !HTML_TAG_QUICK_CHECK.is_match(content) {
-            return Ok(Vec::new());
-        }
-
-        // Early return if no HTML tags are detected or this is explicitly HTML content
-        if !structure.has_html {
+        if content.is_empty() || !content.contains('<') || !HTML_TAG_QUICK_CHECK.is_match(content) || !structure.has_html {
             return Ok(Vec::new());
         }
 
         let mut warnings = Vec::new();
         let line_index = LineIndex::new(content.to_string());
 
-        // Process each line
         for (i, line) in content.lines().enumerate() {
-            // Early skip optimizations
-            if line.trim().is_empty() {
+            let line_num = i + 1;
+
+            if line.trim().is_empty() || structure.is_in_code_block(line_num) || !line.contains('<') || HTML_COMMENT_PATTERN.is_match(line) {
                 continue;
             }
 
-            // Skip lines in code blocks - using document structure
-            if structure.is_in_code_block(i + 1) {
-                continue;
-            }
-
-            // Skip if no angle brackets in this line
-            if !line.contains('<') {
-                continue;
-            }
-
-            // Skip if line has HTML comments
-            if HTML_COMMENT_PATTERN.is_match(line) {
-                continue;
-            }
-
-            // Find potential HTML tags
             for cap in HTML_TAG_FINDER.captures_iter(line) {
-                let html_tag = cap.get(0).unwrap().as_str();
-                let start_pos = cap.get(0).unwrap().start();
+                let tag_match = cap.get(0).unwrap();
+                let html_tag = tag_match.as_str();
+                let start_byte_offset_in_line = tag_match.start();
+                let end_byte_offset_in_line = tag_match.end();
+                let start_col = line[..start_byte_offset_in_line].chars().count() + 1;
 
-                // Skip HTML comments
-                if self.is_html_comment(html_tag) {
+                if self.is_html_comment(html_tag) || self.is_in_markdown_link(line, start_byte_offset_in_line) || structure.is_in_code_span(line_num, start_col) {
                     continue;
                 }
 
-                // Skip if part of markdown link
-                if self.is_in_markdown_link(line, start_pos) {
-                    continue;
-                }
-
-                // Skip if in code span - using document structure
-                if structure.is_in_code_span(i + 1, start_pos + 1) {
-                    continue;
-                }
-
-                // Check if tag is allowed
                 if !self.is_tag_allowed(html_tag) {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: line_index.line_col_to_byte_range(i + 1, start_pos + 1).start,
-                        message: format!("Found inline HTML tag: {}", html_tag),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, start_pos + 1),
-                            replacement: String::new(),
-                        }),
-                    });
+                    if let Some(line_start_byte) = line_index.get_line_start_byte(line_num) {
+                        let global_start_byte = line_start_byte + start_byte_offset_in_line;
+                        let global_end_byte = line_start_byte + end_byte_offset_in_line;
+                        let warning_range = global_start_byte..global_end_byte;
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: line_num,
+                            column: start_col,
+                            message: format!("Found inline HTML tag: {}", html_tag),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: warning_range,
+                                replacement: String::new(),
+                            }),
+                        });
+                    } else {
+                        eprintln!("Warning: Could not find line start for line {} in MD033", line_num);
+                    }
                 }
             }
         }

@@ -45,6 +45,15 @@ impl LineIndex {
         start..start
     }
 
+    /// Get the global start byte offset for a given 1-based line number.
+    pub fn get_line_start_byte(&self, line_num: usize) -> Option<usize> {
+        if line_num == 0 {
+            return None; // Lines are 1-based
+        }
+        // line_num is 1-based, line_starts index is 0-based
+        self.line_starts.get(line_num - 1).cloned()
+    }
+
     /// Check if the line at the given index is within a code block
     pub fn is_code_block(&self, line: usize) -> bool {
         if let Some(ref code_block_lines) = self.code_block_lines {

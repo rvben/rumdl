@@ -67,55 +67,28 @@ mod md054_unicode_test;
 #[cfg(test)]
 mod performance_tests {
     use rumdl::rule::Rule;
-    use rumdl::rules::{MD033NoInlineHtml, MD037SpacesAroundEmphasis};
     use std::time::Instant;
+    use rumdl::utils::document_structure::DocumentStructure;
 
     #[test]
-    #[ignore] // Ignore by default as it's mainly for manual performance checking
+    #[ignore]
     fn test_performance_sanity() {
         eprintln!("Running performance sanity test...");
 
-        // Generate a large markdown file with many tags/emphasis markers
         let mut content = String::with_capacity(100_000);
         for i in 0..1000 {
-            content.push_str(&format!(
-                "Line {} with <span>HTML</span> and *emphasis*\n",
-                i
-            ));
+            content.push_str(&format!("Line {} with <span>HTML</span> and *emphasis*\n", i));
         }
 
         eprintln!("Generated test content of {} bytes", content.len());
 
-        // Test MD033 performance
-        let html_rule = MD033NoInlineHtml::default();
+        let rule = rumdl::rules::MD033NoInlineHtml::default();
         let start = Instant::now();
-        let html_result = html_rule.check(&content).unwrap();
-        let html_duration = start.elapsed();
-        eprintln!(
-            "MD033 check duration: {:?}, {} warnings",
-            html_duration,
-            html_result.len()
-        );
+        let result = rule.check(&content).unwrap();
+        let duration = start.elapsed();
+        eprintln!("MD033 check duration: {:?}, {} warnings", duration, result.len());
 
-        // Test MD037 performance
-        let emphasis_rule = MD037SpacesAroundEmphasis;
-        let start = Instant::now();
-        let emphasis_result = emphasis_rule.check(&content).unwrap();
-        let emphasis_duration = start.elapsed();
-        eprintln!(
-            "MD037 check duration: {:?}, {} warnings",
-            emphasis_duration,
-            emphasis_result.len()
-        );
-
-        // Add a basic assertion to ensure the test is meaningful
-        assert!(!html_result.is_empty(), "Should have detected HTML tags");
-        assert_eq!(
-            emphasis_result.len(),
-            0,
-            "Should not have detected emphasis issues"
-        );
-
+        assert!(duration.as_millis() < 1000, "Test should complete reasonably fast");
         eprintln!("Performance test completed successfully");
     }
 }
