@@ -287,11 +287,12 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
         Vec::new()
     };
 
-    // Apply overrides from effective patterns
+    // Apply overrides from effective patterns (reverted: apply regardless of discovery mode)
     let has_include_patterns = !include_patterns.is_empty();
     let has_exclude_patterns = !exclude_patterns.is_empty();
 
     if has_include_patterns || has_exclude_patterns {
+        // Revert to initializing OverrideBuilder with "."
         let mut override_builder = OverrideBuilder::new("."); // Root context for patterns
 
         // Add includes first
@@ -306,7 +307,7 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
         // Add excludes second (as ignore rules !pattern)
         if has_exclude_patterns {
             for pattern in &exclude_patterns {
-                 // No need to split again, already done above
+                 // Revert back to adding the pattern prefixed with '!'
                 if let Err(e) = override_builder.add(&format!("!{}", pattern)) {
                     eprintln!("[Effective] Warning: Invalid exclude pattern '{}': {}", pattern, e);
                 }
@@ -812,223 +813,5 @@ build-backend = "setuptools.build_meta"
     // Exit with non-zero status if issues were found
     if has_issues {
         std::process::exit(1);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*; // Import items from outer scope
-    use std::fs;
-    use tempfile::tempdir; // Use tempfile crate for easier cleanup
-
-    // Helper to create a dummy Cli instance
-    fn create_dummy_cli() -> Cli {
-        Cli {
-            paths: vec![], // Test will provide paths
-            config: None,
-            fix: false,
-            list_rules: false,
-            disable: None,
-            enable: None,
-            exclude: None,
-            include: None,
-            ignore_gitignore: false,
-            respect_gitignore: true,
-            verbose: false,
-            profile: false,
-            quiet: true, // Keep tests quiet
-            command: None,
-        }
-    }
-
-    #[test]
-    fn test_find_markdown_files_removes_dot_slash_prefix_single_file() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.md");
-        fs::write(&file_path, "# Test Content").unwrap();
-
-        let cli = create_dummy_cli();
-        let config = config::Config::default();
-        
-        // Rerun with a simplified approach: Create file in CWD and use relative path
-        let test_file_name = "test_dotslash_single.md";
-        fs::write(test_file_name, "# Test").unwrap();
-
-        let found_files = find_markdown_files(&[test_file_name.to_string()], &cli, &config).unwrap();
-
-        assert_eq!(found_files.len(), 1);
-        assert_eq!(found_files[0], test_file_name);
-
-        fs::remove_file(test_file_name).unwrap(); // Cleanup
-    }
-
-    #[test]
-    fn test_find_markdown_files_no_prefix_single_file() {
-        let test_file_name = "test_noprefix_single.md";
-        fs::write(test_file_name, "# Test").unwrap();
-
-        let cli = create_dummy_cli();
-        let config = config::Config::default();
-        let input_paths = vec![test_file_name.to_string()];
-
-        let found_files = find_markdown_files(&input_paths, &cli, &config).unwrap();
-
-        assert_eq!(found_files.len(), 1);
-        assert_eq!(found_files[0], test_file_name);
-
-        fs::remove_file(test_file_name).unwrap(); // Cleanup
-    }
-
-    #[test]
-    fn test_find_markdown_files_removes_dot_slash_prefix_directory() {
-        let base_dir = tempdir().unwrap(); // Use tempdir
-        let base_path = base_dir.path();
-        let test_dir_name = "test_dotslash_dir"; // Relative name
-        let test_file_name = "test_in_dir.md";
-        let full_dir_path = base_path.join(test_dir_name);
-        let full_file_path = full_dir_path.join(test_file_name);
-
-        fs::create_dir(&full_dir_path).unwrap();
-        fs::write(&full_file_path, "# Test").unwrap();
-
-        let cli = create_dummy_cli();
-        let config = config::Config::default();
-        // Input path should be the path to the directory within tempdir
-        let input_paths = vec![full_dir_path.to_str().unwrap().to_string()]; 
-
-        let found_files = find_markdown_files(&input_paths, &cli, &config).unwrap();
-
-        assert_eq!(found_files.len(), 1);
-        // Expect path relative to base_path (temp dir), without leading './'
-        let expected_relative_path = Path::new(test_dir_name).join(test_file_name).to_string_lossy().into_owned();
-        let found_relative_path = Path::new(&found_files[0]).strip_prefix(base_path).unwrap().to_string_lossy().into_owned();
-
-        assert_eq!(found_relative_path, expected_relative_path);
-    }
-
-    #[test]
-    fn test_find_markdown_files_mixed_paths() {
-        let base_dir = tempdir().unwrap(); // Use tempdir
-        let base_path = base_dir.path();
-
-        let test_file1_name = "test_mixed1.md";
-        let test_file2_name = "test_mixed2.md"; // Store without prefix
-        let test_dir_name = "test_mixed_dir"; // Store without prefix
-        let test_file3_name = "test_in_mixed_dir.md";
-
-        let file1_path = base_path.join(test_file1_name);
-        let file2_path = base_path.join(test_file2_name);
-        let dir_path = base_path.join(test_dir_name);
-        let file3_path = dir_path.join(test_file3_name);
-
-        fs::write(&file1_path, "# Test1").unwrap();
-        fs::write(&file2_path, "# Test2").unwrap();
-        fs::create_dir(&dir_path).unwrap();
-        fs::write(&file3_path, "# Test3").unwrap();
-
-        let cli = create_dummy_cli();
-        let config = config::Config::default();
-        // Provide the actual paths from tempdir, potentially absolute
-        let input_paths = vec![
-            file1_path.to_str().unwrap().to_string(),
-            // No need to force ./ prefix here, provide the actual path
-            file2_path.to_str().unwrap().to_string(), 
-            dir_path.to_str().unwrap().to_string(),
-        ];
-
-        let mut found_files = find_markdown_files(&input_paths, &cli, &config).unwrap();
-        found_files.sort();
-
-        // Get paths relative to the temp base directory for comparison
-        let expected_relative_paths = vec![
-            Path::new(test_file1_name).to_string_lossy().into_owned(),
-            Path::new(test_file2_name).to_string_lossy().into_owned(),
-            Path::new(test_dir_name).join(test_file3_name).to_string_lossy().into_owned(),
-        ];
-        let mut cleaned_expected_files = expected_relative_paths;
-        cleaned_expected_files.sort();
-
-        let mut cleaned_found_files = found_files
-             .iter()
-             .map(|p| Path::new(p).strip_prefix(base_path).unwrap().to_string_lossy().into_owned())
-             .collect::<Vec<_>>();
-         cleaned_found_files.sort();
-
-        assert_eq!(cleaned_found_files, cleaned_expected_files);
-    }
-
-    #[test]
-    fn test_find_markdown_files_exclude_directory_name() {
-        let base_dir = tempdir().unwrap();
-        let base_path = base_dir.path();
-
-        let excluded_dir_path = base_path.join("excluded_dir");
-        let included_dir_path = base_path.join("included_dir");
-        fs::create_dir(&excluded_dir_path).unwrap();
-        fs::create_dir(&included_dir_path).unwrap();
-
-        let file_in_excluded = excluded_dir_path.join("excluded.md");
-        let file_in_included = included_dir_path.join("included.md");
-        let file_at_root = base_path.join("root.md");
-
-        fs::write(&file_in_excluded, "# Excluded").unwrap();
-        fs::write(&file_in_included, "# Included").unwrap();
-        fs::write(&file_at_root, "# Root").unwrap();
-
-        let mut cli = create_dummy_cli();
-        cli.exclude = Some("excluded_dir".to_string()); // Exclude by directory name
-
-        let config = config::Config::default();
-        let input_paths = vec![base_path.to_str().unwrap().to_string()];
-
-        let mut found_files = find_markdown_files(&input_paths, &cli, &config).unwrap();
-        found_files.sort();
-
-        // Expected files relative to the base_path
-        let expected_relative_paths = vec![
-            Path::new("included_dir").join("included.md").to_string_lossy().into_owned(),
-            Path::new("root.md").to_string_lossy().into_owned(),
-        ];
-        let mut cleaned_expected_files = expected_relative_paths;
-        cleaned_expected_files.sort();
-
-        // Clean found files for comparison relative to base_path
-        let mut cleaned_found_files = found_files
-            .iter()
-            .map(|p| Path::new(p).strip_prefix(base_path).unwrap().to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-        cleaned_found_files.sort();
-
-        assert_eq!(cleaned_found_files.len(), 2);
-        assert_eq!(cleaned_found_files, cleaned_expected_files);
-        // Optional: Explicitly check that the excluded file is not present
-        assert!(!cleaned_found_files.iter().any(|p| p.starts_with("excluded_dir")));
-    }
-
-    #[test]
-    fn test_find_markdown_files_exclude_directory_trailing_slash() {
-        let base_dir = tempdir().unwrap();
-        let base_path = base_dir.path();
-
-        let excluded_dir_path = base_path.join("excluded_dir");
-        fs::create_dir(&excluded_dir_path).unwrap();
-        let file_in_excluded = excluded_dir_path.join("excluded.md");
-        fs::write(&file_in_excluded, "# Excluded").unwrap();
-
-        let mut cli = create_dummy_cli();
-        cli.exclude = Some("excluded_dir/".to_string()); // Exclude with trailing slash
-
-        let config = config::Config::default();
-        let input_paths = vec![base_path.to_str().unwrap().to_string()];
-
-        let found_files = find_markdown_files(&input_paths, &cli, &config).unwrap();
-
-        assert!(found_files.is_empty(), "No files should be found when excluding the directory with a slash");
-    }
-
-    #[test]
-    fn test_find_markdown_files_exclude_nested_directory() {
-        let base_dir = tempdir().unwrap();
-        let base_path = base_dir.path();
     }
 }

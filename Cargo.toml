@@ -45,6 +45,9 @@ console = "0.15.8"
 dialoguer = "0.11.0"
 indicatif = "0.17.8"
 
+log = "0.4"
+pretty_assertions = "1.4"
+
 [features]
 default = ["parallel", "profiling"]
 parallel = ["rayon"]
@@ -62,6 +65,8 @@ proptest = "1.4.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 rand = "0.8.5"
 regex = "1.10.3"
+
+pretty_assertions = "1.4"
 
 [[bench]]
 name = "rule_performance"

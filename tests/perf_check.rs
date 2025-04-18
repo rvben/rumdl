@@ -1,8 +1,10 @@
-use rumdl::rule::Rule;
-use rumdl::rules::{
-    MD033NoInlineHtml, MD037SpacesAroundEmphasis, MD053LinkImageReferenceDefinitions,
-};
 use std::time::Instant;
+use rumdl::{
+    rule::Rule,
+    MD033NoInlineHtml,
+    MD037SpacesAroundEmphasis,
+    MD053LinkImageReferenceDefinitions,
+};
 
 #[test]
 fn test_optimized_rules_performance() {
@@ -54,10 +56,10 @@ fn test_optimized_rules_performance() {
     );
 
     // Test MD053 with caching (first run)
+    let start_time = Instant::now();
     let reference_rule = MD053LinkImageReferenceDefinitions::default();
-    let start = Instant::now();
     let ref_warnings = reference_rule.check(&content).unwrap();
-    let ref_duration = start.elapsed();
+    let ref_duration = start_time.elapsed();
     println!(
         "MD053 Rule first check (cold cache) took: {:?}, found: {} issues",
         ref_duration,

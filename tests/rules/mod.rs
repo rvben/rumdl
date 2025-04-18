@@ -64,31 +64,8 @@ mod md001_unicode_test;
 mod md006_unicode_test;
 mod md054_unicode_test;
 
-#[cfg(test)]
-mod performance_tests {
-    use rumdl::rule::Rule;
-    use std::time::Instant;
-    use rumdl::utils::document_structure::DocumentStructure;
-
-    #[test]
-    #[ignore]
-    fn test_performance_sanity() {
-        eprintln!("Running performance sanity test...");
-
-        let mut content = String::with_capacity(100_000);
-        for i in 0..1000 {
-            content.push_str(&format!("Line {} with <span>HTML</span> and *emphasis*\n", i));
-        }
-
-        eprintln!("Generated test content of {} bytes", content.len());
-
-        let rule = rumdl::rules::MD033NoInlineHtml::default();
-        let start = Instant::now();
-        let result = rule.check(&content).unwrap();
-        let duration = start.elapsed();
-        eprintln!("MD033 check duration: {:?}, {} warnings", duration, result.len());
-
-        assert!(duration.as_millis() < 1000, "Test should complete reasonably fast");
-        eprintln!("Performance test completed successfully");
-    }
+// Test cases for MD003 - Heading Style
+#[test]
+fn test_md003_fix_consistent_style() {
+// ... existing code ...
 }

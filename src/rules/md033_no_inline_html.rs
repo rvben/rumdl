@@ -5,7 +5,6 @@ use lazy_static::lazy_static;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
-use std::time::Instant;
 
 lazy_static! {
     // Refined regex patterns with better performance characteristics

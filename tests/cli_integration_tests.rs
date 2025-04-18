@@ -1,10 +1,7 @@
-use std::error::Error;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::env;
 use tempfile::tempdir;
-use assert_cmd::prelude::*;
 
 fn setup_test_files() -> tempfile::TempDir {
     let temp_dir = tempfile::tempdir().unwrap();

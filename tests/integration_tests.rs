@@ -1,4 +1,4 @@
-use rumdl::rule::Rule;
+use rumdl::rule::{Rule};
 use rumdl::rules::MD036NoEmphasisOnlyFirst;
 use rumdl::MD015NoMissingSpaceAfterListMarker;
 use rumdl::MD053LinkImageReferenceDefinitions;
@@ -13,9 +13,8 @@ fn cross_rule_md015_md053() {
         .unwrap();
 
     // Check MD053 results
-    let result = MD053LinkImageReferenceDefinitions::new(vec![])
-        .check(&fixed)
-        .unwrap();
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    let result = rule.check(&fixed).unwrap();
 
     // The rule should not generate any warnings because all references are used
     assert!(
