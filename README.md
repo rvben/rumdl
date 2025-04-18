@@ -43,6 +43,7 @@
     - [Prerequisites](#prerequisites)
     - [Building](#building)
     - [Testing](#testing)
+  - [Using rumdl with pre-commit](#using-rumdl-with-pre-commit)
   - [License](#license)
 
 ## Quick Start
@@ -336,6 +337,26 @@ make build
 make test
 ```
 
+## Using rumdl with pre-commit (for Users)
+
+You can use `rumdl` as a pre-commit hook in your own projects to check your Markdown files.
+
+Add the following to your `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+-   repo: https://github.com/rvben/rumdl
+    rev: v0.5.0  # Use the latest release tag
+    hooks:
+    -   id: rumdl-check  # Just check for issues
+    # Or use rumdl-fix to automatically fix issues:
+    # -   id: rumdl-fix
+```
+
+Then run `pre-commit install`.
+
+Pre-commit will automatically download and install `rumdl` using `cargo`. `rumdl` will respect any `.rumdl.toml` or `pyproject.toml` configuration file present in your repository.
+
 ## License
 
-MIT License
+rumdl is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
