@@ -106,3 +106,39 @@ fn test_word_boundaries() {
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "Using Git and github with gitflow");
 }
+
+#[test]
+fn test_fix_multiple_on_same_line() {
+    let names = vec!["Rust".to_string(), "Cargo".to_string()];
+    let rule = MD044ProperNames::new(names, true);
+    let content = "Using rust and cargo is fun. rust is fast.";
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "Using Rust and Cargo is fun. Rust is fast.");
+}
+
+#[test]
+fn test_fix_adjacent_to_markdown() {
+    let names = vec!["Markdown".to_string()];
+    let rule = MD044ProperNames::new(names, true);
+    let content = "*markdown* _markdown_ `markdown` [markdown](link)";
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "*Markdown* _Markdown_ `Markdown` [Markdown](link)");
+}
+
+#[test]
+fn test_fix_with_dots() {
+    let names = vec!["Node.js".to_string()];
+    let rule = MD044ProperNames::new(names, true);
+    let content = "Using node.js or sometimes nodejs.";
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "Using Node.js or sometimes Node.js.");
+}
+
+#[test]
+fn test_fix_code_block_included() {
+    let names = vec!["Rust".to_string()];
+    let rule = MD044ProperNames::new(names, false); // Include code blocks
+    let content = "```rust\nlet lang = \"rust\";\n```\n\nThis is rust code.";
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "```rust\nlet lang = \"Rust\";\n```\n\nThis is Rust code.");
+}

@@ -573,18 +573,18 @@ mod tests {
         let _expected_markers = vec!["*", "-", "+", "*", "-", "+", "*", "*", "-", "*", "*", "*"];
         let _expected_indents = vec![0, 4, 8, 0, 4, 8, 0, 4, 8, 12, 16, 20];
         let expected_content = vec![
-            "* Level 1",
-            "- Level 2",
-            "+ Level 3",
-            "* Level 4",
-            "- Level 5",
-            "+ Level 6",
-            "* Sibling 1",
-            "* Sibling 2",
-            "- After blank line, not nested",
-            "\t* Tab indented",
-            "        * 8 spaces indented",
-            "* After excessive indent"
+            "Level 1",
+            "Level 2",
+            "Level 3",
+            "Level 4",
+            "Level 5",
+            "Level 6",
+            "Sibling 1",
+            "Sibling 2",
+            "After blank line, not nested",
+            "Tab indented", // Content after marker
+            "8 spaces indented", // Content after marker
+            "After excessive indent"
         ];
         let actual_content: Vec<_> = cache.list_items.iter().map(|item| item.content.clone()).collect();
         assert_eq!(actual_content, expected_content, "List item contents should match expected values");

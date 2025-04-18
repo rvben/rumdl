@@ -200,3 +200,85 @@ This is a reversed link with Unicode: (Unicode café)[https://example.com/café]
     let result = rule.check(content_reversed).unwrap();
     assert_eq!(result.len(), 0);
 }
+
+#[test]
+fn test_image_styles() {
+    // Default: all styles allowed
+    let rule = MD054LinkImageStyle::default();
+    let content = r#"
+An ![inline image](img.png).
+An ![collapsed image][].
+A ![full image][ref].
+A ![shortcut image].
+
+[collapsed image]: img.png
+[ref]: img.png
+[shortcut image]: img.png
+    "#;
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty(), "All image styles should be valid by default");
+
+    // Disallow collapsed style
+    let rule_no_collapse = MD054LinkImageStyle::new(true, false, true, true, true, true);
+    let content_mix = r#"
+An ![inline image](img.png).
+An ![collapsed image][].
+
+[collapsed image]: img.png
+    "#;
+    let result = rule_no_collapse.check(content_mix).unwrap();
+    assert_eq!(result.len(), 1, "Should flag disallowed collapsed image style");
+    assert_eq!(result[0].line, 3);
+    assert!(result[0].message.contains("collapsed"));
+
+    // Ensure images are ignored in code spans
+     let content_code = r#"
+This has an `![image](img.png)` in inline code.
+And `![collapsed][]`
+And `![full][ref]`
+And `![shortcut]`
+
+[collapsed]: img.png
+[ref]: img.png
+[shortcut]: img.png
+    "#;
+    let result = rule.check(content_code).unwrap();
+     assert!(result.is_empty(), "Image styles in code spans should be ignored");
+}
+
+
+#[test]
+fn test_shortcut_edge_cases() {
+    // Default: all styles allowed
+    let rule = MD054LinkImageStyle::default();
+
+    // Ensure [shortcut] isn't confused with [collapsed][] or [full][ref]
+    let content = r#"
+Link [shortcut] followed by [another].
+Link [collapsed][] followed by text.
+Link [full][ref] followed by text.
+
+[shortcut]: /shortcut
+[another]: /another
+[collapsed]: /collapsed
+[ref]: /full
+    "#;
+    let result = rule.check(content).unwrap();
+     assert!(result.is_empty(), "Shortcut detection should not interfere with other types");
+
+    // Disallow shortcut, ensure others are still detected correctly
+    let rule_no_shortcut = MD054LinkImageStyle::new(true, true, true, true, false, true);
+    let content_flag_shortcut = r#"
+[Okay collapsed][]
+[Okay full][ref]
+[Not okay shortcut]
+
+[Okay collapsed]: /
+[ref]: /
+[Not okay shortcut]: /
+    "#;
+     let result = rule_no_shortcut.check(content_flag_shortcut).unwrap();
+     assert_eq!(result.len(), 1);
+     assert_eq!(result[0].line, 4);
+     assert!(result[0].message.contains("shortcut"));
+}

@@ -3,13 +3,13 @@ use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
-use regex::Regex;
+use fancy_regex::Regex;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 lazy_static! {
-    static ref CODE_BLOCK_FENCE: Regex = Regex::new(r"^```").unwrap();
-    static ref INDENTED_CODE_BLOCK: Regex = Regex::new(r"^    ").unwrap();
+    static ref CODE_BLOCK_FENCE: regex::Regex = regex::Regex::new(r"^```").unwrap();
+    static ref INDENTED_CODE_BLOCK: regex::Regex = regex::Regex::new(r"^    ").unwrap();
 }
 
 type WarningPosition = (usize, usize, String); // (line, column, found_name)
@@ -93,17 +93,21 @@ impl MD044ProperNames {
 
     // Create a regex-safe version of the name for word boundary matches
     fn create_safe_pattern(&self, name: &str) -> String {
-        // Create variations of the name with and without dots
-        let variations = [name.to_lowercase(), name.to_lowercase().replace(".", "")];
+        // Create variations for case-insensitive matching and handling dots
+        let lower_name = name.to_lowercase();
+        let lower_name_no_dots = lower_name.replace('.', "");
 
-        // Create a pattern that matches any of the variations with word boundaries
-        let pattern = variations
-            .iter()
-            .map(|v| regex::escape(v))
-            .collect::<Vec<_>>()
-            .join("|");
-
-        format!(r"(?i)\b({})\b", pattern)
+        // Build the pattern using lookarounds that explicitly exclude underscore
+        // to avoid issues with emphasis characters if \w includes _.
+        // (?<![a-zA-Z0-9]) - Negative lookbehind for an ASCII alphanumeric character
+        // (?i) - Case-insensitive flag
+        // (?:...|...) - Non-capturing group for variations
+        // (?![a-zA-Z0-9]) - Negative lookahead for an ASCII alphanumeric character
+        format!(
+            r"(?<![a-zA-Z0-9])(?i)(?:{}|{})(?![a-zA-Z0-9])",
+            fancy_regex::escape(&lower_name),
+            fancy_regex::escape(&lower_name_no_dots)
+        )
     }
 
     // Get compiled regex from cache or compile it
@@ -111,13 +115,18 @@ impl MD044ProperNames {
         let pattern = self.create_safe_pattern(name);
         let mut cache = self.regex_cache.borrow_mut();
 
-        if let Some(regex) = cache.get(&pattern) {
-            regex.clone()
-        } else {
-            let regex = Regex::new(&pattern).unwrap();
-            cache.insert(pattern, regex.clone());
-            regex
-        }
+        // Use entry API for cleaner cache logic
+        cache.entry(pattern.clone()).or_insert_with(|| {
+            Regex::new(&pattern).unwrap_or_else(|e| {
+                // Provide more context on regex compilation failure
+                panic!(
+                    "Failed to compile regex pattern '{}' for name '{}': {}",
+                    pattern,
+                    name,
+                    e
+                )
+            })
+        }).clone()
     }
 
     // Find all name violations in the content and return positions
@@ -143,7 +152,7 @@ impl MD044ProperNames {
             .collect();
 
         for (line_num, line) in content.lines().enumerate() {
-            // Handle code blocks
+            // Handle code blocks (using standard regex for simple fence matching)
             if CODE_BLOCK_FENCE.is_match(line.trim_start()) {
                 in_code_block = !in_code_block;
                 continue;
@@ -153,12 +162,31 @@ impl MD044ProperNames {
                 continue;
             }
 
-            // Use the pre-compiled patterns for better performance
+            // Use the pre-compiled fancy_regex patterns
             for (name, regex) in &patterns {
-                for cap in regex.find_iter(line) {
-                    let found_name = &line[cap.start()..cap.end()];
-                    if found_name != **name {
-                        violations.push((line_num + 1, cap.start() + 1, found_name.to_string()));
+                // Use find_iter from fancy_regex, which yields Result<Match, Error>
+                for cap_result in regex.find_iter(line) {
+                    match cap_result {
+                        Ok(cap) => {
+                            let found_name = &line[cap.start()..cap.end()];
+                            // Ensure the found name isn't the correct one (case-sensitive compare)
+                            if found_name != **name {
+                                violations.push((
+                                    line_num + 1,
+                                    cap.start() + 1,
+                                    found_name.to_string(),
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            // Log or handle regex execution error if necessary
+                            eprintln!(
+                                "Regex execution error on line {} for pattern matching '{}': {}",
+                                line_num + 1,
+                                name,
+                                e
+                            );
+                        }
                     }
                 }
             }
@@ -173,12 +201,20 @@ impl MD044ProperNames {
 
     // Get the proper name that should be used for a found name
     fn get_proper_name_for(&self, found_name: &str) -> Option<String> {
+        // Iterate through the configured proper names
         for name in &self.names {
-            let regex = self.get_compiled_regex(name);
-            if regex.is_match(found_name) {
+            // Perform a case-insensitive comparison between the found name
+            // and the configured proper name (and its dotless variation).
+            let lower_name = name.to_lowercase();
+            let lower_name_no_dots = lower_name.replace('.', "");
+            let found_lower = found_name.to_lowercase();
+
+            if found_lower == lower_name || found_lower == lower_name_no_dots {
+                // If they match case-insensitively, return the correctly capitalized name
                 return Some(name.clone());
             }
         }
+        // If no match is found after checking all configured names, return None
         None
     }
 }
@@ -229,35 +265,43 @@ impl Rule for MD044ProperNames {
             return Ok(content.to_string());
         }
 
-        let lines: Vec<&str> = content.lines().collect();
-        let mut new_lines = Vec::with_capacity(lines.len());
-        let mut in_code_block = false;
-
-        for line in lines {
-            let mut current_line = line.to_string();
-
-            // Handle code blocks
-            if CODE_BLOCK_FENCE.is_match(line.trim_start()) {
-                in_code_block = !in_code_block;
-                new_lines.push(current_line);
-                continue;
-            }
-
-            if self.code_blocks_excluded && self.is_code_block(line, in_code_block) {
-                new_lines.push(current_line);
-                continue;
-            }
-
-            // Apply all name replacements to this line
-            for name in &self.names {
-                let regex = self.get_compiled_regex(name);
-                current_line = regex.replace_all(&current_line, name.as_str()).to_string();
-            }
-
-            new_lines.push(current_line);
+        let mut violations = self.find_name_violations(content);
+        if violations.is_empty() {
+            return Ok(content.to_string());
         }
 
-        Ok(new_lines.join("\n"))
+        // Sort violations in reverse order (by line, then by column) to apply fixes
+        // from end to beginning, avoiding range invalidation.
+        violations.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+
+        let mut fixed_content = content.to_string();
+        let line_index = LineIndex::new(content.to_string()); // Recreate for accurate byte ranges
+
+        for (line_num, col_num, found_name) in violations {
+            if let Some(proper_name) = self.get_proper_name_for(&found_name) {
+                // Calculate the byte range for the violation
+                let range = line_index.line_col_to_byte_range(line_num, col_num);
+                let start_byte = range.start;
+                let end_byte = start_byte + found_name.len();
+
+                // Ensure the calculated range is valid within the current fixed_content
+                if end_byte <= fixed_content.len()
+                    && fixed_content.is_char_boundary(start_byte)
+                    && fixed_content.is_char_boundary(end_byte)
+                {
+                    // Perform the replacement directly on the string using byte offsets
+                    fixed_content.replace_range(start_byte..end_byte, &proper_name);
+                } else {
+                    // Log error or handle invalid range - potentially due to overlapping fixes or calculation errors
+                    eprintln!(
+                        "Warning: Skipping fix for '{}' at {}:{} due to invalid byte range [{}..{}], content length {}.",
+                        found_name, line_num, col_num, start_byte, end_byte, fixed_content.len()
+                    );
+                }
+            }
+        }
+
+        Ok(fixed_content)
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }

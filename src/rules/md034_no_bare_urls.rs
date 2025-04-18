@@ -6,19 +6,21 @@ use regex::Regex;
 
 lazy_static! {
     // Simple pattern to quickly check if a line might contain a URL
-    static ref URL_QUICK_CHECK: Regex = Regex::new(r"(?:https?|ftp)://").unwrap();
+    static ref URL_QUICK_CHECK: Regex = Regex::new(r#"(?:https?|ftp)://"#).unwrap();
 
-    // Comprehensive URL detection pattern
-    static ref URL_REGEX: Regex = Regex::new(r#"(?:https?|ftp)://[^\s<>\[\]()'"]+[^\s<>\[\]()"'.,]"#).unwrap();
+    // Comprehensive URL detection pattern - fixed escaping and simplified
+    // It now requires the URL to end with a character not typically part of markdown structure
+    // or be followed by whitespace or end of line.
+    static ref URL_REGEX: Regex = Regex::new(r#"(?:https?|ftp)://(?:[^\s<>[\\]()\\\'\"]*[^\s<>[\\]()\"\\\'.,;:!?])"#).unwrap();
 
-    // Pattern to match markdown link format
-    static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
+    // Pattern to match markdown link format - capture destination carefully
+    static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r#"\[[^]]*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap();
 
     // Pattern to match angle bracket link format
-    static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r"<((?:https?|ftp)://[^>]+)>").unwrap();
+    static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r#"<((?:https?|ftp)://[^>]+)>"#).unwrap();
 
     // Pattern to match code fences
-    static ref CODE_FENCE_RE: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
+    static ref CODE_FENCE_RE: Regex = Regex::new(r#"^(`{3,}|~{3,})"#).unwrap();
 }
 
 #[derive(Default)]
@@ -29,27 +31,52 @@ impl MD034NoBareUrls {
         !early_returns::has_urls(content)
     }
 
-    // Quick check if a URL is already within a markdown link
+    // Quick check if a URL is already within a markdown link or angle bracket link
     #[inline]
     fn is_url_in_link(&self, line: &str, url_start: usize, url_end: usize) -> bool {
-        if ANGLE_LINK_PATTERN.is_match(line) {
-            for cap in ANGLE_LINK_PATTERN.captures_iter(line) {
-                let m = cap.get(0).unwrap();
-                if m.start() <= url_start && m.end() >= url_end {
+        // Check angle bracket links first
+        for cap in ANGLE_LINK_PATTERN.captures_iter(line) {
+            if let Some(m) = cap.get(0) { // Check the full match <...>
+                // Ensure the bare URL is strictly inside the angle brackets
+                if m.start() < url_start && m.end() > url_end {
                     return true;
                 }
             }
         }
 
-        if MARKDOWN_LINK_PATTERN.is_match(line) {
-            for cap in MARKDOWN_LINK_PATTERN.captures_iter(line) {
-                if let Some(m) = cap.get(2) {
-                    if m.start() <= url_start && m.end() >= url_end {
-                        return true;
-                    }
-                }
-            }
-        }
+        // Check markdown links
+        for cap in MARKDOWN_LINK_PATTERN.captures_iter(line) {
+             // Check if the URL range exactly matches the link destination part (...)
+             if let Some(link_dest_match) = cap.get(1) { // Group 1 captures the URL destination itself
+                 // Compare the start/end of the bare URL match with the captured destination
+                 if link_dest_match.start() == url_start && link_dest_match.end() == url_end {
+                     return true;
+                 }
+                 // Also handle case where the URL is *contained* within the destination,
+                 // but might have surrounding whitespace or title ignored by URL_REGEX.
+                 // We need to check if the bare URL range is inside the overall link destination range
+                 // captured by the regex group, which might be slightly larger than the bare URL match.
+                 let full_link_match = cap.get(0).unwrap(); // Full [...] (...) match
+                 if full_link_match.start() < url_start && full_link_match.end() > url_end {
+                     // Additional check: ensure the URL is within the parenthesis part
+                     let paren_start = line[full_link_match.start()..]
+                         .find('(')
+                         .map(|p| full_link_match.start() + p)
+                         .unwrap_or(usize::MAX);
+                     let paren_end = line[..full_link_match.end()]
+                         .rfind(')')
+                         .unwrap_or(0);
+
+                     if url_start > paren_start && url_end < paren_end {
+                        // Heuristic: If the captured destination (group 1) contains the bare url,
+                        // it's likely part of the intended link.
+                        if line[link_dest_match.range()].contains(&line[url_start..url_end]) {
+                            return true;
+                        }
+                     }
+                 }
+             }
+         }
 
         false
     }
