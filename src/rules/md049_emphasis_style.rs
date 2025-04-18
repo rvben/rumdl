@@ -1,7 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::utils::document_structure::DocumentStructure;
-use crate::utils::range_utils::LineIndex;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
