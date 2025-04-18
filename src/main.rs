@@ -262,6 +262,16 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
         walk_builder.add(path);
     }
 
+    // --- Add Markdown File Type Definition ---
+    let mut types_builder = ignore::types::TypesBuilder::new();
+    types_builder.add_defaults(); // Add standard types
+    types_builder.add("markdown", "*.md").unwrap();
+    types_builder.add("markdown", "*.markdown").unwrap();
+    types_builder.select("markdown"); // Select ONLY markdown for processing
+    let types = types_builder.build().unwrap();
+    walk_builder.types(types);
+    // -----------------------------------------
+
     // Determine if running in discovery mode (e.g., "rumdl .") vs explicit path mode
     let is_discovery_mode = paths.len() == 1 && paths[0] == ".";
 
@@ -287,32 +297,53 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
         Vec::new()
     };
 
-    // Apply overrides from effective patterns (reverted: apply regardless of discovery mode)
-    let has_include_patterns = !include_patterns.is_empty();
+    // --- Determine Effective Include Patterns --- 
+    let default_markdown_patterns = vec!["*.md".to_string(), "*.markdown".to_string()];
+
+    let effective_include_patterns = if is_discovery_mode {
+        if include_patterns.is_empty() {
+            // Discovery mode, no user includes: Use defaults
+            default_markdown_patterns
+        } else {
+            // Discovery mode, user includes provided: Use user's patterns. 
+            // The type filter added earlier already restricts to MD files.
+            // If user includes non-MD, type filter handles it.
+            // If user includes specific MD, this override refines it.
+            include_patterns 
+        }
+    } else {
+        // Explicit path mode: Include patterns are ignored, rely on type filter + explicit paths.
+        // Return empty vec here, as overrides shouldn't add includes in this mode.
+        Vec::new()
+    };
+
+    // Apply overrides from effective patterns 
+    let has_include_patterns = !effective_include_patterns.is_empty(); // Use effective patterns
     let has_exclude_patterns = !exclude_patterns.is_empty();
 
     if has_include_patterns || has_exclude_patterns {
-        // Revert to initializing OverrideBuilder with "."
+        // Initialize OverrideBuilder
         let mut override_builder = OverrideBuilder::new("."); // Root context for patterns
 
-        // Add includes first
+        // Add includes first (using effective patterns)
         if has_include_patterns {
-            for pattern in &include_patterns {
-                // No need to split again, already done above
+            for pattern in &effective_include_patterns { // Use effective patterns
                 if let Err(e) = override_builder.add(pattern) {
-                    eprintln!("[Effective] Warning: Invalid include pattern '{}': {}", pattern, e);
+                    eprintln!("[Effective] Warning: Invalid include pattern '{pattern}': {e}");
                 }
             }
         }
         // Add excludes second (as ignore rules !pattern)
         if has_exclude_patterns {
             for pattern in &exclude_patterns {
-                 // Revert back to adding the pattern prefixed with '!'
-                if let Err(e) = override_builder.add(&format!("!{}", pattern)) {
-                    eprintln!("[Effective] Warning: Invalid exclude pattern '{}': {}", pattern, e);
+                let exclude_rule = format!("!{}", pattern);
+                if let Err(e) = override_builder.add(&exclude_rule) {
+                    // Log the original pattern, not the modified rule
+                    eprintln!("[Effective] Warning: Invalid exclude pattern '{pattern}': {e}"); 
                 }
             }
         }
+        // Build and apply the overrides
         let overrides = override_builder.build()?;
         walk_builder.overrides(overrides);
     }
@@ -359,11 +390,21 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
     file_paths.sort();
     file_paths.dedup();
 
+    // --- Final Explicit Markdown Filter ---
+    // Ensure only files with .md or .markdown extensions are returned,
+    // regardless of how ignore crate overrides interacted with type filters.
+    file_paths.retain(|path_str| {
+        let path = Path::new(path_str);
+        path.extension()
+            .map_or(false, |ext| ext == "md" || ext == "markdown")
+    });
+    // -------------------------------------
+
     // Note: The complex logic for warning about excluded explicit paths is removed
     // as the `ignore` crate handles this implicitly.
     // We could potentially add it back by tracking inputs vs outputs if needed.
 
-    Ok(file_paths)
+    Ok(file_paths) // Ensure the function returns the result
 }
 
 // Function to print linting results and summary
@@ -453,7 +494,7 @@ fn process_file(
     verbose: bool,
     quiet: bool,
 ) -> (bool, usize, usize, usize) {
-    use std::time::Instant;
+    use std::time::Instant; 
 
     let start_time = Instant::now();
     if verbose && !quiet {

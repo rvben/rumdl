@@ -2,6 +2,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
+use assert_cmd::prelude::*;
+use predicates::prelude::*;
 
 fn setup_test_files() -> tempfile::TempDir {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -494,6 +496,114 @@ exclude = ["docs/*"] # Exclude all docs via config
     assert!(!norm_stdout17.contains("Processing file: README.md"), "README.md should NOT be included in Test Case 17");
     assert!(!norm_stdout17.contains("Processing file: src/test.md"), "src/test.md should NOT be included in Test Case 17");
     assert!(!norm_stdout17.contains("Processing file: subfolder/README.md"), "subfolder/README.md should NOT be included in Test Case 17");
+
+    Ok(())
+}
+
+#[test]
+fn test_default_discovery_includes_only_markdown() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let dir_path = temp_dir.path();
+
+    // Create a markdown file
+    fs::write(dir_path.join("test.md"), "# Valid Markdown\n")?;
+    // Create a non-markdown file
+    fs::write(dir_path.join("test.txt"), "This is a text file.")?;
+
+    let mut cmd = Command::cargo_bin("rumdl")?;
+    cmd.arg(".")
+       .arg("--verbose") // Need verbose to see "Processing file:" messages
+       .current_dir(dir_path);
+
+    cmd.assert()
+       .success() // Should succeed as test.md is valid
+       .stdout(predicates::str::contains("Processing file: test.md"))
+       .stdout(predicates::str::contains("Processing file: test.txt").not());
+
+    Ok(())
+}
+
+#[test]
+fn test_markdown_extension_handling() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let dir_path = temp_dir.path();
+
+    // Create files with both extensions
+    fs::write(dir_path.join("test.md"), "# MD File\n")?;
+    fs::write(dir_path.join("test.markdown"), "# MARKDOWN File\n")?;
+    fs::write(dir_path.join("other.txt"), "Text file")?;
+
+    // Test 1: Default discovery should find both .md and .markdown
+    let mut cmd1 = Command::cargo_bin("rumdl")?;
+    cmd1.arg(".")
+        .arg("--verbose")
+        .current_dir(dir_path);
+    cmd1.assert()
+        .success()
+        .stdout(predicates::str::contains("Processing file: test.md"))
+        .stdout(predicates::str::contains("Processing file: test.markdown"))
+        .stdout(predicates::str::contains("Processing file: other.txt").not());
+
+    // Test 2: Explicit include for .markdown should only find that file
+    let mut cmd2 = Command::cargo_bin("rumdl")?;
+    cmd2.arg(".")
+        .arg("--include")
+        .arg("*.markdown")
+        .arg("--verbose")
+        .current_dir(dir_path);
+    cmd2.assert()
+        .success()
+        .stdout(predicates::str::contains("Processing file: test.markdown"))
+        .stdout(predicates::str::contains("Processing file: test.md").not());
+
+    Ok(())
+}
+
+#[test]
+fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let dir_path = temp_dir.path();
+
+    // Create files
+    fs::write(dir_path.join("test.md"), "# MD File\n")?;
+    fs::write(dir_path.join("test.txt"), "Text file")?;
+
+    // Test 1: Trying to include non-markdown files should yield nothing
+    let mut cmd1 = Command::cargo_bin("rumdl")?;
+    cmd1.arg(".")
+        .arg("--include")
+        .arg("*.txt")
+        .arg("--verbose") // Use verbose to ensure no "Processing file:" messages appear
+        .current_dir(dir_path);
+    cmd1.assert()
+        .success()
+        .stdout(predicates::str::contains("No markdown files found to check."))
+        .stdout(predicates::str::contains("Processing file:").not());
+
+    // Test 2: Excluding all .md files when only .md files exist
+    let mut cmd2 = Command::cargo_bin("rumdl")?;
+    cmd2.arg(".")
+        .arg("--exclude")
+        .arg("*.md")
+        .arg("--verbose")
+        .current_dir(dir_path);
+    cmd2.assert()
+        .success()
+        .stdout(predicates::str::contains("No markdown files found to check."))
+        .stdout(predicates::str::contains("Processing file:").not());
+        
+    // Test 3: Excluding both markdown types
+    fs::write(dir_path.join("test.markdown"), "# MARKDOWN File\n")?;
+    let mut cmd3 = Command::cargo_bin("rumdl")?;
+    cmd3.arg(".")
+        .arg("--exclude")
+        .arg("*.md,*.markdown")
+        .arg("--verbose")
+        .current_dir(dir_path);
+    cmd3.assert()
+        .success()
+        .stdout(predicates::str::contains("No markdown files found to check."))
+        .stdout(predicates::str::contains("Processing file:").not());
 
     Ok(())
 }
