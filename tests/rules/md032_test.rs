@@ -120,3 +120,52 @@ fn test_list_with_blank_lines() {
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
 }
+
+#[test]
+fn test_md032_toc_false_positive() {
+    let rule = MD032BlanksAroundLists;
+    let content = r#"
+## Table of Contents
+
+- [Item 1](#item-1)
+  - [Sub Item 1a](#sub-item-1a)
+  - [Sub Item 1b](#sub-item-1b)
+- [Item 2](#item-2)
+  - [Sub Item 2a](#sub-item-2a)
+- [Item 3](#item-3)
+
+## Next Section
+"#;
+    let result = rule.check(content).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD032 should not trigger inside a list, but got warnings: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_list_followed_by_heading_invalid() {
+    let rule = MD032BlanksAroundLists;
+    let content = "* Item 1\n* Item 2\n## Next Section";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1, "Should warn for missing blank line before heading");
+    assert!(result[0].message.contains("followed by a blank line"));
+}
+
+#[test]
+fn test_list_followed_by_code_block_invalid() {
+    let rule = MD032BlanksAroundLists;
+    let content = "* Item 1\n* Item 2\n```\ncode\n```";
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1, "Should warn for missing blank line before code block");
+    assert!(result[0].message.contains("followed by a blank line"));
+}
+
+#[test]
+fn test_list_followed_by_blank_then_code_block_valid() {
+    let rule = MD032BlanksAroundLists;
+    let content = "* Item 1\n* Item 2\n\n```\ncode\n```";
+    let result = rule.check(content).unwrap();
+    assert!(result.is_empty(), "Should not warn when blank line precedes code block");
+}

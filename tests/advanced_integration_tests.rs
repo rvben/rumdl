@@ -1,9 +1,17 @@
 use assert_cmd::Command;
 use std::fs;
 use tempfile::tempdir;
+use std::path::PathBuf;
 
 // Tests that exercise multiple components working together,
 // including CLI, configuration, rule processing, etc.
+
+// Helper to create an empty dummy config file
+fn create_dummy_config(dir: &tempfile::TempDir) -> PathBuf {
+    let config_path = dir.path().join("dummy_config.toml");
+    fs::write(&config_path, "").unwrap();
+    config_path
+}
 
 #[test]
 fn test_cli_with_config_and_rules() {
@@ -170,11 +178,10 @@ fn test_init_load_apply_config() {
 
 #[test]
 fn test_rules_interaction() {
-    // Create a temporary directory for our test
     let temp_dir = tempdir().unwrap();
-
-    // Create a markdown file with issues that span multiple rules and their interactions
     let markdown_path = temp_dir.path().join("complex.md");
+    let config_path = create_dummy_config(&temp_dir); // Use dummy config
+
     let markdown_content = r#"<!-- Test document -->
 # Heading with no blank line below
 ## Subheading also with no space
@@ -216,41 +223,36 @@ Link to [non-existent heading](#nowhere)
 "#;
     fs::write(&markdown_path, markdown_content).unwrap();
 
-    // Run rumdl on the file
+    // Run rumdl on the file using the dummy config
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
-
-    // Execute the command and capture output first
-    let assert = cmd.arg(&markdown_path).assert();
-
-    // Get the output before checking success
-    let output = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-
-    // rumdl returns 1 when finding issues, which is expected in this test
-    assert.code(1);
-
-    // Check for various rule warnings
-    assert!(output.contains("MD022")); // Blanks around headings
-    assert!(output.contains("MD023")); // Indented heading
-    assert!(output.contains("MD033")); // HTML
-    assert!(output.contains("MD042")); // Empty links
-    assert!(output.contains("MD051")); // Link fragments
-
-    // Now with fix
-    let mut fix_cmd = Command::cargo_bin("rumdl").unwrap();
-
-    // The output shows the command was successful, even though the exit code was 1
-    // This is because the tool has fixed the issues but reports exit code 1 to indicate issues were found
-    let fix_assert = fix_cmd
-        .arg("--fix") // Use --fix flag
+    let assert = cmd
         .arg(&markdown_path)
+        .arg("--config") // Specify dummy config
+        .arg(&config_path)
         .assert();
 
-    // Get the output to confirm fixes were applied
+    let output = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert.code(1); // Expect issues
+
+    // Check for various rule warnings
+    assert!(output.contains("MD022")); 
+    assert!(output.contains("MD023")); 
+    assert!(output.contains("MD033")); // Should be present now
+    assert!(output.contains("MD042")); 
+    assert!(output.contains("MD051")); 
+
+    // Now with fix, using dummy config
+    let mut fix_cmd = Command::cargo_bin("rumdl").unwrap();
+    let fix_assert = fix_cmd
+        .arg("--fix")
+        .arg(&markdown_path)
+        .arg("--config") // Specify dummy config
+        .arg(&config_path)
+        .assert();
+
     let fix_output = String::from_utf8(fix_assert.get_output().stdout.clone()).unwrap();
     assert!(fix_output.contains("Fixed"));
-
-    // Even though fixes were applied, the tool reports a non-zero exit code to indicate issues were found
-    fix_assert.code(1);
+    fix_assert.code(1); // Still expect exit code 1 after fixing
 
     // Read the fixed file
     let fixed_content = fs::read_to_string(&markdown_path).unwrap();
@@ -283,8 +285,8 @@ Link to [non-existent heading](#nowhere)
 
 #[test]
 fn test_cli_options() {
-    // Create a temporary directory for our test
     let temp_dir = tempdir().unwrap();
+    let config_path = create_dummy_config(&temp_dir); // Use dummy config
 
     // Create a markdown file with some issues
     let markdown_path = temp_dir.path().join("format_test.md");
@@ -298,62 +300,60 @@ fn test_cli_options() {
 "#;
     fs::write(&markdown_path, markdown_content).unwrap();
 
-    // Test with default output format
+    // Test with default output format (using dummy config)
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
-
-    // Execute the command and capture output first
-    let assert = cmd.arg(&markdown_path).assert();
-
-    // Get the output before checking success
+    let assert = cmd
+        .arg(&markdown_path)
+        .arg("--config") // Specify dummy config
+        .arg(&config_path)
+        .assert();
     let default_output = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-
-    // rumdl returns 1 when finding issues, which is expected in this test
-    assert.code(1);
-
+    assert.code(1); 
     assert!(default_output.contains("MD022"));
-    assert!(default_output.contains("MD033"));
-    assert!(default_output.contains("MD015"));
+    assert!(default_output.contains("MD033")); // Should be present
+    assert!(default_output.contains("MD030")); // *Bad item violates MD030 (Spaces after list markers)
 
-    // Test with disabled rules
+    // Test with disabled rules (still using dummy config, disable via CLI)
     let mut disabled_cmd = Command::cargo_bin("rumdl").unwrap();
-
-    // Execute the command with certain rules disabled
     let disabled_assert = disabled_cmd
         .arg("--disable")
         .arg("MD022,MD033")
         .arg(&markdown_path)
+        .arg("--config") // Specify dummy config
+        .arg(&config_path)
         .assert();
-
-    // Get the output before checking success
     let disabled_output = String::from_utf8(disabled_assert.get_output().stdout.clone()).unwrap();
-
-    // rumdl returns 1 when finding issues, which is expected in this test
-    disabled_assert.code(1);
-
-    // MD022 and MD033 should be disabled
+    disabled_assert.code(1); 
     assert!(!disabled_output.contains("MD022"));
     assert!(!disabled_output.contains("MD033"));
-    // But MD015 should still be reported
-    assert!(disabled_output.contains("MD015"));
+    assert!(disabled_output.contains("MD030")); // MD030 should still be reported
 
-    // Test with enabled rules
+    // Test with enabled rules (still using dummy config, enable via CLI)
     let mut enabled_cmd = Command::cargo_bin("rumdl").unwrap();
-
-    // Execute the command with only certain rules enabled
     let enabled_assert = enabled_cmd
         .arg("--enable")
-        .arg("MD015") // Only enable MD015
+        .arg("MD030") // Only enable MD030
         .arg(&markdown_path)
+        .arg("--config") // Specify dummy config
+        .arg(&config_path)
         .assert();
-
-    // Get the output before checking success
     let enabled_output = String::from_utf8(enabled_assert.get_output().stdout.clone()).unwrap();
-
-    // rumdl returns 1 when finding issues, which is expected in this test
     enabled_assert.code(1);
-
-    // Only MD015 should be reported
     assert!(!enabled_output.contains("MD022"));
     assert!(!enabled_output.contains("MD033"));
-    assert!(enabled_output.contains("MD015"));
+    assert!(enabled_output.contains("MD030"));
+
+    // Test default run on options_test.md (using dummy config)
+    let options_test_path = temp_dir.path().join("options_test.md");
+    fs::write(&options_test_path, "# Test\n\n<div>HTML</div>\n").unwrap();
+    let mut default_cmd_options = Command::cargo_bin("rumdl").unwrap();
+    let default_assert_options = default_cmd_options
+        .arg(&options_test_path)
+        .arg("--config") // Specify dummy config
+        .arg(&config_path)
+        .assert();
+    let default_output_options = String::from_utf8(default_assert_options.get_output().stdout.clone()).unwrap();
+    assert!(default_output_options.contains("MD033")); 
+    assert!(!default_output_options.contains("MD047")); // Corrected: MD047 should NOT be reported for this file
+    default_assert_options.code(1); 
 }

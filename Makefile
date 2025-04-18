@@ -49,6 +49,12 @@ update-cargo-version:
 	@echo "Updating Cargo.lock..."
 	@cargo update
 
+update-readme-version:
+	@echo "Updating README.md pre-commit rev to $(NEW_TAG)..."
+	@perl -i.bak -0777 -pe 's{(repo: https://github.com/rvben/rumdl\s+rev: )v\d+\.\d+\.\d+}{$$1$(NEW_TAG)}g' README.md
+	@rm -f README.md.bak
+	@echo "README.md updated to rev $(NEW_TAG)"
+
 version-major:
 	@echo "Creating new major version tag..."
 	$(eval CURRENT := $(shell git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0))
@@ -58,7 +64,8 @@ version-major:
 	$(eval VERSION_NO_V := $(NEW_MAJOR).0.0)
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
-	@git add Cargo.toml Cargo.lock
+	@$(MAKE) update-readme-version NEW_TAG=$(NEW_TAG)
+	@git add Cargo.toml Cargo.lock README.md
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
@@ -73,7 +80,8 @@ version-minor:
 	$(eval VERSION_NO_V := $(MAJOR).$(NEW_MINOR).0)
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
-	@git add Cargo.toml Cargo.lock
+	@$(MAKE) update-readme-version NEW_TAG=$(NEW_TAG)
+	@git add Cargo.toml Cargo.lock README.md
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
@@ -89,7 +97,8 @@ version-patch:
 	$(eval VERSION_NO_V := $(MAJOR).$(MINOR).$(NEW_PATCH))
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
-	@git add Cargo.toml Cargo.lock
+	@$(MAKE) update-readme-version NEW_TAG=$(NEW_TAG)
+	@git add Cargo.toml Cargo.lock README.md
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."

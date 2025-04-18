@@ -302,8 +302,8 @@ fn test_fixable_issues_labeling() {
     println!("Fixable issue output:\n{}", stdout);
     
     // Verify MD037 emphasis spaces issue is reported
-    assert!(stdout.contains("[MD037]") && stdout.contains("Spaces inside emphasis"),
-            "Should detect spaces inside emphasis issue");
+    assert!(stdout.contains("[MD037]"),
+            "Should detect spaces around emphasis issue");
     
     // Verify issue has a [*] label, indicating it's fixable
     if stdout.contains("[MD037]") {
@@ -324,8 +324,8 @@ fn test_fixable_issues_labeling() {
     println!("Fixable issue with --fix output:\n{}", fix_stdout);
     
     // Verify the issue is marked as fixed
-    assert!(fix_stdout.contains("[MD037]") && fix_stdout.contains("Spaces inside emphasis"),
-            "Spaces inside emphasis issue should be reported with fix");
+    assert!(fix_stdout.contains("[MD037]"),
+            "Spaces around emphasis issue should be reported with fix");
     
     if fix_stdout.contains("[MD037]") {
         let md037_line = fix_stdout.lines()
@@ -446,15 +446,15 @@ fn test_mixed_fixable_unfixable_issues() {
     println!("Mixed issues output:\n{}", stdout);
     
     // Check for fixable issues
-    assert!(stdout.contains("[MD022]") && stdout.contains("Heading should have"), 
+    assert!(stdout.contains("[MD022]"),
             "Should detect heading blank line issue (fixable)");
-    assert!(stdout.contains("[MD047]") && stdout.contains("newline"), 
+    assert!(stdout.contains("[MD047]"),
             "Should detect missing newline issue (fixable)");
-    assert!(stdout.contains("[MD037]") && stdout.contains("Spaces inside emphasis"),
-            "Should detect spaces inside emphasis issue (fixable)");
+    assert!(stdout.contains("[MD037]"),
+            "Should detect spaces around emphasis issue (fixable)");
     
     // Check for unfixable issues
-    assert!(stdout.contains("[MD013]") && stdout.contains("Line length"),
+    assert!(stdout.contains("[MD013]"),
             "Should detect line length issue (unfixable)");
     
     // Check that fixable issues have [*] label

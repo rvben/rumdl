@@ -95,6 +95,11 @@ impl Rule for MD007ULIndent {
                 continue;
             }
 
+            // Skip check if the line is inside a code block
+            if element_cache.is_in_code_block(list_item.line_number) {
+                continue;
+            }
+
             // Calculate expected indentation: level * indent spaces
             let expected_indent = list_item.nesting_level * self.indent;
 

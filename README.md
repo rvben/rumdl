@@ -337,7 +337,7 @@ make build
 make test
 ```
 
-## Using rumdl with pre-commit (for Users)
+## Using rumdl with pre-commit
 
 You can use `rumdl` as a pre-commit hook in your own projects to check your Markdown files.
 
@@ -346,7 +346,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
 -   repo: https://github.com/rvben/rumdl
-    rev: v0.5.0  # Use the latest release tag
+    rev: v0.0.42  # Use the latest release tag
     hooks:
     -   id: rumdl-check  # Just check for issues
     # Or use rumdl-fix to automatically fix issues:

@@ -6,9 +6,12 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    // Optimize regex patterns with compilation once at startup
-    static ref LIST_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)(\s+)").unwrap();
-    static ref LIST_FIX_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)(\s+)").unwrap();
+    // Regex to capture list markers and the spaces *after* them
+    // Allows ZERO or more spaces after marker now using \s*
+    static ref LIST_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)(\s*)").unwrap();
+    // Regex used for fixing - ensures exactly the required number of spaces
+    // Note: Captures slightly differently to handle replacement efficiently
+    static ref LIST_FIX_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)(\s*)").unwrap();
     static ref CODE_BLOCK_REGEX: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
 }
 
@@ -42,20 +45,26 @@ impl MD030ListMarkerSpace {
     }
 
     fn is_list_item(line: &str) -> Option<(ListType, String, usize)> {
-        // Fast path
-        if line.trim().is_empty() {
+        let trimmed_line = line.trim();
+        if trimmed_line.is_empty() {
             return None;
         }
 
+        // Add check for horizontal rules before checking for list markers
+        if trimmed_line.chars().all(|c| c == '-' || c == ' ') && trimmed_line.chars().filter(|&c| c == '-').count() >= 3 { return None; }
+        if trimmed_line.chars().all(|c| c == '*' || c == ' ') && trimmed_line.chars().filter(|&c| c == '*').count() >= 3 { return None; }
+        // Note: '_' HRs won't conflict with list markers anyway
+
         if let Some(cap) = LIST_REGEX.captures(line) {
             let marker = &cap[2];
-            let spaces = cap[3].len();
-            let list_type = if marker.chars().next().unwrap().is_ascii_digit() {
+            let spaces = cap[3].len(); // Group 3 now captures zero or more spaces
+            let list_type = if marker.chars().next().map_or(false, |c| c.is_ascii_digit()) {
                 ListType::Ordered
             } else {
                 ListType::Unordered
             };
-            return Some((list_type, cap[0].to_string(), spaces));
+            // Return the whole matched line part for column calculation later
+            return Some((list_type, cap[0].to_string(), spaces)); 
         }
 
         None
@@ -102,8 +111,15 @@ impl MD030ListMarkerSpace {
 
     fn fix_line(&self, line: &str, list_type: ListType, is_multi: bool) -> String {
         let expected_spaces = self.get_expected_spaces(list_type, is_multi);
+        // Use the LIST_FIX_REGEX for replacement
         LIST_FIX_REGEX
-            .replace(line, format!("$1$2{}", " ".repeat(expected_spaces)))
+            .replace(line, |caps: &regex::Captures| {
+                // Reconstruct the start: indentation + marker + correct spaces
+                format!("{}{}{}", 
+                       &caps[1], 
+                       &caps[2], 
+                       " ".repeat(expected_spaces))
+            })
             .to_string()
     }
 
@@ -172,19 +188,26 @@ impl Rule for MD030ListMarkerSpace {
         let (is_list_line, multi_line) = self.precompute_states(&lines);
 
         for (i, &line) in lines.iter().enumerate() {
-            // Skip non-list lines
-            if !is_list_line[i] {
+            if !is_list_line[i] { // Skip if not identified as a list item line by precompute
                 continue;
             }
 
-            if let Some((list_type, line_start, spaces)) = Self::is_list_item(line) {
+            // Re-check with updated regex to get space count (including 0)
+            if let Some((list_type, _line_start_match, spaces)) = Self::is_list_item(line) {
                 let expected_spaces = self.get_expected_spaces(list_type, multi_line[i]);
+                
+                // The check is now simply if the captured spaces count differs from expected
                 if spaces != expected_spaces {
-                    let col = line_start.len() - spaces;
+                    // Calculate column: indentation + marker length
+                    let marker_part = LIST_REGEX.captures(line).unwrap(); // Re-capture for precise groups
+                    let indentation_len = marker_part[1].len();
+                    let marker_len = marker_part[2].len();
+                    let col = indentation_len + marker_len + 1; // Column is *after* the marker
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: i + 1,
-                        column: col,
+                        column: col, 
                         message: format!(
                             "Expected {} space{} after list marker, found {}",
                             expected_spaces,
@@ -193,6 +216,7 @@ impl Rule for MD030ListMarkerSpace {
                         ),
                         severity: Severity::Warning,
                         fix: Some(Fix {
+                            // Fix applies to the whole line for simplicity with regex replace
                             range: line_index.line_col_to_byte_range(i + 1, 1),
                             replacement: self.fix_line(line, list_type, multi_line[i]),
                         }),
@@ -224,26 +248,30 @@ impl Rule for MD030ListMarkerSpace {
         // Precompute list states
         let (is_list_line, multi_line) = self.precompute_states(&lines);
 
-        let mut result = String::with_capacity(content.len() + 100);
+        let mut result_lines = Vec::with_capacity(lines.len());
 
         for (i, &line) in lines.iter().enumerate() {
             if is_list_line[i] {
-                if let Some((list_type, _, _)) = Self::is_list_item(line) {
-                    result.push_str(&self.fix_line(line, list_type, multi_line[i]));
+                // Check if it's a list item that needs fixing
+                if let Some((list_type, _line_start_match, spaces)) = Self::is_list_item(line) {
+                    let expected_spaces = self.get_expected_spaces(list_type, multi_line[i]);
+                    if spaces != expected_spaces {
+                        result_lines.push(self.fix_line(line, list_type, multi_line[i]));
+                    } else {
+                        result_lines.push(line.to_string()); // No fix needed
+                    }
                 } else {
-                    result.push_str(line);
+                     result_lines.push(line.to_string()); // Not matched by regex, don't change
                 }
             } else {
-                result.push_str(line);
-            }
-
-            if i < lines.len() - 1 {
-                result.push('\n');
+                result_lines.push(line.to_string()); // Not a list line
             }
         }
 
-        // Preserve trailing newline
-        if content.ends_with('\n') && !result.ends_with('\n') {
+        let mut result = result_lines.join("\n");
+
+        // Preserve trailing newline if original content had one
+        if content.ends_with('\n') {
             result.push('\n');
         }
 

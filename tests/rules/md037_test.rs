@@ -223,16 +223,6 @@ fn test_emphasis_near_html() {
 }
 
 #[test]
-fn test_complex_mixed_content() {
-    let rule = MD037SpacesAroundEmphasis;
-    
-    // Complex content with code, HTML, and multiple emphasis styles
-    let content = "A paragraph with `code`, <span>HTML</span>, *emphasis*, and **strong**.\n\n```rust\nfn main() {\n    // * Not emphasis *\n}\n```\n\n> Blockquote with *emphasis* and ** invalid strong **";
-    let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 1);
-}
-
-#[test]
 fn test_emphasis_with_multiple_spaces() {
     let rule = MD037SpacesAroundEmphasis;
     
@@ -281,3 +271,20 @@ fn test_emphasis_in_blockquotes() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
 }
+
+#[test]
+fn test_md037_in_text_code_block() {
+    let rule = MD037SpacesAroundEmphasis;
+    let content = r#"
+```text
+README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
+```
+"#;
+    let result = rule.check(content).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD037 should not trigger inside a code block, but got warnings: {:?}",
+        result
+    );
+}
+

@@ -43,3 +43,21 @@ fn test_fix_indentation() {
     let expected = "* Item 1\n  * Item 2\n    * Item 3";
     assert_eq!(result, expected);
 }
+
+#[test]
+fn test_md007_in_yaml_code_block() {
+    let rule = MD007ULIndent::default();
+    let content = r#"```yaml
+repos:
+-   repo: https://github.com/rvben/rumdl
+    rev: v0.5.0
+    hooks:
+    -   id: rumdl-check
+```"#;
+    let result = rule.check(content).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD007 should not trigger inside a code block, but got warnings: {:?}",
+        result
+    );
+}

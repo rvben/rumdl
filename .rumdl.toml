@@ -7,8 +7,8 @@ include = [
     "README.md"
 ]
 # Globally disable specific rules
-disable = []
-# Add respect_gitignore setting
+disable = ["MD033"]
+
 respect_gitignore = true
 
 [MD013]

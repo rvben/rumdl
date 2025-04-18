@@ -55,6 +55,9 @@ lazy_static! {
 enum CodeBlockState {
     None,
     InFrontMatter,
+    InFencedCodeBlock,
+    InTildeFencedCodeBlock,
+    InIndentedCodeBlock,
 }
 
 impl CodeBlockState {
@@ -66,15 +69,62 @@ impl CodeBlockState {
         match self {
             CodeBlockState::None => false,
             CodeBlockState::InFrontMatter => false,
+            CodeBlockState::InFencedCodeBlock => true,
+            CodeBlockState::InTildeFencedCodeBlock => true,
+            CodeBlockState::InIndentedCodeBlock => true,
         }
     }
 
     fn update(&mut self, line: &str) {
+        // Front matter
         if FRONT_MATTER_DELIM.is_match(line) {
             *self = match self {
                 CodeBlockState::None => CodeBlockState::InFrontMatter,
                 CodeBlockState::InFrontMatter => CodeBlockState::None,
+                _ => *self,
             };
+            return;
+        }
+        // Fenced code block (backticks)
+        if FENCED_CODE_BLOCK_START.is_match(line) {
+            *self = match self {
+                CodeBlockState::None => CodeBlockState::InFencedCodeBlock,
+                CodeBlockState::InFencedCodeBlock => CodeBlockState::None,
+                _ => *self,
+            };
+            return;
+        }
+        if FENCED_CODE_BLOCK_END.is_match(line) {
+            *self = match self {
+                CodeBlockState::InFencedCodeBlock => CodeBlockState::None,
+                _ => *self,
+            };
+            return;
+        }
+        // Fenced code block (tildes)
+        if ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line) {
+            *self = match self {
+                CodeBlockState::None => CodeBlockState::InTildeFencedCodeBlock,
+                CodeBlockState::InTildeFencedCodeBlock => CodeBlockState::None,
+                _ => *self,
+            };
+            return;
+        }
+        if ALTERNATE_FENCED_CODE_BLOCK_END.is_match(line) {
+            *self = match self {
+                CodeBlockState::InTildeFencedCodeBlock => CodeBlockState::None,
+                _ => *self,
+            };
+            return;
+        }
+        // Indented code block (only if not in a fenced block)
+        if INDENTED_CODE_BLOCK.is_match(line) {
+            if let CodeBlockState::None = self {
+                *self = CodeBlockState::InIndentedCodeBlock;
+            }
+        } else if let CodeBlockState::InIndentedCodeBlock = self {
+            // End indented code block if line is not indented
+            *self = CodeBlockState::None;
         }
     }
 }

@@ -1,9 +1,8 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_block_utils::CodeBlockUtils;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::document_structure::document_structure_from_str;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -246,89 +245,89 @@ impl Rule for MD032BlanksAroundLists {
         Ok(result.join("\n"))
     }
 
-    /// Optimized check using document structure
+    /// Optimized check using document structure - Block-based approach
     fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        // Early returns for common cases
-        if self.should_skip(content) {
-            return Ok(Vec::new());
-        }
-
-        // Use document structure to check only for lists
-        if !self.has_relevant_elements(content, structure) {
-            return Ok(Vec::new());
-        }
-
-        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
+        let num_lines = lines.len();
 
-        // Pre-compute empty lines
-        let mut is_empty_vec = vec![false; lines.len()];
-        for (i, line) in lines.iter().enumerate() {
-            is_empty_vec[i] = Self::is_empty_line(line);
-        }
+        let mut current_list_start: Option<usize> = None;
 
-        // Pre-compute list content lines (indented content belonging to list items)
-        let mut is_list_content_vec = vec![false; lines.len()];
-        for (i, line) in lines.iter().enumerate() {
-            if !is_empty_vec[i] && !Self::is_list_item(line) && Self::is_list_content(line) {
-                is_list_content_vec[i] = true;
+        for i in 0..num_lines {
+            let line_idx = i + 1; // 1-based index
+            let is_excluded = structure.is_in_code_block(line_idx) || structure.is_in_front_matter(line_idx);
+            let is_list_related = structure.list_lines.contains(&line_idx);
+
+            if is_list_related && !is_excluded {
+                // Part of a potential list block
+                if current_list_start.is_none() {
+                    current_list_start = Some(line_idx);
+                }
+            } else {
+                // Not part of a list block (or excluded)
+                if let Some(start_line) = current_list_start {
+                    // Just finished a list block ending at line i (0-based)
+                    let end_line = i; // The list ended on the previous line (i-1, which is 1-based `i`)
+
+                    // Check line *before* start_line
+                    if start_line > 1 {
+                        let prev_line_idx = start_line - 1;
+                        let prev_line_is_excluded = structure.is_in_code_block(prev_line_idx) || structure.is_in_front_matter(prev_line_idx);
+                        if !prev_line_is_excluded {
+                             let prev_line = lines.get(prev_line_idx - 1).unwrap_or(&"");
+                             if !Self::is_empty_line(prev_line) {
+                                warnings.push(LintWarning {
+                                    rule_name: Some(self.name()),
+                                    line: start_line,
+                                    column: 1,
+                                    message: "List should be preceded by a blank line".to_string(),
+                                    severity: Severity::Warning,
+                                    fix: None,
+                                });
+                            }
+                        }
+                    }
+
+                    // Check line *after* end_line
+                    // The current line (line_idx) is the one immediately after the list ended.
+                    if !is_excluded && !Self::is_empty_line(lines[i]) {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: end_line + 1, // Warning points to the line *after* the list ended
+                            column: 1,
+                            message: "List should be followed by a blank line".to_string(),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
+                    }
+                    current_list_start = None; // Reset for the next potential block
+                }
+                // If it wasn't a list line, just continue
             }
         }
 
-        // Get list boundaries from document structure
-        let list_starts = structure.get_list_start_indices();
-        let list_ends = structure.get_list_end_indices();
-
-        // Process each list
-        for i in 0..list_starts.len().min(list_ends.len()) {
-            let start_idx = list_starts[i];
-            let mut end_idx = list_ends[i];
-
-            // Extend the list end to include indented content
-            for j in end_idx..lines.len() {
-                if is_list_content_vec[j] {
-                    end_idx = j;
-                } else if !is_empty_vec[j] {
-                    break;
+        // Check if the document ends with a list block
+        if let Some(start_line) = current_list_start {
+            let _end_line = num_lines; // Prefixed with underscore as it's not used below
+            // Check line *before* start_line
+             if start_line > 1 {
+                let prev_line_idx = start_line - 1;
+                let prev_line_is_excluded = structure.is_in_code_block(prev_line_idx) || structure.is_in_front_matter(prev_line_idx);
+                if !prev_line_is_excluded {
+                    let prev_line = lines.get(prev_line_idx - 1).unwrap_or(&"");
+                    if !Self::is_empty_line(prev_line) {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: 1,
+                            message: "List should be preceded by a blank line".to_string(),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
+                    }
                 }
             }
-
-            // Check for blank line before list (unless at document start)
-            if start_idx > 0
-                && !is_empty_vec[start_idx - 1]
-                && !structure.is_in_code_block(start_idx)
-            {
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: start_idx + 1,
-                    column: 1,
-                    message: "List should be preceded by a blank line".to_string(),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(start_idx + 1, 1),
-                        replacement: format!("\n{}", lines[start_idx]),
-                    }),
-                });
-            }
-
-            // Check for blank line after list (unless at document end)
-            if end_idx < lines.len() - 1
-                && !is_empty_vec[end_idx + 1]
-                && !structure.is_in_code_block(end_idx + 1)
-            {
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: end_idx + 2,
-                    column: 1,
-                    message: "List should be followed by a blank line".to_string(),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(end_idx + 2, 1),
-                        replacement: format!("\n{}", lines[end_idx + 1]),
-                    }),
-                });
-            }
+            // No need to check line *after* end_line since it's the end of the file
         }
 
         Ok(warnings)

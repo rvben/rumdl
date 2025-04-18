@@ -22,6 +22,10 @@ pub enum LintError {
     InvalidInput(String),
     #[error("Fix failed: {0}")]
     FixFailed(String),
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Parsing error: {0}")]
+    ParsingError(String),
 }
 
 pub type LintResult = Result<Vec<LintWarning>, LintError>;

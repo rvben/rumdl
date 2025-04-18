@@ -8,6 +8,7 @@ use std::path::Path;
 use std::process;
 use std::time::Instant;
 use std::error::Error;
+use std::collections::HashSet;
 
 use rumdl::rule::Rule;
 use rumdl::rules::code_block_utils::CodeBlockStyle;
@@ -147,105 +148,142 @@ fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
 
 // Get a complete set of enabled rules based on CLI options and config
 fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
-    let mut rules: Vec<Box<dyn Rule>> = Vec::new();
+    // 1. Initialize all available rules
+    let mut all_rules: Vec<Box<dyn Rule>> = Vec::new();
+    all_rules.push(Box::new(MD001HeadingIncrement));
+    all_rules.push(Box::new(MD002FirstHeadingH1::default()));
+    all_rules.push(Box::new(MD003HeadingStyle::default()));
+    all_rules.push(Box::new(MD004UnorderedListStyle::default()));
+    all_rules.push(Box::new(MD005ListIndent));
+    all_rules.push(Box::new(MD006StartBullets));
+    all_rules.push(Box::new(MD007ULIndent::default()));
+    all_rules.push(Box::new(MD009TrailingSpaces::default()));
+    all_rules.push(Box::new(MD010NoHardTabs::default()));
+    all_rules.push(Box::new(MD011ReversedLink {}));
+    all_rules.push(Box::new(MD012NoMultipleBlanks::default()));
+    all_rules.push(Box::new(MD013LineLength::default()));
+    all_rules.push(Box::new(MD014CommandsShowOutput::default()));
+    all_rules.push(Box::new(MD015NoMissingSpaceAfterListMarker::default()));
+    all_rules.push(Box::new(MD016NoMultipleSpaceAfterListMarker::default()));
+    all_rules.push(Box::new(MD017NoEmphasisAsHeading));
+    all_rules.push(Box::new(MD018NoMissingSpaceAtx {}));
+    all_rules.push(Box::new(MD019NoMultipleSpaceAtx {}));
+    all_rules.push(Box::new(MD020NoMissingSpaceClosedAtx {}));
+    all_rules.push(Box::new(MD021NoMultipleSpaceClosedAtx {}));
+    all_rules.push(Box::new(MD022BlanksAroundHeadings::default()));
+    all_rules.push(Box::new(MD023HeadingStartLeft {}));
+    all_rules.push(Box::new(MD024MultipleHeadings::default()));
+    all_rules.push(Box::new(MD025SingleTitle::default()));
+    all_rules.push(Box::new(MD026NoTrailingPunctuation::default()));
+    all_rules.push(Box::new(MD027MultipleSpacesBlockquote {}));
+    all_rules.push(Box::new(MD028NoBlanksBlockquote {}));
+    all_rules.push(Box::new(MD029OrderedListPrefix::default()));
+    all_rules.push(Box::new(MD030ListMarkerSpace::default()));
+    all_rules.push(Box::new(MD031BlanksAroundFences {}));
+    all_rules.push(Box::new(MD032BlanksAroundLists {}));
+    all_rules.push(Box::new(MD033NoInlineHtml::default()));
+    all_rules.push(Box::new(MD034NoBareUrls {}));
+    all_rules.push(Box::new(MD035HRStyle::default()));
+    all_rules.push(Box::new(MD036NoEmphasisOnlyFirst {}));
+    all_rules.push(Box::new(MD037SpacesAroundEmphasis::default()));
+    all_rules.push(Box::new(MD038NoSpaceInCode::default()));
+    all_rules.push(Box::new(MD039NoSpaceInLinks::default()));
+    all_rules.push(Box::new(MD040FencedCodeLanguage {}));
+    all_rules.push(Box::new(MD041FirstLineHeading::default()));
+    all_rules.push(Box::new(MD042NoEmptyLinks::new()));
+    all_rules.push(Box::new(MD043RequiredHeadings::new(Vec::new()))); // Base instance
+    all_rules.push(Box::new(MD044ProperNames::new(Vec::new(), true))); // Base instance
+    all_rules.push(Box::new(MD045NoAltText::new()));
+    all_rules.push(Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent))); // Base instance
+    all_rules.push(Box::new(MD047FileEndNewline));
+    all_rules.push(Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent))); // Base instance
+    all_rules.push(Box::new(MD049EmphasisStyle::new(EmphasisStyle::Consistent))); // Base instance
+    all_rules.push(Box::new(MD050StrongStyle::new(StrongStyle::Consistent))); // Base instance
+    all_rules.push(Box::new(MD051LinkFragments));
+    all_rules.push(Box::new(MD052ReferenceLinkImages::default()));
+    all_rules.push(Box::new(MD053LinkImageReferenceDefinitions::default())); // Base instance
+    all_rules.push(Box::new(MD054LinkImageStyle::default()));
+    all_rules.push(Box::new(MD055TablePipeStyle::default()));
+    all_rules.push(Box::new(MD056TableColumnCount::default()));
+    all_rules.push(Box::new(MD057ExistingRelativeLinks::default()));
+    all_rules.push(Box::new(MD058BlanksAroundTables::default()));
 
-    // Add all the implemented rules with default configuration
-    rules.push(Box::new(MD001HeadingIncrement));
-    rules.push(Box::new(MD002FirstHeadingH1::default()));
-    rules.push(Box::new(MD003HeadingStyle::default()));
-    rules.push(Box::new(MD004UnorderedListStyle::default()));
-    rules.push(Box::new(MD005ListIndent));
-    rules.push(Box::new(MD006StartBullets));
-    rules.push(Box::new(MD007ULIndent::default()));
-    rules.push(Box::new(MD009TrailingSpaces::default()));
-    rules.push(Box::new(MD010NoHardTabs::default()));
-    rules.push(Box::new(MD011ReversedLink {}));
-    rules.push(Box::new(MD012NoMultipleBlanks::default()));
-    rules.push(Box::new(MD013LineLength::default()));
-    rules.push(Box::new(MD014CommandsShowOutput::default()));
-    rules.push(Box::new(MD015NoMissingSpaceAfterListMarker::default()));
-    rules.push(Box::new(MD016NoMultipleSpaceAfterListMarker::default()));
-    rules.push(Box::new(MD017NoEmphasisAsHeading));
-    rules.push(Box::new(MD018NoMissingSpaceAtx {}));
-    rules.push(Box::new(MD019NoMultipleSpaceAtx {}));
-    rules.push(Box::new(MD020NoMissingSpaceClosedAtx {}));
-    rules.push(Box::new(MD021NoMultipleSpaceClosedAtx {}));
-    rules.push(Box::new(MD022BlanksAroundHeadings::default()));
-    rules.push(Box::new(MD023HeadingStartLeft {}));
-    rules.push(Box::new(MD024MultipleHeadings::default()));
-    rules.push(Box::new(MD025SingleTitle::default()));
-    rules.push(Box::new(MD026NoTrailingPunctuation::default()));
-    rules.push(Box::new(MD027MultipleSpacesBlockquote {}));
-    rules.push(Box::new(MD028NoBlanksBlockquote {}));
-    rules.push(Box::new(MD029OrderedListPrefix::default()));
-    rules.push(Box::new(MD030ListMarkerSpace::default()));
-    rules.push(Box::new(MD031BlanksAroundFences {}));
-    rules.push(Box::new(MD032BlanksAroundLists {}));
-    rules.push(Box::new(MD033NoInlineHtml::default()));
-    rules.push(Box::new(MD034NoBareUrls {}));
-    rules.push(Box::new(MD035HRStyle::default()));
-    rules.push(Box::new(MD036NoEmphasisOnlyFirst {}));
-    rules.push(Box::new(MD037SpacesAroundEmphasis::default()));
-    rules.push(Box::new(MD038NoSpaceInCode::default()));
-    rules.push(Box::new(MD039NoSpaceInLinks::default()));
-    rules.push(Box::new(MD040FencedCodeLanguage {}));
-    rules.push(Box::new(MD041FirstLineHeading::default()));
-    rules.push(Box::new(MD042NoEmptyLinks::new()));
-    rules.push(Box::new(MD043RequiredHeadings::new(Vec::new())));
-    rules.push(Box::new(MD044ProperNames::new(Vec::new(), true)));
-    rules.push(Box::new(MD045NoAltText::new()));
-    rules.push(Box::new(MD046CodeBlockStyle::new(
-        CodeBlockStyle::Consistent,
-    )));
-    rules.push(Box::new(MD047FileEndNewline));
-    rules.push(Box::new(MD048CodeFenceStyle::new(
-        CodeFenceStyle::Consistent,
-    )));
-    rules.push(Box::new(MD049EmphasisStyle::new(EmphasisStyle::Consistent)));
-    rules.push(Box::new(MD050StrongStyle::new(StrongStyle::Consistent)));
-    rules.push(Box::new(MD051LinkFragments));
-    rules.push(Box::new(MD052ReferenceLinkImages::default()));
-    rules.push(Box::new(MD053LinkImageReferenceDefinitions::default()));
-    rules.push(Box::new(MD054LinkImageStyle::default()));
-    rules.push(Box::new(MD055TablePipeStyle::default()));
-    rules.push(Box::new(MD056TableColumnCount::default()));
-    rules.push(Box::new(MD057ExistingRelativeLinks::default()));
-    rules.push(Box::new(MD058BlanksAroundTables::default()));
+    // 2. Apply specific rule parameter configurations (e.g., line length for MD013)
+    // This modifies the instances within all_rules
+    apply_rule_configs(&mut all_rules, config);
 
-    // Apply configuration to rules that need it
-    apply_rule_configs(&mut rules, config);
+    // 3. Determine the final list of enabled rules based on precedence
+    let final_rules: Vec<Box<dyn Rule>>;
 
-    // Apply config disable first
-    if !config.global.disable.is_empty() {
-        rules.retain(|rule| !config.global.disable.iter().any(|name| name == rule.name()));
+    // Rule names provided via CLI flags
+    let cli_enable_set: Option<HashSet<&str>> = cli
+        .enable
+        .as_deref()
+        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
+    let cli_disable_set: Option<HashSet<&str>> = cli
+        .disable
+        .as_deref()
+        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
+
+    // Rule names provided via config file
+    let config_enable_set: HashSet<&str> = config
+        .global
+        .enable
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    let config_disable_set: HashSet<&str> = config
+        .global
+        .disable
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+
+    if let Some(enabled_cli) = &cli_enable_set {
+        // --- Case 1: CLI --enable provided --- 
+        // CLI --enable overrides *everything* (config enable/disable are ignored).
+        // Filter all_rules directly based on CLI --enable.
+        final_rules = all_rules
+            .into_iter()
+            .filter(|rule| enabled_cli.contains(rule.name()))
+            .collect();
+        // Note: CLI --disable is IGNORED if CLI --enable is present.
+    } else {
+        // --- Case 2: No CLI --enable --- 
+        // Start with all (already configured) rules.
+        let mut enabled_rules = all_rules;
+
+        // Step 2a: Apply config `enable` (if specified).
+        // If config.enable is not empty, it acts as an *exclusive* list.
+        if !config_enable_set.is_empty() {
+            enabled_rules.retain(|rule| config_enable_set.contains(rule.name()));
+        }
+
+        // Step 2b: Apply config `disable`.
+        // Remove rules specified in config.disable from the current set.
+        if !config_disable_set.is_empty() {
+            enabled_rules.retain(|rule| !config_disable_set.contains(rule.name()));
+        }
+
+        // Step 2c: Apply CLI `disable`.
+        // Remove rules specified in cli.disable from the result of steps 2a & 2b.
+        if let Some(disabled_cli) = &cli_disable_set {
+            enabled_rules.retain(|rule| !disabled_cli.contains(rule.name()));
+        }
+
+        final_rules = enabled_rules;
     }
 
-    // Apply config enable if provided (exclusive list)
-    if !config.global.enable.is_empty() {
-        rules.retain(|rule| config.global.enable.iter().any(|name| name == rule.name()));
-    }
-
-    // Apply rule enable/disable from CLI (overrides config)
-    if let Some(enable) = &cli.enable {
-        // Only keep rules that are in the enable list
-        let enabled_rules: Vec<&str> = enable.split(',').map(|s| s.trim()).collect();
-        rules.retain(|rule| enabled_rules.contains(&rule.name()));
-    } else if let Some(disable) = &cli.disable {
-        // Remove rules that are in the disable list
-        let disabled_rules: Vec<&str> = disable.split(',').map(|s| s.trim()).collect();
-        rules.retain(|rule| !disabled_rules.contains(&rule.name()));
-    }
-
-    // Print enabled rules if verbose
+    // 4. Print enabled rules if verbose
     if cli.verbose {
         println!("Enabled rules:");
-        for rule in &rules {
+        for rule in &final_rules {
             println!("  - {} ({})", rule.name(), rule.description());
         }
         println!();
     }
 
-    rules
+    final_rules
 }
 
 // Find all markdown files using the `ignore` crate, returning Result
