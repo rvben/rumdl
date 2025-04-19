@@ -363,23 +363,30 @@ make test
 
 ## Using rumdl with pre-commit
 
-You can use `rumdl` as a pre-commit hook in your own projects to check your Markdown files.
+You can use `rumdl` as a pre-commit hook to check and fix your Markdown files.
+
+The recommended way is to use the official pre-commit hook repository:
+
+https://github.com/rvben/rumdl-pre-commit
 
 Add the following to your `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
--   repo: https://github.com/rvben/rumdl
+  - repo: https://github.com/rvben/rumdl-pre-commit
     rev: v0.0.45  # Use the latest release tag
     hooks:
-    -   id: rumdl-check  # Just check for issues
-    # Or use rumdl-fix to automatically fix issues:
-    # -   id: rumdl-fix
+      - id: rumdl
+        # To only check (default):
+        # args: []
+        # To automatically fix issues:
+        # args: [--fix]
 ```
 
-Then run `pre-commit install`.
+- By default, the hook will only check for issues.
+- To automatically fix issues, add `args: [--fix]` to the hook configuration.
 
-Pre-commit will automatically download and install `rumdl` using `cargo`. `rumdl` will respect any `.rumdl.toml` or `pyproject.toml` configuration file present in your repository.
+When you run `pre-commit install` or `pre-commit run`, pre-commit will automatically install `rumdl` in an isolated Python environment using pip. You do **not** need to install rumdl manually.
 
 ## License
 

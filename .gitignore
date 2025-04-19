@@ -4,3 +4,4 @@ target/
 cov-report
 benchmark
 *.bak*
+.env
