@@ -17,8 +17,8 @@ use rumdl::rules::emphasis_style::EmphasisStyle;
 use rumdl::rules::strong_style::StrongStyle;
 use rumdl::rules::*;
 use rumdl::{MD046CodeBlockStyle, MD048CodeFenceStyle, MD049EmphasisStyle, MD050StrongStyle};
-
-mod config;
+use rumdl::config as rumdl_config;
+use rumdl_config::get_rule_config_value;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -99,6 +99,29 @@ enum Commands {
         #[arg(long)]
         pyproject: bool,
     },
+    /// Show information about a rule or list all rules
+    Rule {
+        /// Rule name or ID (optional)
+        rule: Option<String>,
+    },
+    /// Show configuration or query a specific key
+    Config {
+        #[command(subcommand)]
+        subcmd: Option<ConfigSubcommand>,
+        /// Show the override chain for each config value
+        #[arg(long, help = "Show the override chain for each config value")]
+        show_overrides: bool,
+    },
+    /// Show version information
+    Version,
+}
+
+#[derive(Subcommand)]
+enum ConfigSubcommand {
+    /// Query a specific config key (e.g. global.exclude or MD013.line_length)
+    Get {
+        key: String,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -166,21 +189,21 @@ struct CheckArgs {
 }
 
 // Helper function to apply configuration to rules that need it
-fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
+fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &rumdl_config::Config) {
     // Replace any rules that need configuration with properly configured instances
 
     // Replace MD013 with configured instance
     if let Some(pos) = rules.iter().position(|r| r.name() == "MD013") {
         let line_length =
-            config::get_rule_config_value::<usize>(config, "MD013", "line_length").unwrap_or(80);
+            get_rule_config_value::<usize>(config, "MD013", "line_length").unwrap_or(80);
         let code_blocks =
-            config::get_rule_config_value::<bool>(config, "MD013", "code_blocks").unwrap_or(true);
+            get_rule_config_value::<bool>(config, "MD013", "code_blocks").unwrap_or(true);
         let tables =
-            config::get_rule_config_value::<bool>(config, "MD013", "tables").unwrap_or(false);
+            get_rule_config_value::<bool>(config, "MD013", "tables").unwrap_or(false);
         let headings =
-            config::get_rule_config_value::<bool>(config, "MD013", "headings").unwrap_or(true);
+            get_rule_config_value::<bool>(config, "MD013", "headings").unwrap_or(true);
         let strict =
-            config::get_rule_config_value::<bool>(config, "MD013", "strict").unwrap_or(false);
+            get_rule_config_value::<bool>(config, "MD013", "strict").unwrap_or(false);
 
         rules[pos] = Box::new(MD013LineLength::new(
             line_length,
@@ -194,7 +217,7 @@ fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
     // Replace MD043 with configured instance
     if let Some(pos) = rules.iter().position(|r| r.name() == "MD043") {
         let mut headings =
-            config::get_rule_config_value::<Vec<String>>(config, "MD043", "headings")
+            get_rule_config_value::<Vec<String>>(config, "MD043", "headings")
                 .unwrap_or_default();
 
         // Strip leading '#' and spaces from the configured headings to match the format of extracted headings
@@ -209,7 +232,7 @@ fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
     // Replace MD053 with configured instance
     if let Some(pos) = rules.iter().position(|r| r.name() == "MD053") {
         let ignored_definitions =
-            config::get_rule_config_value::<Vec<String>>(config, "MD053", "ignored_definitions")
+            get_rule_config_value::<Vec<String>>(config, "MD053", "ignored_definitions")
                 .unwrap_or_default();
         rules[pos] = Box::new(MD053LinkImageReferenceDefinitions::new(ignored_definitions));
     }
@@ -220,7 +243,7 @@ fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
 // Get a complete set of enabled rules based on CLI options and config
 fn get_enabled_rules_from_checkargs(
     args: &CheckArgs,
-    config: &config::Config,
+    config: &rumdl_config::Config,
 ) -> Vec<Box<dyn Rule>> {
     // 1. Initialize all available rules
     let mut all_rules: Vec<Box<dyn Rule>> = vec![
@@ -361,7 +384,7 @@ fn get_enabled_rules_from_checkargs(
 fn find_markdown_files(
     paths: &[String],
     args: &CheckArgs,
-    config: &config::Config,
+    config: &rumdl_config::Config,
 ) -> Result<Vec<String>, Box<dyn Error>> {
     let mut file_paths = Vec::new();
 
@@ -385,7 +408,7 @@ fn find_markdown_files(
     walk_builder.types(types);
     // -----------------------------------------
 
-    // Determine if running in discovery mode (e.g., "rumdl .") vs explicit path mode
+    // Determine if running in discovery mode (e.g., "rumdl ." vs explicit path mode
     let is_discovery_mode = paths.len() == 1 && paths[0] == ".";
 
     // Determine effective patterns based on CLI overrides
@@ -620,7 +643,7 @@ fn main() {
         Some(Commands::Init { pyproject }) => {
             if *pyproject {
                 // Handle pyproject.toml initialization
-                let config_content = config::generate_pyproject_config();
+                let config_content = rumdl_config::generate_pyproject_config();
 
                 if Path::new("pyproject.toml").exists() {
                     // pyproject.toml exists, ask to append
@@ -698,7 +721,7 @@ build-backend = \"setuptools.build_meta\"
             }
 
             // Create default config file
-            match config::create_default_config(".rumdl.toml") {
+            match rumdl_config::create_default_config(".rumdl.toml") {
                 Ok(_) => {
                     println!("Created default configuration file: .rumdl.toml");
                 }
@@ -714,6 +737,277 @@ build-backend = \"setuptools.build_meta\"
         }
         Some(Commands::Check(args)) => {
             run_check(args);
+        }
+        Some(Commands::Rule { rule }) => {
+            use rumdl::rules::*;
+            let all_rules: Vec<Box<dyn Rule>> = vec![
+                Box::new(MD001HeadingIncrement),
+                Box::new(MD002FirstHeadingH1::default()),
+                Box::new(MD003HeadingStyle::default()),
+                Box::new(MD004UnorderedListStyle::default()),
+                Box::new(MD005ListIndent),
+                Box::new(MD006StartBullets),
+                Box::new(MD007ULIndent::default()),
+                Box::new(MD008ULStyle::default()),
+                Box::new(MD009TrailingSpaces::default()),
+                Box::new(MD010NoHardTabs::default()),
+                Box::new(MD011ReversedLink {}),
+                Box::new(MD012NoMultipleBlanks::default()),
+                Box::new(MD013LineLength::default()),
+                Box::new(MD015NoMissingSpaceAfterListMarker::default()),
+                Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
+                Box::new(MD017NoEmphasisAsHeading),
+                Box::new(MD018NoMissingSpaceAtx {}),
+                Box::new(MD019NoMultipleSpaceAtx {}),
+                Box::new(MD020NoMissingSpaceClosedAtx {}),
+                Box::new(MD021NoMultipleSpaceClosedAtx {}),
+                Box::new(MD022BlanksAroundHeadings::default()),
+                Box::new(MD023HeadingStartLeft {}),
+                Box::new(MD024MultipleHeadings::default()),
+                Box::new(MD025SingleTitle::default()),
+                Box::new(MD026NoTrailingPunctuation::default()),
+                Box::new(MD027MultipleSpacesBlockquote {}),
+                Box::new(MD028NoBlanksBlockquote {}),
+                Box::new(MD029OrderedListPrefix::default()),
+                Box::new(MD030ListMarkerSpace::default()),
+                Box::new(MD031BlanksAroundFences {}),
+                Box::new(MD032BlanksAroundLists {}),
+                Box::new(MD033NoInlineHtml::default()),
+                Box::new(MD034NoBareUrls {}),
+                Box::new(MD035HRStyle::default()),
+                Box::new(MD036NoEmphasisOnlyFirst {}),
+                Box::new(MD037SpacesAroundEmphasis),
+                Box::new(MD038NoSpaceInCode::default()),
+                Box::new(MD039NoSpaceInLinks),
+                Box::new(MD040FencedCodeLanguage {}),
+                Box::new(MD041FirstLineHeading::default()),
+                Box::new(MD042NoEmptyLinks::new()),
+                Box::new(MD043RequiredHeadings::new(Vec::new())),
+                Box::new(MD044ProperNames::new(Vec::new(), true)),
+                Box::new(MD045NoAltText::new()),
+                Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
+                Box::new(MD047FileEndNewline),
+                Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
+                Box::new(MD049EmphasisStyle::new(EmphasisStyle::Consistent)),
+                Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
+                Box::new(MD051LinkFragments),
+                Box::new(MD052ReferenceLinkImages),
+                Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
+                Box::new(MD054LinkImageStyle::default()),
+                Box::new(MD055TablePipeStyle::default()),
+                Box::new(MD056TableColumnCount),
+                Box::new(MD057ExistingRelativeLinks::default()),
+                Box::new(MD058BlanksAroundTables),
+            ];
+            if let Some(rule_query) = rule {
+                let rule_query = rule_query.to_ascii_uppercase();
+                let found = all_rules.iter().find(|r| {
+                    r.name().eq_ignore_ascii_case(&rule_query)
+                        || r.name().replace("MD", "") == rule_query.replace("MD", "")
+                });
+                if let Some(rule) = found {
+                    println!("{} - {}\n\nDescription:\n  {}", rule.name(), rule.description(), rule.description());
+                } else {
+                    eprintln!("Rule '{}' not found.", rule_query);
+                    std::process::exit(1);
+                }
+            } else {
+                println!("Available rules:");
+                for rule in &all_rules {
+                    println!("  {} - {}", rule.name(), rule.description());
+                }
+            }
+        }
+        Some(Commands::Config { subcmd, show_overrides }) => {
+            let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
+            // Map ConfigSource to user-friendly filename or label
+            let file_for_source = |src: rumdl_config::ConfigSource| match src {
+                rumdl_config::ConfigSource::Cli => "CLI".to_string(),
+                rumdl_config::ConfigSource::RumdlToml => {
+                    // Prefer .rumdl.toml if present, else rumdl.toml
+                    let f = sourced.loaded_files.iter().find(|f| f.ends_with(".rumdl.toml"));
+                    if let Some(f) = f {
+                        f.clone()
+                    } else {
+                        sourced.loaded_files.iter().find(|f| f.ends_with("rumdl.toml")).cloned().unwrap_or(".rumdl.toml".to_string())
+                    }
+                }
+                rumdl_config::ConfigSource::PyprojectToml => {
+                    sourced.loaded_files.iter().find(|f| f.ends_with("pyproject.toml")).cloned().unwrap_or("pyproject.toml".to_string())
+                }
+                rumdl_config::ConfigSource::Default => "default".to_string(),
+            };
+            let color_for_source = |src: rumdl_config::ConfigSource| match src {
+                rumdl_config::ConfigSource::Cli => "green",
+                rumdl_config::ConfigSource::RumdlToml => "blue",
+                rumdl_config::ConfigSource::PyprojectToml => "magenta",
+                rumdl_config::ConfigSource::Default => "yellow",
+            };
+            if let Some(ConfigSubcommand::Get { key }) = subcmd {
+                // Support global.key or MDxxx.key
+                let parts: Vec<_> = key.split('.').collect();
+                if parts.len() == 2 {
+                    if parts[0].eq_ignore_ascii_case("global") {
+                        match parts[1] {
+                            "enable" => {
+                                println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.enable.value), format!("[from {}]", file_for_source(sourced.global.enable.source)).color(color_for_source(sourced.global.enable.source)));
+                                return;
+                            }
+                            "disable" => {
+                                println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.disable.value), format!("[from {}]", file_for_source(sourced.global.disable.source)).color(color_for_source(sourced.global.disable.source)));
+                                return;
+                            }
+                            "exclude" => {
+                                println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.exclude.value), format!("[from {}]", file_for_source(sourced.global.exclude.source)).color(color_for_source(sourced.global.exclude.source)));
+                                return;
+                            }
+                            "include" => {
+                                println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.include.value), format!("[from {}]", file_for_source(sourced.global.include.source)).color(color_for_source(sourced.global.include.source)));
+                                return;
+                            }
+                            "ignore_gitignore" => {
+                                println!("{} = {} {}", key.cyan(), sourced.global.ignore_gitignore.value.to_string(), format!("[from {}]", file_for_source(sourced.global.ignore_gitignore.source)).color(color_for_source(sourced.global.ignore_gitignore.source)));
+                                return;
+                            }
+                            "respect_gitignore" => {
+                                println!("{} = {} {}", key.cyan(), sourced.global.respect_gitignore.value.to_string(), format!("[from {}]", file_for_source(sourced.global.respect_gitignore.source)).color(color_for_source(sourced.global.respect_gitignore.source)));
+                                return;
+                            }
+                            _ => {
+                                println!("{} {}", format!("Unknown global key: {}", parts[1]).red().bold(), "(not set)".yellow());
+                                return;
+                            }
+                        }
+                    } else {
+                        // Rule-specific
+                        let rule = parts[0];
+                        let k = parts[1];
+                        if let Some(rule_cfg) = sourced.rules.get(rule) {
+                            if let Some(sv) = rule_cfg.values.get(k) {
+                                println!("{}.{} = {} {}", rule.cyan(), k.cyan(), to_toml_string(&sv.value), format!("[from {}]", file_for_source(sv.source)).color(color_for_source(sv.source)));
+                                return;
+                            } else {
+                                println!("{} {}", format!("Unknown key: {}.{}", rule, k).red().bold(), "(not set)".yellow());
+                                return;
+                            }
+                        } else {
+                            println!("{} {}", format!("Unknown rule: {}", rule).red().bold(), "(not set)".yellow());
+                            return;
+                        }
+                    }
+                } else {
+                    println!("{}", "Key must be in the form global.key or MDxxx.key".red().bold());
+                    return;
+                }
+            }
+            // Print loaded config files
+            if !sourced.loaded_files.is_empty() {
+                println!("{}", "Loaded config files:".bold());
+                for f in &sourced.loaded_files {
+                    println!("  {}", f.blue().bold());
+                }
+                println!();
+            } else {
+                println!("{}", "No config files loaded (using defaults)".yellow());
+            }
+            // Print global config
+            println!("{}", "[global]".bold().underline());
+            fn to_toml_string<T: serde::Serialize>(v: &T) -> String {
+                toml::to_string(v).expect("TOML serialization failed").trim().to_string()
+            }
+            fn to_toml_string_vec_string(v: &Vec<String>) -> String {
+                format!("[{}]", v.iter().map(|s| format!("{:?}", s)).collect::<Vec<_>>().join(", "))
+            }
+            fn to_toml_string_toml_value(v: &toml::Value) -> String {
+                v.to_string()
+            }
+            fn print_override_chain_vec_string(sv: &rumdl_config::SourcedValue<Vec<String>>) {
+                if sv.overrides.len() > 1 {
+                    println!("    overrides:");
+                    for o in &sv.overrides {
+                        println!("      {}: {}", o.file.clone().unwrap_or_else(|| format!("{:?}", o.source)), to_toml_string_vec_string(&o.value));
+                    }
+                }
+            }
+            fn print_override_chain_bool(sv: &rumdl_config::SourcedValue<bool>) {
+                if sv.overrides.len() > 1 {
+                    println!("    overrides:");
+                    for o in &sv.overrides {
+                        println!("      {}: {}", o.file.clone().unwrap_or_else(|| format!("{:?}", o.source)), o.value.to_string());
+                    }
+                }
+            }
+            fn print_override_chain_toml_value(sv: &rumdl_config::SourcedValue<toml::Value>) {
+                if sv.overrides.len() > 1 {
+                    println!("    overrides:");
+                    for o in &sv.overrides {
+                        println!("      {}: {}", o.file.clone().unwrap_or_else(|| format!("{:?}", o.source)), to_toml_string_toml_value(&o.value));
+                    }
+                }
+            }
+            // Align per section: global
+            let global_keys = [
+                "enable", "disable", "exclude", "include", "ignore_gitignore", "respect_gitignore"
+            ];
+            let global_val_strs = [
+                to_toml_string_vec_string(&sourced.global.enable.value),
+                to_toml_string_vec_string(&sourced.global.disable.value),
+                to_toml_string_vec_string(&sourced.global.exclude.value),
+                to_toml_string_vec_string(&sourced.global.include.value),
+                sourced.global.ignore_gitignore.value.to_string(),
+                sourced.global.respect_gitignore.value.to_string(),
+            ];
+            // Build 'key = value' strings
+            let global_lines: Vec<String> = global_keys.iter().zip(global_val_strs.iter())
+                .map(|(k, v)| format!("{} = {}", k, v)).collect();
+            // Compute max width for [from ...] alignment
+            let global_max_line_width = global_lines.iter().map(|s| s.len()).max().unwrap_or(0);
+            let gpad = |s: &str| format!("{s:width$}", s=s, width=global_max_line_width);
+
+            println!("  {} {}", gpad(&global_lines[0]), format!("[from {}]", file_for_source(sourced.global.enable.source)).color(color_for_source(sourced.global.enable.source)));
+            if *show_overrides { print_override_chain_vec_string(&sourced.global.enable); }
+            println!("  {} {}", gpad(&global_lines[1]), format!("[from {}]", file_for_source(sourced.global.disable.source)).color(color_for_source(sourced.global.disable.source)));
+            if *show_overrides { print_override_chain_vec_string(&sourced.global.disable); }
+            println!("  {} {}", gpad(&global_lines[2]), format!("[from {}]", file_for_source(sourced.global.exclude.source)).color(color_for_source(sourced.global.exclude.source)));
+            if *show_overrides { print_override_chain_vec_string(&sourced.global.exclude); }
+            println!("  {} {}", gpad(&global_lines[3]), format!("[from {}]", file_for_source(sourced.global.include.source)).color(color_for_source(sourced.global.include.source)));
+            if *show_overrides { print_override_chain_vec_string(&sourced.global.include); }
+            println!("  {} {}", gpad(&global_lines[4]), format!("[from {}]", file_for_source(sourced.global.ignore_gitignore.source)).color(color_for_source(sourced.global.ignore_gitignore.source)));
+            if *show_overrides { print_override_chain_bool(&sourced.global.ignore_gitignore); }
+            println!("  {} {}", gpad(&global_lines[5]), format!("[from {}]", file_for_source(sourced.global.respect_gitignore.source)).color(color_for_source(sourced.global.respect_gitignore.source)));
+            if *show_overrides { print_override_chain_bool(&sourced.global.respect_gitignore); }
+
+            // Align per section: each rule, and order rules alphabetically
+            let mut rule_names: Vec<_> = sourced.rules.keys().collect();
+            rule_names.sort();
+            for rule in rule_names {
+                let rule_cfg = &sourced.rules[rule];
+                if !rule_cfg.values.is_empty() {
+                    println!("\n{}", format!("[{}]", rule).bold().underline());
+                    // Build 'key = value' strings for this rule
+                    let rule_lines: Vec<String> = rule_cfg.values.iter()
+                        .map(|(k, sv)| format!("{} = {}", k, to_toml_string_toml_value(&sv.value))).collect();
+                    let rule_max_line_width = rule_lines.iter().map(|s| s.len()).max().unwrap_or(0);
+                    let rule_pad = |s: &str| format!("{s:width$}", s=s, width=rule_max_line_width);
+                    for ((_, sv), line) in rule_cfg.values.iter().zip(rule_lines.iter()) {
+                        let src = sv.source;
+                        let color = color_for_source(src);
+                        println!("  {} {}", rule_pad(line), format!("[from {}]", file_for_source(src)).color(color));
+                        if *show_overrides { print_override_chain_toml_value(sv); }
+                    }
+                }
+            }
+            // Print unknown keys
+            if !sourced.unknown_keys.is_empty() {
+                println!("\n{}", "Warnings:".red().bold());
+                for (section, key) in &sourced.unknown_keys {
+                    println!("  {} {}", "Unknown key:".red(), format!("{} -> {}", section, key).yellow());
+                }
+            }
+        }
+        Some(Commands::Version) => {
+            // Use clap's version info
+            println!("rumdl {}", env!("CARGO_PKG_VERSION"));
         }
         None => {
             // Legacy: rumdl . or rumdl [PATHS...]
@@ -748,14 +1042,14 @@ build-backend = \"setuptools.build_meta\"
 
 fn run_check(args: &CheckArgs) {
     // Load configuration
-    let config = match config::load_config(args.config.as_deref()) {
+    let config = match rumdl_config::load_config(args.config.as_deref()) {
         Ok(config) => config,
         Err(e) => {
             if args.config.is_some() {
                 eprintln!("{}: {}", "Error".red().bold(), e);
                 std::process::exit(1);
             }
-            config::Config::default()
+            rumdl_config::Config::default()
         }
     };
 

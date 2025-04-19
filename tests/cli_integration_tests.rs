@@ -904,3 +904,56 @@ fn test_legacy_cli_works_and_warns() {
         "Should print deprecation warning for legacy CLI"
     );
 }
+
+#[test]
+fn test_rule_command_lists_all_rules() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .arg("rule")
+        .output()
+        .expect("Failed to execute 'rumdl rule'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(output.status.success(), "'rumdl rule' did not exit successfully");
+    assert!(stdout.contains("Available rules:"), "Output missing 'Available rules:'");
+    assert!(stdout.contains("MD013"), "Output missing rule MD013");
+}
+
+#[test]
+fn test_rule_command_shows_specific_rule() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "MD013"])
+        .output()
+        .expect("Failed to execute 'rumdl rule MD013'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(output.status.success(), "'rumdl rule MD013' did not exit successfully");
+    assert!(stdout.contains("MD013"), "Output missing rule name MD013");
+    assert!(stdout.contains("Description"), "Output missing 'Description'");
+}
+
+#[test]
+fn test_config_command_lists_options() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .arg("config")
+        .output()
+        .expect("Failed to execute 'rumdl config'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(output.status.success(), "'rumdl config' did not exit successfully");
+    assert!(stdout.contains("Available configuration options"), "Output missing config options header");
+    assert!(stdout.contains("line-length"), "Output missing 'line-length' option");
+    assert!(stdout.contains("exclude"), "Output missing 'exclude' option");
+}
+
+#[test]
+fn test_version_command_prints_version() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .arg("version")
+        .output()
+        .expect("Failed to execute 'rumdl version'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(output.status.success(), "'rumdl version' did not exit successfully");
+    assert!(stdout.contains("rumdl"), "Output missing 'rumdl' in version output");
+    assert!(stdout.contains("."), "Output missing version number");
+}
