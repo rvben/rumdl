@@ -32,7 +32,8 @@
   - [Rules](#rules)
   - [Command-line Interface](#command-line-interface)
     - [Commands](#commands)
-    - [Options](#options)
+    - [Options (for `check`)](#options-for-check)
+    - [Example Help Output](#example-help-output)
   - [Configuration](#configuration)
     - [Configuration File Example](#configuration-file-example)
     - [Initializing Configuration](#initializing-configuration)
@@ -52,11 +53,11 @@
 # Install using Cargo
 cargo install rumdl
 
-# Check Markdown files in the current directory
-rumdl .
+# Lint Markdown files in the current directory
+rumdl check .
 
 # Automatically fix issues
-rumdl --fix .
+rumdl check --fix .
 
 # Create a default configuration file
 rumdl init
@@ -108,14 +109,14 @@ Expand-Archive -Path "rumdl.zip" -DestinationPath "$env:USERPROFILE\.rumdl"
 Getting started with rumdl is simple:
 
 ```bash
-# Check a single file
-rumdl README.md
+# Lint a single file
+rumdl check README.md
 
-# Check all Markdown files in current directory and subdirectories
-rumdl .
+# Lint all Markdown files in current directory and subdirectories
+rumdl check .
 
 # Automatically fix issues
-rumdl --fix README.md
+rumdl check --fix README.md
 
 # Create a default configuration file
 rumdl init
@@ -124,26 +125,26 @@ rumdl init
 Common usage examples:
 
 ```bash
-# Check with custom configuration
-rumdl --config my-config.toml docs/
+# Lint with custom configuration
+rumdl check --config my-config.toml docs/
 
 # Disable specific rules
-rumdl --disable MD013,MD033 README.md
+rumdl check --disable MD013,MD033 README.md
 
 # Enable only specific rules
-rumdl --enable MD001,MD003 README.md
+rumdl check --enable MD001,MD003 README.md
 
 # Exclude specific files/directories
-rumdl --exclude "node_modules,dist" .
+rumdl check --exclude "node_modules,dist" .
 
 # Include only specific files/directories
-rumdl --include "docs/*.md,README.md" .
+rumdl check --include "docs/*.md,README.md" .
 
 # Combine include and exclude patterns
-rumdl --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
+rumdl check --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
 
 # Ignore gitignore rules
-rumdl --no-respect-gitignore .
+rumdl check --no-respect-gitignore .
 ```
 
 ## Rules
@@ -169,18 +170,18 @@ rumdl --list-rules
 ## Command-line Interface
 
 ```bash
-rumdl [options] [file or directory...]
-rumdl <command> [options]
+rumdl <command> [options] [file or directory...]
 ```
 
 ### Commands
 
+- `check`: Lint Markdown files and print warnings/errors (main subcommand)
 - `init`: Create a default `.rumdl.toml` configuration file in the current directory
 
-### Options
+### Options (for `check`)
 
 - `-c, --config <file>`: Use custom configuration file
-- `-f, --fix`: Automatically fix issues where possible
+- `--fix`: Automatically fix issues where possible
 - `-l, --list-rules`: List all available rules
 - `-d, --disable <rules>`: Disable specific rules (comma-separated)
 - `-e, --enable <rules>`: Enable only specific rules (comma-separated)
@@ -188,8 +189,31 @@ rumdl <command> [options]
 - `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
 - `--respect-gitignore`: Respect .gitignore files when scanning directories (default: true)
 - `--no-respect-gitignore`: Don't respect .gitignore files (same as --ignore-gitignore)
-- `--ignore-gitignore`: Ignore .gitignore files when scanning directories (deprecated, use --no-respect-gitignore)
 - `-v, --verbose`: Show detailed output
+- `--profile`: Show profiling information
+- `-q, --quiet`: Suppress all output except errors
+
+### Example Help Output
+
+```bash
+rumdl --help
+
+Usage: rumdl <COMMAND> [OPTIONS] [PATHS...]
+
+Commands:
+  check    Lint Markdown files and print warnings/errors
+  init     Create a default configuration file
+
+Options (for 'check' subcommand):
+  --fix                  Automatically fix fixable issues
+  --rules <RULES>        Comma-separated list of rules to enable
+  --config <FILE>        Path to configuration file
+  --format <FORMAT>      Output format (default: text)
+  --help                 Print help information
+  --version              Print version information
+
+If no command is given, 'check' is assumed (deprecated).
+```
 
 ## Configuration
 

@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, Args};
 use colored::*;
 use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
@@ -25,6 +25,76 @@ mod config;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Legacy: allow positional paths for backwards compatibility
+    #[arg(required = false, hide = true)]
+    paths: Vec<String>,
+
+    /// Configuration file path
+    #[arg(short, long, hide = true)]
+    config: Option<String>,
+
+    /// Fix issues automatically where possible
+    #[arg(short, long, default_value = "false", hide = true)]
+    fix: bool,
+
+    /// List all available rules
+    #[arg(short, long, default_value = "false", hide = true)]
+    list_rules: bool,
+
+    /// Disable specific rules (comma-separated)
+    #[arg(short, long, hide = true)]
+    disable: Option<String>,
+
+    /// Enable only specific rules (comma-separated)
+    #[arg(short, long, hide = true)]
+    enable: Option<String>,
+
+    /// Exclude specific files or directories (comma-separated glob patterns)
+    #[arg(long, hide = true)]
+    exclude: Option<String>,
+
+    /// Include only specific files or directories (comma-separated glob patterns).
+    #[arg(long, hide = true)]
+    include: Option<String>,
+
+    /// Ignore .gitignore files when scanning directories
+    #[arg(long, default_value = "false", help = "Ignore .gitignore files when scanning directories (does not apply to explicitly provided paths)", hide = true)]
+    ignore_gitignore: bool,
+
+    /// Respect .gitignore files when scanning directories (takes precedence over ignore_gitignore)
+    #[arg(long, default_value = "true", help = "Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)", hide = true)]
+    respect_gitignore: bool,
+
+    /// Show detailed output
+    #[arg(short, long, hide = true)]
+    verbose: bool,
+
+    /// Show profiling information
+    #[arg(long, hide = true)]
+    profile: bool,
+
+    /// Quiet mode
+    #[arg(short, long, hide = true)]
+    quiet: bool,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Lint Markdown files and print warnings/errors
+    Check(CheckArgs),
+    /// Initialize a new configuration file
+    Init {
+        /// Generate configuration for pyproject.toml instead of .rumdl.toml
+        #[arg(long)]
+        pyproject: bool,
+    },
+}
+
+#[derive(Args, Debug)]
+struct CheckArgs {
     /// Files or directories to lint.
     /// If provided, these paths take precedence over include patterns.
     #[arg(required = false)]
@@ -55,8 +125,6 @@ struct Cli {
     exclude: Option<String>,
 
     /// Include only specific files or directories (comma-separated glob patterns).
-    /// Note: When explicit paths are provided, include patterns are ignored.
-    /// Use either include patterns or paths, not both.
     #[arg(long)]
     include: Option<String>,
 
@@ -79,20 +147,6 @@ struct Cli {
     /// Quiet mode
     #[arg(short, long)]
     quiet: bool,
-
-    /// Command to run
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Initialize a new configuration file
-    Init {
-        /// Generate configuration for pyproject.toml instead of .rumdl.toml
-        #[arg(long)]
-        pyproject: bool,
-    },
 }
 
 // Helper function to apply configuration to rules that need it
@@ -147,7 +201,7 @@ fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
 }
 
 // Get a complete set of enabled rules based on CLI options and config
-fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
+fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &config::Config) -> Vec<Box<dyn Rule>> {
     // 1. Initialize all available rules
     let mut all_rules: Vec<Box<dyn Rule>> = Vec::new();
     all_rules.push(Box::new(MD001HeadingIncrement));
@@ -216,11 +270,11 @@ fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
     let final_rules: Vec<Box<dyn Rule>>;
 
     // Rule names provided via CLI flags
-    let cli_enable_set: Option<HashSet<&str>> = cli
+    let cli_enable_set: Option<HashSet<&str>> = args
         .enable
         .as_deref()
         .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
-    let cli_disable_set: Option<HashSet<&str>> = cli
+    let cli_disable_set: Option<HashSet<&str>> = args
         .disable
         .as_deref()
         .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
@@ -275,7 +329,7 @@ fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
     }
 
     // 4. Print enabled rules if verbose
-    if cli.verbose {
+    if args.verbose {
         println!("Enabled rules:");
         for rule in &final_rules {
             println!("  - {} ({})", rule.name(), rule.description());
@@ -287,7 +341,7 @@ fn get_enabled_rules(cli: &Cli, config: &config::Config) -> Vec<Box<dyn Rule>> {
 }
 
 // Find all markdown files using the `ignore` crate, returning Result
-fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> Result<Vec<String>, Box<dyn Error>> {
+fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Config) -> Result<Vec<String>, Box<dyn Error>> {
     let mut file_paths = Vec::new();
 
     // --- Configure ignore::WalkBuilder ---
@@ -314,7 +368,7 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
     let is_discovery_mode = paths.len() == 1 && paths[0] == ".";
 
     // Determine effective patterns based on CLI overrides
-    let exclude_patterns = if let Some(exclude_str) = cli.exclude.as_deref() {
+    let exclude_patterns = if let Some(exclude_str) = args.exclude.as_deref() {
         // If CLI exclude is given, IT REPLACES config excludes
         exclude_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
     } else {
@@ -323,7 +377,7 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
     };
 
     let include_patterns = if is_discovery_mode {
-        if let Some(include_str) = cli.include.as_deref() {
+        if let Some(include_str) = args.include.as_deref() {
             // If CLI include is given, IT REPLACES config includes
              include_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
         } else {
@@ -387,8 +441,8 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
     }
 
     // Configure gitignore handling *SECOND*
-    let use_gitignore = if cli.respect_gitignore {
-        !cli.ignore_gitignore // If respect is true, only ignore if ignore_gitignore is false
+    let use_gitignore = if args.respect_gitignore {
+        !args.ignore_gitignore // If respect is true, only ignore if ignore_gitignore is false
     } else {
         false // If respect is false, always ignore gitignore
     };
@@ -438,16 +492,12 @@ fn find_markdown_files(paths: &[String], cli: &Cli, config: &config::Config) -> 
     });
     // -------------------------------------
 
-    // Note: The complex logic for warning about excluded explicit paths is removed
-    // as the `ignore` crate handles this implicitly.
-    // We could potentially add it back by tracking inputs vs outputs if needed.
-
     Ok(file_paths) // Ensure the function returns the result
 }
 
 // Function to print linting results and summary
-fn print_results(
-    cli: &Cli,
+fn print_results_from_checkargs(
+    args: &CheckArgs,
     has_issues: bool,
     files_with_issues: usize,
     total_issues: usize,
@@ -456,11 +506,6 @@ fn print_results(
     total_files_processed: usize,
     duration_ms: u64,
 ) {
-    // Skip all output in quiet mode except warnings (which are printed during file processing)
-    if cli.quiet {
-        return;
-    }
-
     // Choose singular or plural form of "file" based on count
     let file_text = if total_files_processed == 1 {
         "file"
@@ -476,7 +521,7 @@ fn print_results(
     // Show results summary
     if has_issues {
         // If fix mode is enabled, only show the fixed summary
-        if cli.fix && total_issues_fixed > 0 {
+        if args.fix && total_issues_fixed > 0 {
             println!(
                 "\n{} Fixed {}/{} issues in {} {} ({}ms)",
                 "Fixed:".green().bold(),
@@ -505,7 +550,7 @@ fn print_results(
                 duration_ms
             );
 
-            if !cli.fix && total_fixable_issues > 0 {
+            if !args.fix && total_fixable_issues > 0 {
                 // Display the exact count of fixable issues
                 println!(
                     "Run with `--fix` to automatically fix {} of the {} issues",
@@ -521,6 +566,244 @@ fn print_results(
             file_text,
             duration_ms
         );
+    }
+}
+
+fn main() {
+    let _timer = rumdl::profiling::ScopedTimer::new("main");
+
+    let cli = Cli::parse();
+
+    match &cli.command {
+        Some(Commands::Init { pyproject }) => {
+            if *pyproject {
+                // Handle pyproject.toml initialization
+                let config_content = config::generate_pyproject_config();
+                
+                if Path::new("pyproject.toml").exists() {
+                    // pyproject.toml exists, ask to append
+                    println!("pyproject.toml already exists. Would you like to append rumdl configuration? [y/N]");
+                    print!("> ");
+                    io::stdout().flush().unwrap();
+                    
+                    let mut answer = String::new();
+                    io::stdin().read_line(&mut answer).unwrap();
+                    
+                    if answer.trim().eq_ignore_ascii_case("y") {
+                        // Append to existing file
+                        match fs::read_to_string("pyproject.toml") {
+                            Ok(content) => {
+                                // Check if [tool.rumdl] section already exists
+                                if content.contains("[tool.rumdl]") {
+                                    println!("The pyproject.toml file already contains a [tool.rumdl] section.");
+                                    println!("Please edit the file manually to avoid overwriting existing configuration.");
+                                    return;
+                                }
+                                
+                                // Append with a blank line for separation
+                                let new_content = format!("{}\n\n{}", content.trim_end(), config_content);
+                                match fs::write("pyproject.toml", new_content) {
+                                    Ok(_) => println!("Added rumdl configuration to pyproject.toml"),
+                                    Err(e) => {
+                                        eprintln!(
+                                            "{}: Failed to update pyproject.toml: {}",
+                                            "Error".red().bold(),
+                                            e
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                eprintln!(
+                                    "{}: Failed to read pyproject.toml: {}",
+                                    "Error".red().bold(),
+                                    e
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        println!("Aborted. No changes made to pyproject.toml");
+                    }
+                } else {
+                    // Create new pyproject.toml with basic structure
+                    let basic_content = r#"[build-system]
+requires = [\"setuptools>=42\", \"wheel\"]
+build-backend = \"setuptools.build_meta\"
+
+"#;
+                    let content = basic_content.to_owned() + &config_content;
+                    
+                    match fs::write("pyproject.toml", content) {
+                        Ok(_) => {
+                            println!("Created pyproject.toml with rumdl configuration");
+                        },
+                        Err(e) => {
+                            eprintln!(
+                                "{}: Failed to create pyproject.toml: {}",
+                                "Error".red().bold(),
+                                e
+                            );
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                return;
+            }
+            
+            // Create default config file
+            match config::create_default_config(".rumdl.toml") {
+                Ok(_) => {
+                    println!("Created default configuration file: .rumdl.toml");
+                    return;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "{}: Failed to create config file: {}",
+                        "Error".red().bold(),
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Check(args)) => {
+            run_check(args);
+        }
+        None => {
+            // Legacy: rumdl . or rumdl [PATHS...]
+            if !cli.paths.is_empty() {
+                let args = CheckArgs {
+                    paths: cli.paths.clone(),
+                    config: cli.config.clone(),
+                    fix: cli.fix,
+                    list_rules: cli.list_rules,
+                    disable: cli.disable.clone(),
+                    enable: cli.enable.clone(),
+                    exclude: cli.exclude.clone(),
+                    include: cli.include.clone(),
+                    ignore_gitignore: cli.ignore_gitignore,
+                    respect_gitignore: cli.respect_gitignore,
+                    verbose: cli.verbose,
+                    profile: cli.profile,
+                    quiet: cli.quiet,
+                };
+                eprintln!("{}: Deprecation warning: Running 'rumdl .' or 'rumdl [PATHS...]' without a subcommand is deprecated and will be removed in a future release. Please use 'rumdl check .' instead.", "[rumdl]".yellow().bold());
+                run_check(&args);
+            } else {
+                eprintln!(
+                    "{}: No files or directories specified. Please provide at least one path to lint.",
+                    "Error".red().bold()
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn run_check(args: &CheckArgs) {
+    // Load configuration
+    let config = match config::load_config(args.config.as_deref()) {
+        Ok(config) => config,
+        Err(e) => {
+            if args.config.is_some() {
+                eprintln!("{}: {}", "Error".red().bold(), e);
+                std::process::exit(1);
+            }
+            config::Config::default()
+        }
+    };
+
+    // Initialize rules with configuration
+    let enabled_rules = get_enabled_rules_from_checkargs(args, &config);
+
+    // Find all markdown files to check
+    let file_paths = match find_markdown_files(&args.paths, args, &config) {
+        Ok(paths) => paths,
+        Err(e) => {
+            eprintln!("{}: Failed to find markdown files: {}", "Error".red().bold(), e);
+            process::exit(1);
+        }
+    };
+    if file_paths.is_empty() {
+        if !args.quiet {
+            println!("No markdown files found to check.");
+        }
+        return;
+    }
+
+    // Confirm with the user if we're fixing a large number of files
+    if args.fix && file_paths.len() > 10 && !args.quiet {
+        println!(
+            "You are about to fix {} files. This will modify files in-place.",
+            file_paths.len()
+        );
+        print!("Continue? [y/N] ");
+        io::stdout().flush().unwrap();
+
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer).unwrap();
+
+        if !answer.trim().eq_ignore_ascii_case("y") {
+            println!("Aborted.");
+            return;
+        }
+    }
+
+    let start_time = Instant::now();
+
+    // Process files sequentially
+    let mut has_issues = false;
+    let mut files_with_issues = 0;
+    let mut total_issues = 0;
+    let mut total_issues_fixed = 0;
+    let mut total_fixable_issues = 0;
+    let mut total_files_processed = 0;
+
+    for file_path in &file_paths {
+        let (file_has_issues, issues_found, issues_fixed, fixable_issues) =
+            process_file(file_path, &enabled_rules, args.fix, args.verbose, args.quiet);
+
+        total_files_processed += 1;
+        total_issues_fixed += issues_fixed;
+        total_fixable_issues += fixable_issues;
+
+        if file_has_issues {
+            has_issues = true;
+            files_with_issues += 1;
+            total_issues += issues_found;
+        }
+    }
+
+    let duration = start_time.elapsed();
+    let duration_ms = duration.as_secs() * 1000 + duration.subsec_millis() as u64;
+
+    // Print results summary if not in quiet mode
+    if !args.quiet {
+        print_results_from_checkargs(
+            args,
+            has_issues,
+            files_with_issues,
+            total_issues,
+            total_issues_fixed,
+            total_fixable_issues,
+            total_files_processed,
+            duration_ms,
+        );
+    }
+
+    // Print profiling information if enabled and not in quiet mode
+    if args.profile && !args.quiet {
+        match std::panic::catch_unwind(|| rumdl::profiling::get_report()) {
+            Ok(report) => println!("\n{}", report),
+            Err(_) => println!("\nProfiling information not available"),
+        }
+    }
+
+    // Exit with non-zero status if issues were found
+    if has_issues {
+        std::process::exit(1);
     }
 }
 
@@ -635,12 +918,14 @@ fn process_file(
                         }
                     }
                     Err(err) => {
-                        eprintln!(
-                            "{} Failed to apply fix for rule {}: {}",
-                            "Warning:".yellow().bold(),
-                            rule.name(),
-                            err
-                        );
+                        if !quiet {
+                            eprintln!(
+                                "{} Failed to apply fix for rule {}: {}",
+                                "Warning:".yellow().bold(),
+                                rule.name(),
+                                err
+                            );
+                        }
                     }
                 }
             }
@@ -649,12 +934,14 @@ fn process_file(
         // Write fixed content back to file
         if warnings_fixed > 0 {
             if let Err(err) = std::fs::write(file_path, &content) {
-                eprintln!(
-                    "{} Failed to write fixed content to file {}: {}",
-                    "Error:".red().bold(),
-                    file_path,
-                    err
-                );
+                if !quiet {
+                    eprintln!(
+                        "{} Failed to write fixed content to file {}: {}",
+                        "Error:".red().bold(),
+                        file_path,
+                        err
+                    );
+                }
             }
         }
     }
@@ -662,235 +949,14 @@ fn process_file(
     let lint_end_time = Instant::now();
     let lint_time = lint_end_time.duration_since(lint_start);
 
-    if verbose {
+    if verbose && !quiet {
         println!("Linting took: {:?}", lint_time);
     }
 
     let total_time = start_time.elapsed();
-    if verbose {
+    if verbose && !quiet {
         println!("Total processing time for {}: {:?}", file_path, total_time);
     }
 
     (true, total_warnings, warnings_fixed, fixable_warnings)
-}
-
-fn main() {
-    let _timer = rumdl::profiling::ScopedTimer::new("main");
-
-    // Initialize CLI and parse arguments
-    let cli = Cli::parse();
-
-    // Handle init command separately
-    if let Some(Commands::Init { pyproject }) = cli.command {
-        if pyproject {
-            // Handle pyproject.toml initialization
-            let config_content = config::generate_pyproject_config();
-            
-            if Path::new("pyproject.toml").exists() {
-                // pyproject.toml exists, ask to append
-                if !cli.quiet {
-                    println!("pyproject.toml already exists. Would you like to append rumdl configuration? [y/N]");
-                    print!("> ");
-                    io::stdout().flush().unwrap();
-                    
-                    let mut answer = String::new();
-                    io::stdin().read_line(&mut answer).unwrap();
-                    
-                    if answer.trim().eq_ignore_ascii_case("y") {
-                        // Append to existing file
-                        match fs::read_to_string("pyproject.toml") {
-                            Ok(content) => {
-                                // Check if [tool.rumdl] section already exists
-                                if content.contains("[tool.rumdl]") {
-                                    println!("The pyproject.toml file already contains a [tool.rumdl] section.");
-                                    println!("Please edit the file manually to avoid overwriting existing configuration.");
-                                    return;
-                                }
-                                
-                                // Append with a blank line for separation
-                                let new_content = format!("{}\n\n{}", content.trim_end(), config_content);
-                                match fs::write("pyproject.toml", new_content) {
-                                    Ok(_) => println!("Added rumdl configuration to pyproject.toml"),
-                                    Err(e) => {
-                                        eprintln!(
-                                            "{}: Failed to update pyproject.toml: {}",
-                                            "Error".red().bold(),
-                                            e
-                                        );
-                                        std::process::exit(1);
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                eprintln!(
-                                    "{}: Failed to read pyproject.toml: {}",
-                                    "Error".red().bold(),
-                                    e
-                                );
-                                std::process::exit(1);
-                            }
-                        }
-                    } else {
-                        println!("Aborted. No changes made to pyproject.toml");
-                    }
-                }
-            } else {
-                // Create new pyproject.toml with basic structure
-                let basic_content = r#"[build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
-
-"#;
-                let content = basic_content.to_owned() + &config_content;
-                
-                match fs::write("pyproject.toml", content) {
-                    Ok(_) => {
-                        if !cli.quiet {
-                            println!("Created pyproject.toml with rumdl configuration");
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!(
-                            "{}: Failed to create pyproject.toml: {}",
-                            "Error".red().bold(),
-                            e
-                        );
-                        std::process::exit(1);
-                    }
-                }
-            }
-            return;
-        }
-        
-        // Create default config file
-        match config::create_default_config(".rumdl.toml") {
-            Ok(_) => {
-                if !cli.quiet {
-                    println!("Created default configuration file: .rumdl.toml");
-                }
-                return;
-            }
-            Err(e) => {
-                eprintln!(
-                    "{}: Failed to create config file: {}",
-                    "Error".red().bold(),
-                    e
-                );
-                std::process::exit(1);
-            }
-        }
-    }
-
-    // If no paths provided and not using a subcommand, print error and exit
-    if cli.paths.is_empty() {
-        eprintln!(
-            "{}: No files or directories specified. Please provide at least one path to lint.",
-            "Error".red().bold()
-        );
-        std::process::exit(1);
-    }
-
-    // Load configuration
-    let config = match config::load_config(cli.config.as_deref()) {
-        Ok(config) => config,
-        Err(e) => {
-            // Only show error if a specific config file was provided
-            if cli.config.is_some() {
-                eprintln!("{}: {}", "Error".red().bold(), e);
-                std::process::exit(1);
-            }
-            // Otherwise use default config
-            config::Config::default()
-        }
-    };
-
-    // Initialize rules with configuration
-    let enabled_rules = get_enabled_rules(&cli, &config);
-
-    // Find all markdown files to check
-    let file_paths = match find_markdown_files(&cli.paths, &cli, &config) {
-        Ok(paths) => paths,
-        Err(e) => {
-            eprintln!("{}: Failed to find markdown files: {}", "Error".red().bold(), e);
-            process::exit(1);
-        }
-    };
-    if file_paths.is_empty() {
-        if !cli.quiet {
-            println!("No markdown files found to check.");
-        }
-        return;
-    }
-
-    // Confirm with the user if we're fixing a large number of files
-    if cli.fix && file_paths.len() > 10 && !cli.quiet {
-        println!(
-            "You are about to fix {} files. This will modify files in-place.",
-            file_paths.len()
-        );
-        print!("Continue? [y/N] ");
-        io::stdout().flush().unwrap();
-
-        let mut answer = String::new();
-        io::stdin().read_line(&mut answer).unwrap();
-
-        if !answer.trim().eq_ignore_ascii_case("y") {
-            println!("Aborted.");
-            return;
-        }
-    }
-
-    let start_time = Instant::now();
-
-    // Process files sequentially
-    let mut has_issues = false;
-    let mut files_with_issues = 0;
-    let mut total_issues = 0;
-    let mut total_issues_fixed = 0;
-    let mut total_fixable_issues = 0;
-    let mut total_files_processed = 0;
-
-    for file_path in &file_paths {
-        let (file_has_issues, issues_found, issues_fixed, fixable_issues) =
-            process_file(file_path, &enabled_rules, cli.fix, cli.verbose, cli.quiet);
-
-        total_files_processed += 1;
-        total_issues_fixed += issues_fixed;
-        total_fixable_issues += fixable_issues;
-
-        if file_has_issues {
-            has_issues = true;
-            files_with_issues += 1;
-            total_issues += issues_found;
-        }
-    }
-
-    let duration = start_time.elapsed();
-    let duration_ms = duration.as_secs() * 1000 + duration.subsec_millis() as u64;
-
-    // Print results summary if not in quiet mode
-    print_results(
-        &cli,
-        has_issues,
-        files_with_issues,
-        total_issues,
-        total_issues_fixed,
-        total_fixable_issues,
-        total_files_processed,
-        duration_ms,
-    );
-
-    // Print profiling information if enabled and not in quiet mode
-    if cli.profile && !cli.quiet {
-        // Try to get profiling information and handle any errors
-        match std::panic::catch_unwind(|| rumdl::profiling::get_report()) {
-            Ok(report) => println!("\n{}", report),
-            Err(_) => println!("\nProfiling information not available"),
-        }
-    }
-
-    // Exit with non-zero status if issues were found
-    if has_issues {
-        std::process::exit(1);
-    }
 }

@@ -607,3 +607,41 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[test]
+fn test_check_subcommand_works() {
+    let temp_dir = setup_test_files();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    let output = std::process::Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(&["check", "README.md"])
+        .output()
+        .expect("Failed to execute command");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    assert!(output.status.success(), "check subcommand failed: {stderr}");
+    assert!(stdout.contains("Success:") || stdout.contains("Issues:"), "Output missing summary");
+    assert!(!stderr.contains("Deprecation warning"), "Should not print deprecation warning for subcommand");
+}
+
+#[test]
+fn test_legacy_cli_works_and_warns() {
+    let temp_dir = setup_test_files();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    let output = std::process::Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(&["README.md"])
+        .output()
+        .expect("Failed to execute command");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    assert!(output.status.success(), "legacy CLI failed: {stderr}");
+    assert!(stdout.contains("Success:") || stdout.contains("Issues:"), "Output missing summary");
+    assert!(stderr.contains("Deprecation warning"), "Should print deprecation warning for legacy CLI");
+}
