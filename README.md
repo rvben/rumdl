@@ -29,6 +29,7 @@
     - [Using pip (Python)](#using-pip-python)
     - [Download binary](#download-binary)
   - [Usage](#usage)
+  - [Pre-commit Integration](#pre-commit-integration)
   - [Rules](#rules)
   - [Command-line Interface](#command-line-interface)
     - [Commands](#commands)
@@ -44,7 +45,6 @@
     - [Prerequisites](#prerequisites)
     - [Building](#building)
     - [Testing](#testing)
-  - [Using rumdl with pre-commit](#using-rumdl-with-pre-commit)
   - [License](#license)
 
 ## Quick Start
@@ -146,6 +146,33 @@ rumdl check --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
 # Ignore gitignore rules
 rumdl check --no-respect-gitignore .
 ```
+
+## Pre-commit Integration
+
+You can use `rumdl` as a pre-commit hook to check and fix your Markdown files.
+
+The recommended way is to use the official pre-commit hook repository:
+
+[rumdl-pre-commit repository](https://github.com/rvben/rumdl-pre-commit)
+
+Add the following to your `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/rvben/rumdl-pre-commit
+    rev: v0.0.45  # Use the latest release tag
+    hooks:
+      - id: rumdl
+        # To only check (default):
+        # args: []
+        # To automatically fix issues:
+        # args: [--fix]
+```
+
+- By default, the hook will only check for issues.
+- To automatically fix issues, add `args: [--fix]` to the hook configuration.
+
+When you run `pre-commit install` or `pre-commit run`, pre-commit will automatically install `rumdl` in an isolated Python environment using pip. You do **not** need to install rumdl manually.
 
 ## Rules
 
@@ -360,33 +387,6 @@ make build
 ```bash
 make test
 ```
-
-## Using rumdl with pre-commit
-
-You can use `rumdl` as a pre-commit hook to check and fix your Markdown files.
-
-The recommended way is to use the official pre-commit hook repository:
-
-https://github.com/rvben/rumdl-pre-commit
-
-Add the following to your `.pre-commit-config.yaml`:
-
-```yaml
-repos:
-  - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.0.45  # Use the latest release tag
-    hooks:
-      - id: rumdl
-        # To only check (default):
-        # args: []
-        # To automatically fix issues:
-        # args: [--fix]
-```
-
-- By default, the hook will only check for issues.
-- To automatically fix issues, add `args: [--fix]` to the hook configuration.
-
-When you run `pre-commit install` or `pre-commit run`, pre-commit will automatically install `rumdl` in an isolated Python environment using pip. You do **not** need to install rumdl manually.
 
 ## License
 
