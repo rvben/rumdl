@@ -185,11 +185,11 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/**/rumdl_linux_amd64
-            artifacts/**/rumdl_linux_arm64
-            artifacts/**/rumdl_darwin_amd64
-            artifacts/**/rumdl_darwin_arm64
-            artifacts/**/rumdl_windows_amd64.exe
+            artifacts/wheel-linux-x86_64/*
+            artifacts/wheel-linux-aarch64/*
+            artifacts/wheel-macos-x86_64/*
+            artifacts/wheel-macos-aarch64/*
+            artifacts/wheel-windows-x86_64/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
