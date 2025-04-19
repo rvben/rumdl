@@ -370,7 +370,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
 -   repo: https://github.com/rvben/rumdl
-    rev: v0.0.43  # Use the latest release tag
+    rev: v0.0.44  # Use the latest release tag
     hooks:
     -   id: rumdl-check  # Just check for issues
     # Or use rumdl-fix to automatically fix issues:
