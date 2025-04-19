@@ -2,7 +2,6 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
 
@@ -22,10 +21,6 @@ lazy_static! {
 
     // Removed HTML_TAG_PATTERN as it seemed redundant with HTML_TAG_FINDER
 }
-
-// Non-regex patterns for faster checks
-static BACKTICK: Lazy<char> = Lazy::new(|| '`');
-static MARKDOWN_LINK_START: Lazy<&str> = Lazy::new(|| "](");
 
 #[derive(Debug)]
 pub struct MD033NoInlineHtml {
@@ -52,67 +47,18 @@ impl MD033NoInlineHtml {
         }
     }
 
-    // Very fast code block detection - optimized for performance
-    #[inline]
-    fn detect_code_blocks(&self, content: &str) -> HashSet<usize> {
-        let mut code_block_lines = HashSet::new();
-        let mut in_code_block = false;
-        let mut fence_marker: Option<&str> = None;
-
-        for (i, line) in content.lines().enumerate() {
-            // Skip processing if already known to be in a code block
-            if in_code_block {
-                code_block_lines.insert(i);
-
-                // Check if this line ends the code block
-                if let Some(marker) = fence_marker {
-                    if line.trim().starts_with(marker) {
-                        in_code_block = false;
-                        fence_marker = None;
-                        // Don't continue here - the closing fence is part of the code block
-                    }
-                }
-                continue;
-            }
-
-            // Fast literal check for fence markers
-            let trimmed = line.trim();
-            if trimmed.starts_with("```") {
-                in_code_block = true;
-                fence_marker = Some("```");
-                code_block_lines.insert(i);
-            } else if trimmed.starts_with("~~~") {
-                in_code_block = true;
-                fence_marker = Some("~~~");
-                code_block_lines.insert(i);
-            }
-        }
-
-        code_block_lines
-    }
-
     // Efficient check for allowed tags using HashSet (case-insensitive)
     #[inline]
     fn is_tag_allowed(&self, tag: &str) -> bool {
         if self.allowed.is_empty() {
             return false;
         }
-
-        // Extract tag name without angle brackets, attributes, or closing slash
-        let tag_name = if tag.starts_with("</") {
-            // Closing tag
-            tag[2..].trim_end_matches('>').split_whitespace().next().unwrap_or("")
-        } else if tag.ends_with("/>") {
-            // Self-closing tag
-            let inner = &tag[1..tag.len()-2];
-            inner.split_whitespace().next().unwrap_or("")
-        } else {
-            // Opening tag
-            let inner = &tag[1..tag.len()-1];
-            inner.split_whitespace().next().unwrap_or("")
-        };
-
-        // Compare lowercase tag name with allowed set
+        // Remove angle brackets and slashes, then split by whitespace or '>'
+        let tag = tag.trim_start_matches('<').trim_start_matches('/');
+        let tag_name = tag
+            .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+            .next()
+            .unwrap_or("");
         self.allowed.contains(&tag_name.to_lowercase())
     }
 
@@ -168,7 +114,7 @@ impl Rule for MD033NoInlineHtml {
                 if self.is_html_comment(html_tag) {
                     continue;
                 }
-                
+
                 // IMPROVED CHECK: Skip tags within markdown links using DocumentStructure
                 let is_in_link = structure.links.iter().any(|link| {
                     link.line == line_num && start_col >= link.start_col && start_col < link.end_col
@@ -208,7 +154,10 @@ impl Rule for MD033NoInlineHtml {
                         }),
                     });
                 } else {
-                    eprintln!("Warning: Could not find line start for line {} in MD033", line_num);
+                    eprintln!(
+                        "Warning: Could not find line start for line {} in MD033",
+                        line_num
+                    );
                 }
             }
         }
@@ -225,8 +174,9 @@ impl Rule for MD033NoInlineHtml {
 
         // Apply fixes in reverse order to avoid messing up ranges
         let mut fixed_content = content.to_string();
-        let mut sorted_warnings: Vec<_> = warnings.into_iter().filter(|w| w.fix.is_some()).collect();
-        
+        let mut sorted_warnings: Vec<_> =
+            warnings.into_iter().filter(|w| w.fix.is_some()).collect();
+
         // Sort by start byte offset in reverse
         sorted_warnings.sort_by(|a, b| {
             let range_a = a.fix.as_ref().unwrap().range.start;
@@ -268,7 +218,9 @@ impl Rule for MD033NoInlineHtml {
         content.is_empty() || !content.contains('<') || !HTML_TAG_QUICK_CHECK.is_match(content)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD033NoInlineHtml {
@@ -335,13 +287,20 @@ mod tests {
         let rule = MD033NoInlineHtml::default();
         let content = "[Link](http://example.com/<div>)"; // Simplistic case for the improved check
         let result = rule.check(content).unwrap();
-        assert!(result.is_empty(), "Tags within link destinations should be skipped");
-        
+        assert!(
+            result.is_empty(),
+            "Tags within link destinations should be skipped"
+        );
+
         let content2 = "[Link <a>text</a>](url)";
         let result2 = rule.check(content2).unwrap();
         // TODO: Currently, the structure.links check might incorrectly skip tags in link text
         // Asserting current behavior (0 warnings) until DocumentStructure is refined.
-        assert_eq!(result2.len(), 0, "Tags within link text currently skipped due to broad link range check");
+        assert_eq!(
+            result2.len(),
+            0,
+            "Tags within link text currently skipped due to broad link range check"
+        );
         // assert_eq!(result2.len(), 2, "Tags within link text should be flagged");
         // assert!(result2[0].message.contains("<a>"));
         // assert!(result2[1].message.contains("</a>"));
@@ -370,7 +329,11 @@ mod tests {
         let rule = MD033NoInlineHtml::default();
         let content = "Text with `<p>in code</p>` span. <br/> Not in span.";
         let result = rule.check(content).unwrap();
-        assert_eq!(result.len(), 1, "Should only warn for tag outside code span");
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only warn for tag outside code span"
+        );
         assert_eq!(result[0].message, "Found inline HTML tag: <br/>");
         assert_eq!(result[0].line, 1);
         assert_eq!(result[0].column, 34); // Adjusted column from 35 to 34

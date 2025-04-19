@@ -376,7 +376,10 @@ fn test_fix_nested_references() {
     let content = "[![alt][img1]][link1]\n\n[img1]: /path/to/img1.png\n[img2]: /path/to/img2.png\n[link1]: http://example1.com";
     let fixed = rule.fix(content).unwrap();
     // Both 'img1' and 'link1' are used according to CommonMark spec
-    assert_eq!(fixed, "[![alt][img1]][link1]\n\n[img1]: /path/to/img1.png\n[link1]: http://example1.com");
+    assert_eq!(
+        fixed,
+        "[![alt][img1]][link1]\n\n[img1]: /path/to/img1.png\n[link1]: http://example1.com"
+    );
 }
 
 #[test]

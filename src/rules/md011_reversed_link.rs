@@ -71,5 +71,7 @@ impl Rule for MD011ReversedLink {
         Ok(result)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

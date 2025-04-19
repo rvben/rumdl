@@ -180,5 +180,7 @@ impl Rule for MD035HRStyle {
         Ok(result.join("\n"))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

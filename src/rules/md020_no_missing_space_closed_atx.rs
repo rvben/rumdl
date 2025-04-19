@@ -202,7 +202,9 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
         content.is_empty() || !content.contains('#')
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD020NoMissingSpaceClosedAtx {

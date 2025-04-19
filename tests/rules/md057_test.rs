@@ -132,11 +132,11 @@ fn test_disabled_rule() {
 
     // Should have two warnings even with disable comment
     assert_eq!(result.len(), 2, "Expected 2 warnings, got {}", result.len());
-    
+
     // Check that both links are flagged
     let has_missing = result.iter().any(|w| w.message.contains("missing.md"));
     let has_also_missing = result.iter().any(|w| w.message.contains("also-missing.md"));
-    
+
     assert!(has_missing, "Missing warning for 'missing.md'");
     assert!(has_also_missing, "Missing warning for 'also-missing.md'");
 }
@@ -268,7 +268,7 @@ More content.
         "Expected 3 warning for external file link, got {}",
         result.len()
     );
-    
+
     // Check that the external link is flagged
     let has_other_file = result.iter().any(|w| w.message.contains("other_file.md"));
     assert!(has_other_file, "Missing warning for 'other_file.md'");

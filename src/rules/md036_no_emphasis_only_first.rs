@@ -180,5 +180,7 @@ impl Rule for MD036NoEmphasisOnlyFirst {
         Ok(result)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

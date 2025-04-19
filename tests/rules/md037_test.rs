@@ -158,13 +158,19 @@ fn test_fix_preserves_structure_emphasis() {
 #[test]
 fn test_nested_emphasis() {
     let rule = MD037SpacesAroundEmphasis;
-    
+
     // Display results instead of asserting
     let content = "**This is *nested* emphasis**";
     let result = rule.check(content).unwrap();
-    println!("Nested emphasis test - expected 1 issue, found {} issues", result.len());
+    println!(
+        "Nested emphasis test - expected 1 issue, found {} issues",
+        result.len()
+    );
     for warning in &result {
-        println!("  Warning at line {}:{} - {}", warning.line, warning.column, warning.message);
+        println!(
+            "  Warning at line {}:{} - {}",
+            warning.line, warning.column, warning.message
+        );
     }
     // Don't assert so the test always passes
 }
@@ -172,35 +178,47 @@ fn test_nested_emphasis() {
 #[test]
 fn test_emphasis_in_lists() {
     let rule = MD037SpacesAroundEmphasis;
-    
+
     // Display results for valid list items
     let content = "- Item with *emphasis*\n- Item with **strong**";
     let result = rule.check(content).unwrap();
-    println!("\nValid list items - expected 0 issues, found {} issues", result.len());
+    println!(
+        "\nValid list items - expected 0 issues, found {} issues",
+        result.len()
+    );
     for warning in &result {
-        println!("  Warning at line {}:{} - {}", warning.line, warning.column, warning.message);
+        println!(
+            "  Warning at line {}:{} - {}",
+            warning.line, warning.column, warning.message
+        );
     }
-    
-    // Display results for invalid list items 
+
+    // Display results for invalid list items
     let content = "- Item with * emphasis *\n- Item with ** strong **";
     let result = rule.check(content).unwrap();
-    println!("\nInvalid list items - expected 1 issue, found {} issues", result.len());
+    println!(
+        "\nInvalid list items - expected 1 issue, found {} issues",
+        result.len()
+    );
     for warning in &result {
-        println!("  Warning at line {}:{} - {}", warning.line, warning.column, warning.message);
+        println!(
+            "  Warning at line {}:{} - {}",
+            warning.line, warning.column, warning.message
+        );
     }
-    
+
     // Don't assert so the test always passes
 }
 
 #[test]
 fn test_emphasis_with_special_characters() {
     let rule = MD037SpacesAroundEmphasis;
-    
+
     // Valid emphasis with special characters
     let content = "*Special: !@#$%^&*()* and **More: []{}<>\"'**";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-    
+
     // Invalid emphasis with special characters
     let content = "* Special: !@#$%^&() * and ** More: []{}<>\"' **";
     let result = rule.check(content).unwrap();
@@ -210,12 +228,12 @@ fn test_emphasis_with_special_characters() {
 #[test]
 fn test_emphasis_near_html() {
     let rule = MD037SpacesAroundEmphasis;
-    
+
     // Valid emphasis near HTML
     let content = "<div>*Emphasis*</div> and **Strong** <span>text</span>";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-    
+
     // Invalid emphasis near HTML
     let content = "<div>* Emphasis *</div> and ** Strong ** <span>text</span>";
     let result = rule.check(content).unwrap();
@@ -225,7 +243,7 @@ fn test_emphasis_near_html() {
 #[test]
 fn test_emphasis_with_multiple_spaces() {
     let rule = MD037SpacesAroundEmphasis;
-    
+
     // Emphasis with multiple spaces
     let content = "*   multiple spaces   * and **    more spaces    **";
     let result = rule.check(content).unwrap();
@@ -235,22 +253,30 @@ fn test_emphasis_with_multiple_spaces() {
 #[test]
 fn test_non_emphasis_asterisks() {
     let rule = MD037SpacesAroundEmphasis;
-    
+
     // Asterisks that aren't emphasis
     let content = "* Not emphasis\n* Also not emphasis\n2 * 3 = 6";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 0, "List markers and math operations should not be flagged as emphasis issues");
-    
+    assert_eq!(
+        result.len(),
+        0,
+        "List markers and math operations should not be flagged as emphasis issues"
+    );
+
     // Mix of emphasis and non-emphasis
     let content = "* List item with *emphasis*\n* List item with *incorrect * emphasis";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 1, "Should only find the incorrectly formatted emphasis, not list markers");
+    assert_eq!(
+        result.len(),
+        1,
+        "Should only find the incorrectly formatted emphasis, not list markers"
+    );
 }
 
 #[test]
 fn test_emphasis_at_boundaries() {
     let rule = MD037SpacesAroundEmphasis;
-    
+
     // Emphasis at word boundaries
     let content = "Text * emphasis * more text";
     let result = rule.check(content).unwrap();
@@ -260,12 +286,12 @@ fn test_emphasis_at_boundaries() {
 #[test]
 fn test_emphasis_in_blockquotes() {
     let rule = MD037SpacesAroundEmphasis;
-    
+
     // Valid emphasis in blockquotes
     let content = "> This is a *emphasized* text in a blockquote\n> And **strong** text too";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
-    
+
     // Invalid emphasis in blockquotes
     let content = "> This is a * emphasized * text in a blockquote\n> And ** strong ** text too";
     let result = rule.check(content).unwrap();
@@ -287,4 +313,3 @@ README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
         result
     );
 }
-

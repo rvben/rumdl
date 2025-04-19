@@ -1,9 +1,9 @@
+use assert_cmd::prelude::*;
+use predicates::prelude::*;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
-use assert_cmd::prelude::*;
-use predicates::prelude::*;
 
 fn setup_test_files() -> tempfile::TempDir {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -66,28 +66,65 @@ fn test_cli_include_exclude() {
     let (success_incl, stdout_incl, _) = run_cmd(&[".", "--include", "docs/doc1.md", "--verbose"]);
     assert!(success_incl, "CLI Include Test failed");
     let norm_stdout_incl = normalize(&stdout_incl);
-    assert!(norm_stdout_incl.contains("Processing file: docs/doc1.md"), "CLI Include: docs/doc1.md missing");
-    assert!(!norm_stdout_incl.contains("Processing file: README.md"), "CLI Include: README.md should be excluded");
-    assert!(!norm_stdout_incl.contains("Processing file: docs/temp/temp.md"), "CLI Include: temp.md should be excluded");
+    assert!(
+        norm_stdout_incl.contains("Processing file: docs/doc1.md"),
+        "CLI Include: docs/doc1.md missing"
+    );
+    assert!(
+        !norm_stdout_incl.contains("Processing file: README.md"),
+        "CLI Include: README.md should be excluded"
+    );
+    assert!(
+        !norm_stdout_incl.contains("Processing file: docs/temp/temp.md"),
+        "CLI Include: temp.md should be excluded"
+    );
 
     // Test exclude via CLI - exclude the temp directory
     println!("--- Running CLI Exclude Test ---");
     let (success_excl, stdout_excl, _) = run_cmd(&[".", "--exclude", "docs/temp", "--verbose"]);
     assert!(success_excl, "CLI Exclude Test failed");
     let norm_stdout_excl = normalize(&stdout_excl);
-    assert!(norm_stdout_excl.contains("Processing file: README.md"), "CLI Exclude: README.md missing");
-    assert!(norm_stdout_excl.contains("Processing file: docs/doc1.md"), "CLI Exclude: docs/doc1.md missing");
-    assert!(norm_stdout_excl.contains("Processing file: src/test.md"), "CLI Exclude: src/test.md missing");
-    assert!(!norm_stdout_excl.contains("Processing file: docs/temp/temp.md"), "CLI Exclude: temp.md should be excluded");
+    assert!(
+        norm_stdout_excl.contains("Processing file: README.md"),
+        "CLI Exclude: README.md missing"
+    );
+    assert!(
+        norm_stdout_excl.contains("Processing file: docs/doc1.md"),
+        "CLI Exclude: docs/doc1.md missing"
+    );
+    assert!(
+        norm_stdout_excl.contains("Processing file: src/test.md"),
+        "CLI Exclude: src/test.md missing"
+    );
+    assert!(
+        !norm_stdout_excl.contains("Processing file: docs/temp/temp.md"),
+        "CLI Exclude: temp.md should be excluded"
+    );
 
     // Test combined include and exclude via CLI - include *.md in docs, exclude temp
     println!("--- Running CLI Include/Exclude Test ---");
-    let (success_comb, stdout_comb, _) = run_cmd(&[".", "--include", "docs/*.md", "--exclude", "docs/temp", "--verbose"]);
+    let (success_comb, stdout_comb, _) = run_cmd(&[
+        ".",
+        "--include",
+        "docs/*.md",
+        "--exclude",
+        "docs/temp",
+        "--verbose",
+    ]);
     assert!(success_comb, "CLI Include/Exclude Test failed");
     let norm_stdout_comb = normalize(&stdout_comb);
-    assert!(norm_stdout_comb.contains("Processing file: docs/doc1.md"), "CLI Combo: docs/doc1.md missing");
-    assert!(!norm_stdout_comb.contains("Processing file: docs/temp/temp.md"), "CLI Combo: temp.md should be excluded");
-    assert!(!norm_stdout_comb.contains("Processing file: README.md"), "CLI Combo: README.md should be excluded");
+    assert!(
+        norm_stdout_comb.contains("Processing file: docs/doc1.md"),
+        "CLI Combo: docs/doc1.md missing"
+    );
+    assert!(
+        !norm_stdout_comb.contains("Processing file: docs/temp/temp.md"),
+        "CLI Combo: temp.md should be excluded"
+    );
+    assert!(
+        !norm_stdout_comb.contains("Processing file: README.md"),
+        "CLI Combo: README.md should be excluded"
+    );
 }
 
 #[test]
@@ -120,10 +157,18 @@ include = ["docs/doc1.md"]
     let (success_incl, stdout_incl, _) = run_cmd(&[".", "--verbose"]);
     assert!(success_incl, "Config Include Test failed");
     let norm_stdout_incl = normalize(&stdout_incl);
-    assert!(norm_stdout_incl.contains("Processing file: docs/doc1.md"), "Config Include: docs/doc1.md missing");
-    assert!(!norm_stdout_incl.contains("Processing file: README.md"), "Config Include: README.md should be excluded");
-    assert!(!norm_stdout_incl.contains("Processing file: docs/temp/temp.md"), "Config Include: temp.md should be excluded");
-
+    assert!(
+        norm_stdout_incl.contains("Processing file: docs/doc1.md"),
+        "Config Include: docs/doc1.md missing"
+    );
+    assert!(
+        !norm_stdout_incl.contains("Processing file: README.md"),
+        "Config Include: README.md should be excluded"
+    );
+    assert!(
+        !norm_stdout_incl.contains("Processing file: docs/temp/temp.md"),
+        "Config Include: temp.md should be excluded"
+    );
 
     // Test combined include and exclude via config
     println!("--- Running Config Include/Exclude Test ---");
@@ -137,10 +182,18 @@ exclude = ["docs/temp"]
     let (success_comb, stdout_comb, _) = run_cmd(&[".", "--verbose"]);
     assert!(success_comb, "Config Include/Exclude Test failed");
     let norm_stdout_comb = normalize(&stdout_comb);
-    assert!(norm_stdout_comb.contains("Processing file: docs/doc1.md"), "Config Combo: docs/doc1.md missing");
-    assert!(!norm_stdout_comb.contains("Processing file: docs/temp/temp.md"), "Config Combo: temp.md should be excluded");
-    assert!(!norm_stdout_comb.contains("Processing file: README.md"), "Config Combo: README.md should be excluded");
-
+    assert!(
+        norm_stdout_comb.contains("Processing file: docs/doc1.md"),
+        "Config Combo: docs/doc1.md missing"
+    );
+    assert!(
+        !norm_stdout_comb.contains("Processing file: docs/temp/temp.md"),
+        "Config Combo: temp.md should be excluded"
+    );
+    assert!(
+        !norm_stdout_comb.contains("Processing file: README.md"),
+        "Config Combo: README.md should be excluded"
+    );
 }
 
 #[test]
@@ -175,10 +228,18 @@ include = ["src/**/*.md"] # Config includes only src/test.md
     assert!(success, "CLI Override Config Test failed");
     let norm_stdout = normalize(&stdout);
 
-    assert!(norm_stdout.contains("Processing file: docs/doc1.md"), "CLI Override: docs/doc1.md missing");
-    assert!(!norm_stdout.contains("Processing file: src/test.md"), "CLI Override: src/test.md should be excluded due to CLI override");
-    assert!(!norm_stdout.contains("Processing file: README.md"), "CLI Override: README.md should be excluded");
-
+    assert!(
+        norm_stdout.contains("Processing file: docs/doc1.md"),
+        "CLI Override: docs/doc1.md missing"
+    );
+    assert!(
+        !norm_stdout.contains("Processing file: src/test.md"),
+        "CLI Override: src/test.md should be excluded due to CLI override"
+    );
+    assert!(
+        !norm_stdout.contains("Processing file: README.md"),
+        "CLI Override: README.md should be excluded"
+    );
 }
 
 #[test]
@@ -212,10 +273,18 @@ include = ["README.md"] # Reverted pattern
     assert!(success, "README Pattern Scope Test failed");
     let norm_stdout = normalize(&stdout);
 
-    assert!(norm_stdout.contains("Processing file: README.md"), "README Scope: Root README.md missing");
-    assert!(norm_stdout.contains("Processing file: subfolder/README.md"), "README Scope: Subfolder README.md ALSO included (known behavior)");
-    assert!(!norm_stdout.contains("Processing file: docs/doc1.md"), "README Scope: docs/doc1.md should be excluded");
-
+    assert!(
+        norm_stdout.contains("Processing file: README.md"),
+        "README Scope: Root README.md missing"
+    );
+    assert!(
+        norm_stdout.contains("Processing file: subfolder/README.md"),
+        "README Scope: Subfolder README.md ALSO included (known behavior)"
+    );
+    assert!(
+        !norm_stdout.contains("Processing file: docs/doc1.md"),
+        "README Scope: docs/doc1.md should be excluded"
+    );
 }
 
 #[test]
@@ -270,11 +339,22 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     println!("Test Case 1 Stderr:\\n{}", stderr1);
     assert!(success1, "Test Case 1 failed");
     let norm_stdout1 = normalize(&stdout1);
-    assert!(norm_stdout1.contains("Processing file: README.md"), "Expected file README.md missing in Test Case 1");
-    assert!(norm_stdout1.contains("Processing file: docs/doc1.md"), "Expected file docs/doc1.md missing in Test Case 1");
-    assert!(norm_stdout1.contains("Processing file: src/test.md"), "Expected file src/test.md missing in Test Case 1");
-    assert!(norm_stdout1.contains("Processing file: subfolder/README.md"), "Expected file subfolder/README.md missing in Test Case 1");
-
+    assert!(
+        norm_stdout1.contains("Processing file: README.md"),
+        "Expected file README.md missing in Test Case 1"
+    );
+    assert!(
+        norm_stdout1.contains("Processing file: docs/doc1.md"),
+        "Expected file docs/doc1.md missing in Test Case 1"
+    );
+    assert!(
+        norm_stdout1.contains("Processing file: src/test.md"),
+        "Expected file src/test.md missing in Test Case 1"
+    );
+    assert!(
+        norm_stdout1.contains("Processing file: subfolder/README.md"),
+        "Expected file subfolder/README.md missing in Test Case 1"
+    );
 
     // --- Test Case 2: Include specific file ---
     println!("--- Running Test Case 2: Include specific file ---");
@@ -283,11 +363,26 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     println!("Test Case 2 Stderr:\\n{}", stderr2);
     assert!(success2, "Test Case 2 failed");
     let norm_stdout2 = normalize(&stdout2);
-    assert!(norm_stdout2.contains("Processing file: docs/doc1.md"), "Expected file docs/doc1.md missing in Test Case 2");
-    assert!(!norm_stdout2.contains("Processing file: README.md"), "File README.md should not be processed in Test Case 2");
-    assert!(!norm_stdout2.contains("Processing file: docs/temp/temp.md"), "File docs/temp/temp.md should not be processed in Test Case 2");
-    assert!(!norm_stdout2.contains("Processing file: src/test.md"), "File src/test.md should not be processed in Test Case 2");
-    assert!(!norm_stdout2.contains("Processing file: subfolder/README.md"), "File subfolder/README.md should not be processed in Test Case 2");
+    assert!(
+        norm_stdout2.contains("Processing file: docs/doc1.md"),
+        "Expected file docs/doc1.md missing in Test Case 2"
+    );
+    assert!(
+        !norm_stdout2.contains("Processing file: README.md"),
+        "File README.md should not be processed in Test Case 2"
+    );
+    assert!(
+        !norm_stdout2.contains("Processing file: docs/temp/temp.md"),
+        "File docs/temp/temp.md should not be processed in Test Case 2"
+    );
+    assert!(
+        !norm_stdout2.contains("Processing file: src/test.md"),
+        "File src/test.md should not be processed in Test Case 2"
+    );
+    assert!(
+        !norm_stdout2.contains("Processing file: subfolder/README.md"),
+        "File subfolder/README.md should not be processed in Test Case 2"
+    );
 
     // --- Test Case 3: Exclude glob pattern (original failing case) ---
     // This should exclude README.md in root AND subfolder/README.md
@@ -297,12 +392,26 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     println!("Test Case 3 Stderr:\\n{}", stderr3);
     assert!(success3, "Test Case 3 failed");
     let norm_stdout3 = normalize(&stdout3);
-    assert!(!norm_stdout3.contains("Processing file: README.md"), "Root README.md should be excluded in Test Case 3");
-    assert!(!norm_stdout3.contains("Processing file: subfolder/README.md"), "Subfolder README.md should be excluded in Test Case 3");
-    assert!(norm_stdout3.contains("Processing file: docs/doc1.md"), "Expected file docs/doc1.md missing in Test Case 3");
-    assert!(norm_stdout3.contains("Processing file: docs/temp/temp.md"), "Expected file docs/temp/temp.md missing in Test Case 3");
-    assert!(norm_stdout3.contains("Processing file: src/test.md"), "Expected file src/test.md missing in Test Case 3");
-
+    assert!(
+        !norm_stdout3.contains("Processing file: README.md"),
+        "Root README.md should be excluded in Test Case 3"
+    );
+    assert!(
+        !norm_stdout3.contains("Processing file: subfolder/README.md"),
+        "Subfolder README.md should be excluded in Test Case 3"
+    );
+    assert!(
+        norm_stdout3.contains("Processing file: docs/doc1.md"),
+        "Expected file docs/doc1.md missing in Test Case 3"
+    );
+    assert!(
+        norm_stdout3.contains("Processing file: docs/temp/temp.md"),
+        "Expected file docs/temp/temp.md missing in Test Case 3"
+    );
+    assert!(
+        norm_stdout3.contains("Processing file: src/test.md"),
+        "Expected file src/test.md missing in Test Case 3"
+    );
 
     // --- Test Case 4: Include glob pattern ---
     // Should only include docs/doc1.md (not docs/temp/temp.md)
@@ -312,53 +421,103 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     println!("Test Case 4 Stderr:\\n{}", stderr4);
     assert!(success4, "Test Case 4 failed");
     let norm_stdout4 = normalize(&stdout4);
-    assert!(norm_stdout4.contains("Processing file: docs/doc1.md"), "Expected file docs/doc1.md missing in Test Case 4");
-    assert!(!norm_stdout4.contains("Processing file: docs/temp/temp.md"), "File docs/temp/temp.md should not be processed in Test Case 4");
-    assert!(!norm_stdout4.contains("Processing file: README.md"), "File README.md should not be processed in Test Case 4");
-    assert!(!norm_stdout4.contains("Processing file: src/test.md"), "File src/test.md should not be processed in Test Case 4");
-    assert!(!norm_stdout4.contains("Processing file: subfolder/README.md"), "File subfolder/README.md should not be processed in Test Case 4");
-
+    assert!(
+        norm_stdout4.contains("Processing file: docs/doc1.md"),
+        "Expected file docs/doc1.md missing in Test Case 4"
+    );
+    assert!(
+        !norm_stdout4.contains("Processing file: docs/temp/temp.md"),
+        "File docs/temp/temp.md should not be processed in Test Case 4"
+    );
+    assert!(
+        !norm_stdout4.contains("Processing file: README.md"),
+        "File README.md should not be processed in Test Case 4"
+    );
+    assert!(
+        !norm_stdout4.contains("Processing file: src/test.md"),
+        "File src/test.md should not be processed in Test Case 4"
+    );
+    assert!(
+        !norm_stdout4.contains("Processing file: subfolder/README.md"),
+        "File subfolder/README.md should not be processed in Test Case 4"
+    );
 
     // --- Test Case 5: Glob Include + Specific Exclude ---
     // Should include docs/doc1.md but exclude docs/temp/temp.md
     println!("--- Running Test Case 5: Glob Include + Specific Exclude ---");
-    let (success5, stdout5, stderr5) = run_cmd(&[".", "--include", "docs/**/*.md", "--exclude", "docs/temp/temp.md", "--verbose"]);
+    let (success5, stdout5, stderr5) = run_cmd(&[
+        ".",
+        "--include",
+        "docs/**/*.md",
+        "--exclude",
+        "docs/temp/temp.md",
+        "--verbose",
+    ]);
     println!("Test Case 5 Stdout:\\n{}", stdout5);
     println!("Test Case 5 Stderr:\\n{}", stderr5);
     assert!(success5, "Test Case 5 failed");
     let norm_stdout5 = normalize(&stdout5);
-    assert!(norm_stdout5.contains("Processing file: docs/doc1.md"), "Expected file docs/doc1.md missing in Test Case 5");
-    assert!(!norm_stdout5.contains("Processing file: docs/temp/temp.md"), "File docs/temp/temp.md should be excluded in Test Case 5");
-    assert!(!norm_stdout5.contains("Processing file: README.md"), "File README.md should not be processed in Test Case 5");
-    assert!(!norm_stdout5.contains("Processing file: src/test.md"), "File src/test.md should not be processed in Test Case 5");
-    assert!(!norm_stdout5.contains("Processing file: subfolder/README.md"), "File subfolder/README.md should not be processed in Test Case 5");
-
+    assert!(
+        norm_stdout5.contains("Processing file: docs/doc1.md"),
+        "Expected file docs/doc1.md missing in Test Case 5"
+    );
+    assert!(
+        !norm_stdout5.contains("Processing file: docs/temp/temp.md"),
+        "File docs/temp/temp.md should be excluded in Test Case 5"
+    );
+    assert!(
+        !norm_stdout5.contains("Processing file: README.md"),
+        "File README.md should not be processed in Test Case 5"
+    );
+    assert!(
+        !norm_stdout5.contains("Processing file: src/test.md"),
+        "File src/test.md should not be processed in Test Case 5"
+    );
+    assert!(
+        !norm_stdout5.contains("Processing file: subfolder/README.md"),
+        "File subfolder/README.md should not be processed in Test Case 5"
+    );
 
     // --- Test Case 6: Specific Exclude Overrides Broader Include ---
     println!("--- Running Test Case 6: Specific Exclude Overrides Broader Include ---");
-    let (success6, stdout6, stderr6) = run_cmd(
-        &[".", "--include", "subfolder/*.md", "--exclude", "subfolder/README.md"]
-    ); // Pass only the args slice
+    let (success6, stdout6, stderr6) = run_cmd(&[
+        ".",
+        "--include",
+        "subfolder/*.md",
+        "--exclude",
+        "subfolder/README.md",
+    ]); // Pass only the args slice
     println!("Test Case 6 Stdout:\n{}", stdout6);
     println!("Test Case 6 Stderr:{}", stderr6);
     assert!(success6, "Case 6: Command failed"); // Use success6
-    assert!(stdout6.contains("No markdown files found to check."), "Case 6: Should find no files");
-    assert!(!stdout6.contains("Processing file: subfolder/README.md"), "File subfolder/README.md should be excluded in Test Case 6");
-
+    assert!(
+        stdout6.contains("No markdown files found to check."),
+        "Case 6: Should find no files"
+    );
+    assert!(
+        !stdout6.contains("Processing file: subfolder/README.md"),
+        "File subfolder/README.md should be excluded in Test Case 6"
+    );
 
     // --- Test Case 7: Root Exclude ---
     println!("--- Running Test Case 7: Root Exclude ---");
-    let (success7, stdout7, stderr7) = run_cmd(
-        &[".", "--exclude", "README.md", "--verbose"]
-    ); // No globstar
+    let (success7, stdout7, stderr7) = run_cmd(&[".", "--exclude", "README.md", "--verbose"]); // No globstar
     println!("Test Case 7 Stdout:\\n{}", stdout7);
     println!("Test Case 7 Stderr:{}", stderr7);
     assert!(success7, "Test Case 7 failed");
     let norm_stdout7 = normalize(&stdout7);
-    assert!(!norm_stdout7.contains("Processing file: README.md"), "Root README.md should be excluded in Test Case 7");
-    assert!(!norm_stdout7.contains("Processing file: subfolder/README.md"), "Subfolder README.md should ALSO be excluded in Test Case 7");
-    assert!(norm_stdout7.contains("Processing file: docs/doc1.md"), "File docs/doc1.md should be included in Test Case 7");
-
+    assert!(
+        !norm_stdout7.contains("Processing file: README.md"),
+        "Root README.md should be excluded in Test Case 7"
+    );
+    assert!(
+        !norm_stdout7.contains("Processing file: subfolder/README.md"),
+        "Subfolder README.md should ALSO be excluded in Test Case 7"
+    );
+    assert!(
+        norm_stdout7.contains("Processing file: docs/doc1.md"),
+        "File docs/doc1.md should be included in Test Case 7"
+    );
 
     // --- Test Case 8: Deep Glob Exclude ---
     // Should exclude everything
@@ -368,39 +527,60 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     println!("Test Case 8 Stderr:\\n{}", stderr8);
     assert!(success8, "Test Case 8 failed");
     let norm_stdout8 = normalize(&stdout8);
-     // Check that *none* of the files were processed
-    assert!(!norm_stdout8.contains("Processing file:"), "No files should be processed in Test Case 8");
-
+    // Check that *none* of the files were processed
+    assert!(
+        !norm_stdout8.contains("Processing file:"),
+        "No files should be processed in Test Case 8"
+    );
 
     // --- Test Case 9: Exclude multiple patterns ---
     println!("--- Running Test Case 9: Exclude multiple patterns ---");
-    let (success9, stdout9, stderr9) = run_cmd(
-        &[".", "--exclude", "README.md,src/*", "--verbose"]
-    );
+    let (success9, stdout9, stderr9) = run_cmd(&[".", "--exclude", "README.md,src/*", "--verbose"]);
     println!("Test Case 9 Stdout:\n{}", stdout9);
     println!("Test Case 9 Stderr:{}\n", stderr9);
     assert!(success9, "Test Case 9 failed");
     let norm_stdout9 = normalize(&stdout9);
-    assert!(!norm_stdout9.contains("Processing file: README.md"), "Root README.md should be excluded in Test Case 9");
-    assert!(!norm_stdout9.contains("Processing file: subfolder/README.md"), "Subfolder README.md should be excluded in Test Case 9");
-    assert!(!norm_stdout9.contains("Processing file: src/test.md"), "File src/test.md should be excluded in Test Case 9");
-    assert!(norm_stdout9.contains("Processing file: docs/doc1.md"), "Expected file docs/doc1.md missing in Test Case 9");
-
+    assert!(
+        !norm_stdout9.contains("Processing file: README.md"),
+        "Root README.md should be excluded in Test Case 9"
+    );
+    assert!(
+        !norm_stdout9.contains("Processing file: subfolder/README.md"),
+        "Subfolder README.md should be excluded in Test Case 9"
+    );
+    assert!(
+        !norm_stdout9.contains("Processing file: src/test.md"),
+        "File src/test.md should be excluded in Test Case 9"
+    );
+    assert!(
+        norm_stdout9.contains("Processing file: docs/doc1.md"),
+        "Expected file docs/doc1.md missing in Test Case 9"
+    );
 
     // --- Test Case 10: Include multiple patterns ---
     println!("--- Running Test Case 10: Include multiple patterns ---");
-    let (success10, stdout10, stderr10) = run_cmd(
-        &[".", "--include", "README.md,src/*", "--verbose"]
-    );
+    let (success10, stdout10, stderr10) =
+        run_cmd(&[".", "--include", "README.md,src/*", "--verbose"]);
     println!("Test Case 10 Stdout:\n{}", stdout10);
     println!("Test Case 10 Stderr:{}\n", stderr10);
     assert!(success10, "Test Case 10 failed");
     let norm_stdout10 = normalize(&stdout10);
-    assert!(norm_stdout10.contains("Processing file: README.md"), "Root README.md should be included in Test Case 10");
-    assert!(norm_stdout10.contains("Processing file: src/test.md"), "File src/test.md should be included in Test Case 10");
-    assert!(!norm_stdout10.contains("Processing file: docs/doc1.md"), "File docs/doc1.md should not be processed in Test Case 10");
-    assert!(norm_stdout10.contains("Processing file: subfolder/README.md"), "File subfolder/README.md SHOULD be processed in Test Case 10");
-
+    assert!(
+        norm_stdout10.contains("Processing file: README.md"),
+        "Root README.md should be included in Test Case 10"
+    );
+    assert!(
+        norm_stdout10.contains("Processing file: src/test.md"),
+        "File src/test.md should be included in Test Case 10"
+    );
+    assert!(
+        !norm_stdout10.contains("Processing file: docs/doc1.md"),
+        "File docs/doc1.md should not be processed in Test Case 10"
+    );
+    assert!(
+        norm_stdout10.contains("Processing file: subfolder/README.md"),
+        "File subfolder/README.md SHOULD be processed in Test Case 10"
+    );
 
     // --- Test Case 11: Explicit Path (File) Ignores Config Include ---
     println!("--- Running Test Case 11: Explicit Path (File) Ignores Config Include ---");
@@ -411,8 +591,14 @@ include=["src/*.md"]
     let (success11, stdout11, _) = run_cmd(&["docs/doc1.md", "--verbose"]);
     assert!(success11, "Test Case 11 failed");
     let norm_stdout11 = normalize(&stdout11);
-    assert!(norm_stdout11.contains("Processing file: docs/doc1.md"), "Explicit path docs/doc1.md should be processed in Test Case 11");
-    assert!(!norm_stdout11.contains("Processing file: src/test.md"), "src/test.md should not be processed in Test Case 11");
+    assert!(
+        norm_stdout11.contains("Processing file: docs/doc1.md"),
+        "Explicit path docs/doc1.md should be processed in Test Case 11"
+    );
+    assert!(
+        !norm_stdout11.contains("Processing file: src/test.md"),
+        "src/test.md should not be processed in Test Case 11"
+    );
     fs::remove_file(temp_dir.path().join(".rumdl.toml"))?; // Clean up config
 
     // --- Test Case 12: Explicit Path (Dir) Ignores Config Include ---
@@ -424,9 +610,18 @@ include=["src/*.md"]
     let (success12, stdout12, _) = run_cmd(&["docs", "--verbose"]); // Process everything in docs/
     assert!(success12, "Test Case 12 failed");
     let norm_stdout12 = normalize(&stdout12);
-    assert!(norm_stdout12.contains("Processing file: docs/doc1.md"), "docs/doc1.md should be processed in Test Case 12");
-    assert!(norm_stdout12.contains("Processing file: docs/temp/temp.md"), "docs/temp/temp.md should be processed in Test Case 12");
-    assert!(!norm_stdout12.contains("Processing file: src/test.md"), "src/test.md should not be processed in Test Case 12");
+    assert!(
+        norm_stdout12.contains("Processing file: docs/doc1.md"),
+        "docs/doc1.md should be processed in Test Case 12"
+    );
+    assert!(
+        norm_stdout12.contains("Processing file: docs/temp/temp.md"),
+        "docs/temp/temp.md should be processed in Test Case 12"
+    );
+    assert!(
+        !norm_stdout12.contains("Processing file: src/test.md"),
+        "src/test.md should not be processed in Test Case 12"
+    );
     fs::remove_file(temp_dir.path().join(".rumdl.toml"))?; // Clean up config
 
     // --- Test Case 13: Explicit Path (Dir) Respects Config Exclude ---
@@ -438,8 +633,14 @@ exclude=["docs/temp"]
     let (success13, stdout13, _) = run_cmd(&["docs", "--verbose"]); // Process docs/, exclude temp via config
     assert!(success13, "Test Case 13 failed");
     let norm_stdout13 = normalize(&stdout13);
-    assert!(norm_stdout13.contains("Processing file: docs/doc1.md"), "docs/doc1.md should be processed in Test Case 13");
-    assert!(!norm_stdout13.contains("Processing file: docs/temp/temp.md"), "docs/temp/temp.md should be excluded by config in Test Case 13");
+    assert!(
+        norm_stdout13.contains("Processing file: docs/doc1.md"),
+        "docs/doc1.md should be processed in Test Case 13"
+    );
+    assert!(
+        !norm_stdout13.contains("Processing file: docs/temp/temp.md"),
+        "docs/temp/temp.md should be excluded by config in Test Case 13"
+    );
     fs::remove_file(temp_dir.path().join(".rumdl.toml"))?; // Clean up config
 
     // --- Test Case 14: Explicit Path (Dir) Respects CLI Exclude ---
@@ -447,18 +648,36 @@ exclude=["docs/temp"]
     let (success14, stdout14, _) = run_cmd(&["docs", "--exclude", "docs/temp", "--verbose"]); // Process docs/, exclude temp via CLI
     assert!(success14, "Test Case 14 failed");
     let norm_stdout14 = normalize(&stdout14);
-    assert!(norm_stdout14.contains("Processing file: docs/doc1.md"), "docs/doc1.md should be processed in Test Case 14");
-    assert!(!norm_stdout14.contains("Processing file: docs/temp/temp.md"), "docs/temp/temp.md should be excluded by CLI in Test Case 14");
+    assert!(
+        norm_stdout14.contains("Processing file: docs/doc1.md"),
+        "docs/doc1.md should be processed in Test Case 14"
+    );
+    assert!(
+        !norm_stdout14.contains("Processing file: docs/temp/temp.md"),
+        "docs/temp/temp.md should be excluded by CLI in Test Case 14"
+    );
 
     // --- Test Case 15: Multiple Explicit Paths ---
     println!("--- Running Test Case 15: Multiple Explicit Paths ---");
     let (success15, stdout15, _) = run_cmd(&["docs/doc1.md", "src/test.md", "--verbose"]); // Process specific files
     assert!(success15, "Test Case 15 failed");
     let norm_stdout15 = normalize(&stdout15);
-    assert!(norm_stdout15.contains("Processing file: docs/doc1.md"), "docs/doc1.md was not processed in Test Case 15");
-    assert!(norm_stdout15.contains("Processing file: src/test.md"), "src/test.md was not processed in Test Case 15");
-    assert!(!norm_stdout15.contains("Processing file: README.md"), "README.md should not be processed in Test Case 15");
-    assert!(!norm_stdout15.contains("Processing file: docs/temp/temp.md"), "docs/temp/temp.md should not be processed in Test Case 15");
+    assert!(
+        norm_stdout15.contains("Processing file: docs/doc1.md"),
+        "docs/doc1.md was not processed in Test Case 15"
+    );
+    assert!(
+        norm_stdout15.contains("Processing file: src/test.md"),
+        "src/test.md was not processed in Test Case 15"
+    );
+    assert!(
+        !norm_stdout15.contains("Processing file: README.md"),
+        "README.md should not be processed in Test Case 15"
+    );
+    assert!(
+        !norm_stdout15.contains("Processing file: docs/temp/temp.md"),
+        "docs/temp/temp.md should not be processed in Test Case 15"
+    );
 
     // --- Test Case 16: CLI Exclude Overrides Config Include (Discovery Mode) ---
     println!("--- Running Test Case 16: CLI Exclude Overrides Config Include ---");
@@ -469,9 +688,18 @@ include=["docs/**/*.md"]
     let (success16, stdout16, _) = run_cmd(&[".", "--exclude", "docs/temp/temp.md", "--verbose"]); // Discover ., exclude specific file via CLI
     assert!(success16, "Test Case 16 failed");
     let norm_stdout16 = normalize(&stdout16);
-    assert!(norm_stdout16.contains("Processing file: docs/doc1.md"), "docs/doc1.md should be included by config in Test Case 16");
-    assert!(!norm_stdout16.contains("Processing file: docs/temp/temp.md"), "docs/temp/temp.md should be excluded by CLI in Test Case 16");
-    assert!(!norm_stdout16.contains("Processing file: README.md"), "README.md should not be included by config in Test Case 16");
+    assert!(
+        norm_stdout16.contains("Processing file: docs/doc1.md"),
+        "docs/doc1.md should be included by config in Test Case 16"
+    );
+    assert!(
+        !norm_stdout16.contains("Processing file: docs/temp/temp.md"),
+        "docs/temp/temp.md should be excluded by CLI in Test Case 16"
+    );
+    assert!(
+        !norm_stdout16.contains("Processing file: README.md"),
+        "README.md should not be included by config in Test Case 16"
+    );
     fs::remove_file(temp_dir.path().join(".rumdl.toml"))?; // Clean up config
 
     // --- Test Case 17: CLI Include Overrides Config Exclude (Discovery Mode) ---
@@ -483,19 +711,34 @@ exclude = ["docs/*"] # Exclude all docs via config
 "#,
     )?;
     let (success17, stdout17, stderr17) = run_cmd(
-        &[".", "--include", "docs/doc1.md", "--verbose"] // ADDED "." path for discovery mode
+        &[".", "--include", "docs/doc1.md", "--verbose"], // ADDED "." path for discovery mode
     );
     println!("Test Case 17 Stdout:\n{}", stdout17);
     println!("Test Case 17 Stderr:{}\n", stderr17);
     assert!(success17, "Test Case 17 failed");
     let norm_stdout17 = normalize(&stdout17);
     // ASSERTION REVERTED: Expect file to be included by CLI override
-    assert!(norm_stdout17.contains("Processing file: docs/doc1.md"), "docs/doc1.md should be included by CLI in Test Case 17");
-    assert!(!norm_stdout17.contains("Processing file: docs/temp/temp.md"), "docs/temp/temp.md should remain excluded by config in Test Case 17");
+    assert!(
+        norm_stdout17.contains("Processing file: docs/doc1.md"),
+        "docs/doc1.md should be included by CLI in Test Case 17"
+    );
+    assert!(
+        !norm_stdout17.contains("Processing file: docs/temp/temp.md"),
+        "docs/temp/temp.md should remain excluded by config in Test Case 17"
+    );
     // Other files shouldn't be processed because they aren't included by CLI
-    assert!(!norm_stdout17.contains("Processing file: README.md"), "README.md should NOT be included in Test Case 17");
-    assert!(!norm_stdout17.contains("Processing file: src/test.md"), "src/test.md should NOT be included in Test Case 17");
-    assert!(!norm_stdout17.contains("Processing file: subfolder/README.md"), "subfolder/README.md should NOT be included in Test Case 17");
+    assert!(
+        !norm_stdout17.contains("Processing file: README.md"),
+        "README.md should NOT be included in Test Case 17"
+    );
+    assert!(
+        !norm_stdout17.contains("Processing file: src/test.md"),
+        "src/test.md should NOT be included in Test Case 17"
+    );
+    assert!(
+        !norm_stdout17.contains("Processing file: subfolder/README.md"),
+        "subfolder/README.md should NOT be included in Test Case 17"
+    );
 
     Ok(())
 }
@@ -512,13 +755,13 @@ fn test_default_discovery_includes_only_markdown() -> Result<(), Box<dyn std::er
 
     let mut cmd = Command::cargo_bin("rumdl")?;
     cmd.arg(".")
-       .arg("--verbose") // Need verbose to see "Processing file:" messages
-       .current_dir(dir_path);
+        .arg("--verbose") // Need verbose to see "Processing file:" messages
+        .current_dir(dir_path);
 
     cmd.assert()
-       .success() // Should succeed as test.md is valid
-       .stdout(predicates::str::contains("Processing file: test.md"))
-       .stdout(predicates::str::contains("Processing file: test.txt").not());
+        .success() // Should succeed as test.md is valid
+        .stdout(predicates::str::contains("Processing file: test.md"))
+        .stdout(predicates::str::contains("Processing file: test.txt").not());
 
     Ok(())
 }
@@ -535,9 +778,7 @@ fn test_markdown_extension_handling() -> Result<(), Box<dyn std::error::Error>> 
 
     // Test 1: Default discovery should find both .md and .markdown
     let mut cmd1 = Command::cargo_bin("rumdl")?;
-    cmd1.arg(".")
-        .arg("--verbose")
-        .current_dir(dir_path);
+    cmd1.arg(".").arg("--verbose").current_dir(dir_path);
     cmd1.assert()
         .success()
         .stdout(predicates::str::contains("Processing file: test.md"))
@@ -577,7 +818,9 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
         .current_dir(dir_path);
     cmd1.assert()
         .success()
-        .stdout(predicates::str::contains("No markdown files found to check."))
+        .stdout(predicates::str::contains(
+            "No markdown files found to check.",
+        ))
         .stdout(predicates::str::contains("Processing file:").not());
 
     // Test 2: Excluding all .md files when only .md files exist
@@ -589,9 +832,11 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
         .current_dir(dir_path);
     cmd2.assert()
         .success()
-        .stdout(predicates::str::contains("No markdown files found to check."))
+        .stdout(predicates::str::contains(
+            "No markdown files found to check.",
+        ))
         .stdout(predicates::str::contains("Processing file:").not());
-        
+
     // Test 3: Excluding both markdown types
     fs::write(dir_path.join("test.markdown"), "# MARKDOWN File\n")?;
     let mut cmd3 = Command::cargo_bin("rumdl")?;
@@ -602,7 +847,9 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
         .current_dir(dir_path);
     cmd3.assert()
         .success()
-        .stdout(predicates::str::contains("No markdown files found to check."))
+        .stdout(predicates::str::contains(
+            "No markdown files found to check.",
+        ))
         .stdout(predicates::str::contains("Processing file:").not());
 
     Ok(())
@@ -616,15 +863,21 @@ fn test_check_subcommand_works() {
 
     let output = std::process::Command::new(rumdl_exe)
         .current_dir(base_path)
-        .args(&["check", "README.md"])
+        .args(["check", "README.md"])
         .output()
         .expect("Failed to execute command");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     assert!(output.status.success(), "check subcommand failed: {stderr}");
-    assert!(stdout.contains("Success:") || stdout.contains("Issues:"), "Output missing summary");
-    assert!(!stderr.contains("Deprecation warning"), "Should not print deprecation warning for subcommand");
+    assert!(
+        stdout.contains("Success:") || stdout.contains("Issues:"),
+        "Output missing summary"
+    );
+    assert!(
+        !stderr.contains("Deprecation warning"),
+        "Should not print deprecation warning for subcommand"
+    );
 }
 
 #[test]
@@ -635,13 +888,19 @@ fn test_legacy_cli_works_and_warns() {
 
     let output = std::process::Command::new(rumdl_exe)
         .current_dir(base_path)
-        .args(&["README.md"])
+        .args(["README.md"])
         .output()
         .expect("Failed to execute command");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     assert!(output.status.success(), "legacy CLI failed: {stderr}");
-    assert!(stdout.contains("Success:") || stdout.contains("Issues:"), "Output missing summary");
-    assert!(stderr.contains("Deprecation warning"), "Should print deprecation warning for legacy CLI");
+    assert!(
+        stdout.contains("Success:") || stdout.contains("Issues:"),
+        "Output missing summary"
+    );
+    assert!(
+        stderr.contains("Deprecation warning"),
+        "Should print deprecation warning for legacy CLI"
+    );
 }

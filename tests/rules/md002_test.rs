@@ -110,8 +110,14 @@ fn test_setext_heading() {
     let rule = MD002FirstHeadingH1::default();
     let content = "Heading\n-------\n\n### Subheading";
     let structure = DocumentStructure::new(content);
-    println!("[test_setext_heading] heading_lines: {:?}", structure.heading_lines);
-    println!("[test_setext_heading] heading_levels: {:?}", structure.heading_levels);
+    println!(
+        "[test_setext_heading] heading_lines: {:?}",
+        structure.heading_lines
+    );
+    println!(
+        "[test_setext_heading] heading_levels: {:?}",
+        structure.heading_levels
+    );
     let result = rule.check_with_structure(content, &structure).unwrap();
     println!("[test_setext_heading] result: {:?}", result);
     assert_eq!(result.len(), 1);
@@ -136,12 +142,21 @@ fn test_setext_with_front_matter() {
     let rule = MD002FirstHeadingH1::default();
     let content = "---\ntitle: Test\n---\n\nHeading\n-------\n\n### Subheading";
     let structure = DocumentStructure::new(content);
-    println!("[test_setext_with_front_matter] heading_lines: {:?}", structure.heading_lines);
-    println!("[test_setext_with_front_matter] heading_levels: {:?}", structure.heading_levels);
+    println!(
+        "[test_setext_with_front_matter] heading_lines: {:?}",
+        structure.heading_lines
+    );
+    println!(
+        "[test_setext_with_front_matter] heading_levels: {:?}",
+        structure.heading_levels
+    );
     let result = rule.check_with_structure(content, &structure).unwrap();
     println!("[test_setext_with_front_matter] result: {:?}", result);
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 5);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "---\ntitle: Test\n---\n\nHeading\n=======\n\n### Subheading");
+    assert_eq!(
+        fixed,
+        "---\ntitle: Test\n---\n\nHeading\n=======\n\n### Subheading"
+    );
 }

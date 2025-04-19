@@ -1,13 +1,13 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{
-    DocumentStructure, DocumentStructureExtensions
-};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
-    static ref UNORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
+    static ref UNORDERED_LIST_REGEX: FancyRegex =
+        FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)(?P<content>.*)$")
+            .unwrap();
     static ref CODE_BLOCK_START: Regex = Regex::new(r"^\s*(```|~~~)").unwrap();
     static ref CODE_BLOCK_END: Regex = Regex::new(r"^\s*(```|~~~)\s*$").unwrap();
     static ref FRONT_MATTER_DELIM: Regex = Regex::new(r"^---\s*$").unwrap();
@@ -193,7 +193,11 @@ impl Rule for MD004UnorderedListStyle {
                 let after = cap.name("after").map_or(" ", |m| m.as_str());
                 let content = cap.name("content").map_or("", |m| m.as_str());
                 let marker = cap.name("marker").unwrap().as_str();
-                let new_marker = if marker != target_marker { target_marker } else { marker };
+                let new_marker = if marker != target_marker {
+                    target_marker
+                } else {
+                    marker
+                };
                 let new_line = format!("{}{}{}{}", indent, new_marker, after, content);
                 lines.push(new_line);
             } else {
@@ -223,7 +227,9 @@ impl Rule for MD004UnorderedListStyle {
             || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD004UnorderedListStyle {
@@ -262,4 +268,3 @@ mod tests {
         assert_eq!(result.len(), 2); // Should flag the * and + markers
     }
 }
-

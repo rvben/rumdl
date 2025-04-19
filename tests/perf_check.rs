@@ -1,10 +1,7 @@
-use std::time::Instant;
 use rumdl::{
-    rule::Rule,
-    MD033NoInlineHtml,
-    MD037SpacesAroundEmphasis,
-    MD053LinkImageReferenceDefinitions,
+    rule::Rule, MD033NoInlineHtml, MD037SpacesAroundEmphasis, MD053LinkImageReferenceDefinitions,
 };
+use std::time::Instant;
 
 #[test]
 fn test_optimized_rules_performance() {

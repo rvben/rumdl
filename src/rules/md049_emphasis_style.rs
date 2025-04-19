@@ -44,7 +44,9 @@ impl MD049EmphasisStyle {
         end_col: usize,
     ) -> bool {
         // Check for standard URL patterns within the slice
-        if content_slice.contains("http://") || content_slice.contains("https://") || content_slice.contains("ftp://")
+        if content_slice.contains("http://")
+            || content_slice.contains("https://")
+            || content_slice.contains("ftp://")
         {
             return true;
         }
@@ -55,7 +57,8 @@ impl MD049EmphasisStyle {
                 // Check if the emphasis span overlaps with the URL part of the link
                 // Heuristic: Assuming URL starts after '(' in [text](url)
                 let url_start_col = link.start_col + link.text.len() + 3; // Approx: '[' + text + ']('
-                if start_col >= url_start_col && end_col <= link.end_col - 1 // Approx: ends before ')'
+                if start_col >= url_start_col && end_col < link.end_col
+                // Approx: ends before ')'
                 {
                     return true;
                 }
@@ -80,10 +83,15 @@ impl MD049EmphasisStyle {
                 let mut first_underscore_pos = usize::MAX;
 
                 // Find first asterisk not in code
-                if let Ok(matches) = ASTERISK_PATTERN.find_iter(content).collect::<Result<Vec<_>, _>>() {
+                if let Ok(matches) = ASTERISK_PATTERN
+                    .find_iter(content)
+                    .collect::<Result<Vec<_>, _>>()
+                {
                     for m in matches {
                         let (line, col) = self.byte_pos_to_line_col(content, m.start());
-                        if !doc_structure.is_in_code_block(line) && !doc_structure.is_in_code_span(line, col) {
+                        if !doc_structure.is_in_code_block(line)
+                            && !doc_structure.is_in_code_span(line, col)
+                        {
                             first_asterisk_pos = m.start();
                             break;
                         }
@@ -91,11 +99,16 @@ impl MD049EmphasisStyle {
                 }
 
                 // Find first underscore not in code
-                if let Ok(matches) = UNDERSCORE_PATTERN.find_iter(content).collect::<Result<Vec<_>, _>>() {
+                if let Ok(matches) = UNDERSCORE_PATTERN
+                    .find_iter(content)
+                    .collect::<Result<Vec<_>, _>>()
+                {
                     for m in matches {
                         let (line, col) = self.byte_pos_to_line_col(content, m.start());
-                        if !doc_structure.is_in_code_block(line) && !doc_structure.is_in_code_span(line, col) {
-                             first_underscore_pos = m.start();
+                        if !doc_structure.is_in_code_block(line)
+                            && !doc_structure.is_in_code_span(line, col)
+                        {
+                            first_underscore_pos = m.start();
                             break;
                         }
                     }
@@ -165,17 +178,20 @@ impl Rule for MD049EmphasisStyle {
         };
 
         let incorrect_char = match target_style {
-             EmphasisStyle::Asterisk => '_',
-             EmphasisStyle::Underscore => '*',
-             EmphasisStyle::Consistent => return Ok(warnings),
+            EmphasisStyle::Asterisk => '_',
+            EmphasisStyle::Underscore => '*',
+            EmphasisStyle::Consistent => return Ok(warnings),
         };
         let correct_char = match target_style {
-             EmphasisStyle::Asterisk => '*',
-             EmphasisStyle::Underscore => '_',
-             EmphasisStyle::Consistent => return Ok(warnings),
+            EmphasisStyle::Asterisk => '*',
+            EmphasisStyle::Underscore => '_',
+            EmphasisStyle::Consistent => return Ok(warnings),
         };
 
-        if let Ok(matches) = pattern_to_find.find_iter(content).collect::<Result<Vec<_>, _>>() {
+        if let Ok(matches) = pattern_to_find
+            .find_iter(content)
+            .collect::<Result<Vec<_>, _>>()
+        {
             for m in matches {
                 let start_byte = m.start();
                 let end_byte = m.end();
@@ -198,7 +214,13 @@ impl Rule for MD049EmphasisStyle {
                     continue;
                 }
 
-                if self.is_url(&content[start_byte..end_byte], structure, line_num, start_col, end_col) {
+                if self.is_url(
+                    &content[start_byte..end_byte],
+                    structure,
+                    line_num,
+                    start_col,
+                    end_col,
+                ) {
                     continue;
                 }
 
@@ -235,8 +257,11 @@ impl Rule for MD049EmphasisStyle {
         let mut fixed_content = content.to_string();
         let offset = 0;
 
-        if let Ok(matches) = pattern_to_find.find_iter(content).collect::<Result<Vec<_>, _>>() {
-             for m in matches {
+        if let Ok(matches) = pattern_to_find
+            .find_iter(content)
+            .collect::<Result<Vec<_>, _>>()
+        {
+            for m in matches {
                 let start_byte = m.start();
                 let end_byte = m.end();
 
@@ -248,28 +273,44 @@ impl Rule for MD049EmphasisStyle {
                 }
 
                 let mut in_span = false;
-                 for col in start_col..=end_col {
+                for col in start_col..=end_col {
                     if doc_structure.is_in_code_span(line_num, col) {
                         in_span = true;
                         break;
                     }
-                 }
-                 if in_span {
+                }
+                if in_span {
                     continue;
-                 }
+                }
 
-                if self.is_url(&content[start_byte..end_byte], &doc_structure, line_num, start_col, end_col) {
+                if self.is_url(
+                    &content[start_byte..end_byte],
+                    &doc_structure,
+                    line_num,
+                    start_col,
+                    end_col,
+                ) {
                     continue;
                 }
 
                 let adjusted_start = start_byte + offset;
                 let adjusted_end = end_byte + offset;
 
-                if adjusted_start < fixed_content.len() && adjusted_end <= fixed_content.len() && adjusted_start < adjusted_end {
-                    fixed_content.replace_range(adjusted_start..adjusted_start + 1, &correct_char.to_string());
-                    fixed_content.replace_range(adjusted_end - 1..adjusted_end, &correct_char.to_string());
+                if adjusted_start < fixed_content.len()
+                    && adjusted_end <= fixed_content.len()
+                    && adjusted_start < adjusted_end
+                {
+                    fixed_content.replace_range(
+                        adjusted_start..adjusted_start + 1,
+                        &correct_char.to_string(),
+                    );
+                    fixed_content
+                        .replace_range(adjusted_end - 1..adjusted_end, &correct_char.to_string());
                 } else {
-                    eprintln!("Warning: Invalid range detected during MD049 fix: {}..{}", adjusted_start, adjusted_end);
+                    eprintln!(
+                        "Warning: Invalid range detected during MD049 fix: {}..{}",
+                        adjusted_start, adjusted_end
+                    );
                 }
             }
         }
@@ -277,7 +318,9 @@ impl Rule for MD049EmphasisStyle {
         Ok(fixed_content)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -297,8 +340,3 @@ mod tests {
         assert_eq!(EmphasisStyle::from("other"), EmphasisStyle::Consistent);
     }
 }
-
-
-
-
-

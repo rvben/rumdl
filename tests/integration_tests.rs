@@ -1,4 +1,4 @@
-use rumdl::rule::{Rule};
+use rumdl::rule::Rule;
 use rumdl::rules::MD036NoEmphasisOnlyFirst;
 use rumdl::MD015NoMissingSpaceAfterListMarker;
 use rumdl::MD053LinkImageReferenceDefinitions;

@@ -225,14 +225,13 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
         for (i, line) in lines.iter().enumerate() {
             // Fast checks using HashSet lookups
-            if code_block_lines.contains(&i) || front_matter_lines.contains(&i) {
+            if code_block_lines.contains(&i)
+                || front_matter_lines.contains(&i)
+                || Self::is_horizontal_rule(line)
+            {
                 result.push_str(line);
             }
             // Skip if this is a horizontal rule
-            else if Self::is_horizontal_rule(line) {
-                result.push_str(line);
-            }
-            // Check for list items without space
             else if Self::is_list_item_without_space(line) {
                 result.push_str(&Self::fix_list_item(line));
             } else {
@@ -252,5 +251,7 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
         Ok(result)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

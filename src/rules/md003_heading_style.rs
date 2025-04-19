@@ -180,8 +180,7 @@ impl Rule for MD003HeadingStyle {
 
             // For Setext, levels 3+ must be ATX regardless of the target style
             let expected_style = if level > 2
-                && (target_style == HeadingStyle::Setext1
-                    || target_style == HeadingStyle::Setext2)
+                && (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2)
             {
                 HeadingStyle::Atx
             } else if (target_style == HeadingStyle::Setext1
@@ -457,7 +456,9 @@ impl Rule for MD003HeadingStyle {
         content.is_empty() || !QUICK_HEADING_CHECK.is_match(content)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -501,13 +502,15 @@ mod tests {
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert!(
             result.is_empty(),
-            "No warnings expected for content with front matter, found: {:?}", result
+            "No warnings expected for content with front matter, found: {:?}",
+            result
         );
         // Also check the direct check method
         let result = rule.check(content).unwrap();
         assert!(
             result.is_empty(),
-            "No warnings expected for content with front matter, found: {:?}", result
+            "No warnings expected for content with front matter, found: {:?}",
+            result
         );
     }
 
@@ -531,7 +534,8 @@ mod tests {
         // Make test more resilient
         assert!(
             result.is_empty(),
-            "No warnings expected for consistent ATX style, found: {:?}", result
+            "No warnings expected for consistent ATX style, found: {:?}",
+            result
         );
 
         // Test with incorrect style
@@ -552,7 +556,8 @@ mod tests {
         // The level 3 heading can't be setext, so it's valid as ATX
         assert!(
             result.is_empty(),
-            "No warnings expected for setext style with ATX for level 3, found: {:?}", result
+            "No warnings expected for setext style with ATX for level 3, found: {:?}",
+            result
         );
     }
 }

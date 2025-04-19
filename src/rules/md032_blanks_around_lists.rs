@@ -255,7 +255,8 @@ impl Rule for MD032BlanksAroundLists {
 
         for i in 0..num_lines {
             let line_idx = i + 1; // 1-based index
-            let is_excluded = structure.is_in_code_block(line_idx) || structure.is_in_front_matter(line_idx);
+            let is_excluded =
+                structure.is_in_code_block(line_idx) || structure.is_in_front_matter(line_idx);
             let is_list_related = structure.list_lines.contains(&line_idx);
 
             if is_list_related && !is_excluded {
@@ -272,10 +273,11 @@ impl Rule for MD032BlanksAroundLists {
                     // Check line *before* start_line
                     if start_line > 1 {
                         let prev_line_idx = start_line - 1;
-                        let prev_line_is_excluded = structure.is_in_code_block(prev_line_idx) || structure.is_in_front_matter(prev_line_idx);
+                        let prev_line_is_excluded = structure.is_in_code_block(prev_line_idx)
+                            || structure.is_in_front_matter(prev_line_idx);
                         if !prev_line_is_excluded {
-                             let prev_line = lines.get(prev_line_idx - 1).unwrap_or(&"");
-                             if !Self::is_empty_line(prev_line) {
+                            let prev_line = lines.get(prev_line_idx - 1).unwrap_or(&"");
+                            if !Self::is_empty_line(prev_line) {
                                 warnings.push(LintWarning {
                                     rule_name: Some(self.name()),
                                     line: start_line,
@@ -309,10 +311,11 @@ impl Rule for MD032BlanksAroundLists {
         // Check if the document ends with a list block
         if let Some(start_line) = current_list_start {
             let _end_line = num_lines; // Prefixed with underscore as it's not used below
-            // Check line *before* start_line
-             if start_line > 1 {
+                                       // Check line *before* start_line
+            if start_line > 1 {
                 let prev_line_idx = start_line - 1;
-                let prev_line_is_excluded = structure.is_in_code_block(prev_line_idx) || structure.is_in_front_matter(prev_line_idx);
+                let prev_line_is_excluded = structure.is_in_code_block(prev_line_idx)
+                    || structure.is_in_front_matter(prev_line_idx);
                 if !prev_line_is_excluded {
                     let prev_line = lines.get(prev_line_idx - 1).unwrap_or(&"");
                     if !Self::is_empty_line(prev_line) {
@@ -346,7 +349,9 @@ impl Rule for MD032BlanksAroundLists {
         RuleCategory::List
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD032BlanksAroundLists {

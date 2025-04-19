@@ -63,12 +63,16 @@ fn test_md004_dash_style() {
 #[test]
 fn test_md004_deeply_nested() {
     let rule = MD004UnorderedListStyle::default();
-    let content = "* Level 1\n  + Level 2\n    - Level 3\n      + Level 4\n  * Back to 2\n* Level 1\n";
+    let content =
+        "* Level 1\n  + Level 2\n    - Level 3\n      + Level 4\n  * Back to 2\n* Level 1\n";
     let mut result = rule.check(content).unwrap();
     result.sort_by_key(|w| w.line);
     // The most common marker is '*', so all others are flagged
     assert_eq!(result.len(), 3); // + Level 2, - Level 3, + Level 4
-    assert_eq!(result.iter().map(|w| w.line).collect::<Vec<_>>(), vec![2, 3, 4]);
+    assert_eq!(
+        result.iter().map(|w| w.line).collect::<Vec<_>>(),
+        vec![2, 3, 4]
+    );
     let fixed = rule.fix(content).unwrap();
     assert_eq!(
         fixed,

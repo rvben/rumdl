@@ -119,7 +119,7 @@ impl HeadingUtils {
             let heading = Heading {
                 text: text.clone(),
                 level,
-                style: style.clone(),
+                style,
                 line_number: line_num,
                 original_text: line.to_string(),
                 indentation: indentation.clone(),

@@ -1,10 +1,10 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::element_cache::ElementCache;
 use crate::utils::element_cache::ListMarkerType;
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::utils::element_cache::ElementCache;
 
 #[derive(Debug)]
 pub struct MD007ULIndent {
@@ -105,7 +105,9 @@ impl Rule for MD007ULIndent {
 
             if list_item.indentation != expected_indent {
                 let correct_indent = " ".repeat(expected_indent);
-                let trimmed = content.lines().nth(list_item.line_number - 1)
+                let trimmed = content
+                    .lines()
+                    .nth(list_item.line_number - 1)
                     .map(|line| line.trim_start())
                     .unwrap_or("");
                 let replacement = format!("{}{}", correct_indent, trimmed);
@@ -186,7 +188,9 @@ impl Rule for MD007ULIndent {
             || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD007ULIndent {

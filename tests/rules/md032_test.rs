@@ -149,7 +149,11 @@ fn test_list_followed_by_heading_invalid() {
     let rule = MD032BlanksAroundLists;
     let content = "* Item 1\n* Item 2\n## Next Section";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 1, "Should warn for missing blank line before heading");
+    assert_eq!(
+        result.len(),
+        1,
+        "Should warn for missing blank line before heading"
+    );
     assert!(result[0].message.contains("followed by a blank line"));
 }
 
@@ -158,7 +162,11 @@ fn test_list_followed_by_code_block_invalid() {
     let rule = MD032BlanksAroundLists;
     let content = "* Item 1\n* Item 2\n```\ncode\n```";
     let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 1, "Should warn for missing blank line before code block");
+    assert_eq!(
+        result.len(),
+        1,
+        "Should warn for missing blank line before code block"
+    );
     assert!(result[0].message.contains("followed by a blank line"));
 }
 
@@ -167,5 +175,8 @@ fn test_list_followed_by_blank_then_code_block_valid() {
     let rule = MD032BlanksAroundLists;
     let content = "* Item 1\n* Item 2\n\n```\ncode\n```";
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "Should not warn when blank line precedes code block");
+    assert!(
+        result.is_empty(),
+        "Should not warn when blank line precedes code block"
+    );
 }

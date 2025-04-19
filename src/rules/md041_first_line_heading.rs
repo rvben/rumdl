@@ -75,7 +75,10 @@ impl Rule for MD041FirstLineHeading {
             return Ok(warnings);
         }
         // Check if the first non-blank, non-front-matter line is a heading of the required level
-        if structure.heading_lines.is_empty() || structure.heading_lines[0] != first_line || structure.heading_levels[0] != self.level {
+        if structure.heading_lines.is_empty()
+            || structure.heading_lines[0] != first_line
+            || structure.heading_levels[0] != self.level
+        {
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 line: first_line,
@@ -86,8 +89,13 @@ impl Rule for MD041FirstLineHeading {
                 ),
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: LineIndex::new(content.to_string()).line_col_to_byte_range(first_line, 1),
-                    replacement: format!("{} Title\n{}", "#".repeat(self.level), lines[first_line - 1]),
+                    range: LineIndex::new(content.to_string())
+                        .line_col_to_byte_range(first_line, 1),
+                    replacement: format!(
+                        "{} Title\n{}",
+                        "#".repeat(self.level),
+                        lines[first_line - 1]
+                    ),
                 }),
             });
         }
@@ -95,7 +103,8 @@ impl Rule for MD041FirstLineHeading {
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let content = crate::rules::front_matter_utils::FrontMatterUtils::fix_malformed_front_matter(content);
+        let content =
+            crate::rules::front_matter_utils::FrontMatterUtils::fix_malformed_front_matter(content);
         if content.trim().is_empty() || self.has_front_matter_title(&content) {
             return Ok(content.to_string());
         }
@@ -132,5 +141,7 @@ impl Rule for MD041FirstLineHeading {
         Ok(result)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

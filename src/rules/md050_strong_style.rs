@@ -158,5 +158,7 @@ impl Rule for MD050StrongStyle {
         Ok(result)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

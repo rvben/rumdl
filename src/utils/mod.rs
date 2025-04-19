@@ -1,10 +1,10 @@
 pub mod code_block_utils;
 pub mod document_structure;
 pub mod early_returns;
+pub mod element_cache;
 pub mod markdown_elements;
 pub mod range_utils;
 pub mod regex_cache;
-pub mod element_cache;
 
 pub use code_block_utils::CodeBlockUtils;
 pub use document_structure::DocumentStructure;
@@ -28,13 +28,10 @@ impl StrExt for str {
         // Custom implementation to handle both newlines and tabs specially
 
         // Check if string ends with newline
-        let ends_with_newline = self.ends_with('\n');
-
-        // Prepare the string without newline if needed
-        let content = if ends_with_newline {
-            &self[..self.len() - 1]
+        let (content, ends_with_newline) = if let Some(stripped) = self.strip_suffix('\n') {
+            (stripped, true)
         } else {
-            self
+            (self, false)
         };
 
         // Find where the trailing spaces begin
@@ -68,11 +65,7 @@ impl StrExt for str {
         // Custom implementation to handle both newlines and tabs specially
 
         // Prepare the string without newline if it ends with one
-        let content = if self.ends_with('\n') {
-            &self[..self.len() - 1]
-        } else {
-            self
-        };
+        let content = self.strip_suffix('\n').unwrap_or(self);
 
         // Count only trailing spaces at the end, not tabs
         let mut space_count = 0;

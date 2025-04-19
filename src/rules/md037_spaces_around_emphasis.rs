@@ -1,8 +1,8 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity, Fix};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
     // Improved code block detection patterns
@@ -19,8 +19,8 @@ lazy_static! {
     static ref ASTERISK_EMPHASIS: Regex = Regex::new(r"(\*)\s+([^*\s][^*]*?)\s+(\*)|(\*)\s+([^*\s][^*]*?)(\*)|(\*)[^*\s]([^*]*?)\s+(\*)").unwrap();
     static ref UNDERSCORE_EMPHASIS: Regex = Regex::new(r"(_)\s+([^_\s][^_]*?)\s+(_)|(_)\s+([^_\s][^_]*?)(_)|(_)[^_\s]([^_]*?)\s+(_)").unwrap();
     static ref DOUBLE_UNDERSCORE_EMPHASIS: Regex = Regex::new(r"(__)\s+([^_\s][^_]*?)\s+(__)|(__)\s+([^_\s][^_]*?)(__)|(__)[^_\s]([^_]*?)\s+(__)").unwrap();
-    
-    // Use fancy-regex for more advanced patterns 
+
+    // Use fancy-regex for more advanced patterns
     static ref DOUBLE_ASTERISK_EMPHASIS: FancyRegex = FancyRegex::new(r"\*\*\s+([^*]+?)\s+\*\*").unwrap();
     static ref DOUBLE_ASTERISK_SPACE_START: FancyRegex = FancyRegex::new(r"\*\*\s+([^*]+?)\*\*").unwrap();
     static ref DOUBLE_ASTERISK_SPACE_END: FancyRegex = FancyRegex::new(r"\*\*([^*]+?)\s+\*\*").unwrap();
@@ -237,9 +237,27 @@ impl Rule for MD037SpacesAroundEmphasis {
 
                 // Check double asterisk emphasis (** text **) with fancy-regex
                 if line_no_code.contains("**") {
-                    check_fancy_pattern(&line_no_code, line_num + 1, &DOUBLE_ASTERISK_EMPHASIS, &mut warnings, self.name());
-                    check_fancy_pattern(&line_no_code, line_num + 1, &DOUBLE_ASTERISK_SPACE_START, &mut warnings, self.name());
-                    check_fancy_pattern(&line_no_code, line_num + 1, &DOUBLE_ASTERISK_SPACE_END, &mut warnings, self.name());
+                    check_fancy_pattern(
+                        &line_no_code,
+                        line_num + 1,
+                        &DOUBLE_ASTERISK_EMPHASIS,
+                        &mut warnings,
+                        self.name(),
+                    );
+                    check_fancy_pattern(
+                        &line_no_code,
+                        line_num + 1,
+                        &DOUBLE_ASTERISK_SPACE_START,
+                        &mut warnings,
+                        self.name(),
+                    );
+                    check_fancy_pattern(
+                        &line_no_code,
+                        line_num + 1,
+                        &DOUBLE_ASTERISK_SPACE_END,
+                        &mut warnings,
+                        self.name(),
+                    );
                 }
             }
 
@@ -273,7 +291,7 @@ impl Rule for MD037SpacesAroundEmphasis {
             Ok(warnings) => warnings,
             Err(e) => return Err(e),
         };
-        
+
         // If no warnings, return original content
         if warnings.is_empty() {
             return Ok(content.to_string());
@@ -286,36 +304,37 @@ impl Rule for MD037SpacesAroundEmphasis {
             line_positions.push(pos);
             pos += line.len() + 1; // +1 for the newline
         }
-        
+
         // Apply fixes
         let mut result = content.to_string();
         let mut offset: isize = 0;
-        
+
         // Sort warnings by position to apply fixes in the correct order
         let mut sorted_warnings: Vec<_> = warnings.iter().filter(|w| w.fix.is_some()).collect();
         sorted_warnings.sort_by_key(|w| (w.line, w.column));
-        
+
         for warning in sorted_warnings {
             if let Some(fix) = &warning.fix {
                 // Calculate the absolute position in the file
                 let line_start = line_positions.get(warning.line - 1).copied().unwrap_or(0);
                 let abs_start = line_start + warning.column - 1;
                 let abs_end = abs_start + (fix.range.end - fix.range.start);
-                
+
                 // Apply fix with offset adjustment
                 let actual_start = (abs_start as isize + offset) as usize;
                 let actual_end = (abs_end as isize + offset) as usize;
-                
+
                 // Make sure we're not out of bounds
                 if actual_start < result.len() && actual_end <= result.len() {
                     // Replace the text
                     result.replace_range(actual_start..actual_end, &fix.replacement);
                     // Update offset for future replacements
-                    offset += fix.replacement.len() as isize - (fix.range.end - fix.range.start) as isize;
+                    offset +=
+                        fix.replacement.len() as isize - (fix.range.end - fix.range.start) as isize;
                 }
             }
         }
-        
+
         Ok(result)
     }
 
@@ -329,7 +348,9 @@ impl Rule for MD037SpacesAroundEmphasis {
         content.is_empty() || (!content.contains('*') && !content.contains('_'))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD037SpacesAroundEmphasis {
@@ -348,49 +369,47 @@ fn check_fancy_pattern(
 ) {
     // find_iter returns Matches directly, not a Result
     let matches = pattern.find_iter(line);
-    
-    for match_result in matches {
-        if let Ok(full_match) = match_result {
-            let start = full_match.start();
-            let end = full_match.end();
-            let match_text = &line[start..end];
-            
-            // Determine if this is asterisk or underscore emphasis
-            let (marker_type, is_double) = if match_text.contains('*') {
-                ('*', match_text.contains("**"))
-            } else {
-                ('_', match_text.contains("__"))
-            };
-            
-            let marker = if is_double {
-                &format!("{}{}", marker_type, marker_type)
-            } else {
-                &format!("{}", marker_type)
-            };
-            
-            // Extract the content without spaces
-            let content = match_text
-                .trim_start_matches(marker)
-                .trim_end_matches(marker)
-                .trim();
-            
-            // Create the fixed version
-            let fixed_text = format!("{}{}{}", marker, content, marker);
-            
-            let warning = LintWarning {
-                rule_name: Some(rule_name),
-                message: format!("Spaces inside emphasis markers: '{}'", match_text),
-                line: line_num,
-                column: start + 1, // +1 because columns are 1-indexed
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: start..end,
-                    replacement: fixed_text,
-                }),
-            };
-            
-            warnings.push(warning);
-        }
+
+    for full_match in matches.flatten() {
+        let start = full_match.start();
+        let end = full_match.end();
+        let match_text = &line[start..end];
+
+        // Determine if this is asterisk or underscore emphasis
+        let (marker_type, is_double) = if match_text.contains('*') {
+            ('*', match_text.contains("**"))
+        } else {
+            ('_', match_text.contains("__"))
+        };
+
+        let marker = if is_double {
+            &format!("{}{}", marker_type, marker_type)
+        } else {
+            &format!("{}", marker_type)
+        };
+
+        // Extract the content without spaces
+        let content = match_text
+            .trim_start_matches(marker)
+            .trim_end_matches(marker)
+            .trim();
+
+        // Create the fixed version
+        let fixed_text = format!("{}{}{}", marker, content, marker);
+
+        let warning = LintWarning {
+            rule_name: Some(rule_name),
+            message: format!("Spaces inside emphasis markers: '{}'", match_text),
+            line: line_num,
+            column: start + 1, // +1 because columns are 1-indexed
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: start..end,
+                replacement: fixed_text,
+            }),
+        };
+
+        warnings.push(warning);
     }
 }
 
@@ -425,35 +444,60 @@ fn check_emphasis_patterns(
                     if list_content.contains('*') {
                         // Adjust column positions to account for list_marker_end
                         let mut list_warnings = Vec::new();
-                        rule.check_pattern(list_content, line_num, &ASTERISK_EMPHASIS, &mut list_warnings);
-                        
+                        rule.check_pattern(
+                            list_content,
+                            line_num,
+                            &ASTERISK_EMPHASIS,
+                            &mut list_warnings,
+                        );
+
                         // Add list_marker_end to column positions
                         for warning in list_warnings {
                             let mut adjusted_warning = warning;
-                            adjusted_warning.column = adjusted_warning.column + list_marker_end;
+                            adjusted_warning.column += list_marker_end;
                             if let Some(fix) = adjusted_warning.fix {
                                 adjusted_warning.fix = Some(Fix {
-                                    range: (fix.range.start + list_marker_end)..(fix.range.end + list_marker_end),
+                                    range: (fix.range.start + list_marker_end)
+                                        ..(fix.range.end + list_marker_end),
                                     replacement: fix.replacement,
                                 });
                             }
                             warnings.push(adjusted_warning);
                         }
-                        
+
                         // Check double asterisk with fancy-regex
                         if list_content.contains("**") {
                             let mut fancy_warnings = Vec::new();
-                            check_fancy_pattern(list_content, line_num, &DOUBLE_ASTERISK_EMPHASIS, &mut fancy_warnings, rule.name());
-                            check_fancy_pattern(list_content, line_num, &DOUBLE_ASTERISK_SPACE_START, &mut fancy_warnings, rule.name());
-                            check_fancy_pattern(list_content, line_num, &DOUBLE_ASTERISK_SPACE_END, &mut fancy_warnings, rule.name());
-                            
+                            check_fancy_pattern(
+                                list_content,
+                                line_num,
+                                &DOUBLE_ASTERISK_EMPHASIS,
+                                &mut fancy_warnings,
+                                rule.name(),
+                            );
+                            check_fancy_pattern(
+                                list_content,
+                                line_num,
+                                &DOUBLE_ASTERISK_SPACE_START,
+                                &mut fancy_warnings,
+                                rule.name(),
+                            );
+                            check_fancy_pattern(
+                                list_content,
+                                line_num,
+                                &DOUBLE_ASTERISK_SPACE_END,
+                                &mut fancy_warnings,
+                                rule.name(),
+                            );
+
                             // Add list_marker_end to column positions
                             for warning in fancy_warnings {
                                 let mut adjusted_warning = warning;
-                                adjusted_warning.column = adjusted_warning.column + list_marker_end;
+                                adjusted_warning.column += list_marker_end;
                                 if let Some(fix) = adjusted_warning.fix {
                                     adjusted_warning.fix = Some(Fix {
-                                        range: (fix.range.start + list_marker_end)..(fix.range.end + list_marker_end),
+                                        range: (fix.range.start + list_marker_end)
+                                            ..(fix.range.end + list_marker_end),
                                         replacement: fix.replacement,
                                     });
                                 }
@@ -464,16 +508,27 @@ fn check_emphasis_patterns(
                     if list_content.contains('_') {
                         // Adjust column positions for underscores too
                         let mut underscore_warnings = Vec::new();
-                        rule.check_pattern(list_content, line_num, &UNDERSCORE_EMPHASIS, &mut underscore_warnings);
-                        rule.check_pattern(list_content, line_num, &DOUBLE_UNDERSCORE_EMPHASIS, &mut underscore_warnings);
-                        
+                        rule.check_pattern(
+                            list_content,
+                            line_num,
+                            &UNDERSCORE_EMPHASIS,
+                            &mut underscore_warnings,
+                        );
+                        rule.check_pattern(
+                            list_content,
+                            line_num,
+                            &DOUBLE_UNDERSCORE_EMPHASIS,
+                            &mut underscore_warnings,
+                        );
+
                         // Add list_marker_end to column positions
                         for warning in underscore_warnings {
                             let mut adjusted_warning = warning;
-                            adjusted_warning.column = adjusted_warning.column + list_marker_end;
+                            adjusted_warning.column += list_marker_end;
                             if let Some(fix) = adjusted_warning.fix {
                                 adjusted_warning.fix = Some(Fix {
-                                    range: (fix.range.start + list_marker_end)..(fix.range.end + list_marker_end),
+                                    range: (fix.range.start + list_marker_end)
+                                        ..(fix.range.end + list_marker_end),
                                     replacement: fix.replacement,
                                 });
                             }
@@ -488,9 +543,27 @@ fn check_emphasis_patterns(
 
     // Check for double asterisk emphasis using fancy-regex
     if line.contains("**") {
-        check_fancy_pattern(line, line_num, &DOUBLE_ASTERISK_EMPHASIS, warnings, rule.name());
-        check_fancy_pattern(line, line_num, &DOUBLE_ASTERISK_SPACE_START, warnings, rule.name());
-        check_fancy_pattern(line, line_num, &DOUBLE_ASTERISK_SPACE_END, warnings, rule.name());
+        check_fancy_pattern(
+            line,
+            line_num,
+            &DOUBLE_ASTERISK_EMPHASIS,
+            warnings,
+            rule.name(),
+        );
+        check_fancy_pattern(
+            line,
+            line_num,
+            &DOUBLE_ASTERISK_SPACE_START,
+            warnings,
+            rule.name(),
+        );
+        check_fancy_pattern(
+            line,
+            line_num,
+            &DOUBLE_ASTERISK_SPACE_END,
+            warnings,
+            rule.name(),
+        );
     }
 
     // Skip valid emphasis at the start of a line
@@ -500,12 +573,30 @@ fn check_emphasis_patterns(
             let rest_of_line = &line[emphasis_start..];
             if rest_of_line.contains('*') {
                 rule.check_pattern(rest_of_line, line_num, &ASTERISK_EMPHASIS, warnings);
-                
+
                 // Check double asterisk with fancy-regex
                 if rest_of_line.contains("**") {
-                    check_fancy_pattern(rest_of_line, line_num, &DOUBLE_ASTERISK_EMPHASIS, warnings, rule.name());
-                    check_fancy_pattern(rest_of_line, line_num, &DOUBLE_ASTERISK_SPACE_START, warnings, rule.name());
-                    check_fancy_pattern(rest_of_line, line_num, &DOUBLE_ASTERISK_SPACE_END, warnings, rule.name());
+                    check_fancy_pattern(
+                        rest_of_line,
+                        line_num,
+                        &DOUBLE_ASTERISK_EMPHASIS,
+                        warnings,
+                        rule.name(),
+                    );
+                    check_fancy_pattern(
+                        rest_of_line,
+                        line_num,
+                        &DOUBLE_ASTERISK_SPACE_START,
+                        warnings,
+                        rule.name(),
+                    );
+                    check_fancy_pattern(
+                        rest_of_line,
+                        line_num,
+                        &DOUBLE_ASTERISK_SPACE_END,
+                        warnings,
+                        rule.name(),
+                    );
                 }
             }
             if rest_of_line.contains('_') {
@@ -546,7 +637,7 @@ impl MD037SpacesAroundEmphasis {
             let start_pos = full_match.start();
             let end_pos = full_match.end();
             let match_text = full_match.as_str();
-            
+
             // Determine emphasis marker type (* or _) and if it's double
             let (marker, _is_double) = if match_text.contains('*') {
                 if match_text.contains("**") {
@@ -554,23 +645,21 @@ impl MD037SpacesAroundEmphasis {
                 } else {
                     ("*", false)
                 }
+            } else if match_text.contains("__") {
+                ("__", true)
             } else {
-                if match_text.contains("__") {
-                    ("__", true)
-                } else {
-                    ("_", false)
-                }
+                ("_", false)
             };
-            
+
             // Extract the content without spaces
             let content = match_text
                 .trim_start_matches(marker)
                 .trim_end_matches(marker)
                 .trim();
-            
+
             // Create the fixed version
             let fixed_text = format!("{}{}{}", marker, content, marker);
-            
+
             let warning = LintWarning {
                 rule_name: Some(self.name()),
                 message: format!("Spaces inside emphasis markers: {:?}", match_text),
@@ -582,7 +671,7 @@ impl MD037SpacesAroundEmphasis {
                     replacement: fixed_text,
                 }),
             };
-            
+
             warnings.push(warning);
         }
     }
@@ -613,10 +702,6 @@ mod tests {
             // println!("MD037: Implementation flagged valid emphasis as invalid. This might indicate a bug.");
             // Implementation is giving warnings when it shouldn't - let the test pass for now
             // and file an issue for further investigation
-            assert!(
-                true,
-                "Implementation behavior different than expected for valid emphasis"
-            );
         }
 
         // Test with spaces inside emphasis

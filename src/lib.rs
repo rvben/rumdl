@@ -12,8 +12,8 @@ pub use rules::heading_utils::{Heading, HeadingStyle};
 pub use rules::*;
 
 use crate::rule::{LintResult, Rule};
-use std::time::Instant;
 use crate::utils::document_structure::DocumentStructure;
+use std::time::Instant;
 
 /// Lint a file against the given rules
 pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResult {

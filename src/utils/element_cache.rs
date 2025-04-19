@@ -1,18 +1,18 @@
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::cell::RefCell;
-use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
     // Efficient regex patterns
     static ref CODE_BLOCK_START_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)(.*)$").unwrap();
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)\s*$").unwrap();
     static ref INDENTED_CODE_BLOCK_REGEX: Regex = Regex::new(r"^(\s{4,})(.+)$").unwrap();
-    
+
     // List detection patterns
     static ref UNORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
     static ref ORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>\d+\.)(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
-    
+
     // Inline code span pattern
     static ref CODE_SPAN_REGEX: Regex = Regex::new(r"`+").unwrap();
 }
@@ -71,14 +71,14 @@ pub struct ElementCache {
     // Document content and metadata
     content: Option<String>,
     line_count: usize,
-    
+
     // Code blocks
     code_blocks: Vec<CodeBlock>,
     code_block_line_map: Vec<bool>, // Line index -> is in code block
-    
+
     // Code spans (inline code)
     code_spans: Vec<Range>,
-    
+
     // Lists
     list_items: Vec<ListItem>,
     list_line_map: Vec<bool>, // Line index -> is list item
@@ -96,19 +96,19 @@ impl ElementCache {
             list_items: Vec::new(),
             list_line_map: Vec::new(),
         };
-        
+
         // Initialize maps
         cache.code_block_line_map = vec![false; cache.line_count];
         cache.list_line_map = vec![false; cache.line_count];
-        
+
         // Populate the cache
         cache.populate_code_blocks();
         cache.populate_code_spans();
         cache.populate_list_items();
-        
+
         cache
     }
-    
+
     /// Check if a line is within a code block
     pub fn is_in_code_block(&self, line_num: usize) -> bool {
         if line_num == 0 || line_num > self.code_block_line_map.len() {
@@ -116,12 +116,14 @@ impl ElementCache {
         }
         self.code_block_line_map[line_num - 1] // Convert 1-indexed to 0-indexed
     }
-    
+
     /// Check if a position is within a code span
     pub fn is_in_code_span(&self, position: usize) -> bool {
-        self.code_spans.iter().any(|span| position >= span.start && position < span.end)
+        self.code_spans
+            .iter()
+            .any(|span| position >= span.start && position < span.end)
     }
-    
+
     /// Check if a line is a list item
     pub fn is_list_item(&self, line_num: usize) -> bool {
         if line_num == 0 || line_num > self.list_line_map.len() {
@@ -129,27 +131,29 @@ impl ElementCache {
         }
         self.list_line_map[line_num - 1] // Convert 1-indexed to 0-indexed
     }
-    
+
     /// Get list item at line
     pub fn get_list_item(&self, line_num: usize) -> Option<&ListItem> {
-        self.list_items.iter().find(|item| item.line_number == line_num)
+        self.list_items
+            .iter()
+            .find(|item| item.line_number == line_num)
     }
-    
+
     /// Get all list items
     pub fn get_list_items(&self) -> &[ListItem] {
         &self.list_items
     }
-    
+
     /// Get all code blocks
     pub fn get_code_blocks(&self) -> &[CodeBlock] {
         &self.code_blocks
     }
-    
+
     /// Get all code spans
     pub fn get_code_spans(&self) -> &[Range] {
         &self.code_spans
     }
-    
+
     /// Detect and populate code blocks
     fn populate_code_blocks(&mut self) {
         if let Some(content) = &self.content {
@@ -158,25 +162,33 @@ impl ElementCache {
             let mut fence_marker = String::new();
             let mut block_start_line = 0;
             let mut block_language = String::new();
-            
+
             for (i, line) in lines.iter().enumerate() {
                 if in_fenced_block {
                     // Already in a fenced code block, look for the end
                     self.code_block_line_map[i] = true;
-                    
+
                     if line.trim().starts_with(&fence_marker) {
                         // End of code block
-                        let start_pos = lines[0..block_start_line].join("\n").len() + if block_start_line > 0 { 1 } else { 0 };
+                        let start_pos = lines[0..block_start_line].join("\n").len()
+                            + if block_start_line > 0 { 1 } else { 0 };
                         let end_pos = lines[0..=i].join("\n").len();
-                        
+
                         self.code_blocks.push(CodeBlock {
-                            range: Range { start: start_pos, end: end_pos },
+                            range: Range {
+                                start: start_pos,
+                                end: end_pos,
+                            },
                             block_type: CodeBlockType::Fenced,
                             start_line: block_start_line + 1, // 1-indexed
-                            end_line: i + 1, // 1-indexed
-                            language: if !block_language.is_empty() { Some(block_language.clone()) } else { None },
+                            end_line: i + 1,                  // 1-indexed
+                            language: if !block_language.is_empty() {
+                                Some(block_language.clone())
+                            } else {
+                                None
+                            },
                         });
-                        
+
                         in_fenced_block = false;
                         fence_marker.clear();
                         block_language.clear();
@@ -201,32 +213,43 @@ impl ElementCache {
                         let start_pos = lines[0..i].join("\n").len() + if i > 0 { 1 } else { 0 };
                         let end_pos = start_pos + line.len();
                         self.code_blocks.push(CodeBlock {
-                            range: Range { start: start_pos, end: end_pos },
+                            range: Range {
+                                start: start_pos,
+                                end: end_pos,
+                            },
                             block_type: CodeBlockType::Indented,
                             start_line: i + 1, // 1-indexed
-                            end_line: i + 1, // 1-indexed
+                            end_line: i + 1,   // 1-indexed
                             language: None,
                         });
                     }
                 }
             }
-            
+
             // Handle unclosed code block
             if in_fenced_block {
-                let start_pos = lines[0..block_start_line].join("\n").len() + if block_start_line > 0 { 1 } else { 0 };
+                let start_pos = lines[0..block_start_line].join("\n").len()
+                    + if block_start_line > 0 { 1 } else { 0 };
                 let end_pos = content.len();
-                
+
                 self.code_blocks.push(CodeBlock {
-                    range: Range { start: start_pos, end: end_pos },
+                    range: Range {
+                        start: start_pos,
+                        end: end_pos,
+                    },
                     block_type: CodeBlockType::Fenced,
                     start_line: block_start_line + 1, // 1-indexed
-                    end_line: lines.len(), // 1-indexed
-                    language: if !block_language.is_empty() { Some(block_language) } else { None },
+                    end_line: lines.len(),            // 1-indexed
+                    language: if !block_language.is_empty() {
+                        Some(block_language)
+                    } else {
+                        None
+                    },
                 });
             }
         }
     }
-    
+
     /// Detect and populate code spans
     fn populate_code_spans(&mut self) {
         if let Some(content) = &self.content {
@@ -236,7 +259,7 @@ impl ElementCache {
                 if let Some(m) = CODE_SPAN_REGEX.find_at(content, i) {
                     let backtick_length = m.end() - m.start();
                     let start = m.start();
-                    
+
                     // Find matching closing backticks
                     if let Some(end_pos) = content[m.end()..].find(&"`".repeat(backtick_length)) {
                         let end = m.end() + end_pos + backtick_length;
@@ -251,7 +274,7 @@ impl ElementCache {
             }
         }
     }
-    
+
     /// Detect and populate list items
     fn populate_list_items(&mut self) {
         if let Some(content) = &self.content {
@@ -274,12 +297,20 @@ impl ElementCache {
             }
         }
     }
-    
+
     /// Parse a line as a list item and determine its nesting level
-    fn parse_list_item(&self, line: &str, line_num: usize, prev_items: &mut Vec<(usize, usize)>) -> Option<ListItem> {
+    fn parse_list_item(
+        &self,
+        line: &str,
+        line_num: usize,
+        prev_items: &mut Vec<(usize, usize)>,
+    ) -> Option<ListItem> {
         match UNORDERED_LIST_REGEX.captures(line) {
             Ok(Some(captures)) => {
-                let indent_str = captures.name("indent").map_or("", |m| m.as_str()).to_string();
+                let indent_str = captures
+                    .name("indent")
+                    .map_or("", |m| m.as_str())
+                    .to_string();
                 let indentation = indent_str.len();
                 let marker = captures.name("marker").unwrap().as_str();
                 let after = captures.name("after").map_or("", |m| m.as_str());
@@ -294,7 +325,9 @@ impl ElementCache {
                 };
                 let nesting_level = self.calculate_nesting_level(indentation, prev_items);
                 // Find parent: most recent previous item with lower nesting_level
-                let parent_line_number = prev_items.iter().rev()
+                let parent_line_number = prev_items
+                    .iter()
+                    .rev()
                     .find(|(level, _)| *level < nesting_level)
                     .map(|(_, line_num)| *line_num);
                 return Some(ListItem {
@@ -316,14 +349,23 @@ impl ElementCache {
         }
         match ORDERED_LIST_REGEX.captures(line) {
             Ok(Some(captures)) => {
-                let indent_str = captures.name("indent").map_or("", |m| m.as_str()).to_string();
+                let indent_str = captures
+                    .name("indent")
+                    .map_or("", |m| m.as_str())
+                    .to_string();
                 let indentation = indent_str.len();
                 let marker = captures.name("marker").unwrap().as_str();
                 let spaces = captures.name("after").map_or(0, |m| m.as_str().len());
-                let content = captures.name("content").map_or("", |m| m.as_str()).trim_start().to_string();
+                let content = captures
+                    .name("content")
+                    .map_or("", |m| m.as_str())
+                    .trim_start()
+                    .to_string();
                 let nesting_level = self.calculate_nesting_level(indentation, prev_items);
                 // Find parent: most recent previous item with lower nesting_level
-                let parent_line_number = prev_items.iter().rev()
+                let parent_line_number = prev_items
+                    .iter()
+                    .rev()
                     .find(|(level, _)| *level < nesting_level)
                     .map(|(_, line_num)| *line_num);
                 return Some(ListItem {
@@ -343,9 +385,13 @@ impl ElementCache {
         }
         None
     }
-    
+
     /// Calculate the nesting level for a list item
-    fn calculate_nesting_level(&self, indent: usize, prev_items: &mut Vec<(usize, usize)>) -> usize {
+    fn calculate_nesting_level(
+        &self,
+        indent: usize,
+        prev_items: &mut Vec<(usize, usize)>,
+    ) -> usize {
         // CommonMark: a list item is nested if it is indented at least 2 spaces more than the previous list item
         let mut nesting_level = 0;
         if let Some(&(last_indent, last_level)) = prev_items.last() {
@@ -376,43 +422,46 @@ impl ElementCache {
 
 // Thread-local cache for sharing across rules
 thread_local! {
-    static ELEMENT_CACHE: RefCell<Option<ElementCache>> = RefCell::new(None);
+    static ELEMENT_CACHE: RefCell<Option<ElementCache>> = const { RefCell::new(None) };
 }
 
 /// Get or create element cache for document content
 pub fn get_element_cache(content: &str) -> ElementCache {
     // Try to get existing cache
     let mut needs_new_cache = false;
-    
+
     ELEMENT_CACHE.with(|cache| {
         let cache_ref = cache.borrow_mut();
-        
+
         // If cache exists and content matches, return it
         if let Some(existing_cache) = &*cache_ref {
             if let Some(cached_content) = &existing_cache.content {
                 if cached_content == content {
-                    return;  // Keep existing cache
+                    return; // Keep existing cache
                 }
             }
         }
-        
+
         // Content doesn't match, need new cache
         needs_new_cache = true;
     });
-    
+
     if needs_new_cache {
         // Create new cache
         let new_cache = ElementCache::new(content);
-        
+
         // Store in thread-local
         ELEMENT_CACHE.with(|cache| {
             *cache.borrow_mut() = Some(new_cache);
         });
     }
-    
+
     // Return clone of cache
     ELEMENT_CACHE.with(|cache| {
-        cache.borrow().clone().unwrap_or_else(|| ElementCache::new(content))
+        cache
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| ElementCache::new(content))
     })
 }
 
@@ -426,18 +475,19 @@ pub fn reset_element_cache() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_code_block_detection() {
-        let content = "Regular text\n\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n\nMore text";
+        let content =
+            "Regular text\n\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n\nMore text";
         let cache = ElementCache::new(content);
-        
+
         assert_eq!(cache.code_blocks.len(), 1);
         assert_eq!(cache.code_blocks[0].start_line, 3);
         assert_eq!(cache.code_blocks[0].end_line, 7);
         assert_eq!(cache.code_blocks[0].block_type, CodeBlockType::Fenced);
         assert_eq!(cache.code_blocks[0].language, Some("rust".to_string()));
-        
+
         assert!(!cache.is_in_code_block(1));
         assert!(!cache.is_in_code_block(2));
         assert!(cache.is_in_code_block(3));
@@ -448,7 +498,7 @@ mod tests {
         assert!(!cache.is_in_code_block(8));
         assert!(!cache.is_in_code_block(9));
     }
-    
+
     #[test]
     fn test_list_item_detection_simple() {
         let content = "# Heading\n\n- First item\n  - Nested item\n- Second item\n\n1. Ordered item\n   1. Nested ordered\n";
@@ -504,8 +554,15 @@ mod tests {
         assert_eq!(cache.list_items[9].marker, "+");
         assert_eq!(cache.list_items[9].nesting_level, 4);
         let expected_nesting = vec![0, 1, 2, 1, 0, 0, 1, 2, 3, 4];
-        let actual_nesting: Vec<_> = cache.list_items.iter().map(|item| item.nesting_level).collect();
-        assert_eq!(actual_nesting, expected_nesting, "Nesting levels should match expected values");
+        let actual_nesting: Vec<_> = cache
+            .list_items
+            .iter()
+            .map(|item| item.nesting_level)
+            .collect();
+        assert_eq!(
+            actual_nesting, expected_nesting,
+            "Nesting levels should match expected values"
+        );
     }
 
     #[test]
@@ -519,37 +576,37 @@ mod tests {
             assert_eq!(item.nesting_level, 0);
         }
     }
-    
+
     #[test]
     fn test_code_span_detection() {
         let content = "Here is some `inline code` and here are ``nested `code` spans``";
         let cache = ElementCache::new(content);
-        
+
         // Should have two code spans
         assert_eq!(cache.code_spans.len(), 2);
-        
+
         // Check spans
         let span1_content = &content[cache.code_spans[0].start..cache.code_spans[0].end];
         assert_eq!(span1_content, "`inline code`");
-        
+
         let span2_content = &content[cache.code_spans[1].start..cache.code_spans[1].end];
         assert_eq!(span2_content, "``nested `code` spans``");
     }
-    
+
     #[test]
     fn test_get_element_cache() {
         let content1 = "Test content";
         let content2 = "Different content";
-        
+
         // First call should create a new cache
         let cache1 = get_element_cache(content1);
-        
+
         // Second call with same content should return the same cache
         let cache2 = get_element_cache(content1);
-        
+
         // Third call with different content should create new cache
         let cache3 = get_element_cache(content2);
-        
+
         assert_eq!(cache1.content.as_ref().unwrap(), content1);
         assert_eq!(cache2.content.as_ref().unwrap(), content1);
         assert_eq!(cache3.content.as_ref().unwrap(), content2);
@@ -570,8 +627,8 @@ mod tests {
 \n    - After blank line, not nested\n\n\t* Tab indented\n        * 8 spaces indented\n* After excessive indent\n";
         let cache = ElementCache::new(content);
         // Should detect all lines that start with a valid unordered list marker
-        let _expected_markers = vec!["*", "-", "+", "*", "-", "+", "*", "*", "-", "*", "*", "*"];
-        let _expected_indents = vec![0, 4, 8, 0, 4, 8, 0, 4, 8, 12, 16, 20];
+        let _expected_markers = ["*", "-", "+", "*", "-", "+", "*", "*", "-", "*", "*", "*"];
+        let _expected_indents = [0, 4, 8, 0, 4, 8, 0, 4, 8, 12, 16, 20];
         let expected_content = vec![
             "Level 1",
             "Level 2",
@@ -582,20 +639,47 @@ mod tests {
             "Sibling 1",
             "Sibling 2",
             "After blank line, not nested",
-            "Tab indented", // Content after marker
+            "Tab indented",      // Content after marker
             "8 spaces indented", // Content after marker
-            "After excessive indent"
+            "After excessive indent",
         ];
-        let actual_content: Vec<_> = cache.list_items.iter().map(|item| item.content.clone()).collect();
-        assert_eq!(actual_content, expected_content, "List item contents should match expected values");
+        let actual_content: Vec<_> = cache
+            .list_items
+            .iter()
+            .map(|item| item.content.clone())
+            .collect();
+        assert_eq!(
+            actual_content, expected_content,
+            "List item contents should match expected values"
+        );
         let expected_nesting = vec![0, 1, 2, 3, 4, 5, 0, 1, 0, 0, 1, 0];
-        let actual_nesting: Vec<_> = cache.list_items.iter().map(|item| item.nesting_level).collect();
-        assert_eq!(actual_nesting, expected_nesting, "Nesting levels should match expected values");
+        let actual_nesting: Vec<_> = cache
+            .list_items
+            .iter()
+            .map(|item| item.nesting_level)
+            .collect();
+        assert_eq!(
+            actual_nesting, expected_nesting,
+            "Nesting levels should match expected values"
+        );
         // Check that tab-indented and 8-space-indented items are detected
-        assert!(cache.list_items.iter().any(|item| item.marker == "*" && item.indentation >= 1), "Tab or 8-space indented item not detected");
+        assert!(
+            cache
+                .list_items
+                .iter()
+                .any(|item| item.marker == "*" && item.indentation >= 1),
+            "Tab or 8-space indented item not detected"
+        );
         // Check that after blank lines, items are not nested
-        let after_blank = cache.list_items.iter().find(|item| item.content.contains("After blank line"));
+        let after_blank = cache
+            .list_items
+            .iter()
+            .find(|item| item.content.contains("After blank line"));
         assert!(after_blank.is_some());
-        assert_eq!(after_blank.unwrap().nesting_level, 0, "Item after blank line should not be nested");
+        assert_eq!(
+            after_blank.unwrap().nesting_level,
+            0,
+            "Item after blank line should not be nested"
+        );
     }
-} 
+}

@@ -83,5 +83,7 @@ impl Rule for MD045NoAltText {
         Ok(result.to_string())
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

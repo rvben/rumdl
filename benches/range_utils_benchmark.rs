@@ -1,4 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use rand::rng;
+use rand::Rng;
 use rumdl::utils::range_utils::LineIndex;
 
 // Naive implementation that doesn't use the optimized function
@@ -78,14 +80,13 @@ fn bench_range_utils(c: &mut Criterion) {
     });
 
     // Benchmark with random accesses
-    use rand::prelude::*;
-    let mut rng = rand::thread_rng();
+    let mut rng = rng();
 
     c.bench_function("random_access_optimized", |b| {
         b.iter(|| {
             for _ in 0..20 {
-                let line = rng.gen_range(1..=line_count);
-                let col = rng.gen_range(1..=40);
+                let line = rng.random_range(1..=line_count);
+                let col = rng.random_range(1..=40);
                 black_box(line_index.line_col_to_byte_range(line, col));
             }
         })
@@ -94,8 +95,8 @@ fn bench_range_utils(c: &mut Criterion) {
     c.bench_function("random_access_naive", |b| {
         b.iter(|| {
             for _ in 0..20 {
-                let line = rng.gen_range(1..=line_count);
-                let col = rng.gen_range(1..=40);
+                let line = rng.random_range(1..=line_count);
+                let col = rng.random_range(1..=40);
                 black_box(naive_line_col_to_byte_range(black_box(&content), line, col));
             }
         })

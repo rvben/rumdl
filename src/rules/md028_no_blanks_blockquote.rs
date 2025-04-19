@@ -187,7 +187,9 @@ impl Rule for MD028NoBlanksBlockquote {
         !content.contains('>')
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD028NoBlanksBlockquote {

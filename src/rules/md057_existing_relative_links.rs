@@ -1,13 +1,12 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::element_cache::ElementCache;
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
-
 
 // Thread-local cache for file existence checks to avoid redundant filesystem operations
 thread_local! {
@@ -25,7 +24,9 @@ fn reset_file_existence_cache() {
 fn file_exists_with_cache(path: &Path) -> bool {
     FILE_EXISTENCE_CACHE.with(|cache| {
         let mut cache_ref = cache.borrow_mut();
-        *cache_ref.entry(path.to_path_buf()).or_insert_with(|| path.exists())
+        *cache_ref
+            .entry(path.to_path_buf())
+            .or_insert_with(|| path.exists())
     })
 }
 
@@ -118,9 +119,7 @@ impl MD057ExistingRelativeLinks {
         }
 
         // More restrictive domain check using a simpler pattern
-        if !self.is_media_file(url)
-            && url.ends_with(".com")
-        {
+        if !self.is_media_file(url) && url.ends_with(".com") {
             return true;
         }
 
@@ -164,7 +163,13 @@ impl MD057ExistingRelativeLinks {
     }
 
     /// Process a single link and check if it exists
-    fn process_link(&self, url: &str, line_num: usize, column: usize, warnings: &mut Vec<LintWarning>) {
+    fn process_link(
+        &self,
+        url: &str,
+        line_num: usize,
+        column: usize,
+        warnings: &mut Vec<LintWarning>,
+    ) {
         // Skip empty URLs
         if url.is_empty() {
             return;
@@ -195,7 +200,7 @@ impl MD057ExistingRelativeLinks {
             }
         }
     }
-    
+
     /// Extract a URL from a Markdown link segment
     #[allow(dead_code)]
     fn extract_url_from_link<'a>(&self, link_text: &'a str) -> Option<(&'a str, usize)> {
@@ -208,36 +213,35 @@ impl MD057ExistingRelativeLinks {
             })
         })
     }
-    
+
     /// Process links using the element cache and document structure
     fn process_links_with_structure(
-        &self, 
-        content: &str, 
+        &self,
+        content: &str,
         doc_structure: &DocumentStructure,
         element_cache: &ElementCache,
-        warnings: &mut Vec<LintWarning>
+        warnings: &mut Vec<LintWarning>,
     ) {
         // Get all potential link starts
         for link_match in LINK_START_REGEX.find_iter(content) {
             let start_pos = link_match.start();
             let end_pos = link_match.end();
-            
+
             // Skip if this is in a code span or code block
-            if element_cache.is_in_code_span(start_pos) || 
-               doc_structure.is_in_code_block(content[..start_pos].lines().count() + 1) {
+            if element_cache.is_in_code_span(start_pos)
+                || doc_structure.is_in_code_block(content[..start_pos].lines().count() + 1)
+            {
                 continue;
             }
-            
+
             // Find the URL part after the link text
             if let Some(_url_match) = URL_EXTRACT_REGEX.find_at(content, end_pos - 1) {
                 if let Some(caps) = URL_EXTRACT_REGEX.captures_at(content, end_pos - 1) {
                     if let Some(url_group) = caps.get(1) {
                         let url = url_group.as_str().trim();
-                        let line_num = content[..start_pos]
-                            .chars()
-                            .filter(|&c| c == '\n')
-                            .count() + 1;
-                        
+                        let line_num =
+                            content[..start_pos].chars().filter(|&c| c == '\n').count() + 1;
+
                         // Process and validate the link
                         self.process_link(url, line_num, start_pos + 1, warnings);
                     }
@@ -255,28 +259,27 @@ impl Rule for MD057ExistingRelativeLinks {
     fn description(&self) -> &'static str {
         "Relative links should point to existing files"
     }
-    
+
     fn category(&self) -> RuleCategory {
         RuleCategory::Link
     }
-    
+
     fn should_skip(&self, content: &str) -> bool {
         // Skip if content contains no links at all
-        content.is_empty() || 
-        (!content.contains("[") || !content.contains("]("))
+        content.is_empty() || (!content.contains("[") || !content.contains("]("))
     }
-    
+
     /// Optimized implementation using document structure
     fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
         if self.should_skip(content) {
             return Ok(Vec::new());
         }
-        
+
         // Reset the file existence cache for a fresh run
         reset_file_existence_cache();
-        
+
         let mut warnings = Vec::new();
-        
+
         // Check if we have a base path
         let base_path = if self.base_path.borrow().is_some() {
             self.base_path.borrow().clone()
@@ -285,7 +288,9 @@ impl Rule for MD057ExistingRelativeLinks {
             if let Ok(file_path) = env::var("RUMDL_FILE_PATH") {
                 let path = Path::new(&file_path);
                 if path.exists() {
-                    path.parent().map(|p| p.to_path_buf()).or_else(|| Some(CURRENT_DIR.clone()))
+                    path.parent()
+                        .map(|p| p.to_path_buf())
+                        .or_else(|| Some(CURRENT_DIR.clone()))
                 } else {
                     Some(CURRENT_DIR.clone())
                 }
@@ -293,26 +298,26 @@ impl Rule for MD057ExistingRelativeLinks {
                 Some(CURRENT_DIR.clone())
             }
         };
-        
+
         // If we still don't have a base path, we can't validate relative links
         if base_path.is_none() {
             return Ok(warnings);
         }
-        
+
         // Get the element cache for efficient code span detection
         let element_cache = ElementCache::new(content);
-        
+
         // Process links using structure and element cache
         self.process_links_with_structure(content, structure, &element_cache, &mut warnings);
-        
+
         Ok(warnings)
     }
 
     fn check(&self, content: &str) -> LintResult {
         // If document structure is available, use the optimized version
         let structure = DocumentStructure::new(content);
-        return self.check_with_structure(content, &structure);
-        
+        self.check_with_structure(content, &structure)
+
         // The code below is now unreachable because we always use the document structure
     }
 
@@ -324,7 +329,9 @@ impl Rule for MD057ExistingRelativeLinks {
         ))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD057ExistingRelativeLinks {
@@ -453,11 +460,11 @@ mod tests {
         // Should have one warning for the missing.md link but not for the media file
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("missing.md"));
-        
+
         // Test with document structure
         let structure = DocumentStructure::new(content);
         let result_with_structure = rule.check_with_structure(content, &structure).unwrap();
-        
+
         // Results should be the same
         assert_eq!(result.len(), result_with_structure.len());
         assert!(result_with_structure[0].message.contains("missing.md"));
@@ -548,19 +555,20 @@ mod tests {
     #[test]
     fn test_code_span_detection() {
         let rule = MD057ExistingRelativeLinks::new();
-        
+
         // Create a temporary directory for test files
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
-        
+
         let rule = rule.with_path(base_path);
-        
+
         // Test with document structure
-        let content = "This is a [link](nonexistent.md) and `[not a link](not-checked.md)` in code.";
+        let content =
+            "This is a [link](nonexistent.md) and `[not a link](not-checked.md)` in code.";
         let structure = DocumentStructure::new(content);
-        
+
         let result = rule.check_with_structure(content, &structure).unwrap();
-        
+
         // Should only find the real link, not the one in code
         assert_eq!(result.len(), 1, "Should only flag the real link");
         assert!(result[0].message.contains("nonexistent.md"));

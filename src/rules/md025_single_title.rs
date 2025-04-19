@@ -65,7 +65,11 @@ impl Rule for MD025SingleTitle {
                     let region = structure.heading_regions[idx];
                     let start = region.0 - 1;
                     let style = if region.0 != region.1 {
-                        if lines.get(region.1 - 1).map_or("", |l| l.trim()).starts_with('=') {
+                        if lines
+                            .get(region.1 - 1)
+                            .map_or("", |l| l.trim())
+                            .starts_with('=')
+                        {
                             crate::rules::heading_utils::HeadingStyle::Setext1
                         } else {
                             crate::rules::heading_utils::HeadingStyle::Setext2
@@ -74,7 +78,12 @@ impl Rule for MD025SingleTitle {
                         crate::rules::heading_utils::HeadingStyle::Atx
                     };
                     let text = lines[start].trim_start_matches('#').trim();
-                    let replacement = crate::rules::heading_utils::HeadingUtils::convert_heading_style(text, (self.level + 1).try_into().unwrap(), style);
+                    let replacement =
+                        crate::rules::heading_utils::HeadingUtils::convert_heading_style(
+                            text,
+                            (self.level + 1).try_into().unwrap(),
+                            style,
+                        );
                     fixed_lines[start] = replacement;
                 }
             }
@@ -98,7 +107,7 @@ impl Rule for MD025SingleTitle {
         let mut warnings = Vec::new();
 
         // Check for front matter title if configured
-        let mut found_title_in_front_matter = false;
+        let mut _found_title_in_front_matter = false;
         if !self.front_matter_title.is_empty() && structure.has_front_matter {
             if let Some((start, end)) = structure.front_matter_range {
                 // Extract front matter content
@@ -110,7 +119,7 @@ impl Rule for MD025SingleTitle {
                     .join("\n");
 
                 // Check if it contains a title field
-                found_title_in_front_matter = front_matter_content.lines().any(|line| {
+                _found_title_in_front_matter = front_matter_content.lines().any(|line| {
                     line.trim()
                         .starts_with(&format!("{}:", self.front_matter_title))
                 });
@@ -153,7 +162,7 @@ impl Rule for MD025SingleTitle {
         }
 
         // If we already found a title in front matter, allow the first H1 in the content, flag subsequent ones
-        let start_index = if found_title_in_front_matter { 1 } else { 1 };
+        let start_index = 1;
 
         // If we have any target level headings after accounting for front matter, warn as needed
         if target_level_headings.len() > start_index {
@@ -198,7 +207,9 @@ impl Rule for MD025SingleTitle {
         content.is_empty() || !content.contains('#')
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD025SingleTitle {
@@ -233,6 +244,9 @@ mod tests {
         let content = "---\ntitle: Document Title\n---\n\n# Main Heading\n\n## Section 1";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(result.is_empty(), "Should not flag a single title after front matter");
+        assert!(
+            result.is_empty(),
+            "Should not flag a single title after front matter"
+        );
     }
 }

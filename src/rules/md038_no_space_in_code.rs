@@ -44,7 +44,7 @@ impl MD038NoSpaceInCode {
     /// Check if a code span has leading or trailing spaces and return the original and fixed versions
     fn check_space_issues(&self, code_span: &CodeSpan) -> Option<(String, String)> {
         let code_content = self.extract_code_content(code_span);
-        
+
         // Check for leading or trailing spaces
         if code_content.starts_with(' ') || code_content.ends_with(' ') {
             // Only fix if there's actual content after trimming
@@ -55,7 +55,7 @@ impl MD038NoSpaceInCode {
                 return Some((original, fixed));
             }
         }
-        
+
         None
     }
 
@@ -85,7 +85,7 @@ impl Rule for MD038NoSpaceInCode {
 
         // Create document structure for processing
         let structure = DocumentStructure::new(content);
-        
+
         // If no code spans, return early
         if !self.has_code_spans(&structure) {
             return Ok(vec![]);
@@ -100,15 +100,19 @@ impl Rule for MD038NoSpaceInCode {
 
         // Get lines for position mapping
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Process code spans directly from document structure
         for code_span in &structure.code_spans {
             if let Some((original, fixed)) = self.check_space_issues(code_span) {
                 // Use line and column from the code span
                 let line_index = code_span.line - 1; // Adjust to 0-based for array indexing
-                // Get the content for debugging but not required for the warning
-                let _line_content = if line_index < lines.len() { lines[line_index] } else { "" };
-                
+                                                     // Get the content for debugging but not required for the warning
+                let _line_content = if line_index < lines.len() {
+                    lines[line_index]
+                } else {
+                    ""
+                };
+
                 warnings.push(LintWarning {
                     message: format!("Spaces inside code span elements: {}", original),
                     line: code_span.line,
@@ -145,15 +149,15 @@ impl Rule for MD038NoSpaceInCode {
         for warning in warnings {
             warnings_by_line
                 .entry(warning.line)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(warning);
         }
-        
+
         // Process each line with fixes
         for (_, mut line_warnings) in warnings_by_line {
             // Sort warnings by column in reverse order (right to left)
             line_warnings.sort_by(|a, b| b.column.cmp(&a.column));
-            
+
             for warning in line_warnings {
                 if let Some(fix) = warning.fix {
                     // Apply the fix
@@ -161,9 +165,13 @@ impl Rule for MD038NoSpaceInCode {
                     let line_idx = warning.line - 1;
                     if line_idx < lines.len() {
                         let line = lines[line_idx];
-                        let start_pos = if warning.column > 0 { warning.column - 1 } else { 0 };
+                        let start_pos = if warning.column > 0 {
+                            warning.column - 1
+                        } else {
+                            0
+                        };
                         let end_pos = fix.range.end;
-                        
+
                         if start_pos <= line.len() && end_pos <= line.len() {
                             let fixed_line = format!(
                                 "{}{}{}",
@@ -171,7 +179,7 @@ impl Rule for MD038NoSpaceInCode {
                                 fix.replacement,
                                 &line[end_pos.min(line.len())..]
                             );
-                            
+
                             // Rebuild the content with the fixed line
                             let mut new_content = String::new();
                             for (i, l) in lines.iter().enumerate() {
@@ -184,7 +192,7 @@ impl Rule for MD038NoSpaceInCode {
                                     new_content.push('\n');
                                 }
                             }
-                            
+
                             fixed_content = new_content;
                         }
                     }
@@ -199,13 +207,15 @@ impl Rule for MD038NoSpaceInCode {
 
         Ok(fixed_content)
     }
-    
+
     /// Check if content is likely to have code spans
     fn should_skip(&self, content: &str) -> bool {
         !content.contains('`')
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD038NoSpaceInCode {
@@ -221,7 +231,7 @@ mod tests {
     #[test]
     fn test_md038_valid() {
         let rule = MD038NoSpaceInCode::new();
-        
+
         // Valid code spans - no spaces inside
         let valid_cases = vec![
             "This is `code` in a sentence.",
@@ -232,61 +242,85 @@ mod tests {
             "`Start of line` code span",
             "Multiple `code spans` in `one line` are fine",
             "Code span with `symbols: !@#$%^&*()`",
-            "Empty code span `` is technically valid"
+            "Empty code span `` is technically valid",
         ];
-        
+
         for case in valid_cases {
             let result = rule.check(case).unwrap();
-            assert!(result.is_empty(), "Valid case should not have warnings: {}", case);
+            assert!(
+                result.is_empty(),
+                "Valid case should not have warnings: {}",
+                case
+            );
         }
     }
 
     #[test]
     fn test_md038_invalid() {
         let rule = MD038NoSpaceInCode::new();
-        
+
         // Invalid code spans - spaces inside backticks
         let invalid_cases = vec![
             "This is ` code` with leading space.",
             "This is `code ` with trailing space.",
             "This is ` code ` with both leading and trailing space.",
-            "Multiple ` code ` spans with `spaces ` in one line."
+            "Multiple ` code ` spans with `spaces ` in one line.",
         ];
-        
+
         for case in invalid_cases {
             let result = rule.check(case).unwrap();
-            assert!(!result.is_empty(), "Invalid case should have warnings: {}", case);
+            assert!(
+                !result.is_empty(),
+                "Invalid case should have warnings: {}",
+                case
+            );
         }
     }
 
     #[test]
     fn test_md038_fix() {
         let rule = MD038NoSpaceInCode::new();
-        
+
         // Test cases with their expected fixed versions
         let test_cases = vec![
-            ("This is ` code` with leading space.", "This is `code` with leading space."),
-            ("This is `code ` with trailing space.", "This is `code` with trailing space."),
-            ("This is ` code ` with both spaces.", "This is `code` with both spaces."),
-            ("Multiple ` code ` and `spans ` to fix.", "Multiple `code` and `spans` to fix.")
+            (
+                "This is ` code` with leading space.",
+                "This is `code` with leading space.",
+            ),
+            (
+                "This is `code ` with trailing space.",
+                "This is `code` with trailing space.",
+            ),
+            (
+                "This is ` code ` with both spaces.",
+                "This is `code` with both spaces.",
+            ),
+            (
+                "Multiple ` code ` and `spans ` to fix.",
+                "Multiple `code` and `spans` to fix.",
+            ),
         ];
-        
+
         for (input, expected) in test_cases {
             let result = rule.fix(input).unwrap();
-            assert_eq!(result, expected, "Fix did not produce expected output for: {}", input);
+            assert_eq!(
+                result, expected,
+                "Fix did not produce expected output for: {}",
+                input
+            );
         }
     }
 
     #[test]
     fn test_check_invalid_leading_space() {
         let rule = MD038NoSpaceInCode::new();
-        
+
         // Test specific case with leading space
         let input = "This has a ` leading space` in code";
         let result = rule.check(input).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
         assert!(result[0].fix.is_some());
     }
-} 
+}

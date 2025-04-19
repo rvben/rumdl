@@ -131,14 +131,10 @@ impl Rule for MD001HeadingIncrement {
                     rule_name: Some(self.name()),
                     line: line_num,
                     column: indentation + 1,
-                    message: format!(
-                        "Heading level should be {} for this level",
-                        prev_level + 1
-                    ),
+                    message: format!("Heading level should be {} for this level", prev_level + 1),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index
-                            .line_col_to_byte_range(line_num, indentation + 1),
+                        range: line_index.line_col_to_byte_range(line_num, indentation + 1),
                         replacement: format!("{}{}", " ".repeat(indentation), replacement),
                     }),
                 });
@@ -240,7 +236,7 @@ impl Rule for MD001HeadingIncrement {
                 let level = structure.heading_levels[idx];
                 let region = structure.heading_regions[idx];
                 let start = region.0 - 1; // 0-indexed
-                let end = region.1 - 1;   // 0-indexed
+                let end = region.1 - 1; // 0-indexed
                 let indentation = HeadingUtils::get_indentation(lines[start]);
                 let is_setext = start != end;
 
@@ -259,14 +255,13 @@ impl Rule for MD001HeadingIncrement {
                 if level > prev_level + 1 {
                     let fixed_level = prev_level + 1;
                     let text = lines[start].trim_start_matches('#').trim();
-                    let replacement = HeadingUtils::convert_heading_style(text, fixed_level as u32, style);
+                    let replacement =
+                        HeadingUtils::convert_heading_style(text, fixed_level as u32, style);
                     fixed_lines.push(format!("{}{}", " ".repeat(indentation), replacement));
                     prev_level = fixed_level;
                 } else {
                     // No fix needed, keep original
-                    for j in start..=end {
-                        fixed_lines.push(lines[j].to_string());
-                    }
+                    fixed_lines.extend(lines[start..=end].iter().map(|l| l.to_string()));
                     prev_level = level;
                 }
 
@@ -295,7 +290,9 @@ impl Rule for MD001HeadingIncrement {
         content.is_empty() || !content.contains('#')
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD001HeadingIncrement {

@@ -1,11 +1,12 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use rand::rng;
 use rand::Rng;
 use rumdl::rule::Rule;
 use rumdl::MD053LinkImageReferenceDefinitions;
 
 fn create_test_content(size: usize, ratio: f64) -> String {
     let mut content = String::with_capacity(size);
-    let mut rng = rand::thread_rng();
+    let mut rng = rng();
     let line_length = 80;
     let words_per_line = 10;
     let word_length = line_length / words_per_line;
@@ -14,9 +15,9 @@ fn create_test_content(size: usize, ratio: f64) -> String {
     content.push_str("# Test Document with References\n\n");
 
     for i in 0..100 {
-        if rng.gen::<f64>() < 0.5 {
+        if rng.random::<f64>() < 0.5 {
             // 50% chance to add a reference
-            if rng.gen::<f64>() < 0.7 {
+            if rng.random::<f64>() < 0.7 {
                 // 70% chance to be a link, 30% to be an image
                 content.push_str(&format!("[Link {}][ref-{}]\n", i, i));
             } else {
@@ -30,12 +31,12 @@ fn create_test_content(size: usize, ratio: f64) -> String {
     // Create paragraphs
     let num_paragraphs = size / (line_length * 5);
     for _ in 0..num_paragraphs {
-        let num_lines = rng.gen_range(3..7);
+        let num_lines = rng.random_range(3..7);
         for _ in 0..num_lines {
             for _ in 0..words_per_line {
-                let word_size = rng.gen_range(3..word_length);
+                let word_size = rng.random_range(3..word_length);
                 for _ in 0..word_size {
-                    let c = (b'a' + rng.gen_range(0..26)) as char;
+                    let c = (b'a' + rng.random_range(0..26)) as char;
                     content.push(c);
                 }
                 content.push(' ');
@@ -47,7 +48,7 @@ fn create_test_content(size: usize, ratio: f64) -> String {
 
     // Add reference definitions at the end
     for i in 0..100 {
-        if rng.gen::<f64>() < ratio {
+        if rng.random::<f64>() < ratio {
             // Only add a portion based on ratio
             content.push_str(&format!("[ref-{}]: https://example.com/ref-{}\n", i, i));
         }

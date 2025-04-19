@@ -47,7 +47,7 @@ Another paragraph
     // Check each heading's level
     let levels: Vec<Option<u32>> = headings
         .iter()
-        .map(|h| MarkdownElements::get_heading_level(h))
+        .map(MarkdownElements::get_heading_level)
         .collect();
 
     // Regular ATX headings

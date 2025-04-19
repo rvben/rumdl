@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -32,7 +32,7 @@ impl MD043RequiredHeadings {
         while i < lines.len() {
             let line = lines[i];
             let trimmed = line.trim();
-            
+
             // Handle code block state
             if trimmed.len() >= 3 {
                 let first_chars: Vec<char> = trimmed.chars().take(3).collect();
@@ -50,7 +50,7 @@ impl MD043RequiredHeadings {
                     continue;
                 }
             }
-            
+
             // Skip content within code blocks
             if in_code_block {
                 i += 1;
@@ -81,18 +81,18 @@ impl MD043RequiredHeadings {
     fn is_heading(&self, content: &str, line_index: usize) -> bool {
         let lines: Vec<&str> = content.lines().collect();
         let line = lines[line_index];
-        
+
         // If this line is in a code block, it's not a heading
         let mut in_code_block = false;
         let mut code_fence_char = None;
-        
+
         for (idx, curr_line) in lines.iter().enumerate() {
             if idx > line_index {
                 break;
             }
-            
+
             let trimmed = curr_line.trim();
-            
+
             // Handle code block state
             if trimmed.len() >= 3 {
                 let first_chars: Vec<char> = trimmed.chars().take(3).collect();
@@ -109,7 +109,7 @@ impl MD043RequiredHeadings {
                 }
             }
         }
-        
+
         // If we're in a code block, it's not a heading
         if in_code_block {
             return false;
@@ -155,7 +155,7 @@ impl Rule for MD043RequiredHeadings {
             for (i, _) in lines.iter().enumerate() {
                 if self.is_heading(content, i) {
                     warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                        rule_name: Some(self.name()),
                         line: i + 1,
                         column: 1,
                         message: "Heading structure does not match the required structure"
@@ -192,25 +192,25 @@ impl Rule for MD043RequiredHeadings {
     /// Optimized check using document structure
     fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
         let mut warnings = Vec::new();
-        
+
         // If no required headings are specified, the rule is disabled
         if self.headings.is_empty() {
             return Ok(warnings);
         }
-        
+
         // Extract actual headings using document structure
         let lines: Vec<&str> = content.lines().collect();
         let mut actual_headings = Vec::new();
-        
+
         // Detect code blocks
         let mut in_code_block = false;
         let mut code_fence_char = None;
         let mut code_block_lines = Vec::new();
-        
+
         // First identify code block lines
         for (idx, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            
+
             // Handle code block state
             if trimmed.len() >= 3 {
                 let first_chars: Vec<char> = trimmed.chars().take(3).collect();
@@ -226,31 +226,31 @@ impl Rule for MD043RequiredHeadings {
                     }
                 }
             }
-            
+
             // Track lines within code blocks
             if in_code_block {
                 code_block_lines.push(idx);
             }
         }
-        
+
         for (i, &line_num) in structure.heading_lines.iter().enumerate() {
             // Skip headings in front matter
             if structure.is_in_front_matter(line_num) {
                 continue;
             }
-            
+
             let idx = line_num - 1; // Convert to 0-indexed
             if idx >= lines.len() {
                 continue;
             }
-            
+
             // Skip headings in code blocks
             if code_block_lines.contains(&idx) {
                 continue;
             }
-            
+
             let line = lines[idx];
-            
+
             // Extract heading text based on heading style
             let heading_text = if line.trim_start().starts_with('#') {
                 // ATX heading - extract text after '#' marks
@@ -263,16 +263,17 @@ impl Rule for MD043RequiredHeadings {
                 } else {
                     continue;
                 }
-            } else if i + 1 < structure.heading_lines.len() && 
-                      structure.heading_lines[i + 1] == line_num + 1 &&
-                      idx + 1 < lines.len() && 
-                      SETEXT_UNDERLINE.is_match(lines[idx + 1]) {
+            } else if i + 1 < structure.heading_lines.len()
+                && structure.heading_lines[i + 1] == line_num + 1
+                && idx + 1 < lines.len()
+                && SETEXT_UNDERLINE.is_match(lines[idx + 1])
+            {
                 // Setext heading
                 line.trim().to_string()
             } else {
                 line.trim().to_string()
             };
-            
+
             actual_headings.push(heading_text);
         }
 
@@ -297,7 +298,7 @@ impl Rule for MD043RequiredHeadings {
                     if code_block_lines.contains(&idx) {
                         continue;
                     }
-                    
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: *line_num,
@@ -311,7 +312,7 @@ impl Rule for MD043RequiredHeadings {
                     });
                 }
             }
-            
+
             // If we have no warnings but headings don't match (could happen if we have no headings),
             // add a warning at the beginning of the file
             if warnings.is_empty() {
@@ -331,28 +332,28 @@ impl Rule for MD043RequiredHeadings {
 
         Ok(warnings)
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::Heading
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
         // Skip if no heading requirements or content is empty
         if self.headings.is_empty() || content.is_empty() {
             return true;
         }
-        
+
         // We need to properly detect headings in the content
         let lines: Vec<&str> = content.lines().collect();
         let mut has_heading = false;
         let mut in_code_block = false;
         let mut code_fence_char = None;
-        
+
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            
+
             // Handle code block state
             if trimmed.len() >= 3 {
                 let first_chars: Vec<char> = trimmed.chars().take(3).collect();
@@ -369,29 +370,31 @@ impl Rule for MD043RequiredHeadings {
                     continue;
                 }
             }
-            
+
             // Skip content within code blocks
             if in_code_block {
                 continue;
             }
-            
+
             // Check for ATX headings using heading_utils
             if crate::rules::heading_utils::is_heading(line) {
                 has_heading = true;
                 break;
             }
-            
+
             // Check for setext headings (requires next line)
             if i + 1 < lines.len() && crate::rules::heading_utils::is_setext_heading(&lines, i) {
                 has_heading = true;
                 break;
             }
         }
-        
+
         !has_heading
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD043RequiredHeadings {
@@ -410,100 +413,159 @@ mod tests {
         // Create rule with required headings
         let required = vec!["Test Document".to_string(), "Real heading 2".to_string()];
         let rule = MD043RequiredHeadings::new(required);
-        
+
         // Test 1: Basic content with code block
         let content = "# Test Document\n\nThis is regular content.\n\n```markdown\n# This is a heading in a code block\n## Another heading in code block\n```\n\n## Real heading 2\n\nSome content.";
         let actual_headings = rule.extract_headings(content);
-        assert_eq!(actual_headings, vec!["Test Document".to_string(), "Real heading 2".to_string()], "Should extract correct headings and ignore code blocks");
-        
+        assert_eq!(
+            actual_headings,
+            vec!["Test Document".to_string(), "Real heading 2".to_string()],
+            "Should extract correct headings and ignore code blocks"
+        );
+
         // Test 2: Content with invalid headings
         let content = "# Test Document\n\nThis is regular content.\n\n```markdown\n# This is a heading in a code block\n## This should be ignored\n```\n\n## Not Real heading 2\n\nSome content.";
         let actual_headings = rule.extract_headings(content);
-        assert_eq!(actual_headings, vec!["Test Document".to_string(), "Not Real heading 2".to_string()], "Should extract actual headings including mismatched ones");
+        assert_eq!(
+            actual_headings,
+            vec![
+                "Test Document".to_string(),
+                "Not Real heading 2".to_string()
+            ],
+            "Should extract actual headings including mismatched ones"
+        );
     }
 
     #[test]
     fn test_with_document_structure() {
         // Test with required headings
-        let required = vec!["Introduction".to_string(), "Method".to_string(), "Results".to_string()];
+        let required = vec![
+            "Introduction".to_string(),
+            "Method".to_string(),
+            "Results".to_string(),
+        ];
         let rule = MD043RequiredHeadings::new(required);
-        
+
         // Test with matching headings
-        let content = "# Introduction\n\nContent\n\n# Method\n\nMore content\n\n# Results\n\nFinal content";
+        let content =
+            "# Introduction\n\nContent\n\n# Method\n\nMore content\n\n# Results\n\nFinal content";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
-        assert!(warnings.is_empty(), "Expected no warnings for matching headings");
-        
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for matching headings"
+        );
+
         // Test with mismatched headings
         let content = "# Introduction\n\nContent\n\n# Results\n\nSkipped method";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
-        assert!(!warnings.is_empty(), "Expected warnings for mismatched headings");
-        
+        assert!(
+            !warnings.is_empty(),
+            "Expected warnings for mismatched headings"
+        );
+
         // Test with no headings but requirements exist
         let content = "No headings here, just plain text";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
-        assert!(!warnings.is_empty(), "Expected warnings when headings are missing");
-        
+        assert!(
+            !warnings.is_empty(),
+            "Expected warnings when headings are missing"
+        );
+
         // Test with setext headings
         let content = "Introduction\n===========\n\nContent\n\nMethod\n------\n\nMore content\n\nResults\n=======\n\nFinal content";
         let structure = document_structure_from_str(content);
         let warnings = rule.check_with_structure(content, &structure).unwrap();
-        assert!(warnings.is_empty(), "Expected no warnings for matching setext headings");
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for matching setext headings"
+        );
     }
-    
+
     #[test]
     fn test_should_skip_no_false_positives() {
         // Create rule with required headings
         let required = vec!["Test".to_string()];
         let rule = MD043RequiredHeadings::new(required);
-        
+
         // Test 1: Content with '#' character in normal text (not a heading)
         let content = "This paragraph contains a # character but is not a heading";
-        assert!(rule.should_skip(content), "Should skip content with # in normal text");
-        
+        assert!(
+            rule.should_skip(content),
+            "Should skip content with # in normal text"
+        );
+
         // Test 2: Content with code block containing heading-like syntax
-        let content = "Regular paragraph\n\n```markdown\n# This is not a real heading\n```\n\nMore text";
-        assert!(rule.should_skip(content), "Should skip content with heading-like syntax in code blocks");
-        
+        let content =
+            "Regular paragraph\n\n```markdown\n# This is not a real heading\n```\n\nMore text";
+        assert!(
+            rule.should_skip(content),
+            "Should skip content with heading-like syntax in code blocks"
+        );
+
         // Test 3: Content with list items using '-' character
         let content = "Some text\n\n- List item 1\n- List item 2\n\nMore text";
-        assert!(rule.should_skip(content), "Should skip content with list items using dash");
-        
+        assert!(
+            rule.should_skip(content),
+            "Should skip content with list items using dash"
+        );
+
         // Test 4: Content with horizontal rule that uses '---'
         let content = "Some text\n\n---\n\nMore text below the horizontal rule";
-        assert!(rule.should_skip(content), "Should skip content with horizontal rule");
-        
+        assert!(
+            rule.should_skip(content),
+            "Should skip content with horizontal rule"
+        );
+
         // Test 5: Content with equals sign in normal text
         let content = "This is a normal paragraph with equals sign x = y + z";
-        assert!(rule.should_skip(content), "Should skip content with equals sign in normal text");
-        
+        assert!(
+            rule.should_skip(content),
+            "Should skip content with equals sign in normal text"
+        );
+
         // Test 6: Content with dash/minus in normal text
         let content = "This is a normal paragraph with minus sign x - y = z";
-        assert!(rule.should_skip(content), "Should skip content with minus sign in normal text");
+        assert!(
+            rule.should_skip(content),
+            "Should skip content with minus sign in normal text"
+        );
     }
-    
+
     #[test]
     fn test_should_skip_heading_detection() {
         // Create rule with required headings
         let required = vec!["Test".to_string()];
         let rule = MD043RequiredHeadings::new(required);
-        
+
         // Test 1: Content with ATX heading
         let content = "# This is a heading\n\nAnd some content";
-        assert!(!rule.should_skip(content), "Should not skip content with ATX heading");
-        
+        assert!(
+            !rule.should_skip(content),
+            "Should not skip content with ATX heading"
+        );
+
         // Test 2: Content with Setext heading (equals sign)
         let content = "This is a heading\n================\n\nAnd some content";
-        assert!(!rule.should_skip(content), "Should not skip content with Setext heading (=)");
-        
+        assert!(
+            !rule.should_skip(content),
+            "Should not skip content with Setext heading (=)"
+        );
+
         // Test 3: Content with Setext heading (dash)
         let content = "This is a subheading\n------------------\n\nAnd some content";
-        assert!(!rule.should_skip(content), "Should not skip content with Setext heading (-)");
-        
+        assert!(
+            !rule.should_skip(content),
+            "Should not skip content with Setext heading (-)"
+        );
+
         // Test 4: Content with ATX heading with closing hashes
         let content = "## This is a heading ##\n\nAnd some content";
-        assert!(!rule.should_skip(content), "Should not skip content with ATX heading with closing hashes");
+        assert!(
+            !rule.should_skip(content),
+            "Should not skip content with ATX heading with closing hashes"
+        );
     }
 }

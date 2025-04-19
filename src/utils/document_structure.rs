@@ -1,7 +1,7 @@
 use crate::rules::heading_utils::HeadingStyle;
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use fancy_regex::Regex as FancyRegex;
 
 /// A struct that contains pre-computed information about a markdown document structure
 /// to avoid redundant parsing of the same elements by multiple rules.
@@ -509,11 +509,7 @@ impl DocumentStructure {
     #[inline]
     pub fn count_trailing_spaces(line: &str) -> usize {
         // Prepare the string without newline if it ends with one
-        let content = if line.ends_with('\n') {
-            &line[..line.len() - 1]
-        } else {
-            line
-        };
+        let content = line.strip_suffix('\n').unwrap_or(line);
 
         // Count trailing spaces at the end, not including tabs
         let mut space_count = 0;
@@ -654,7 +650,7 @@ impl DocumentStructure {
             // Regex for reference links: [text][id] or [text][] (implicit)
             static ref REFERENCE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\[([^\]]*)\]").unwrap();
             // Regex for shortcut reference links: [text]
-            static ref SHORTCUT_LINK: Regex = Regex::new(r"\[([^\]]+)\](?!\(|\[)").unwrap();
+            static ref SHORTCUT_LINK: FancyRegex = FancyRegex::new(r"\[([^\]]+)\](?!\(|\[)").unwrap();
             // Regex for link definitions: [id]: url
             static ref LINK_DEFINITION: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap();
             // Regex for inline images: ![alt](src)
@@ -1103,7 +1099,8 @@ mod tests {
         assert_eq!(structure.heading_levels, vec![1, 1, 1, 2, 1]);
 
         // Headings in code blocks and front matter (should be ignored)
-        let content = "---\ntitle: Test\n---\n# Heading 1\n\n```\n# Not a heading\n```\n# Heading 2\n";
+        let content =
+            "---\ntitle: Test\n---\n# Heading 1\n\n```\n# Not a heading\n```\n# Heading 2\n";
         let structure = DocumentStructure::new(content);
         assert_eq!(structure.heading_lines, vec![4, 9]);
         assert_eq!(structure.heading_levels, vec![1, 1]);

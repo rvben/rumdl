@@ -725,7 +725,9 @@ impl Rule for MD005ListIndent {
         Ok(warnings)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD005ListIndent {

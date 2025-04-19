@@ -126,7 +126,9 @@ impl Rule for MD042NoEmptyLinks {
         !content.contains('[')
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD042NoEmptyLinks {

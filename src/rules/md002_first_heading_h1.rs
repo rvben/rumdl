@@ -216,18 +216,18 @@ impl Rule for MD002FirstHeadingH1 {
                 "First heading should be level {}, found level {}",
                 self.level, first_heading_level
             );
-            let fix = self.parse_heading(content, first_heading_line)
-                .map(|(_indent, text, _level, style)| {
-                    let replacement = crate::rules::heading_utils::HeadingUtils::convert_heading_style(
-                        &text,
-                        self.level,
-                        style,
-                    );
+            let fix = self.parse_heading(content, first_heading_line).map(
+                |(_indent, text, _level, style)| {
+                    let replacement =
+                        crate::rules::heading_utils::HeadingUtils::convert_heading_style(
+                            &text, self.level, style,
+                        );
                     Fix {
                         range: first_heading_line..first_heading_line,
                         replacement,
                     }
-                });
+                },
+            );
             result.push(LintWarning {
                 message,
                 line: first_heading_line,
@@ -266,7 +266,7 @@ impl Rule for MD002FirstHeadingH1 {
                 if is_setext_h2 && i == first_heading_line - 1 {
                     // Replace with setext h1 and skip underline, preserve heading text and blank lines
                     let heading_text = lines[i].trim_end();
-                    fixed_lines.push(format!("{}", heading_text));
+                    fixed_lines.push(heading_text.to_string());
                     fixed_lines.push("=======".to_string());
                     i += 2;
                     // Preserve any blank lines after the heading underline
@@ -279,7 +279,9 @@ impl Rule for MD002FirstHeadingH1 {
             }
             if i == first_heading_line - 1 {
                 // ATX or closed ATX heading: preserve indentation and closing hashes if present
-                let (indent, text, _level, style) = self.parse_heading(content, i + 1).unwrap_or_else(|| ("".to_string(), "".to_string(), 1, HeadingStyle::Atx));
+                let (indent, text, _level, style) = self
+                    .parse_heading(content, i + 1)
+                    .unwrap_or_else(|| ("".to_string(), "".to_string(), 1, HeadingStyle::Atx));
                 let heading_text = text.trim();
                 match style {
                     HeadingStyle::AtxClosed => {
@@ -315,7 +317,9 @@ impl Rule for MD002FirstHeadingH1 {
             || (!content.contains('#') && !content.contains('=') && !content.contains('-'))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD002FirstHeadingH1 {

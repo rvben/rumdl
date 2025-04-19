@@ -4,7 +4,7 @@ use crate::utils::range_utils::LineIndex;
 
 /// Rule MD039: Spaces inside link text
 ///
-/// This rule is triggered when link text has leading or trailing spaces which can cause 
+/// This rule is triggered when link text has leading or trailing spaces which can cause
 /// unexpected rendering in some Markdown parsers.
 #[derive(Debug, Default)]
 pub struct MD039NoSpaceInLinks;
@@ -19,7 +19,7 @@ impl MD039NoSpaceInLinks {
     fn has_links(&self, content: &str) -> bool {
         content.contains('[') && content.contains("](")
     }
-    
+
     /// Check if the text has leading or trailing spaces, and return the fixed version if so
     #[inline]
     fn check_link_text(&self, text: &str) -> Option<String> {
@@ -129,11 +129,11 @@ impl Rule for MD039NoSpaceInLinks {
     fn description(&self) -> &'static str {
         "Spaces inside link text"
     }
-    
+
     fn category(&self) -> RuleCategory {
         RuleCategory::Link
     }
-    
+
     fn should_skip(&self, content: &str) -> bool {
         // Skip empty content or content without links
         content.is_empty() || !self.has_links(content)
@@ -148,21 +148,21 @@ impl Rule for MD039NoSpaceInLinks {
 
         let mut warnings = Vec::new();
         let line_index = LineIndex::new(content.to_string());
-        
+
         // Process all links from the document structure
         for link in &structure.links {
             if let Some(fixed_text) = self.check_link_text(&link.text) {
                 // Calculate the position for fixing
                 let start_col = link.start_col;
                 let line_num = link.line;
-                
+
                 // Calculate the byte position for the start of the link
                 let start_pos = line_index.line_col_to_byte_range(line_num, start_col).start;
-                
+
                 // Create fixed version of the entire link
                 let original = format!("[{}]({})", link.text, link.url);
                 let fixed = format!("[{}]({})", fixed_text, link.url);
-                
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: line_num,
@@ -176,7 +176,7 @@ impl Rule for MD039NoSpaceInLinks {
                 });
             }
         }
-        
+
         Ok(warnings)
     }
 
@@ -184,7 +184,7 @@ impl Rule for MD039NoSpaceInLinks {
         if self.should_skip(content) {
             return Ok(Vec::new());
         }
-        
+
         // Get document structure for code block detection
         let doc_structure = DocumentStructure::new(content);
         let line_index = LineIndex::new(content.to_string());
@@ -217,7 +217,7 @@ impl Rule for MD039NoSpaceInLinks {
         if self.should_skip(content) {
             return Ok(content.to_string());
         }
-        
+
         // Get document structure for code block detection
         let doc_structure = DocumentStructure::new(content);
         let lines: Vec<&str> = content.lines().collect();
@@ -226,7 +226,7 @@ impl Rule for MD039NoSpaceInLinks {
         for (i, line) in lines.iter().enumerate() {
             let mut line_str = line.to_string();
             let line_num = i + 1;
-            
+
             // Skip lines in code blocks using centralized detection
             if !doc_structure.is_in_code_block(line_num) {
                 for (_, original, fixed) in self.check_line(line) {
@@ -234,7 +234,7 @@ impl Rule for MD039NoSpaceInLinks {
                     line_str = line_str.replace(&original, &fixed);
                 }
             }
-            
+
             result.push_str(&line_str);
             if i < lines.len() - 1 {
                 result.push('\n');
@@ -244,7 +244,9 @@ impl Rule for MD039NoSpaceInLinks {
         Ok(result)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]

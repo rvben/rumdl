@@ -216,7 +216,10 @@ A ![shortcut image].
 [shortcut image]: img.png
     "#;
     let result = rule.check(content).unwrap();
-    assert!(result.is_empty(), "All image styles should be valid by default");
+    assert!(
+        result.is_empty(),
+        "All image styles should be valid by default"
+    );
 
     // Disallow collapsed style
     let rule_no_collapse = MD054LinkImageStyle::new(true, false, true, true, true, true);
@@ -227,12 +230,16 @@ An ![collapsed image][].
 [collapsed image]: img.png
     "#;
     let result = rule_no_collapse.check(content_mix).unwrap();
-    assert_eq!(result.len(), 1, "Should flag disallowed collapsed image style");
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag disallowed collapsed image style"
+    );
     assert_eq!(result[0].line, 3);
     assert!(result[0].message.contains("collapsed"));
 
     // Ensure images are ignored in code spans
-     let content_code = r#"
+    let content_code = r#"
 This has an `![image](img.png)` in inline code.
 And `![collapsed][]`
 And `![full][ref]`
@@ -243,9 +250,11 @@ And `![shortcut]`
 [shortcut]: img.png
     "#;
     let result = rule.check(content_code).unwrap();
-     assert!(result.is_empty(), "Image styles in code spans should be ignored");
+    assert!(
+        result.is_empty(),
+        "Image styles in code spans should be ignored"
+    );
 }
-
 
 #[test]
 fn test_shortcut_edge_cases() {
@@ -264,7 +273,10 @@ Link [full][ref] followed by text.
 [ref]: /full
     "#;
     let result = rule.check(content).unwrap();
-     assert!(result.is_empty(), "Shortcut detection should not interfere with other types");
+    assert!(
+        result.is_empty(),
+        "Shortcut detection should not interfere with other types"
+    );
 
     // Disallow shortcut, ensure others are still detected correctly
     let rule_no_shortcut = MD054LinkImageStyle::new(true, true, true, true, false, true);
@@ -277,8 +289,8 @@ Link [full][ref] followed by text.
 [ref]: /
 [Not okay shortcut]: /
     "#;
-     let result = rule_no_shortcut.check(content_flag_shortcut).unwrap();
-     assert_eq!(result.len(), 1);
-     assert_eq!(result[0].line, 4);
-     assert!(result[0].message.contains("shortcut"));
+    let result = rule_no_shortcut.check(content_flag_shortcut).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 4);
+    assert!(result[0].message.contains("shortcut"));
 }

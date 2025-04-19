@@ -130,7 +130,9 @@ impl Rule for MD024MultipleHeadings {
         content.is_empty() || !content.contains('#')
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD024MultipleHeadings {
@@ -181,7 +183,10 @@ mod tests {
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(result.is_empty(), "Unique headings should not trigger MD024 warnings");
+        assert!(
+            result.is_empty(),
+            "Unique headings should not trigger MD024 warnings"
+        );
 
         // Test with duplicate headings
         let content = "# Heading\n## Subheading\n# Heading";

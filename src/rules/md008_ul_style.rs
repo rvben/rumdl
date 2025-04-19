@@ -349,7 +349,9 @@ impl Rule for MD008ULStyle {
         content.is_empty() || !Self::contains_potential_list_items(content)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD008ULStyle {

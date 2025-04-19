@@ -2,8 +2,8 @@ use crate::utils::fast_hash;
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use lazy_static::lazy_static;
 use fancy_regex::Regex;
+use lazy_static::lazy_static;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
@@ -116,17 +116,18 @@ impl MD044ProperNames {
         let mut cache = self.regex_cache.borrow_mut();
 
         // Use entry API for cleaner cache logic
-        cache.entry(pattern.clone()).or_insert_with(|| {
-            Regex::new(&pattern).unwrap_or_else(|e| {
-                // Provide more context on regex compilation failure
-                panic!(
-                    "Failed to compile regex pattern '{}' for name '{}': {}",
-                    pattern,
-                    name,
-                    e
-                )
+        cache
+            .entry(pattern.clone())
+            .or_insert_with(|| {
+                Regex::new(&pattern).unwrap_or_else(|e| {
+                    // Provide more context on regex compilation failure
+                    panic!(
+                        "Failed to compile regex pattern '{}' for name '{}': {}",
+                        pattern, name, e
+                    )
+                })
             })
-        }).clone()
+            .clone()
     }
 
     // Find all name violations in the content and return positions
@@ -304,5 +305,7 @@ impl Rule for MD044ProperNames {
         Ok(fixed_content)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

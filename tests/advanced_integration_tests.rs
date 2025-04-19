@@ -1,7 +1,7 @@
 use assert_cmd::Command;
 use std::fs;
-use tempfile::tempdir;
 use std::path::PathBuf;
+use tempfile::tempdir;
 
 // Tests that exercise multiple components working together,
 // including CLI, configuration, rule processing, etc.
@@ -235,11 +235,11 @@ Link to [non-existent heading](#nowhere)
     assert.code(1); // Expect issues
 
     // Check for various rule warnings
-    assert!(output.contains("MD022")); 
-    assert!(output.contains("MD023")); 
+    assert!(output.contains("MD022"));
+    assert!(output.contains("MD023"));
     assert!(output.contains("MD033")); // Should be present now
-    assert!(output.contains("MD042")); 
-    assert!(output.contains("MD051")); 
+    assert!(output.contains("MD042"));
+    assert!(output.contains("MD051"));
 
     // Now with fix, using dummy config
     let mut fix_cmd = Command::cargo_bin("rumdl").unwrap();
@@ -308,7 +308,7 @@ fn test_cli_options() {
         .arg(&config_path)
         .assert();
     let default_output = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    assert.code(1); 
+    assert.code(1);
     assert!(default_output.contains("MD022"));
     assert!(default_output.contains("MD033")); // Should be present
     assert!(default_output.contains("MD030")); // *Bad item violates MD030 (Spaces after list markers)
@@ -323,7 +323,7 @@ fn test_cli_options() {
         .arg(&config_path)
         .assert();
     let disabled_output = String::from_utf8(disabled_assert.get_output().stdout.clone()).unwrap();
-    disabled_assert.code(1); 
+    disabled_assert.code(1);
     assert!(!disabled_output.contains("MD022"));
     assert!(!disabled_output.contains("MD033"));
     assert!(disabled_output.contains("MD030")); // MD030 should still be reported
@@ -352,8 +352,9 @@ fn test_cli_options() {
         .arg("--config") // Specify dummy config
         .arg(&config_path)
         .assert();
-    let default_output_options = String::from_utf8(default_assert_options.get_output().stdout.clone()).unwrap();
-    assert!(default_output_options.contains("MD033")); 
+    let default_output_options =
+        String::from_utf8(default_assert_options.get_output().stdout.clone()).unwrap();
+    assert!(default_output_options.contains("MD033"));
     assert!(!default_output_options.contains("MD047")); // Corrected: MD047 should NOT be reported for this file
-    default_assert_options.code(1); 
+    default_assert_options.code(1);
 }

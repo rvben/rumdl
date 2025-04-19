@@ -63,10 +63,10 @@ impl MD034NoBareUrls {
 
         // Check standard markdown links [...] (URL)
         for cap in MARKDOWN_LINK_PATTERN.captures_iter(line) {
-             let link_text_match = cap.get(2);
-             let link_dest_match = cap.get(3);
+            let link_text_match = cap.get(2);
+            let link_dest_match = cap.get(3);
 
-             if let Some(dest_match) = link_dest_match {
+            if let Some(dest_match) = link_dest_match {
                 // Check if the bare URL range is fully contained within the link destination range
                 if dest_match.start() <= url_start && dest_match.end() >= url_end {
                     // Now, check if it's a badge link target (image link inside link text)
@@ -79,8 +79,8 @@ impl MD034NoBareUrls {
                     // If not a badge, but contained within destination, it's a standard link target
                     return true;
                 }
-             }
-         }
+            }
+        }
 
         false // If none of the above conditions met, it might be a bare URL
     }
@@ -136,7 +136,11 @@ impl MD034NoBareUrls {
     }
 
     // New: check_with_structure using DocumentStructure for code block and code span detection
-    pub fn check_with_structure(&self, content: &str, structure: &crate::utils::document_structure::DocumentStructure) -> LintResult {
+    pub fn check_with_structure(
+        &self,
+        content: &str,
+        structure: &crate::utils::document_structure::DocumentStructure,
+    ) -> LintResult {
         if self.should_skip(content) {
             return Ok(vec![]);
         }
@@ -258,7 +262,9 @@ impl Rule for MD034NoBareUrls {
         !regex_cache::contains_url(content)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]

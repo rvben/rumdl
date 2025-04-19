@@ -1,8 +1,7 @@
+use rumdl::config::Config; // Ensure Config is imported
 use rumdl::rules::*;
 use std::fs;
-use rumdl::config::Config; // Ensure Config is imported
-use tempfile::tempdir; // For temporary directory
-use std::env; // Add back env import
+use tempfile::tempdir; // For temporary directory // Add back env import
 
 #[test]
 fn test_load_config_file() {
@@ -31,7 +30,11 @@ tables = true
     // Convert PathBuf to &str for load_config if needed, or update load_config signature
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
     let config_result = rumdl::config::load_config(Some(config_path_str));
-    assert!(config_result.is_ok(), "Config loading should succeed. Error: {:?}", config_result.err());
+    assert!(
+        config_result.is_ok(),
+        "Config loading should succeed. Error: {:?}",
+        config_result.err()
+    );
 
     let config = config_result.unwrap();
 
@@ -79,12 +82,30 @@ fn test_default_config() {
     let config = Config::default();
 
     // Check default global settings
-    assert!(config.global.include.is_empty(), "Default include should be empty");
-    assert!(config.global.exclude.is_empty(), "Default exclude should be empty");
-    assert!(config.global.enable.is_empty(), "Default enable should be empty");
-    assert!(config.global.disable.is_empty(), "Default disable should be empty");
-    assert!(!config.global.ignore_gitignore, "Default ignore_gitignore should be false");
-    assert!(config.global.respect_gitignore, "Default respect_gitignore should be true");
+    assert!(
+        config.global.include.is_empty(),
+        "Default include should be empty"
+    );
+    assert!(
+        config.global.exclude.is_empty(),
+        "Default exclude should be empty"
+    );
+    assert!(
+        config.global.enable.is_empty(),
+        "Default enable should be empty"
+    );
+    assert!(
+        config.global.disable.is_empty(),
+        "Default disable should be empty"
+    );
+    assert!(
+        !config.global.ignore_gitignore,
+        "Default ignore_gitignore should be false"
+    );
+    assert!(
+        config.global.respect_gitignore,
+        "Default respect_gitignore should be true"
+    );
 
     // Check that the default rules map is empty
     assert!(config.rules.is_empty(), "Default rules map should be empty");
@@ -106,7 +127,11 @@ fn test_create_default_config() {
     // Create the default config using the full path
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
     let result = rumdl::config::create_default_config(config_path_str);
-    assert!(result.is_ok(), "Creating default config should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Creating default config should succeed: {:?}",
+        result.err()
+    );
 
     // Verify the file exists using the full path
     assert!(
@@ -118,7 +143,8 @@ fn test_create_default_config() {
     let config_result = rumdl::config::load_config(Some(config_path_str));
     assert!(
         config_result.is_ok(),
-        "Loading created config should succeed: {:?}", config_result.err()
+        "Loading created config should succeed: {:?}",
+        config_result.err()
     );
     // Optional: Add more assertions about the loaded default config content if needed
     // No explicit cleanup needed, tempdir handles it.
@@ -258,7 +284,8 @@ enable = "not_an_array"
     if let Err(err) = config_result {
         assert!(
             err.to_string().contains("Failed to parse TOML"),
-            "Error message should indicate TOML parsing failure, got: {}", err
+            "Error message should indicate TOML parsing failure, got: {}",
+            err
         );
     }
 
@@ -288,17 +315,19 @@ style = "dash"
         .expect("Failed to load integration config");
 
     // Test MD013 behavior with line_length = 60
-    let mut rules_md013: Vec<Box<dyn rumdl::rule::Rule>> = vec![Box::new(MD013LineLength::default())];
+    let mut rules_md013: Vec<Box<dyn rumdl::rule::Rule>> =
+        vec![Box::new(MD013LineLength::default())];
     // Apply config specifically for MD013 test
     if let Some(pos) = rules_md013.iter().position(|r| r.name() == "MD013") {
         let line_length =
             rumdl::config::get_rule_config_value::<usize>(&config, "MD013", "line_length")
                 .unwrap_or(80);
-         rules_md013[pos] = Box::new(MD013LineLength::new(line_length, true, false, true, false));
+        rules_md013[pos] = Box::new(MD013LineLength::new(line_length, true, false, true, false));
     }
 
     let short_content = "# Test\nThis line is short.";
-    let long_content = "# Test\nThis line is definitely longer than the sixty characters limit we set.";
+    let long_content =
+        "# Test\nThis line is definitely longer than the sixty characters limit we set.";
 
     let warnings_short = rumdl::lint(short_content, &rules_md013, false).unwrap();
     let warnings_long = rumdl::lint(long_content, &rules_md013, false).unwrap();

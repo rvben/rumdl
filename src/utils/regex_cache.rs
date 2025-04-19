@@ -1,10 +1,9 @@
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
 /// A module that provides cached regex patterns for use across multiple rules
 /// This helps avoid recompiling the same patterns repeatedly, improving performance
-
-/// Macro for lazily creating a regex pattern
 #[macro_export]
 macro_rules! regex_lazy {
     ($pattern:expr) => {{
@@ -41,8 +40,8 @@ lazy_static! {
     pub static ref INDENTED_CODE_BLOCK_REGEX: Regex = Regex::new(r"^(\s{4,})(.*)$").unwrap();
 
     // Emphasis patterns
-    pub static ref EMPHASIS_REGEX: Regex = Regex::new(r"(\s|^)(\*{1,2}|_{1,2})(?=\S)(.+?)(?<=\S)(\2)(\s|$)").unwrap();
-    pub static ref SPACE_IN_EMPHASIS_REGEX: Regex = Regex::new(r"(\*|_)(\s+)(.+?)(\s+)(\1)").unwrap();
+    pub static ref EMPHASIS_REGEX: FancyRegex = FancyRegex::new(r"(\s|^)(\*{1,2}|_{1,2})(?=\S)(.+?)(?<=\S)(\2)(\s|$)").unwrap();
+    pub static ref SPACE_IN_EMPHASIS_REGEX: FancyRegex = FancyRegex::new(r"(\*|_)(\s+)(.+?)(\s+)(\1)").unwrap();
 
     // HTML patterns
     pub static ref HTML_TAG_REGEX: Regex = Regex::new(r"<([a-zA-Z][^>]*)>").unwrap();
@@ -65,7 +64,6 @@ lazy_static! {
 }
 
 /// Utility functions for quick content checks
-
 /// Check if content contains any headings (quick check before regex)
 pub fn has_heading_markers(content: &str) -> bool {
     content.contains('#')

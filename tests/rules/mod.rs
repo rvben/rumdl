@@ -67,5 +67,5 @@ mod md054_unicode_test;
 // Test cases for MD003 - Heading Style
 #[test]
 fn test_md003_fix_consistent_style() {
-// ... existing code ...
+    // ... existing code ...
 }

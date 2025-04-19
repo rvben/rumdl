@@ -308,5 +308,7 @@ impl Rule for MD052ReferenceLinkImages {
         Ok(content.to_string())
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

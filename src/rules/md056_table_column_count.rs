@@ -266,5 +266,7 @@ impl Rule for MD056TableColumnCount {
         }
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

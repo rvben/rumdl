@@ -196,7 +196,9 @@ impl Rule for MD040FencedCodeLanguage {
         content.is_empty() || (!content.contains("```") && !content.contains("~~~"))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD040FencedCodeLanguage {

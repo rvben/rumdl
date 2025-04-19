@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::document_structure::DocumentStructure;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::utils::document_structure::DocumentStructure;
-use crate::rule::{Rule, LintResult, LintWarning, Severity, LintError};
+use std::collections::{HashMap, HashSet};
 
 lazy_static! {
     // Link reference format: [text][reference]
@@ -82,17 +82,9 @@ lazy_static! {
 /// When fixing issues, this rule removes unused reference definitions while preserving
 /// the document's structure, including handling proper blank line formatting around
 /// the removed definitions.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD053LinkImageReferenceDefinitions {
     ignored_definitions: HashSet<String>,
-}
-
-impl Default for MD053LinkImageReferenceDefinitions {
-    fn default() -> Self {
-        Self {
-            ignored_definitions: HashSet::new(),
-        }
-    }
 }
 
 impl MD053LinkImageReferenceDefinitions {
@@ -150,7 +142,10 @@ impl MD053LinkImageReferenceDefinitions {
                 }
                 // Normalize reference id: trim, unescape, and lowercase
                 let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
-                definitions.entry(normalized_id).or_insert_with(Vec::new).push((start_line, end_line));
+                definitions
+                    .entry(normalized_id)
+                    .or_default()
+                    .push((start_line, end_line));
                 continue;
             }
             i += 1;
@@ -375,5 +370,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         Ok(result.join("\n"))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

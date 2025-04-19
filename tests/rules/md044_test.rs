@@ -140,5 +140,8 @@ fn test_fix_code_block_included() {
     let rule = MD044ProperNames::new(names, false); // Include code blocks
     let content = "```rust\nlet lang = \"rust\";\n```\n\nThis is rust code.";
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "```rust\nlet lang = \"Rust\";\n```\n\nThis is Rust code.");
+    assert_eq!(
+        fixed,
+        "```rust\nlet lang = \"Rust\";\n```\n\nThis is Rust code."
+    );
 }

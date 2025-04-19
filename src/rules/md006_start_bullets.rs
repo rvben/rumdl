@@ -58,8 +58,8 @@ impl MD006StartBullets {
                 // If prev_indent > current_indent, it's a child of a sibling, ignore it and keep searching.
             }
             // If we hit non-list content, stop searching
-            if !Self::is_bullet_list_item(lines[i]).is_some() {
-                 break;
+            if Self::is_bullet_list_item(lines[i]).is_none() {
+                break;
             }
         }
         None
@@ -96,14 +96,15 @@ impl Rule for MD006StartBullets {
                 } else {
                     match Self::find_relevant_previous_bullet(&lines, line_idx) {
                         Some((prev_idx, prev_indent)) => {
-                            if prev_indent < indent {
-                                // Valid nesting if previous item was valid
-                                is_valid = valid_bullet_lines[prev_idx];
-                            } else if prev_indent == indent {
-                                // Valid sibling only if previous was valid
-                                is_valid = valid_bullet_lines[prev_idx];
+                            match prev_indent.cmp(&indent) {
+                                std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
+                                    // Valid nesting or sibling if previous item was valid
+                                    is_valid = valid_bullet_lines[prev_idx];
+                                }
+                                std::cmp::Ordering::Greater => {
+                                    // remains invalid
+                                }
                             }
-                            // else prev_indent > indent, remains invalid
                         }
                         None => {
                             // Indented item with no previous bullet remains invalid
@@ -222,14 +223,15 @@ impl Rule for MD006StartBullets {
                 } else {
                     match Self::find_relevant_previous_bullet(&lines, line_idx) {
                         Some((prev_idx, prev_indent)) => {
-                            if prev_indent < indent {
-                                // Valid nesting if previous item was valid
-                                is_valid = valid_bullet_lines[prev_idx];
-                            } else if prev_indent == indent {
-                                // Valid sibling only if previous was valid
-                                is_valid = valid_bullet_lines[prev_idx];
+                            match prev_indent.cmp(&indent) {
+                                std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
+                                    // Valid nesting or sibling if previous item was valid
+                                    is_valid = valid_bullet_lines[prev_idx];
+                                }
+                                std::cmp::Ordering::Greater => {
+                                    // remains invalid
+                                }
                             }
-                            // else prev_indent > indent, remains invalid
                         }
                         None => {
                             // Indented item with no previous bullet remains invalid
@@ -277,7 +279,9 @@ impl Rule for MD006StartBullets {
             || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD006StartBullets {
@@ -298,7 +302,9 @@ mod tests {
         // Test with properly formatted lists
         let content_valid = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
         let structure_valid = DocumentStructure::new(content_valid);
-        let result_valid = rule.check_with_structure(content_valid, &structure_valid).unwrap();
+        let result_valid = rule
+            .check_with_structure(content_valid, &structure_valid)
+            .unwrap();
         assert!(
             result_valid.is_empty(),
             "Properly formatted lists should not generate warnings, found: {:?}",
@@ -308,7 +314,9 @@ mod tests {
         // Test with improperly indented list - adjust expectations based on actual implementation
         let content_invalid = "  * Item 1\n  * Item 2\n    * Nested item";
         let structure = DocumentStructure::new(content_invalid);
-        let result = rule.check_with_structure(content_invalid, &structure).unwrap();
+        let result = rule
+            .check_with_structure(content_invalid, &structure)
+            .unwrap();
 
         // If no warnings are generated, the test should be updated to match implementation behavior
         assert!(

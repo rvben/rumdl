@@ -1,5 +1,5 @@
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
-use regex::Regex;
 
 /// The style for strong emphasis (MD050)
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -14,12 +14,12 @@ pub enum StrongStyle {
 }
 
 /// Get regex pattern for finding strong emphasis markers
-pub fn get_strong_pattern() -> &'static Regex {
+pub fn get_strong_pattern() -> &'static FancyRegex {
     lazy_static! {
-        static ref STRONG_PATTERN: Regex =
-            Regex::new(r"(\*\*|__)(?!\s)(?:(?!\1).)+?(?<!\s)(\1)").unwrap();
+        static ref STRONG_REGEX: FancyRegex =
+            FancyRegex::new(r"(\*\*|__)(?!\s)(?:(?!\1).)+?(?<!\s)(\1)").unwrap();
     }
-    &STRONG_PATTERN
+    &STRONG_REGEX
 }
 
 /// Determine the strong style from a marker

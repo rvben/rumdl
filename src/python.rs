@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 
 /// Python module for rumdl
 #[pymodule]
-fn rumdl(_py: Python, m: &PyModule) -> PyResult<()> {
+fn rumdl(_py: Python, m: &Bound<PyModule>) -> PyResult<()> {
     // Add version
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 

@@ -200,18 +200,22 @@ impl FrontMatterUtils {
             let line = line.trim();
 
             // Handle indentation changes for nested fields
-            if line_indent > indent_level {
-                // Going deeper
-                indent_level = line_indent;
-            } else if line_indent < indent_level {
-                // Going back up
-                indent_level = line_indent;
-                // Remove last nested level from prefix
-                if let Some(last_dot) = current_prefix.rfind('.') {
-                    current_prefix.truncate(last_dot);
-                } else {
-                    current_prefix.clear();
+            match line_indent.cmp(&indent_level) {
+                std::cmp::Ordering::Greater => {
+                    // Going deeper
+                    indent_level = line_indent;
                 }
+                std::cmp::Ordering::Less => {
+                    // Going back up
+                    indent_level = line_indent;
+                    // Remove last nested level from prefix
+                    if let Some(last_dot) = current_prefix.rfind('.') {
+                        current_prefix.truncate(last_dot);
+                    } else {
+                        current_prefix.clear();
+                    }
+                }
+                std::cmp::Ordering::Equal => {}
             }
 
             match front_matter_type {
@@ -237,13 +241,12 @@ impl FrontMatterUtils {
                         let key = captures.get(1).unwrap().as_str().trim();
                         let value = captures.get(2).unwrap().as_str().trim();
 
-                        if key.ends_with(':') {
+                        if let Some(stripped) = key.strip_suffix(':') {
                             // This is a nested field marker
                             if current_prefix.is_empty() {
-                                current_prefix = key[..key.len() - 1].to_string();
+                                current_prefix = stripped.to_string();
                             } else {
-                                current_prefix =
-                                    format!("{}.{}", current_prefix, &key[..key.len() - 1]);
+                                current_prefix = format!("{}.{}", current_prefix, stripped);
                             }
                         } else {
                             // This is a field with a value
@@ -253,14 +256,10 @@ impl FrontMatterUtils {
                                 format!("{}.{}", current_prefix, key)
                             };
                             // Strip quotes if present
-                            let value = if value.starts_with('"')
-                                && value.ends_with('"')
-                                && value.len() >= 2
-                            {
-                                &value[1..value.len() - 1]
-                            } else {
-                                value
-                            };
+                            let value = value
+                                .strip_prefix('"')
+                                .and_then(|v| v.strip_suffix('"'))
+                                .unwrap_or(value);
                             fields.insert(full_key, value.to_string());
                         }
                     }

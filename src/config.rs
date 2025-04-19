@@ -47,7 +47,7 @@ pub struct GlobalConfig {
     /// Ignore .gitignore file
     #[serde(default)]
     pub ignore_gitignore: bool,
-    
+
     /// Respect .gitignore files when scanning directories
     #[serde(default = "default_respect_gitignore")]
     pub respect_gitignore: bool,
@@ -85,7 +85,7 @@ pub fn load_config(config_path: Option<&str>) -> Result<Config, ConfigError> {
             return load_config_from_file(filename);
         }
     }
-    
+
     // Check for pyproject.toml
     if Path::new("pyproject.toml").exists() {
         return load_config_from_pyproject("pyproject.toml");
@@ -115,13 +115,13 @@ fn load_config_from_pyproject(path: &str) -> Result<Config, ConfigError> {
         Ok(content) => {
             // Parse the entire pyproject.toml
             let pyproject: toml::Value = toml::from_str(&content)?;
-            
+
             // Try to extract [tool.rumdl] section
             match pyproject.get("tool").and_then(|t| t.get("rumdl")) {
                 Some(rumdl_config) => {
                     // Create a new Config with defaults
                     let mut config = Config::default();
-                    
+
                     // Parse the complete section into our configuration struct
                     if let Some(rumdl_table) = rumdl_config.as_table() {
                         // Extract global options from root level
@@ -130,85 +130,108 @@ fn load_config_from_pyproject(path: &str) -> Result<Config, ConfigError> {
                                 config.global.enable = values;
                             }
                         }
-                        
+
                         if let Some(disable) = rumdl_table.get("disable") {
                             if let Ok(values) = Vec::<String>::deserialize(disable.clone()) {
                                 config.global.disable = values;
                             }
                         }
-                        
+
                         if let Some(include) = rumdl_table.get("include") {
                             if let Ok(values) = Vec::<String>::deserialize(include.clone()) {
                                 config.global.include = values;
                             }
                         }
-                        
+
                         if let Some(exclude) = rumdl_table.get("exclude") {
                             if let Ok(values) = Vec::<String>::deserialize(exclude.clone()) {
                                 config.global.exclude = values;
                             }
                         }
-                        
-                        if let Some(ignore_gitignore) = rumdl_table.get("ignore-gitignore")
-                            .or_else(|| rumdl_table.get("ignore_gitignore")) {
+
+                        if let Some(ignore_gitignore) = rumdl_table
+                            .get("ignore-gitignore")
+                            .or_else(|| rumdl_table.get("ignore_gitignore"))
+                        {
                             if let Ok(value) = bool::deserialize(ignore_gitignore.clone()) {
                                 config.global.ignore_gitignore = value;
                             }
                         }
-                        
-                        if let Some(respect_gitignore) = rumdl_table.get("respect-gitignore")
-                            .or_else(|| rumdl_table.get("respect_gitignore")) {
+
+                        if let Some(respect_gitignore) = rumdl_table
+                            .get("respect-gitignore")
+                            .or_else(|| rumdl_table.get("respect_gitignore"))
+                        {
                             if let Ok(value) = bool::deserialize(respect_gitignore.clone()) {
                                 config.global.respect_gitignore = value;
                             }
                         }
-                        
+
                         // Handle line-length special case
-                        if let Some(line_length) = rumdl_table.get("line-length")
-                            .or_else(|| rumdl_table.get("line_length")) {
+                        if let Some(line_length) = rumdl_table
+                            .get("line-length")
+                            .or_else(|| rumdl_table.get("line_length"))
+                        {
                             // Create MD013 rule config if it doesn't exist
                             if !config.rules.contains_key("MD013") {
-                                config.rules.insert("MD013".to_string(), RuleConfig::default());
+                                config
+                                    .rules
+                                    .insert("MD013".to_string(), RuleConfig::default());
                             }
-                            
+
                             // Add line_length to the MD013 section
                             if let Some(rule_config) = config.rules.get_mut("MD013") {
-                                rule_config.values.insert("line_length".to_string(), line_length.clone());
+                                rule_config
+                                    .values
+                                    .insert("line_length".to_string(), line_length.clone());
                             }
                         }
-                        
+
                         // Extract rule-specific configurations
                         for (key, value) in rumdl_table {
                             // Skip keys that we've already processed as global options
-                            if ["enable", "disable", "include", "exclude", "ignore-gitignore", 
-                                "ignore_gitignore", "line-length", "line_length", 
-                                "respect-gitignore", "respect_gitignore"].contains(&key.as_str()) {
+                            if [
+                                "enable",
+                                "disable",
+                                "include",
+                                "exclude",
+                                "ignore-gitignore",
+                                "ignore_gitignore",
+                                "line-length",
+                                "line_length",
+                                "respect-gitignore",
+                                "respect_gitignore",
+                            ]
+                            .contains(&key.as_str())
+                            {
                                 continue;
                             }
-                            
+
                             // If it's a table, treat it as a rule configuration
                             if let Some(rule_table) = value.as_table() {
                                 let mut rule_config = RuleConfig::default();
-                                
+
                                 // Add all values from the table to the rule config
                                 for (rule_key, rule_value) in rule_table {
-                                    rule_config.values.insert(rule_key.to_string(), rule_value.clone());
+                                    rule_config
+                                        .values
+                                        .insert(rule_key.to_string(), rule_value.clone());
                                 }
-                                
+
                                 // Add to the config
                                 config.rules.insert(key.to_string(), rule_config);
                             }
                         }
                     }
-                    
+
                     Ok(config)
-                },
+                }
                 None => {
                     // No rumdl configuration found in pyproject.toml
                     Ok(Config::default())
                 }
             }
-        },
+        }
         Err(err) => Err(ConfigError::IoError {
             source: err,
             path: path.to_string(),
@@ -378,7 +401,7 @@ mod tests {
     fn test_pyproject_toml_root_level_config() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join("pyproject.toml");
-        
+
         // Create a test pyproject.toml with root-level configuration
         let content = r#"
 [tool.rumdl]
@@ -389,43 +412,46 @@ include = ["docs/*.md"]
 exclude = ["node_modules"]
 respect-gitignore = true
         "#;
-        
+
         fs::write(&config_path, content).unwrap();
-        
+
         // Load the config
         let config = load_config_from_pyproject(config_path.to_str().unwrap()).unwrap();
-        
+
         // Check global settings
         assert_eq!(config.global.disable, vec!["MD033".to_string()]);
-        assert_eq!(config.global.enable, vec!["MD001".to_string(), "MD004".to_string()]);
+        assert_eq!(
+            config.global.enable,
+            vec!["MD001".to_string(), "MD004".to_string()]
+        );
         assert_eq!(config.global.include, vec!["docs/*.md".to_string()]);
         assert_eq!(config.global.exclude, vec!["node_modules".to_string()]);
-        assert_eq!(config.global.respect_gitignore, true);
-        
+        assert!(config.global.respect_gitignore);
+
         // Check line_length was correctly added to MD013
         let line_length = get_rule_config_value::<usize>(&config, "MD013", "line_length");
         assert_eq!(line_length, Some(120));
     }
-    
+
     #[test]
     fn test_pyproject_toml_snake_case_and_kebab_case() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join("pyproject.toml");
-        
+
         // Test with both kebab-case and snake_case variants
         let content = r#"
 [tool.rumdl]
 line_length = 150
 respect_gitignore = true
         "#;
-        
+
         fs::write(&config_path, content).unwrap();
-        
+
         // Load the config
         let config = load_config_from_pyproject(config_path.to_str().unwrap()).unwrap();
-        
+
         // Check settings were correctly loaded
-        assert_eq!(config.global.respect_gitignore, true);
+        assert!(config.global.respect_gitignore);
         let line_length = get_rule_config_value::<usize>(&config, "MD013", "line_length");
         assert_eq!(line_length, Some(150));
     }

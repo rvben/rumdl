@@ -8,7 +8,8 @@ use std::collections::HashSet;
 
 lazy_static! {
     static ref ATX_HEADING_REGEX: Regex = Regex::new(r"^(#{1,6})\s+(.+?)(?:\s+#*\s*)?$").unwrap();
-    static ref SETEXT_HEADING_REGEX: Regex = Regex::new(r"^([^\n]+)\n([=\-])\2+\s*$").unwrap();
+    static ref SETEXT_HEADING_REGEX: FancyRegex =
+        FancyRegex::new(r"^([^\n]+)\n([=\-])\2+\s*$").unwrap();
     static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
     static ref TOC_SECTION_START: Regex =
         Regex::new(r"^#+\s*(?:Table of Contents|Contents|TOC)\s*$").unwrap();
@@ -207,7 +208,10 @@ impl Rule for MD051LinkFragments {
             }
 
             // Use regex to find all links with fragments
-            if let Ok(caps) = LINK_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+            if let Ok(caps) = LINK_REGEX
+                .captures_iter(line)
+                .collect::<Result<Vec<_>, _>>()
+            {
                 for cap in caps {
                     let full_match = cap.get(0).unwrap();
                     let url = cap.get(2).map(|m| m.as_str()).unwrap_or("");
@@ -229,7 +233,10 @@ impl Rule for MD051LinkFragments {
                             rule_name: Some(self.name()),
                             line: line_num + 1,
                             column: full_match.start() + 1,
-                            message: format!("Link fragment '#{}' does not exist in document headings.", fragment),
+                            message: format!(
+                                "Link fragment '#{}' does not exist in document headings.",
+                                fragment
+                            ),
                             severity: Severity::Warning,
                             fix: None,
                         });
@@ -245,5 +252,7 @@ impl Rule for MD051LinkFragments {
         Ok(content.to_string())
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

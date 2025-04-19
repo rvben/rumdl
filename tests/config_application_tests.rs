@@ -95,7 +95,7 @@ fn test_apply_rule_configs() {
     let mut rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD013LineLength::default()),
         Box::new(MD004UnorderedListStyle::default()),
-        Box::new(MD001HeadingIncrement::default()), // Not configured
+        Box::new(MD001HeadingIncrement), // Not configured
     ];
 
     // Create a test config
@@ -299,7 +299,7 @@ style = "dash"
 
     // Create our rules (similar to what get_enabled_rules would do)
     let mut rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD001HeadingIncrement::default()),
+        Box::new(MD001HeadingIncrement),
         Box::new(MD004UnorderedListStyle::default()),
         Box::new(MD013LineLength::default()),
     ];
@@ -363,7 +363,7 @@ line_length = 100
 
     // Create our rules (similar to what get_enabled_rules would do)
     let mut rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD001HeadingIncrement::default()),
+        Box::new(MD001HeadingIncrement),
         Box::new(MD004UnorderedListStyle::default()),
         Box::new(MD013LineLength::default()),
     ];
@@ -386,7 +386,7 @@ line_length = 100
             for rule_name in &config.global.enable {
                 match rule_name.as_str() {
                     "MD013" => rules.push(Box::new(MD013LineLength::default())),
-                    "MD001" => rules.push(Box::new(MD001HeadingIncrement::default())),
+                    "MD001" => rules.push(Box::new(MD001HeadingIncrement)),
                     "MD004" => rules.push(Box::new(MD004UnorderedListStyle::default())),
                     _ => {}
                 }

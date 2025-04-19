@@ -1,14 +1,14 @@
-use clap::{Parser, Subcommand, Args};
+use clap::{Args, Parser, Subcommand};
 use colored::*;
 use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
-use std::io::{self, Write};
+use std::collections::HashSet;
+use std::error::Error;
 use std::fs;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process;
 use std::time::Instant;
-use std::error::Error;
-use std::collections::HashSet;
 
 use rumdl::rule::Rule;
 use rumdl::rules::code_block_utils::CodeBlockStyle;
@@ -16,9 +16,7 @@ use rumdl::rules::code_fence_utils::CodeFenceStyle;
 use rumdl::rules::emphasis_style::EmphasisStyle;
 use rumdl::rules::strong_style::StrongStyle;
 use rumdl::rules::*;
-use rumdl::{
-    MD046CodeBlockStyle, MD048CodeFenceStyle, MD049EmphasisStyle, MD050StrongStyle,
-};
+use rumdl::{MD046CodeBlockStyle, MD048CodeFenceStyle, MD049EmphasisStyle, MD050StrongStyle};
 
 mod config;
 
@@ -61,11 +59,21 @@ struct Cli {
     include: Option<String>,
 
     /// Ignore .gitignore files when scanning directories
-    #[arg(long, default_value = "false", help = "Ignore .gitignore files when scanning directories (does not apply to explicitly provided paths)", hide = true)]
+    #[arg(
+        long,
+        default_value = "false",
+        help = "Ignore .gitignore files when scanning directories (does not apply to explicitly provided paths)",
+        hide = true
+    )]
     ignore_gitignore: bool,
 
     /// Respect .gitignore files when scanning directories (takes precedence over ignore_gitignore)
-    #[arg(long, default_value = "true", help = "Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)", hide = true)]
+    #[arg(
+        long,
+        default_value = "true",
+        help = "Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)",
+        hide = true
+    )]
     respect_gitignore: bool,
 
     /// Show detailed output
@@ -129,11 +137,19 @@ struct CheckArgs {
     include: Option<String>,
 
     /// Ignore .gitignore files when scanning directories
-    #[arg(long, default_value = "false", help = "Ignore .gitignore files when scanning directories (does not apply to explicitly provided paths)")]
+    #[arg(
+        long,
+        default_value = "false",
+        help = "Ignore .gitignore files when scanning directories (does not apply to explicitly provided paths)"
+    )]
     ignore_gitignore: bool,
 
     /// Respect .gitignore files when scanning directories (takes precedence over ignore_gitignore)
-    #[arg(long, default_value = "true", help = "Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)")]
+    #[arg(
+        long,
+        default_value = "true",
+        help = "Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)"
+    )]
     respect_gitignore: bool,
 
     /// Show detailed output
@@ -174,18 +190,19 @@ fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
             strict,
         ));
     }
-    
+
     // Replace MD043 with configured instance
     if let Some(pos) = rules.iter().position(|r| r.name() == "MD043") {
         let mut headings =
             config::get_rule_config_value::<Vec<String>>(config, "MD043", "headings")
-                .unwrap_or_else(Vec::new);
-        
+                .unwrap_or_default();
+
         // Strip leading '#' and spaces from the configured headings to match the format of extracted headings
-        headings = headings.iter().map(|h| {
-            h.trim_start_matches(|c| c == '#' || c == ' ').to_string()
-        }).collect();
-        
+        headings = headings
+            .iter()
+            .map(|h| h.trim_start_matches(['#', ' ']).to_string())
+            .collect();
+
         rules[pos] = Box::new(MD043RequiredHeadings::new(headings));
     }
 
@@ -193,7 +210,7 @@ fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
     if let Some(pos) = rules.iter().position(|r| r.name() == "MD053") {
         let ignored_definitions =
             config::get_rule_config_value::<Vec<String>>(config, "MD053", "ignored_definitions")
-                .unwrap_or_else(Vec::new);
+                .unwrap_or_default();
         rules[pos] = Box::new(MD053LinkImageReferenceDefinitions::new(ignored_definitions));
     }
 
@@ -201,66 +218,70 @@ fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &config::Config) {
 }
 
 // Get a complete set of enabled rules based on CLI options and config
-fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &config::Config) -> Vec<Box<dyn Rule>> {
+fn get_enabled_rules_from_checkargs(
+    args: &CheckArgs,
+    config: &config::Config,
+) -> Vec<Box<dyn Rule>> {
     // 1. Initialize all available rules
-    let mut all_rules: Vec<Box<dyn Rule>> = Vec::new();
-    all_rules.push(Box::new(MD001HeadingIncrement));
-    all_rules.push(Box::new(MD002FirstHeadingH1::default()));
-    all_rules.push(Box::new(MD003HeadingStyle::default()));
-    all_rules.push(Box::new(MD004UnorderedListStyle::default()));
-    all_rules.push(Box::new(MD005ListIndent));
-    all_rules.push(Box::new(MD006StartBullets));
-    all_rules.push(Box::new(MD007ULIndent::default()));
-    all_rules.push(Box::new(MD009TrailingSpaces::default()));
-    all_rules.push(Box::new(MD010NoHardTabs::default()));
-    all_rules.push(Box::new(MD011ReversedLink {}));
-    all_rules.push(Box::new(MD012NoMultipleBlanks::default()));
-    all_rules.push(Box::new(MD013LineLength::default()));
-    all_rules.push(Box::new(MD014CommandsShowOutput::default()));
-    all_rules.push(Box::new(MD015NoMissingSpaceAfterListMarker::default()));
-    all_rules.push(Box::new(MD016NoMultipleSpaceAfterListMarker::default()));
-    all_rules.push(Box::new(MD017NoEmphasisAsHeading));
-    all_rules.push(Box::new(MD018NoMissingSpaceAtx {}));
-    all_rules.push(Box::new(MD019NoMultipleSpaceAtx {}));
-    all_rules.push(Box::new(MD020NoMissingSpaceClosedAtx {}));
-    all_rules.push(Box::new(MD021NoMultipleSpaceClosedAtx {}));
-    all_rules.push(Box::new(MD022BlanksAroundHeadings::default()));
-    all_rules.push(Box::new(MD023HeadingStartLeft {}));
-    all_rules.push(Box::new(MD024MultipleHeadings::default()));
-    all_rules.push(Box::new(MD025SingleTitle::default()));
-    all_rules.push(Box::new(MD026NoTrailingPunctuation::default()));
-    all_rules.push(Box::new(MD027MultipleSpacesBlockquote {}));
-    all_rules.push(Box::new(MD028NoBlanksBlockquote {}));
-    all_rules.push(Box::new(MD029OrderedListPrefix::default()));
-    all_rules.push(Box::new(MD030ListMarkerSpace::default()));
-    all_rules.push(Box::new(MD031BlanksAroundFences {}));
-    all_rules.push(Box::new(MD032BlanksAroundLists {}));
-    all_rules.push(Box::new(MD033NoInlineHtml::default()));
-    all_rules.push(Box::new(MD034NoBareUrls {}));
-    all_rules.push(Box::new(MD035HRStyle::default()));
-    all_rules.push(Box::new(MD036NoEmphasisOnlyFirst {}));
-    all_rules.push(Box::new(MD037SpacesAroundEmphasis::default()));
-    all_rules.push(Box::new(MD038NoSpaceInCode::default()));
-    all_rules.push(Box::new(MD039NoSpaceInLinks::default()));
-    all_rules.push(Box::new(MD040FencedCodeLanguage {}));
-    all_rules.push(Box::new(MD041FirstLineHeading::default()));
-    all_rules.push(Box::new(MD042NoEmptyLinks::new()));
-    all_rules.push(Box::new(MD043RequiredHeadings::new(Vec::new()))); // Base instance
-    all_rules.push(Box::new(MD044ProperNames::new(Vec::new(), true))); // Base instance
-    all_rules.push(Box::new(MD045NoAltText::new()));
-    all_rules.push(Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent))); // Base instance
-    all_rules.push(Box::new(MD047FileEndNewline));
-    all_rules.push(Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent))); // Base instance
-    all_rules.push(Box::new(MD049EmphasisStyle::new(EmphasisStyle::Consistent))); // Base instance
-    all_rules.push(Box::new(MD050StrongStyle::new(StrongStyle::Consistent))); // Base instance
-    all_rules.push(Box::new(MD051LinkFragments));
-    all_rules.push(Box::new(MD052ReferenceLinkImages::default()));
-    all_rules.push(Box::new(MD053LinkImageReferenceDefinitions::default())); // Base instance
-    all_rules.push(Box::new(MD054LinkImageStyle::default()));
-    all_rules.push(Box::new(MD055TablePipeStyle::default()));
-    all_rules.push(Box::new(MD056TableColumnCount::default()));
-    all_rules.push(Box::new(MD057ExistingRelativeLinks::default()));
-    all_rules.push(Box::new(MD058BlanksAroundTables::default()));
+    let mut all_rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(MD001HeadingIncrement),
+        Box::new(MD002FirstHeadingH1::default()),
+        Box::new(MD003HeadingStyle::default()),
+        Box::new(MD004UnorderedListStyle::default()),
+        Box::new(MD005ListIndent),
+        Box::new(MD006StartBullets),
+        Box::new(MD007ULIndent::default()),
+        Box::new(MD008ULStyle::default()),
+        Box::new(MD009TrailingSpaces::default()),
+        Box::new(MD010NoHardTabs::default()),
+        Box::new(MD011ReversedLink {}),
+        Box::new(MD012NoMultipleBlanks::default()),
+        Box::new(MD013LineLength::default()),
+        Box::new(MD015NoMissingSpaceAfterListMarker::default()),
+        Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
+        Box::new(MD017NoEmphasisAsHeading),
+        Box::new(MD018NoMissingSpaceAtx {}),
+        Box::new(MD019NoMultipleSpaceAtx {}),
+        Box::new(MD020NoMissingSpaceClosedAtx {}),
+        Box::new(MD021NoMultipleSpaceClosedAtx {}),
+        Box::new(MD022BlanksAroundHeadings::default()),
+        Box::new(MD023HeadingStartLeft {}),
+        Box::new(MD024MultipleHeadings::default()),
+        Box::new(MD025SingleTitle::default()),
+        Box::new(MD026NoTrailingPunctuation::default()),
+        Box::new(MD027MultipleSpacesBlockquote {}),
+        Box::new(MD028NoBlanksBlockquote {}),
+        Box::new(MD029OrderedListPrefix::default()),
+        Box::new(MD030ListMarkerSpace::default()),
+        Box::new(MD031BlanksAroundFences {}),
+        Box::new(MD032BlanksAroundLists {}),
+        Box::new(MD033NoInlineHtml::default()),
+        Box::new(MD034NoBareUrls {}),
+        Box::new(MD035HRStyle::default()),
+        Box::new(MD036NoEmphasisOnlyFirst {}),
+        Box::new(MD037SpacesAroundEmphasis),
+        Box::new(MD038NoSpaceInCode::default()),
+        Box::new(MD039NoSpaceInLinks),
+        Box::new(MD040FencedCodeLanguage {}),
+        Box::new(MD041FirstLineHeading::default()),
+        Box::new(MD042NoEmptyLinks::new()),
+        Box::new(MD043RequiredHeadings::new(Vec::new())),
+        Box::new(MD044ProperNames::new(Vec::new(), true)),
+        Box::new(MD045NoAltText::new()),
+        Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
+        Box::new(MD047FileEndNewline),
+        Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
+        Box::new(MD049EmphasisStyle::new(EmphasisStyle::Consistent)),
+        Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
+        Box::new(MD051LinkFragments),
+        Box::new(MD052ReferenceLinkImages),
+        Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
+        Box::new(MD054LinkImageStyle::default()),
+        Box::new(MD055TablePipeStyle::default()),
+        Box::new(MD056TableColumnCount),
+        Box::new(MD057ExistingRelativeLinks::default()),
+        Box::new(MD058BlanksAroundTables),
+    ];
 
     // 2. Apply specific rule parameter configurations (e.g., line length for MD013)
     // This modifies the instances within all_rules
@@ -270,31 +291,27 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &config::Config) -
     let final_rules: Vec<Box<dyn Rule>>;
 
     // Rule names provided via CLI flags
-    let cli_enable_set: Option<HashSet<&str>> = args
-        .enable
-        .as_deref()
-        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
-    let cli_disable_set: Option<HashSet<&str>> = args
-        .disable
-        .as_deref()
-        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
+    let cli_enable_set: Option<HashSet<&str>> = args.enable.as_deref().map(|s| {
+        s.split(',')
+            .map(|r| r.trim())
+            .filter(|r| !r.is_empty())
+            .collect()
+    });
+    let cli_disable_set: Option<HashSet<&str>> = args.disable.as_deref().map(|s| {
+        s.split(',')
+            .map(|r| r.trim())
+            .filter(|r| !r.is_empty())
+            .collect()
+    });
 
     // Rule names provided via config file
-    let config_enable_set: HashSet<&str> = config
-        .global
-        .enable
-        .iter()
-        .map(|s| s.as_str())
-        .collect();
-    let config_disable_set: HashSet<&str> = config
-        .global
-        .disable
-        .iter()
-        .map(|s| s.as_str())
-        .collect();
+    let config_enable_set: HashSet<&str> =
+        config.global.enable.iter().map(|s| s.as_str()).collect();
+    let config_disable_set: HashSet<&str> =
+        config.global.disable.iter().map(|s| s.as_str()).collect();
 
     if let Some(enabled_cli) = &cli_enable_set {
-        // --- Case 1: CLI --enable provided --- 
+        // --- Case 1: CLI --enable provided ---
         // CLI --enable overrides *everything* (config enable/disable are ignored).
         // Filter all_rules directly based on CLI --enable.
         final_rules = all_rules
@@ -303,7 +320,7 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &config::Config) -
             .collect();
         // Note: CLI --disable is IGNORED if CLI --enable is present.
     } else {
-        // --- Case 2: No CLI --enable --- 
+        // --- Case 2: No CLI --enable ---
         // Start with all (already configured) rules.
         let mut enabled_rules = all_rules;
 
@@ -341,12 +358,16 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &config::Config) -
 }
 
 // Find all markdown files using the `ignore` crate, returning Result
-fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Config) -> Result<Vec<String>, Box<dyn Error>> {
+fn find_markdown_files(
+    paths: &[String],
+    args: &CheckArgs,
+    config: &config::Config,
+) -> Result<Vec<String>, Box<dyn Error>> {
     let mut file_paths = Vec::new();
 
     // --- Configure ignore::WalkBuilder ---
     // Start with the first path, add others later
-    let first_path = paths.get(0).cloned().unwrap_or_else(|| ".".to_string());
+    let first_path = paths.first().cloned().unwrap_or_else(|| ".".to_string());
     let mut walk_builder = WalkBuilder::new(first_path);
 
     // Add remaining paths
@@ -370,7 +391,11 @@ fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Conf
     // Determine effective patterns based on CLI overrides
     let exclude_patterns = if let Some(exclude_str) = args.exclude.as_deref() {
         // If CLI exclude is given, IT REPLACES config excludes
-        exclude_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+        exclude_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
     } else {
         // Otherwise, use config excludes
         config.global.exclude.clone() // Already Vec<String>
@@ -379,7 +404,11 @@ fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Conf
     let include_patterns = if is_discovery_mode {
         if let Some(include_str) = args.include.as_deref() {
             // If CLI include is given, IT REPLACES config includes
-             include_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            include_str
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
         } else {
             // Otherwise, use config includes
             config.global.include.clone() // Already Vec<String>
@@ -389,7 +418,7 @@ fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Conf
         Vec::new()
     };
 
-    // --- Determine Effective Include Patterns --- 
+    // --- Determine Effective Include Patterns ---
     let default_markdown_patterns = vec!["*.md".to_string(), "*.markdown".to_string()];
 
     let effective_include_patterns = if is_discovery_mode {
@@ -397,11 +426,11 @@ fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Conf
             // Discovery mode, no user includes: Use defaults
             default_markdown_patterns
         } else {
-            // Discovery mode, user includes provided: Use user's patterns. 
+            // Discovery mode, user includes provided: Use user's patterns.
             // The type filter added earlier already restricts to MD files.
             // If user includes non-MD, type filter handles it.
             // If user includes specific MD, this override refines it.
-            include_patterns 
+            include_patterns
         }
     } else {
         // Explicit path mode: Include patterns are ignored, rely on type filter + explicit paths.
@@ -409,7 +438,7 @@ fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Conf
         Vec::new()
     };
 
-    // Apply overrides from effective patterns 
+    // Apply overrides from effective patterns
     let has_include_patterns = !effective_include_patterns.is_empty(); // Use effective patterns
     let has_exclude_patterns = !exclude_patterns.is_empty();
 
@@ -419,7 +448,8 @@ fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Conf
 
         // Add includes first (using effective patterns)
         if has_include_patterns {
-            for pattern in &effective_include_patterns { // Use effective patterns
+            for pattern in &effective_include_patterns {
+                // Use effective patterns
                 if let Err(e) = override_builder.add(pattern) {
                     eprintln!("[Effective] Warning: Invalid include pattern '{pattern}': {e}");
                 }
@@ -431,7 +461,7 @@ fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Conf
                 let exclude_rule = format!("!{}", pattern);
                 if let Err(e) = override_builder.add(&exclude_rule) {
                     // Log the original pattern, not the modified rule
-                    eprintln!("[Effective] Warning: Invalid exclude pattern '{pattern}': {e}"); 
+                    eprintln!("[Effective] Warning: Invalid exclude pattern '{pattern}': {e}");
                 }
             }
         }
@@ -446,16 +476,16 @@ fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Conf
     } else {
         false // If respect is false, always ignore gitignore
     };
-    
-    walk_builder.ignore(use_gitignore);      // Enable/disable .ignore
+
+    walk_builder.ignore(use_gitignore); // Enable/disable .ignore
     walk_builder.git_ignore(use_gitignore); // Enable/disable .gitignore
-    walk_builder.git_global(use_gitignore);  // Enable/disable global gitignore
+    walk_builder.git_global(use_gitignore); // Enable/disable global gitignore
     walk_builder.git_exclude(use_gitignore); // Enable/disable .git/info/exclude
-    walk_builder.parents(use_gitignore);        // Enable/disable parent ignores
+    walk_builder.parents(use_gitignore); // Enable/disable parent ignores
     walk_builder.hidden(true); // Keep hidden files ignored unconditionally
     walk_builder.require_git(false); // Process git ignores even if no repo detected
 
-    // --- Execute Walk --- 
+    // --- Execute Walk ---
 
     for result in walk_builder.build() {
         match result {
@@ -466,8 +496,8 @@ fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Conf
                 if path.is_file() {
                     let file_path = path.to_string_lossy().to_string();
                     // Clean the path before pushing
-                    let cleaned_path = if file_path.starts_with("./") {
-                        file_path[2..].to_string()
+                    let cleaned_path = if let Some(stripped) = file_path.strip_prefix("./") {
+                        stripped.to_string()
                     } else {
                         file_path
                     };
@@ -495,17 +525,29 @@ fn find_markdown_files(paths: &[String], args: &CheckArgs, config: &config::Conf
     Ok(file_paths) // Ensure the function returns the result
 }
 
-// Function to print linting results and summary
-fn print_results_from_checkargs(
-    args: &CheckArgs,
-    has_issues: bool,
-    files_with_issues: usize,
-    total_issues: usize,
-    total_issues_fixed: usize,
-    total_fixable_issues: usize,
-    total_files_processed: usize,
-    duration_ms: u64,
-) {
+// Define a struct to hold the print results arguments
+pub(crate) struct PrintResultsArgs<'a> {
+    pub args: &'a CheckArgs,
+    pub has_issues: bool,
+    pub files_with_issues: usize,
+    pub total_issues: usize,
+    pub total_issues_fixed: usize,
+    pub total_fixable_issues: usize,
+    pub total_files_processed: usize,
+    pub duration_ms: u64,
+}
+
+fn print_results_from_checkargs(params: PrintResultsArgs) {
+    let PrintResultsArgs {
+        args,
+        has_issues,
+        files_with_issues,
+        total_issues,
+        total_issues_fixed,
+        total_fixable_issues,
+        total_files_processed,
+        duration_ms,
+    } = params;
     // Choose singular or plural form of "file" based on count
     let file_text = if total_files_processed == 1 {
         "file"
@@ -579,16 +621,16 @@ fn main() {
             if *pyproject {
                 // Handle pyproject.toml initialization
                 let config_content = config::generate_pyproject_config();
-                
+
                 if Path::new("pyproject.toml").exists() {
                     // pyproject.toml exists, ask to append
                     println!("pyproject.toml already exists. Would you like to append rumdl configuration? [y/N]");
                     print!("> ");
                     io::stdout().flush().unwrap();
-                    
+
                     let mut answer = String::new();
                     io::stdin().read_line(&mut answer).unwrap();
-                    
+
                     if answer.trim().eq_ignore_ascii_case("y") {
                         // Append to existing file
                         match fs::read_to_string("pyproject.toml") {
@@ -599,11 +641,14 @@ fn main() {
                                     println!("Please edit the file manually to avoid overwriting existing configuration.");
                                     return;
                                 }
-                                
+
                                 // Append with a blank line for separation
-                                let new_content = format!("{}\n\n{}", content.trim_end(), config_content);
+                                let new_content =
+                                    format!("{}\n\n{}", content.trim_end(), config_content);
                                 match fs::write("pyproject.toml", new_content) {
-                                    Ok(_) => println!("Added rumdl configuration to pyproject.toml"),
+                                    Ok(_) => {
+                                        println!("Added rumdl configuration to pyproject.toml")
+                                    }
                                     Err(e) => {
                                         eprintln!(
                                             "{}: Failed to update pyproject.toml: {}",
@@ -613,7 +658,7 @@ fn main() {
                                         std::process::exit(1);
                                     }
                                 }
-                            },
+                            }
                             Err(e) => {
                                 eprintln!(
                                     "{}: Failed to read pyproject.toml: {}",
@@ -634,11 +679,11 @@ build-backend = \"setuptools.build_meta\"
 
 "#;
                     let content = basic_content.to_owned() + &config_content;
-                    
+
                     match fs::write("pyproject.toml", content) {
                         Ok(_) => {
                             println!("Created pyproject.toml with rumdl configuration");
-                        },
+                        }
                         Err(e) => {
                             eprintln!(
                                 "{}: Failed to create pyproject.toml: {}",
@@ -651,12 +696,11 @@ build-backend = \"setuptools.build_meta\"
                 }
                 return;
             }
-            
+
             // Create default config file
             match config::create_default_config(".rumdl.toml") {
                 Ok(_) => {
                     println!("Created default configuration file: .rumdl.toml");
-                    return;
                 }
                 Err(e) => {
                     eprintln!(
@@ -693,9 +737,9 @@ build-backend = \"setuptools.build_meta\"
                 run_check(&args);
             } else {
                 eprintln!(
-                    "{}: No files or directories specified. Please provide at least one path to lint.",
-                    "Error".red().bold()
-                );
+            "{}: No files or directories specified. Please provide at least one path to lint.",
+            "Error".red().bold()
+        );
                 std::process::exit(1);
             }
         }
@@ -722,7 +766,11 @@ fn run_check(args: &CheckArgs) {
     let file_paths = match find_markdown_files(&args.paths, args, &config) {
         Ok(paths) => paths,
         Err(e) => {
-            eprintln!("{}: Failed to find markdown files: {}", "Error".red().bold(), e);
+            eprintln!(
+                "{}: Failed to find markdown files: {}",
+                "Error".red().bold(),
+                e
+            );
             process::exit(1);
         }
     };
@@ -762,8 +810,13 @@ fn run_check(args: &CheckArgs) {
     let mut total_files_processed = 0;
 
     for file_path in &file_paths {
-        let (file_has_issues, issues_found, issues_fixed, fixable_issues) =
-            process_file(file_path, &enabled_rules, args.fix, args.verbose, args.quiet);
+        let (file_has_issues, issues_found, issues_fixed, fixable_issues) = process_file(
+            file_path,
+            &enabled_rules,
+            args.fix,
+            args.verbose,
+            args.quiet,
+        );
 
         total_files_processed += 1;
         total_issues_fixed += issues_fixed;
@@ -781,7 +834,7 @@ fn run_check(args: &CheckArgs) {
 
     // Print results summary if not in quiet mode
     if !args.quiet {
-        print_results_from_checkargs(
+        print_results_from_checkargs(PrintResultsArgs {
             args,
             has_issues,
             files_with_issues,
@@ -790,12 +843,12 @@ fn run_check(args: &CheckArgs) {
             total_fixable_issues,
             total_files_processed,
             duration_ms,
-        );
+        });
     }
 
     // Print profiling information if enabled and not in quiet mode
     if args.profile && !args.quiet {
-        match std::panic::catch_unwind(|| rumdl::profiling::get_report()) {
+        match std::panic::catch_unwind(rumdl::profiling::get_report) {
             Ok(report) => println!("\n{}", report),
             Err(_) => println!("\nProfiling information not available"),
         }
@@ -815,7 +868,7 @@ fn process_file(
     verbose: bool,
     quiet: bool,
 ) -> (bool, usize, usize, usize) {
-    use std::time::Instant; 
+    use std::time::Instant;
 
     let start_time = Instant::now();
     if verbose && !quiet {
@@ -833,7 +886,7 @@ fn process_file(
         }
     };
     let _read_time = start_time.elapsed();
-    
+
     let lint_start = Instant::now();
     // Set the environment variable for the file path
     // This allows rules like MD057 to know which file is being processed
@@ -844,7 +897,7 @@ fn process_file(
 
     // Clear the environment variable after processing
     std::env::remove_var("RUMDL_FILE_PATH");
-    
+
     // Combine all warnings
     let mut all_warnings = warnings_result.unwrap_or_default();
 

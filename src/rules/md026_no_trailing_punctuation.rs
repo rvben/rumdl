@@ -173,7 +173,7 @@ impl MD026NoTrailingPunctuation {
         let mut end_marker = false;
 
         // Find front matter markers before this line
-        for i in 0..line_idx {
+        for (i, _item) in lines.iter().enumerate().take(line_idx) {
             if i == 0 && lines[i] == "---" {
                 start_marker = true;
                 continue;
@@ -195,7 +195,11 @@ impl MD026NoTrailingPunctuation {
         line.starts_with("    ") && line.trim_start().starts_with('#')
     }
 
-    fn check_with_structure(&self, content: &str, structure: &crate::utils::document_structure::DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        content: &str,
+        structure: &crate::utils::document_structure::DocumentStructure,
+    ) -> LintResult {
         if content.is_empty() {
             return Ok(Vec::new());
         }
@@ -229,36 +233,20 @@ impl MD026NoTrailingPunctuation {
             }
 
             // Check if it's a code block, but don't skip lightly indented headings
-            if line_index.is_code_block(heading_line + 1) && !INDENTED_HEADING_RE.is_match(lines[heading_line - 1]) {
+            if line_index.is_code_block(heading_line + 1)
+                && !INDENTED_HEADING_RE.is_match(lines[heading_line - 1])
+            {
                 continue;
             }
 
             // For ATX headings
             if region.0 == region.1 {
-                if INDENTED_HEADING_RE.is_match(lines[heading_line - 1]) {
-                    if let Some(heading_text) = self.extract_atx_heading_text(lines[heading_line - 1]) {
-                        if self.has_trailing_punctuation(&heading_text, &re) {
-                            let last_char = heading_text.trim().chars().last().unwrap_or(' ');
-
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
-                                line: heading_line,
-                                column: 1,
-                                message: format!(
-                                    "Heading '{}' should not end with punctuation '{}'",
-                                    heading_text.trim(),
-                                    last_char
-                                ),
-                                severity: Severity::Warning,
-                                fix: Some(Fix {
-                                    range: self.get_line_byte_range(content, heading_line),
-                                    replacement: self.fix_atx_heading(lines[heading_line - 1], &re),
-                                }),
-                            });
-                        }
-                    }
-                } else if ATX_HEADING_RE.is_match(lines[heading_line - 1]) {
-                    if let Some(heading_text) = self.extract_atx_heading_text(lines[heading_line - 1]) {
+                if INDENTED_HEADING_RE.is_match(lines[heading_line - 1])
+                    || ATX_HEADING_RE.is_match(lines[heading_line - 1])
+                {
+                    if let Some(heading_text) =
+                        self.extract_atx_heading_text(lines[heading_line - 1])
+                    {
                         if self.has_trailing_punctuation(&heading_text, &re) {
                             let last_char = heading_text.trim().chars().last().unwrap_or(' ');
 
@@ -332,7 +320,7 @@ impl Rule for MD026NoTrailingPunctuation {
         // Use _line_num as line number from structure.heading_lines is unused
         for (idx, &_line_num) in structure.heading_lines.iter().enumerate() {
             // Use heading_regions to get line indices
-            let region = structure.heading_regions[idx]; 
+            let region = structure.heading_regions[idx];
             let start_line_idx = region.0.saturating_sub(1); // 1-based to 0-based
 
             // Check bounds
@@ -341,46 +329,48 @@ impl Rule for MD026NoTrailingPunctuation {
             }
 
             // Fix based on heading type identified by region span
-            if region.0 == region.1 { // ATX heading (single line)
-                 let fixed = self.fix_atx_heading(&fixed_lines[start_line_idx], &re);
-                 fixed_lines[start_line_idx] = fixed;
-            } else { // Setext heading (content is on start_line_idx)
-                 let fixed = self.fix_setext_heading(&fixed_lines[start_line_idx], &re);
-                 fixed_lines[start_line_idx] = fixed;
+            if region.0 == region.1 {
+                // ATX heading (single line)
+                let fixed = self.fix_atx_heading(&fixed_lines[start_line_idx], &re);
+                fixed_lines[start_line_idx] = fixed;
+            } else {
+                // Setext heading (content is on start_line_idx)
+                let fixed = self.fix_setext_heading(&fixed_lines[start_line_idx], &re);
+                fixed_lines[start_line_idx] = fixed;
             }
         }
-        
+
         // Join lines back with original newline separators
         // Need to handle original newline endings (e.g., CRLF vs LF)
         let mut result = String::new();
         let mut original_lines = content.lines().peekable();
-        let mut fixed_lines_iter = fixed_lines.into_iter();
-        
-        while let Some(fixed_line) = fixed_lines_iter.next() {
+        let fixed_lines_iter = fixed_lines.into_iter();
+
+        for fixed_line in fixed_lines_iter {
             result.push_str(&fixed_line);
             // Append original newline sequence if possible
-            if original_lines.next().is_some() {
-                 if original_lines.peek().is_some() {
-                      // Determine newline type from original content if possible (tricky)
-                      // For simplicity, using platform default for now
-                      #[cfg(windows)]
-                      result.push_str("\r\n");
-                      #[cfg(not(windows))]
-                      result.push('\n');
-                 } // Else: it was the last line, no newline needed after it based on original
+            if original_lines.next().is_some() && original_lines.peek().is_some() {
+                // Determine newline type from original content if possible (tricky)
+                // For simplicity, using platform default for now
+                #[cfg(windows)]
+                result.push_str("\r\n");
+                #[cfg(not(windows))]
+                result.push('\n');
             } // Else: original content might have ended without newline?
         }
-        
+
         // Handle case where content originally ended with a newline
         if content.ends_with('\n') && !result.ends_with('\n') {
-             #[cfg(windows)]
-             result.push_str("\r\n");
-             #[cfg(not(windows))]
-             result.push('\n');
+            #[cfg(windows)]
+            result.push_str("\r\n");
+            #[cfg(not(windows))]
+            result.push('\n');
         }
 
         Ok(result)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

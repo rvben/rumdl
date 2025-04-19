@@ -93,7 +93,10 @@ fn test_indented_closed_atx_headings() {
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(content).unwrap();
-    assert_eq!(fixed, "  # Heading 1 #\n    ##   Heading 2   ##\n      ###    Heading 3    ###");
+    assert_eq!(
+        fixed,
+        "  # Heading 1 #\n    ##   Heading 2   ##\n      ###    Heading 3    ###"
+    );
 }
 
 #[test]

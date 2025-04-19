@@ -51,8 +51,16 @@ impl MD030ListMarkerSpace {
         }
 
         // Add check for horizontal rules before checking for list markers
-        if trimmed_line.chars().all(|c| c == '-' || c == ' ') && trimmed_line.chars().filter(|&c| c == '-').count() >= 3 { return None; }
-        if trimmed_line.chars().all(|c| c == '*' || c == ' ') && trimmed_line.chars().filter(|&c| c == '*').count() >= 3 { return None; }
+        if trimmed_line.chars().all(|c| c == '-' || c == ' ')
+            && trimmed_line.chars().filter(|&c| c == '-').count() >= 3
+        {
+            return None;
+        }
+        if trimmed_line.chars().all(|c| c == '*' || c == ' ')
+            && trimmed_line.chars().filter(|&c| c == '*').count() >= 3
+        {
+            return None;
+        }
         // Note: '_' HRs won't conflict with list markers anyway
 
         if let Some(cap) = LIST_REGEX.captures(line) {
@@ -64,7 +72,7 @@ impl MD030ListMarkerSpace {
                 ListType::Unordered
             };
             // Return the whole matched line part for column calculation later
-            return Some((list_type, cap[0].to_string(), spaces)); 
+            return Some((list_type, cap[0].to_string(), spaces));
         }
 
         None
@@ -115,10 +123,7 @@ impl MD030ListMarkerSpace {
         LIST_FIX_REGEX
             .replace(line, |caps: &regex::Captures| {
                 // Reconstruct the start: indentation + marker + correct spaces
-                format!("{}{}{}", 
-                       &caps[1], 
-                       &caps[2], 
-                       " ".repeat(expected_spaces))
+                format!("{}{}{}", &caps[1], &caps[2], " ".repeat(expected_spaces))
             })
             .to_string()
     }
@@ -188,14 +193,15 @@ impl Rule for MD030ListMarkerSpace {
         let (is_list_line, multi_line) = self.precompute_states(&lines);
 
         for (i, &line) in lines.iter().enumerate() {
-            if !is_list_line[i] { // Skip if not identified as a list item line by precompute
+            if !is_list_line[i] {
+                // Skip if not identified as a list item line by precompute
                 continue;
             }
 
             // Re-check with updated regex to get space count (including 0)
             if let Some((list_type, _line_start_match, spaces)) = Self::is_list_item(line) {
                 let expected_spaces = self.get_expected_spaces(list_type, multi_line[i]);
-                
+
                 // The check is now simply if the captured spaces count differs from expected
                 if spaces != expected_spaces {
                     // Calculate column: indentation + marker length
@@ -207,7 +213,7 @@ impl Rule for MD030ListMarkerSpace {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: i + 1,
-                        column: col, 
+                        column: col,
                         message: format!(
                             "Expected {} space{} after list marker, found {}",
                             expected_spaces,
@@ -261,7 +267,7 @@ impl Rule for MD030ListMarkerSpace {
                         result_lines.push(line.to_string()); // No fix needed
                     }
                 } else {
-                     result_lines.push(line.to_string()); // Not matched by regex, don't change
+                    result_lines.push(line.to_string()); // Not matched by regex, don't change
                 }
             } else {
                 result_lines.push(line.to_string()); // Not a list line
@@ -292,7 +298,9 @@ impl Rule for MD030ListMarkerSpace {
                 && !content.contains(|c: char| c.is_ascii_digit()))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD030ListMarkerSpace {

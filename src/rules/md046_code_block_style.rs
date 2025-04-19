@@ -542,7 +542,9 @@ impl Rule for MD046CodeBlockStyle {
         Ok(warnings)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD046CodeBlockStyle {

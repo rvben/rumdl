@@ -313,11 +313,11 @@ impl MD022BlanksAroundHeadings {
 
             // Check if it's a heading
             let is_heading_line = is_heading(line);
-            let is_setext_marker = i > 0 && is_setext_heading_marker(line);
+            let _is_setext_marker = i > 0 && is_setext_heading_marker(line);
 
-            if is_heading_line || is_setext_marker {
+            if is_heading_line || _is_setext_marker {
                 // For setext headings, we need to process both the content line and the marker line
-                let heading_line = if is_setext_marker { i - 1 } else { i };
+                let heading_line = if _is_setext_marker { i - 1 } else { i };
                 let is_first_heading = heading_line == 0
                     || (0..heading_line).all(|j| {
                         lines[j].trim().is_empty()
@@ -360,7 +360,7 @@ impl MD022BlanksAroundHeadings {
                 }
 
                 // Add the heading line(s)
-                if is_setext_marker {
+                if _is_setext_marker {
                     // For setext, we need to add both the content line and the marker line
                     result.push(lines[heading_line].to_string());
                     result.push(line.to_string());
@@ -369,16 +369,13 @@ impl MD022BlanksAroundHeadings {
                 }
 
                 // Count existing blank lines below to skip them in further processing
-                let heading_end = if is_setext_marker { i } else { i };
+                let heading_end = i;
                 let mut blank_lines_below = 0;
-                if heading_end < lines.len() - 1 {
-                    for j in (heading_end + 1)..lines.len() {
-                        if lines[j].trim().is_empty() {
-                            blank_lines_below += 1;
-                        } else {
-                            break;
-                        }
+                for line in lines.iter().skip(heading_end + 1) {
+                    if !line.trim().is_empty() {
+                        break;
                     }
+                    blank_lines_below += 1;
                 }
 
                 // Add exactly the number of blank lines needed
@@ -387,7 +384,7 @@ impl MD022BlanksAroundHeadings {
                 }
 
                 // Skip over the heading and blank lines so we don't process them again
-                i = if is_setext_marker { i + 1 } else { i + 1 };
+                i += 1;
                 i += blank_lines_below; // Skip existing blank lines
 
                 // If we've reached the end of the document, break
@@ -538,7 +535,7 @@ impl Rule for MD022BlanksAroundHeadings {
                 }
 
                 // Check blank lines above
-                if heading_line > 0 && (!self.allowed_at_start || heading_line > 0) {
+                if heading_line > 0 {
                     let mut blank_lines_above = 0;
                     for j in (0..heading_line).rev() {
                         if lines[j].trim().is_empty() {
@@ -559,9 +556,10 @@ impl Rule for MD022BlanksAroundHeadings {
                 }
 
                 // Check blank lines below
-                if heading_line < lines.len() - 1 {
+                let effective_heading_line = heading_line;
+                if effective_heading_line < lines.len() - 1 {
                     // Special case: Don't require blank lines if the next non-blank line is a code block fence
-                    let mut next_non_blank_idx = heading_line + 1;
+                    let mut next_non_blank_idx = effective_heading_line + 1;
                     while next_non_blank_idx < lines.len()
                         && lines[next_non_blank_idx].trim().is_empty()
                     {
@@ -583,24 +581,14 @@ impl Rule for MD022BlanksAroundHeadings {
                     // If next line is a code fence, we don't need blank lines between
                     if !next_line_is_code_fence {
                         let mut blank_lines_below = 0;
-                        for j in (heading_line + 1)..lines.len() {
-                            if lines[j].trim().is_empty() {
-                                blank_lines_below += 1;
-                            } else {
+                        for line in lines.iter().skip(effective_heading_line + 1) {
+                            if !line.trim().is_empty() {
                                 break;
                             }
+                            blank_lines_below += 1;
                         }
 
-                        // If this is a setext heading, we need to check from the marker line
-                        let effective_heading_line = if is_setext_heading_marker(line) {
-                            i
-                        } else {
-                            heading_line
-                        };
-
-                        if effective_heading_line < lines.len() - 1
-                            && blank_lines_below < self.lines_below
-                        {
+                        if blank_lines_below < self.lines_below {
                             issues.push(format!(
                                 "Heading should have at least {} blank line(s) below.",
                                 self.lines_below
@@ -684,7 +672,7 @@ impl Rule for MD022BlanksAroundHeadings {
             let line = lines[heading_line];
 
             // Detect if this is a setext heading by checking if the next line is a marker
-            let is_setext =
+            let _is_setext =
                 heading_line + 1 < lines.len() && is_setext_heading_marker(lines[heading_line + 1]);
 
             // Skip non-heading lines (this shouldn't happen with the document structure, but just in case)
@@ -710,7 +698,7 @@ impl Rule for MD022BlanksAroundHeadings {
             }
 
             // Check blank lines above
-            if heading_line > 0 && (!self.allowed_at_start || heading_line > 0) {
+            if heading_line > 0 {
                 let mut blank_lines_above = 0;
                 for j in (0..heading_line).rev() {
                     if lines[j].trim().is_empty() {
@@ -730,11 +718,7 @@ impl Rule for MD022BlanksAroundHeadings {
             }
 
             // Check blank lines below
-            let effective_heading_line = if is_setext {
-                heading_line + 1
-            } else {
-                heading_line
-            };
+            let effective_heading_line = heading_line;
             if effective_heading_line < lines.len() - 1 {
                 // Special case: Don't require blank lines if the next non-blank line is a code block fence
                 let mut next_non_blank_idx = effective_heading_line + 1;
@@ -759,12 +743,11 @@ impl Rule for MD022BlanksAroundHeadings {
                 // If next line is a code fence, we don't need blank lines between
                 if !next_line_is_code_fence {
                     let mut blank_lines_below = 0;
-                    for j in (effective_heading_line + 1)..lines.len() {
-                        if lines[j].trim().is_empty() {
-                            blank_lines_below += 1;
-                        } else {
+                    for line in lines.iter().skip(effective_heading_line + 1) {
+                        if !line.trim().is_empty() {
                             break;
                         }
+                        blank_lines_below += 1;
                     }
 
                     if blank_lines_below < self.lines_below {
@@ -809,7 +792,9 @@ impl Rule for MD022BlanksAroundHeadings {
         content.is_empty() || !content.contains('#')
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl DocumentStructureExtensions for MD022BlanksAroundHeadings {

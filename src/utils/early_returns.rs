@@ -69,9 +69,7 @@ pub fn should_skip_blockquote_rule(content: &str) -> bool {
 
 /// Utility module for early returns / fast path checks to quickly skip rules
 /// when processing markdown content.
-
 /// Check if the content potentially contains URLs
-#[inline]
 pub fn has_urls(content: &str) -> bool {
     regex_cache::contains_url(content)
 }

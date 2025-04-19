@@ -1,7 +1,7 @@
-use crate::utils::element_cache::ListMarkerType;
-use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::element_cache::ElementCache;
+use crate::utils::element_cache::ListMarkerType;
+use crate::utils::range_utils::LineIndex;
 
 #[derive(Debug, Default)]
 pub struct MD016NoMultipleSpaceAfterListMarker {
@@ -36,17 +36,21 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
         }
 
         // Fast path - check if content has any list markers
-        if !content.contains('*') && !content.contains('-') && !content.contains('+') && 
-           !content.contains("1.") && !content.contains("2.") {
+        if !content.contains('*')
+            && !content.contains('-')
+            && !content.contains('+')
+            && !content.contains("1.")
+            && !content.contains("2.")
+        {
             return Ok(Vec::new());
         }
-        
+
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        
+
         // Get cached document elements - this provides efficient access to lists and code blocks
         let element_cache = ElementCache::new(content);
-        
+
         // Process each list item from the cache
         for list_item in element_cache.get_list_items() {
             // Skip list items inside code blocks
@@ -58,12 +62,14 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
                 // Create a warning with fix
                 let line_num = list_item.line_number;
                 let message = match list_item.marker_type {
-                    ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus => 
-                        "Multiple spaces after unordered list marker".to_string(),
-                    ListMarkerType::Ordered => 
-                        "Multiple spaces after ordered list marker".to_string(),
+                    ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus => {
+                        "Multiple spaces after unordered list marker".to_string()
+                    }
+                    ListMarkerType::Ordered => {
+                        "Multiple spaces after ordered list marker".to_string()
+                    }
                 };
-                
+
                 // Generate the fixed line with exactly one space after marker
                 let indentation = &list_item.indent_str;
                 let fixed_line = if list_item.content.is_empty() {
@@ -71,7 +77,7 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
                 } else {
                     format!("{}{} {}", indentation, list_item.marker, list_item.content)
                 };
-                
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     severity: Severity::Warning,
@@ -130,57 +136,62 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
         Ok(result)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_md016_check() {
         let rule = MD016NoMultipleSpaceAfterListMarker::default();
-        
+
         // Valid test cases
         let content1 = "- Item with one space\n* Another item with one space\n+ A third item";
         let warnings1 = rule.check(content1).unwrap();
         assert_eq!(warnings1.len(), 0);
-        
+
         // Invalid test cases
-        let content2 = "-  Item with two spaces\n*   Another item with three spaces\n+    Four spaces";
+        let content2 =
+            "-  Item with two spaces\n*   Another item with three spaces\n+    Four spaces";
         let warnings2 = rule.check(content2).unwrap();
         assert_eq!(warnings2.len(), 3);
-        
+
         // Mixed case
         let content3 = "- Valid item\n-  Invalid item\n```
 -  Ignored in code block\n```";
         let warnings3 = rule.check(content3).unwrap();
         // Now both the second and fourth lines are detected as list items, but the fourth is in a code block and should not be flagged
         assert_eq!(warnings3.len(), 1);
-        
+
         // Test with allow_multiple_spaces = true
-        let rule_allowing_spaces = MD016NoMultipleSpaceAfterListMarker::with_allow_multiple_spaces(true);
+        let rule_allowing_spaces =
+            MD016NoMultipleSpaceAfterListMarker::with_allow_multiple_spaces(true);
         let warnings4 = rule_allowing_spaces.check(content2).unwrap();
         assert_eq!(warnings4.len(), 0);
     }
-    
+
     #[test]
     fn test_md016_fix() {
         let rule = MD016NoMultipleSpaceAfterListMarker::default();
-        
+
         // Fix test case
-        let content = "-  Item with two spaces\n*   Another item with three spaces\n+    Four spaces";
+        let content =
+            "-  Item with two spaces\n*   Another item with three spaces\n+    Four spaces";
         let expected = "- Item with two spaces\n* Another item with three spaces\n+ Four spaces";
-        
+
         let fixed = rule.fix(content).unwrap();
         assert_eq!(fixed, expected);
-        
+
         // Test with code blocks
         let content2 = "- Valid item\n-  Invalid item\n```
 -  Ignored in code block\n```";
         let expected2 = "- Valid item\n- Invalid item\n```
 -  Ignored in code block\n```";
-        
+
         let fixed2 = rule.fix(content2).unwrap();
         assert_eq!(fixed2, expected2);
     }
