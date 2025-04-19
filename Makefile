@@ -13,9 +13,12 @@ fmt:
 	cargo fmt
 	cargo clippy --fix --allow-dirty --allow-staged
 
+lint:
+	cargo clippy --all-targets --all-features -- -D warnings
+
 check:
-	cargo check
-	cargo clippy
+	cargo check --all-targets --all-features
+
 
 doc:
 	cargo doc --no-deps
