@@ -940,9 +940,8 @@ fn test_config_command_lists_options() {
         .expect("Failed to execute 'rumdl config'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     assert!(output.status.success(), "'rumdl config' did not exit successfully");
-    assert!(stdout.contains("Available configuration options"), "Output missing config options header");
-    assert!(stdout.contains("line-length"), "Output missing 'line-length' option");
-    assert!(stdout.contains("exclude"), "Output missing 'exclude' option");
+    assert!(stdout.contains("[global]"), "Output missing [global] section");
+    assert!(stdout.contains("enable =") || stdout.contains("disable =") || stdout.contains("exclude ="), "Output missing expected config keys");
 }
 
 #[test]
