@@ -3,21 +3,12 @@ use toml;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MD024NoDuplicateHeading {
     pub allow_different_nesting: bool,
     pub siblings_only: bool,
-}
-
-impl Default for MD024NoDuplicateHeading {
-    fn default() -> Self {
-        Self {
-            allow_different_nesting: false,
-            siblings_only: false,
-        }
-    }
 }
 
 impl MD024NoDuplicateHeading {
@@ -60,7 +51,7 @@ impl Rule for MD024NoDuplicateHeading {
                 if self.siblings_only {
                     // Handle siblings_only logic here
                 } else if self.allow_different_nesting {
-                    let seen = seen_headings_per_level.entry(0).or_insert_with(HashSet::new);
+                    let seen = seen_headings_per_level.entry(0).or_default();
                     if seen.contains(heading_key) {
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
@@ -69,33 +60,40 @@ impl Rule for MD024NoDuplicateHeading {
                             message: "Multiple headings with the same content".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range(line_num + 1, indentation + 1),
-                                replacement: format!("{}{} {} ({})",
+                                range: _line_index
+                                    .line_col_to_byte_range(line_num + 1, indentation + 1),
+                                replacement: format!(
+                                    "{}{} {} ({})",
                                     " ".repeat(indentation),
                                     "#".repeat(heading.level.try_into().unwrap()),
                                     heading.text,
-                                    seen.iter().filter(|&h| h == heading_key).count() + 1),
+                                    seen.iter().filter(|&h| h == heading_key).count() + 1
+                                ),
                             }),
                         });
                     } else {
                         seen.insert(heading_key.to_string());
                     }
                 } else {
-                    let seen = seen_headings_per_level.entry(heading.level).or_insert_with(HashSet::new);
+                    let seen = seen_headings_per_level.entry(heading.level).or_default();
                     if seen.contains(heading_key) {
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             line: line_num + 1,
                             column: indentation + 1,
-                            message: "Multiple headings with the same content at the same level".to_string(),
+                            message: "Multiple headings with the same content at the same level"
+                                .to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range(line_num + 1, indentation + 1),
-                                replacement: format!("{}{} {} ({})",
+                                range: _line_index
+                                    .line_col_to_byte_range(line_num + 1, indentation + 1),
+                                replacement: format!(
+                                    "{}{} {} ({})",
                                     " ".repeat(indentation),
                                     "#".repeat(heading.level.try_into().unwrap()),
                                     heading.text,
-                                    seen.iter().filter(|&h| h == heading_key).count() + 1),
+                                    seen.iter().filter(|&h| h == heading_key).count() + 1
+                                ),
                             }),
                         });
                     } else {
@@ -135,26 +133,30 @@ impl Rule for MD024NoDuplicateHeading {
                 if self.siblings_only {
                     // Handle siblings_only logic here
                 } else if self.allow_different_nesting {
-                    let seen = seen_headings_per_level.entry(0).or_insert_with(HashSet::new);
+                    let seen = seen_headings_per_level.entry(0).or_default();
                     if seen.contains(heading_key) {
-                        result.push_str(&format!("{}{} {} ({})\n",
+                        result.push_str(&format!(
+                            "{}{} {} ({})\n",
                             " ".repeat(indentation),
                             "#".repeat(heading.level.try_into().unwrap()),
                             heading.text,
-                            seen.iter().filter(|&h| h == heading_key).count() + 1));
+                            seen.iter().filter(|&h| h == heading_key).count() + 1
+                        ));
                     } else {
                         seen.insert(heading_key.to_string());
                         result.push_str(line);
                         result.push('\n');
                     }
                 } else {
-                    let seen = seen_headings_per_level.entry(heading.level).or_insert_with(HashSet::new);
+                    let seen = seen_headings_per_level.entry(heading.level).or_default();
                     if seen.contains(heading_key) {
-                        result.push_str(&format!("{}{} {} ({})\n",
+                        result.push_str(&format!(
+                            "{}{} {} ({})\n",
                             " ".repeat(indentation),
                             "#".repeat(heading.level.try_into().unwrap()),
                             heading.text,
-                            seen.iter().filter(|&h| h == heading_key).count() + 1));
+                            seen.iter().filter(|&h| h == heading_key).count() + 1
+                        ));
                     } else {
                         seen.insert(heading_key.to_string());
                         result.push_str(line);
@@ -180,8 +182,14 @@ impl Rule for MD024NoDuplicateHeading {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("allow_different_nesting".to_string(), toml::Value::Boolean(self.allow_different_nesting));
-        map.insert("siblings_only".to_string(), toml::Value::Boolean(self.siblings_only));
+        map.insert(
+            "allow_different_nesting".to_string(),
+            toml::Value::Boolean(self.allow_different_nesting),
+        );
+        map.insert(
+            "siblings_only".to_string(),
+            toml::Value::Boolean(self.siblings_only),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

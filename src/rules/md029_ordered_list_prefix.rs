@@ -1,7 +1,7 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     static ref ORDERED_LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)\d+\.\s").unwrap();
@@ -16,9 +16,9 @@ pub struct MD029OrderedListMarker {
 
 #[derive(Debug, PartialEq)]
 pub enum ListStyle {
-    OneOne,     // All ones (1. 1. 1.)
-    Ordered,    // Sequential (1. 2. 3.)
-    Ordered0,   // Zero-based (0. 1. 2.)
+    OneOne,   // All ones (1. 1. 1.)
+    Ordered,  // Sequential (1. 2. 3.)
+    Ordered0, // Zero-based (0. 1. 2.)
 }
 
 impl Default for MD029OrderedListMarker {
@@ -119,7 +119,8 @@ impl Rule for MD029OrderedListMarker {
                         rule_name: Some(self.name()),
                         message: format!(
                             "Ordered list item number {} does not match style (expected {})",
-                            Self::get_list_number(line).unwrap(), expected_num
+                            Self::get_list_number(line).unwrap(),
+                            expected_num
                         ),
                         line: line_num + 1,
                         column: line.find(char::is_numeric).unwrap_or(0) + 1,
@@ -218,16 +219,18 @@ impl Rule for MD029OrderedListMarker {
         if structure.list_lines.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         // Quick check if there are no ordered lists
-        if !content.contains('1') || (!content.contains("1.") && !content.contains("2.") && !content.contains("0.")) {
+        if !content.contains('1')
+            || (!content.contains("1.") && !content.contains("2.") && !content.contains("0."))
+        {
             return Ok(Vec::new());
         }
 
         let mut warnings = Vec::new();
         let mut list_items = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Create a set of list line indices for faster lookup
         let mut list_line_set = std::collections::HashSet::new();
         for &line_num in &structure.list_lines {
@@ -236,10 +239,10 @@ impl Rule for MD029OrderedListMarker {
 
         // Group ordered list items into sections
         let mut in_list = false;
-        
+
         for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1; // Convert to 1-indexed
-            
+
             // Skip lines in code blocks
             if structure.is_in_code_block(line_num) {
                 // If we were in a list, check it before continuing
@@ -250,14 +253,14 @@ impl Rule for MD029OrderedListMarker {
                 }
                 continue;
             }
-            
+
             if list_line_set.contains(&line_num) {
                 if Self::get_list_number(line).is_some() {
                     // If this is the first item of a new list, record the list start
                     if !in_list {
                         in_list = true;
                     }
-                    
+
                     list_items.push((line_idx, line.to_string()));
                 }
             } else if !line.trim().is_empty() {
@@ -277,17 +280,17 @@ impl Rule for MD029OrderedListMarker {
 
         Ok(warnings)
     }
-    
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::List
     }
-    
+
     /// Check if this rule should be skipped
     fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || 
-        !content.contains('1') || 
-        (!content.contains("1.") && !content.contains("2.") && !content.contains("0."))
+        content.is_empty()
+            || !content.contains('1')
+            || (!content.contains("1.") && !content.contains("2.") && !content.contains("0."))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -298,8 +301,8 @@ impl Rule for MD029OrderedListMarker {
 impl DocumentStructureExtensions for MD029OrderedListMarker {
     fn has_relevant_elements(&self, content: &str, doc_structure: &DocumentStructure) -> bool {
         // This rule is only relevant if there are list items AND they might be ordered lists
-        !doc_structure.list_lines.is_empty() && 
-        (content.contains("1.") || content.contains("2.") || content.contains("0."))
+        !doc_structure.list_lines.is_empty()
+            && (content.contains("1.") || content.contains("2.") || content.contains("0."))
     }
 }
 
@@ -309,7 +312,7 @@ impl MD029OrderedListMarker {
         let mut groups: Vec<Vec<(usize, String)>> = Vec::new();
         let mut current_group: Vec<(usize, String)> = Vec::new();
         let mut last_indent: Option<usize> = None;
-        for (_idx, (line_num, _line)) in items.iter().enumerate() {
+        for (line_num, _line) in items.iter() {
             let indent = _line.chars().take_while(|c| c.is_whitespace()).count();
             if current_group.is_empty() {
                 current_group.push((*line_num, _line.clone()));
@@ -343,7 +346,8 @@ impl MD029OrderedListMarker {
                             rule_name: Some(self.name()),
                             message: format!(
                                 "Ordered list item number {} does not match style (expected {})",
-                                Self::get_list_number(line).unwrap(), expected_num
+                                Self::get_list_number(line).unwrap(),
+                                expected_num
                             ),
                             line: line_num + 1,
                             column: line.find(char::is_numeric).unwrap_or(0) + 1,
@@ -363,31 +367,31 @@ impl MD029OrderedListMarker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_with_document_structure() {
         // Test with default style (ordered)
         let rule = MD029OrderedListMarker::default();
-        
+
         // Test with correctly ordered list
         let content = "1. First item\n2. Second item\n3. Third item";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert!(result.is_empty());
-        
+
         // Test with incorrectly ordered list
         let content = "1. First item\n3. Third item\n5. Fifth item";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 3 and 5
-        
+
         // Test with one-one style
         let rule = MD029OrderedListMarker::new(ListStyle::OneOne);
         let content = "1. First item\n2. Second item\n3. Third item";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 2 and 3
-        
+
         // Test with ordered0 style
         let rule = MD029OrderedListMarker::new(ListStyle::Ordered0);
         let content = "0. First item\n1. Second item\n2. Third item";

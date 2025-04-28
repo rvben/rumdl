@@ -1016,14 +1016,20 @@ build-backend = \"setuptools.build_meta\"
                 // Print [global] section first
                 let mut global_table = toml::map::Map::new();
                 global_table.insert("global".to_string(), global);
-                println!("{}", toml::to_string_pretty(&Value::Table(global_table)).unwrap());
+                println!(
+                    "{}",
+                    toml::to_string_pretty(&Value::Table(global_table)).unwrap()
+                );
                 // Then print each rule section
                 let mut rule_names: Vec<_> = rule_map.keys().collect();
                 rule_names.sort();
                 for rule_name in rule_names {
                     let mut rule_table = toml::map::Map::new();
                     rule_table.insert(rule_name.clone(), rule_map[rule_name].clone());
-                    println!("{}", toml::to_string_pretty(&Value::Table(rule_table)).unwrap());
+                    println!(
+                        "{}",
+                        toml::to_string_pretty(&Value::Table(rule_table)).unwrap()
+                    );
                 }
                 return;
             }
@@ -1228,8 +1234,7 @@ build-backend = \"setuptools.build_meta\"
                     keys.sort();
                     for key in keys {
                         let default_val = &defaults_table[key];
-                        let (value, src_str_colored) = if let Some(sourced_rule) = sourced_rule
-                        {
+                        let (value, src_str_colored) = if let Some(sourced_rule) = sourced_rule {
                             if let Some(sv) = sourced_rule.values.get(key) {
                                 (
                                     sv.value.clone(),
@@ -1241,9 +1246,7 @@ build-backend = \"setuptools.build_meta\"
                                         rumdl_config::ConfigSource::PyprojectToml => {
                                             "pyproject.toml".magenta()
                                         }
-                                        rumdl_config::ConfigSource::Default => {
-                                            "default".yellow()
-                                        }
+                                        rumdl_config::ConfigSource::Default => "default".yellow(),
                                     },
                                 )
                             } else {

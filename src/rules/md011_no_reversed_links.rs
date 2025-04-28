@@ -18,7 +18,12 @@ impl MD011NoReversedLinks {
                     let text = cap[3].trim_matches('(').trim_matches(')');
                     let url = &cap[4];
                     let start = line_start + cap.get(0).unwrap().start();
-                    results.push((current_line, start - line_start + 1, text.to_string(), url.to_string()));
+                    results.push((
+                        current_line,
+                        start - line_start + 1,
+                        text.to_string(),
+                        url.to_string(),
+                    ));
                 }
             }
             line_start += line.len() + 1; // +1 for newline
@@ -100,10 +105,7 @@ impl Rule for MD011NoReversedLinks {
                 let adjusted_pos = pos + offset;
                 let original_len = format!("({})[{}]", url, text).len();
                 let replacement = format!("[{}]({})", text, url);
-                result.replace_range(
-                    adjusted_pos..adjusted_pos + original_len,
-                    &replacement
-                );
+                result.replace_range(adjusted_pos..adjusted_pos + original_len, &replacement);
                 // Update offset based on the difference in lengths
                 if replacement.len() > original_len {
                     offset += replacement.len() - original_len;
@@ -119,4 +121,4 @@ impl Rule for MD011NoReversedLinks {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-} 
+}
