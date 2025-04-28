@@ -27,11 +27,20 @@ jobs:
           python -m pip install maturin[zig]
       - name: Build wheel
         run: maturin build --release --target x86_64-unknown-linux-gnu --compatibility manylinux2014 --zig
+      - name: Build binary
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+      - name: Rename binary
+        run: mv target/x86_64-unknown-linux-gnu/release/rumdl rumdl-x86_64-unknown-linux-gnu
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
           path: target/wheels/*.whl
           name: wheel-linux-x86_64
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          path: rumdl-x86_64-unknown-linux-gnu
+          name: rumdl-x86_64-unknown-linux-gnu
 
   build-linux-aarch64:
     runs-on: ubuntu-latest
@@ -51,11 +60,20 @@ jobs:
           python -m pip install maturin[zig]
       - name: Build wheel
         run: maturin build --release --target aarch64-unknown-linux-gnu --compatibility manylinux2014 --zig
+      - name: Build binary
+        run: cargo build --release --target aarch64-unknown-linux-gnu
+      - name: Rename binary
+        run: mv target/aarch64-unknown-linux-gnu/release/rumdl rumdl-aarch64-unknown-linux-gnu
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
           path: target/wheels/*.whl
           name: wheel-linux-aarch64
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          path: rumdl-aarch64-unknown-linux-gnu
+          name: rumdl-aarch64-unknown-linux-gnu
 
   build-windows-x86_64:
     runs-on: windows-latest
@@ -76,11 +94,22 @@ jobs:
       - name: Build wheel
         shell: pwsh
         run: maturin build --release --target x86_64-pc-windows-msvc
+      - name: Build binary
+        shell: pwsh
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: Rename binary
+        shell: pwsh
+        run: Move-Item target/x86_64-pc-windows-msvc/release/rumdl.exe rumdl-x86_64-pc-windows-msvc.exe
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
           path: target/wheels/*.whl
           name: wheel-windows-x86_64
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          path: rumdl-x86_64-pc-windows-msvc.exe
+          name: rumdl-x86_64-pc-windows-msvc
 
   build-macos-x86_64:
     runs-on: macos-latest
@@ -100,11 +129,20 @@ jobs:
           python -m pip install maturin[zig]
       - name: Build wheel
         run: maturin build --release --target x86_64-apple-darwin
+      - name: Build binary
+        run: cargo build --release --target x86_64-apple-darwin
+      - name: Rename binary
+        run: mv target/x86_64-apple-darwin/release/rumdl rumdl-x86_64-apple-darwin
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
           path: target/wheels/*.whl
           name: wheel-macos-x86_64
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          path: rumdl-x86_64-apple-darwin
+          name: rumdl-x86_64-apple-darwin
 
   build-macos-aarch64:
     runs-on: macos-latest
@@ -124,11 +162,20 @@ jobs:
           python -m pip install maturin[zig]
       - name: Build wheel
         run: maturin build --release --target aarch64-apple-darwin
+      - name: Build binary
+        run: cargo build --release --target aarch64-apple-darwin
+      - name: Rename binary
+        run: mv target/aarch64-apple-darwin/release/rumdl rumdl-aarch64-apple-darwin
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
           path: target/wheels/*.whl
           name: wheel-macos-aarch64
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          path: rumdl-aarch64-apple-darwin
+          name: rumdl-aarch64-apple-darwin
 
   sdist:
     runs-on: ubuntu-latest
@@ -185,12 +232,12 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/wheel-linux-x86_64/*
-            artifacts/wheel-linux-aarch64/*
-            artifacts/wheel-macos-x86_64/*
-            artifacts/wheel-macos-aarch64/*
-            artifacts/wheel-windows-x86_64/*
-          generate_release_notes: true
+            artifacts/rumdl-x86_64-unknown-linux-gnu/rumdl-x86_64-unknown-linux-gnu
+            artifacts/rumdl-aarch64-unknown-linux-gnu/rumdl-aarch64-unknown-linux-gnu
+            artifacts/rumdl-x86_64-apple-darwin/rumdl-x86_64-apple-darwin
+            artifacts/rumdl-aarch64-apple-darwin/rumdl-aarch64-apple-darwin
+            artifacts/rumdl-x86_64-pc-windows-msvc/rumdl-x86_64-pc-windows-msvc.exe
+            artifacts/sdist/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
