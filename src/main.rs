@@ -944,6 +944,10 @@ build-backend = \"setuptools.build_meta\"
                 use rumdl::rules::*;
                 use std::collections::BTreeMap;
                 use toml::Value;
+                // Build default global config
+                let global = Value::try_from(rumdl_config::GlobalConfig::default())
+                    .unwrap_or(Value::Table(Default::default()));
+                // Build default rule configs
                 let mut rule_map = BTreeMap::new();
                 let all_rules: Vec<Box<dyn Rule>> = vec![
                     Box::new(MD001HeadingIncrement),
@@ -1009,190 +1013,17 @@ build-backend = \"setuptools.build_meta\"
                         rule_map.insert(name, value);
                     }
                 }
-                let mut global = Value::try_from(rumdl_config::GlobalConfig::default())
-                    .unwrap_or(Value::Table(Default::default()));
-                let sourced =
-                    rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
-                // Overlay global
-                if let Some(global_table) = global.as_table_mut() {
-                    let mut sourced_global_table = toml::map::Map::new();
-                    sourced_global_table.insert(
-                        "enable".to_string(),
-                        Value::Array(
-                            sourced
-                                .global
-                                .enable
-                                .value
-                                .iter()
-                                .map(|s| Value::String(s.clone()))
-                                .collect(),
-                        ),
-                    );
-                    sourced_global_table.insert(
-                        "disable".to_string(),
-                        Value::Array(
-                            sourced
-                                .global
-                                .disable
-                                .value
-                                .iter()
-                                .map(|s| Value::String(s.clone()))
-                                .collect(),
-                        ),
-                    );
-                    sourced_global_table.insert(
-                        "exclude".to_string(),
-                        Value::Array(
-                            sourced
-                                .global
-                                .exclude
-                                .value
-                                .iter()
-                                .map(|s| Value::String(s.clone()))
-                                .collect(),
-                        ),
-                    );
-                    sourced_global_table.insert(
-                        "include".to_string(),
-                        Value::Array(
-                            sourced
-                                .global
-                                .include
-                                .value
-                                .iter()
-                                .map(|s| Value::String(s.clone()))
-                                .collect(),
-                        ),
-                    );
-                    sourced_global_table.insert(
-                        "respect_gitignore".to_string(),
-                        Value::Boolean(sourced.global.respect_gitignore.value),
-                    );
-                    for (k, v) in sourced_global_table {
-                        global_table.insert(k, v);
-                    }
-                }
-                for (rule_name, rule_defaults) in rule_map.iter_mut() {
-                    if let Some(sourced_rule) = sourced.rules.get(rule_name) {
-                        if let Some(defaults_table) = rule_defaults.as_table_mut() {
-                            for (k, sv) in &sourced_rule.values {
-                                defaults_table.insert(k.clone(), sv.value.clone());
-                            }
-                        }
-                    }
-                }
-                // Annotated config output (after all variables are defined)
-                // --- Collect all lines for alignment ---
-                let mut all_lines = Vec::new();
-                // --- GLOBAL SECTION ---
-                let mut global_section_lines = Vec::new();
-                let global_keys = [
-                    ("enable", &sourced.global.enable, "vec"),
-                    ("disable", &sourced.global.disable, "vec"),
-                    ("exclude", &sourced.global.exclude, "vec"),
-                    ("include", &sourced.global.include, "vec"),
-                ];
-                for (key, sourced_val, kind) in &global_keys {
-                    let value_str = match *kind {
-                        "vec" => to_toml_string_vec_string(&sourced_val.value).yellow(),
-                        _ => "<unknown>".yellow(),
-                    };
-                    let src_str_colored = match sourced_val.source {
-                        rumdl_config::ConfigSource::Cli => "CLI".green(),
-                        rumdl_config::ConfigSource::RumdlToml => ".rumdl.toml".blue(),
-                        rumdl_config::ConfigSource::PyprojectToml => "pyproject.toml".magenta(),
-                        rumdl_config::ConfigSource::Default => "default".yellow(),
-                    };
-                    let key_str = key.cyan();
-                    global_section_lines.push((
-                        format!("  {} = {}", key_str, value_str),
-                        format!("[from {}]", src_str_colored),
-                    ));
-                }
-                let sourced_val = &sourced.global.respect_gitignore;
-                let value_str = sourced_val.value.to_string().yellow();
-                let src_str_colored = match sourced_val.source {
-                    rumdl_config::ConfigSource::Cli => "CLI".green(),
-                    rumdl_config::ConfigSource::RumdlToml => ".rumdl.toml".blue(),
-                    rumdl_config::ConfigSource::PyprojectToml => "pyproject.toml".magenta(),
-                    rumdl_config::ConfigSource::Default => "default".yellow(),
-                };
-                let key_str = "respect_gitignore".cyan();
-                global_section_lines.push((
-                    format!("  {} = {}", key_str, value_str),
-                    format!("[from {}]", src_str_colored),
-                ));
-                // Add section marker for printing
-                all_lines.push(("[global]".bold().underline().to_string(), String::new()));
-                all_lines.extend(global_section_lines);
-                // --- RULE SECTIONS ---
-                let mut rule_names: Vec<_> = rule_map.keys().cloned().collect();
+                // Print [global] section first
+                let mut global_table = toml::map::Map::new();
+                global_table.insert("global".to_string(), global);
+                println!("{}", toml::to_string_pretty(&Value::Table(global_table)).unwrap());
+                // Then print each rule section
+                let mut rule_names: Vec<_> = rule_map.keys().collect();
                 rule_names.sort();
                 for rule_name in rule_names {
-                    let rule_defaults = rule_map.get(&rule_name).unwrap();
-                    let sourced_rule = sourced.rules.get(&rule_name);
-                    if let Some(defaults_table) = rule_defaults.as_table() {
-                        // Add section marker for printing
-                        all_lines.push((
-                            format!("\n{}", format!("[{}]", rule_name).bold().underline()),
-                            String::new(),
-                        ));
-                        let mut keys: Vec<_> = defaults_table.keys().collect();
-                        keys.sort();
-                        for key in keys {
-                            let default_val = &defaults_table[key];
-                            let (value, src_str_colored) = if let Some(sourced_rule) = sourced_rule
-                            {
-                                if let Some(sv) = sourced_rule.values.get(key) {
-                                    (
-                                        sv.value.clone(),
-                                        match sv.source {
-                                            rumdl_config::ConfigSource::Cli => "CLI".green(),
-                                            rumdl_config::ConfigSource::RumdlToml => {
-                                                ".rumdl.toml".blue()
-                                            }
-                                            rumdl_config::ConfigSource::PyprojectToml => {
-                                                "pyproject.toml".magenta()
-                                            }
-                                            rumdl_config::ConfigSource::Default => {
-                                                "default".yellow()
-                                            }
-                                        },
-                                    )
-                                } else {
-                                    (default_val.clone(), "default".yellow())
-                                }
-                            } else {
-                                (default_val.clone(), "default".yellow())
-                            };
-                            let value_str = match value {
-                                Value::Array(arr) => {
-                                    let vals: Vec<String> =
-                                        arr.into_iter().map(|v| v.to_string()).collect();
-                                    format!("[{}]", vals.join(", ")).yellow()
-                                }
-                                Value::String(s) => format!("\"{}\"", s).yellow(),
-                                Value::Boolean(b) => b.to_string().yellow(),
-                                Value::Integer(i) => i.to_string().yellow(),
-                                Value::Float(f) => f.to_string().yellow(),
-                                _ => value.to_string().yellow(),
-                            };
-                            let key_str = key.cyan();
-                            all_lines.push((
-                                format!("  {} = {}", key_str, value_str),
-                                format!("[from {}]", src_str_colored),
-                            ));
-                        }
-                    }
-                }
-                // --- Print all lines with global alignment ---
-                let max_left = all_lines.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
-                for (left, right) in &all_lines {
-                    if right.is_empty() {
-                        println!("{}", left);
-                    } else {
-                        println!("{:<width$} {}", left, right, width = max_left);
-                    }
+                    let mut rule_table = toml::map::Map::new();
+                    rule_table.insert(rule_name.clone(), rule_map[rule_name].clone());
+                    println!("{}", toml::to_string_pretty(&Value::Table(rule_table)).unwrap());
                 }
                 return;
             }
@@ -1397,7 +1228,8 @@ build-backend = \"setuptools.build_meta\"
                     keys.sort();
                     for key in keys {
                         let default_val = &defaults_table[key];
-                        let (value, src_str_colored) = if let Some(sourced_rule) = sourced_rule {
+                        let (value, src_str_colored) = if let Some(sourced_rule) = sourced_rule
+                        {
                             if let Some(sv) = sourced_rule.values.get(key) {
                                 (
                                     sv.value.clone(),
@@ -1409,7 +1241,9 @@ build-backend = \"setuptools.build_meta\"
                                         rumdl_config::ConfigSource::PyprojectToml => {
                                             "pyproject.toml".magenta()
                                         }
-                                        rumdl_config::ConfigSource::Default => "default".yellow(),
+                                        rumdl_config::ConfigSource::Default => {
+                                            "default".yellow()
+                                        }
                                     },
                                 )
                             } else {
