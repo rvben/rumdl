@@ -58,7 +58,7 @@ impl HeadingUtils {
 
         for line in content.lines() {
             line_count += 1;
-            if line_count > line_number + 1 {
+            if line_count > line_number {
                 break;
             }
 

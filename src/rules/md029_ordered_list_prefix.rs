@@ -1,298 +1,398 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::LineIndex;
-use lazy_static::lazy_static;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use regex::Regex;
-use std::collections::HashMap;
-use toml;
+use lazy_static::lazy_static;
 
-// Cache regex patterns for better performance
 lazy_static! {
-    static ref LIST_NUMBER_PATTERN: Regex = Regex::new(r"^\s*(\d+)\.\s").unwrap();
-    static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^```|^~~~").unwrap();
+    static ref ORDERED_LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)\d+\.\s").unwrap();
+    static ref LIST_NUMBER_REGEX: Regex = Regex::new(r"^\s*(\d+)\.\s").unwrap();
+    static ref FIX_LINE_REGEX: Regex = Regex::new(r"^(\s*)\d+(\.\s.*)$").unwrap();
 }
 
 #[derive(Debug)]
-pub struct MD029OrderedListPrefix {
-    pub style: String,
+pub struct MD029OrderedListMarker {
+    style: ListStyle,
 }
 
-impl Default for MD029OrderedListPrefix {
+#[derive(Debug, PartialEq)]
+pub enum ListStyle {
+    OneOne,     // All ones (1. 1. 1.)
+    Ordered,    // Sequential (1. 2. 3.)
+    Ordered0,   // Zero-based (0. 1. 2.)
+}
+
+impl Default for MD029OrderedListMarker {
     fn default() -> Self {
         Self {
-            style: "ordered".to_string(),
+            style: ListStyle::Ordered,
         }
     }
 }
 
-#[derive(Debug, Clone)]
-struct ListSequence {
-    index: usize,
-    indent_level: usize,
-    last_seen_line: usize,
-}
-
-impl MD029OrderedListPrefix {
-    pub fn new(style: &str) -> Self {
-        Self {
-            style: style.to_string(),
-        }
+impl MD029OrderedListMarker {
+    pub fn new(style: ListStyle) -> Self {
+        Self { style }
     }
 
     fn get_list_number(line: &str) -> Option<usize> {
-        LIST_NUMBER_PATTERN
+        LIST_NUMBER_REGEX
             .captures(line)
-            .and_then(|cap| cap[1].parse().ok())
+            .and_then(|cap| cap[1].parse::<usize>().ok())
     }
 
-    fn get_indent_level(line: &str) -> usize {
-        let indent = line.len() - line.trim_start().len();
-        indent / 2 // Assuming 2 spaces per indent level
-    }
-
-    fn get_expected_number(&self, sequence: &ListSequence) -> usize {
-        match self.style.as_str() {
-            "ordered" => {
-                if sequence.indent_level > 0 {
-                    // For nested lists, always start at 1
-                    sequence.index + 1
-                } else {
-                    // For root level lists, maintain sequence
-                    sequence.index + 1
-                }
-            }
-            "one" => 1,
-            "zero" => 0,
-            _ => sequence.index + 1,
+    fn get_expected_number(&self, index: usize) -> usize {
+        match self.style {
+            ListStyle::OneOne => 1,
+            ListStyle::Ordered => index + 1,
+            ListStyle::Ordered0 => index,
         }
     }
 
-    fn is_blank_line(line: &str) -> bool {
-        line.trim().is_empty()
-    }
-
-    // Helper function to find or create a sequence for a given indentation level
-    fn find_or_create_sequence(
-        sequences: &mut HashMap<usize, ListSequence>,
-        indent_level: usize,
-        line_num: usize,
-    ) -> &mut ListSequence {
-        sequences.entry(indent_level).or_insert(ListSequence {
-            index: 0,
-            indent_level,
-            last_seen_line: line_num,
-        })
-    }
-
-    // Helper function to check if a number matches the expected value
-    fn is_number_valid(&self, number: usize, expected: usize) -> bool {
-        match self.style.as_str() {
-            "one" => number == 1,
-            "zero" => number == 0,
-            _ => number == expected,
-        }
-    }
-
-    // Helper function to reset sequences for deeper levels
-    fn reset_deeper_sequences(
-        sequences: &mut HashMap<usize, ListSequence>,
-        current_level: usize,
-        line_num: usize,
-    ) {
-        // Only reset sequences at deeper levels that haven't been seen recently
-        sequences.retain(|&level, sequence| {
-            level <= current_level || line_num - sequence.last_seen_line <= 2
-        });
-    }
-
-    // Helper function to check if a line is part of a code block
-    fn is_code_block_marker(line: &str) -> bool {
-        line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~")
+    fn fix_line(&self, line: &str, expected_num: usize) -> String {
+        FIX_LINE_REGEX
+            .replace(line, format!("${{1}}{}{}", expected_num, "$2"))
+            .to_string()
     }
 }
 
-impl Rule for MD029OrderedListPrefix {
+impl Rule for MD029OrderedListMarker {
     fn name(&self) -> &'static str {
         "MD029"
     }
 
     fn description(&self) -> &'static str {
-        "Ordered list item prefix should be consistent"
+        "Ordered list marker value"
     }
 
     fn check(&self, content: &str) -> LintResult {
-        let line_index = LineIndex::new(content.to_string());
-
-        // Early return for empty content
-        if content.trim().is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Quick check if there are any numbered lists at all
-        if !content.contains(|c: char| c.is_ascii_digit() && c != '0') || !content.contains(". ") {
-            return Ok(vec![]);
-        }
-
         let mut warnings = Vec::new();
-        let mut sequences: HashMap<usize, ListSequence> = HashMap::new();
         let mut in_code_block = false;
-
+        let mut indent_stack: Vec<(usize, usize)> = Vec::new(); // (indent, index)
         let lines: Vec<&str> = content.lines().collect();
-
         for (line_num, line) in lines.iter().enumerate() {
-            // Handle code block transitions
-            if Self::is_code_block_marker(line) {
+            if line.trim().starts_with("```") {
                 in_code_block = !in_code_block;
                 continue;
             }
-
-            // Skip lines in code blocks
             if in_code_block {
                 continue;
             }
-
-            if let Some(number) = Self::get_list_number(line) {
-                let indent_level = Self::get_indent_level(line);
-
-                // Reset sequences for deeper levels when going back to a shallower level
-                Self::reset_deeper_sequences(&mut sequences, indent_level, line_num);
-
-                // Find or create sequence for this level
-                let sequence =
-                    Self::find_or_create_sequence(&mut sequences, indent_level, line_num);
-                let expected = self.get_expected_number(sequence);
-
-                if !self.is_number_valid(number, expected) {
-                    let indentation = line.len() - line.trim_start().len();
-                    let message = match self.style.as_str() {
-                        "one" => "List item prefix should be 1 for style 'one'".to_string(),
-                        "zero" => "List item prefix should be 0 for style 'zero'".to_string(),
-                        _ => format!("List item prefix should be {}", expected),
-                    };
-
+            if Self::get_list_number(line).is_some() {
+                let indent = line.chars().take_while(|c| c.is_whitespace()).count();
+                // Pop stack if current indent is less than stack top
+                while let Some(&(top_indent, _)) = indent_stack.last() {
+                    if indent < top_indent {
+                        indent_stack.pop();
+                    } else {
+                        break;
+                    }
+                }
+                // If indent matches stack top, increment index
+                if let Some(&mut (top_indent, ref mut idx)) = indent_stack.last_mut() {
+                    if indent == top_indent {
+                        let expected_num = self.get_expected_number(*idx);
+                        if Self::get_list_number(line).unwrap() != expected_num {
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                message: format!(
+                                    "Ordered list item number {} does not match style (expected {})",
+                                    Self::get_list_number(line).unwrap(), expected_num
+                                ),
+                                line: line_num + 1,
+                                column: line.find(char::is_numeric).unwrap_or(0) + 1,
+                                severity: Severity::Warning,
+                                fix: Some(Fix {
+                                    range: 0..0, // TODO: Replace with correct byte range if available
+                                    replacement: self.fix_line(line, expected_num),
+                                }),
+                            });
+                        }
+                        *idx += 1;
+                        continue;
+                    }
+                }
+                // New deeper indent or first item
+                indent_stack.push((indent, 0));
+                let expected_num = self.get_expected_number(0);
+                if Self::get_list_number(line).unwrap() != expected_num {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
+                        message: format!(
+                            "Ordered list item number {} does not match style (expected {})",
+                            Self::get_list_number(line).unwrap(), expected_num
+                        ),
                         line: line_num + 1,
-                        column: indentation + 1,
-                        message,
+                        column: line.find(char::is_numeric).unwrap_or(0) + 1,
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num + 1, indentation + 1),
-                            replacement: format!(
-                                "{}{}",
-                                if self.style == "one" {
-                                    1
-                                } else if self.style == "zero" {
-                                    0
-                                } else {
-                                    expected
-                                },
-                                &line[indentation + number.to_string().len()..]
-                            ),
+                            range: 0..0, // TODO: Replace with correct byte range if available
+                            replacement: self.fix_line(line, expected_num),
                         }),
                     });
                 }
-
-                sequence.index += 1;
-                sequence.last_seen_line = line_num;
-            } else if !Self::is_blank_line(line) && !Self::is_code_block_marker(line) {
-                // Non-list, non-blank, non-code-block line resets all sequences
-                sequences.clear();
+                // Increment the new top
+                if let Some(&mut (_, ref mut idx)) = indent_stack.last_mut() {
+                    *idx += 1;
+                }
+            } else if !line.trim().is_empty() {
+                // Non-list, non-blank line breaks the list
+                indent_stack.clear();
+            } else {
+                // Blank line breaks the list
+                indent_stack.clear();
             }
         }
-
         Ok(warnings)
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
-        let warnings = self.check(content)?;
-
-        // Early return if content is empty or has no potential issues
-        if warnings.is_empty() {
-            return Ok(content.to_string());
-        }
-
         let mut result = String::new();
-        let mut sequences: HashMap<usize, ListSequence> = HashMap::new();
         let mut in_code_block = false;
-
+        let mut indent_stack: Vec<(usize, usize)> = Vec::new(); // (indent, index)
         let lines: Vec<&str> = content.lines().collect();
-
-        for (line_num, line) in lines.iter().enumerate() {
-            let mut fixed_line = line.to_string();
-
-            // Handle code block transitions
-            if Self::is_code_block_marker(line) {
+        for line in lines.iter() {
+            if line.trim().starts_with("```") {
                 in_code_block = !in_code_block;
-                result.push_str(&fixed_line);
-                if line_num < lines.len() - 1 {
-                    result.push('\n');
-                }
+                result.push_str(line);
+                result.push('\n');
                 continue;
             }
-
-            // Skip lines in code blocks
             if in_code_block {
-                result.push_str(&fixed_line);
-                if line_num < lines.len() - 1 {
-                    result.push('\n');
-                }
+                result.push_str(line);
+                result.push('\n');
                 continue;
             }
-
-            if let Some(number) = Self::get_list_number(line) {
-                let indent_level = Self::get_indent_level(line);
-
-                // Reset sequences for deeper levels when going back to a shallower level
-                Self::reset_deeper_sequences(&mut sequences, indent_level, line_num);
-
-                // Find or create sequence for this level
-                let sequence =
-                    Self::find_or_create_sequence(&mut sequences, indent_level, line_num);
-                let expected = self.get_expected_number(sequence);
-                let expected_num = match self.style.as_str() {
-                    "one" => 1,
-                    "zero" => 0,
-                    _ => expected,
-                };
-
-                if !self.is_number_valid(number, expected) {
-                    let indentation = line.len() - line.trim_start().len();
-                    fixed_line = format!(
-                        "{}{}{}",
-                        " ".repeat(indentation),
-                        expected_num,
-                        &line[indentation + number.to_string().len()..]
-                    );
+            if Self::get_list_number(line).is_some() {
+                let indent = line.chars().take_while(|c| c.is_whitespace()).count();
+                // Pop stack if current indent is less than stack top
+                while let Some(&(top_indent, _)) = indent_stack.last() {
+                    if indent < top_indent {
+                        indent_stack.pop();
+                    } else {
+                        break;
+                    }
                 }
-
-                sequence.index += 1;
-                sequence.last_seen_line = line_num;
-            } else if !Self::is_blank_line(line) && !Self::is_code_block_marker(line) {
-                // Non-list, non-blank, non-code-block line resets all sequences
-                sequences.clear();
-            }
-
-            result.push_str(&fixed_line);
-            if line_num < lines.len() - 1 {
+                // If indent matches stack top, increment index
+                if let Some(&mut (top_indent, ref mut idx)) = indent_stack.last_mut() {
+                    if indent == top_indent {
+                        let expected_num = self.get_expected_number(*idx);
+                        let fixed_line = self.fix_line(line, expected_num);
+                        result.push_str(&fixed_line);
+                        result.push('\n');
+                        *idx += 1;
+                        continue;
+                    }
+                }
+                // New deeper indent or first item
+                indent_stack.push((indent, 0));
+                let expected_num = self.get_expected_number(0);
+                let fixed_line = self.fix_line(line, expected_num);
+                result.push_str(&fixed_line);
+                result.push('\n');
+                // Increment the new top
+                if let Some(&mut (_, ref mut idx)) = indent_stack.last_mut() {
+                    *idx += 1;
+                }
+            } else if !line.trim().is_empty() {
+                // Non-list, non-blank line breaks the list
+                indent_stack.clear();
+                result.push_str(line);
+                result.push('\n');
+            } else {
+                // Blank line breaks the list
+                indent_stack.clear();
+                result.push_str(line);
                 result.push('\n');
             }
         }
+        // Remove trailing newline if the original content didn't have one
+        if !content.ends_with('\n') && result.ends_with('\n') {
+            result.pop();
+        }
+        Ok(result)
+    }
 
-        // Preserve trailing newline if present
-        if content.ends_with('\n') {
-            result.push('\n');
+    /// Optimized check using document structure
+    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+        // Early return if no lists
+        if structure.list_lines.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // Quick check if there are no ordered lists
+        if !content.contains('1') || (!content.contains("1.") && !content.contains("2.") && !content.contains("0.")) {
+            return Ok(Vec::new());
         }
 
-        Ok(result)
+        let mut warnings = Vec::new();
+        let mut list_items = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Create a set of list line indices for faster lookup
+        let mut list_line_set = std::collections::HashSet::new();
+        for &line_num in &structure.list_lines {
+            list_line_set.insert(line_num); // Keep as 1-indexed for easier comparison
+        }
+
+        // Group ordered list items into sections
+        let mut in_list = false;
+        
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_num = line_idx + 1; // Convert to 1-indexed
+            
+            // Skip lines in code blocks
+            if structure.is_in_code_block(line_num) {
+                // If we were in a list, check it before continuing
+                if in_list && !list_items.is_empty() {
+                    self.check_list_section(&list_items, &mut warnings);
+                    list_items.clear();
+                    in_list = false;
+                }
+                continue;
+            }
+            
+            if list_line_set.contains(&line_num) {
+                if Self::get_list_number(line).is_some() {
+                    // If this is the first item of a new list, record the list start
+                    if !in_list {
+                        in_list = true;
+                    }
+                    
+                    list_items.push((line_idx, line.to_string()));
+                }
+            } else if !line.trim().is_empty() {
+                // Non-empty, non-list line breaks the list
+                if in_list && !list_items.is_empty() {
+                    self.check_list_section(&list_items, &mut warnings);
+                    list_items.clear();
+                    in_list = false;
+                }
+            }
+        }
+
+        // Check last section if it exists
+        if !list_items.is_empty() {
+            self.check_list_section(&list_items, &mut warnings);
+        }
+
+        Ok(warnings)
+    }
+    
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::List
+    }
+    
+    /// Check if this rule should be skipped
+    fn should_skip(&self, content: &str) -> bool {
+        content.is_empty() || 
+        !content.contains('1') || 
+        (!content.contains("1.") && !content.contains("2.") && !content.contains("0."))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+}
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(self.style.clone()));
-        Some((self.name().to_string(), toml::Value::Table(map)))
+impl DocumentStructureExtensions for MD029OrderedListMarker {
+    fn has_relevant_elements(&self, content: &str, doc_structure: &DocumentStructure) -> bool {
+        // This rule is only relevant if there are list items AND they might be ordered lists
+        !doc_structure.list_lines.is_empty() && 
+        (content.contains("1.") || content.contains("2.") || content.contains("0."))
+    }
+}
+
+impl MD029OrderedListMarker {
+    fn check_list_section(&self, items: &[(usize, String)], warnings: &mut Vec<LintWarning>) {
+        // Improved grouping: start a new group when indentation decreases or stays the same after a break
+        let mut groups: Vec<Vec<(usize, String)>> = Vec::new();
+        let mut current_group: Vec<(usize, String)> = Vec::new();
+        let mut last_indent: Option<usize> = None;
+        for (_idx, (line_num, _line)) in items.iter().enumerate() {
+            let indent = _line.chars().take_while(|c| c.is_whitespace()).count();
+            if current_group.is_empty() {
+                current_group.push((*line_num, _line.clone()));
+                last_indent = Some(indent);
+            } else if indent > last_indent.unwrap() {
+                // Nested list: start a new group
+                groups.push(std::mem::take(&mut current_group));
+                current_group.push((*line_num, _line.clone()));
+                last_indent = Some(indent);
+            } else if indent < last_indent.unwrap() {
+                // Outdent: start a new group
+                groups.push(std::mem::take(&mut current_group));
+                current_group.push((*line_num, _line.clone()));
+                last_indent = Some(indent);
+            } else {
+                // Same level: continue current group
+                current_group.push((*line_num, _line.clone()));
+                last_indent = Some(indent);
+            }
+        }
+        if !current_group.is_empty() {
+            groups.push(current_group);
+        }
+        // Check each group independently
+        for group in groups {
+            for (idx, (line_num, line)) in group.iter().enumerate() {
+                if Self::get_list_number(line).is_some() {
+                    let expected_num = self.get_expected_number(idx);
+                    if Self::get_list_number(line).unwrap() != expected_num {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message: format!(
+                                "Ordered list item number {} does not match style (expected {})",
+                                Self::get_list_number(line).unwrap(), expected_num
+                            ),
+                            line: line_num + 1,
+                            column: line.find(char::is_numeric).unwrap_or(0) + 1,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: 0..0, // TODO: Replace with correct byte range if available
+                                replacement: self.fix_line(line, expected_num),
+                            }),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_with_document_structure() {
+        // Test with default style (ordered)
+        let rule = MD029OrderedListMarker::default();
+        
+        // Test with correctly ordered list
+        let content = "1. First item\n2. Second item\n3. Third item";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert!(result.is_empty());
+        
+        // Test with incorrectly ordered list
+        let content = "1. First item\n3. Third item\n5. Fifth item";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 2); // Should have warnings for items 3 and 5
+        
+        // Test with one-one style
+        let rule = MD029OrderedListMarker::new(ListStyle::OneOne);
+        let content = "1. First item\n2. Second item\n3. Third item";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(result.len(), 2); // Should have warnings for items 2 and 3
+        
+        // Test with ordered0 style
+        let rule = MD029OrderedListMarker::new(ListStyle::Ordered0);
+        let content = "0. First item\n1. Second item\n2. Third item";
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(content, &structure).unwrap();
+        assert!(result.is_empty());
     }
 }

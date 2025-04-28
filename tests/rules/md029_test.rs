@@ -1,10 +1,10 @@
 use rumdl::rule::Rule;
-use rumdl::rules::MD029OrderedListPrefix;
+use rumdl::rules::MD029OrderedListMarker;
 use rumdl::utils::range_utils::LineIndex;
 
 #[test]
 fn test_md029_valid() {
-    let rule = MD029OrderedListPrefix::new("one");
+    let rule = MD029OrderedListMarker::new(rumdl::rules::ListStyle::OneOne);
 
     let content = r#"1. Item 1
 1. Item 2
@@ -16,7 +16,7 @@ fn test_md029_valid() {
 
 #[test]
 fn test_md029_ordered_any_valid() {
-    let rule = MD029OrderedListPrefix::new("ordered");
+    let rule = MD029OrderedListMarker::new(rumdl::rules::ListStyle::Ordered);
 
     let content = r#"1. Item 1
 2. Item 2
@@ -28,7 +28,7 @@ fn test_md029_ordered_any_valid() {
 
 #[test]
 fn test_md029_ordered_any_invalid() {
-    let rule = MD029OrderedListPrefix::new("ordered");
+    let rule = MD029OrderedListMarker::new(rumdl::rules::ListStyle::Ordered);
 
     let content = r#"1. Item 1
 1. Item 2
@@ -44,7 +44,7 @@ fn test_md029_ordered_any_invalid() {
 
 #[test]
 fn test_md029_nested() {
-    let rule = MD029OrderedListPrefix::new("one");
+    let rule = MD029OrderedListMarker::new(rumdl::rules::ListStyle::OneOne);
     let content = r#"1. First item
    1. Nested first
    1. Nested second
@@ -55,7 +55,7 @@ fn test_md029_nested() {
 
 #[test]
 fn test_md029_fix() {
-    let rule = MD029OrderedListPrefix::new("ordered");
+    let rule = MD029OrderedListMarker::new(rumdl::rules::ListStyle::Ordered);
     let content = r#"1. First item
 3. Second item
 5. Third item"#;
@@ -77,7 +77,7 @@ fn test_line_index() {
 
 #[test]
 fn test_md029_with_code_blocks() {
-    let rule = MD029OrderedListPrefix::new("ordered");
+    let rule = MD029OrderedListMarker::new(rumdl::rules::ListStyle::Ordered);
 
     let content = r#"1. First step
 ```bash
@@ -108,7 +108,7 @@ final code
 
 #[test]
 fn test_md029_nested_with_code_blocks() {
-    let rule = MD029OrderedListPrefix::new("ordered");
+    let rule = MD029OrderedListMarker::new(rumdl::rules::ListStyle::Ordered);
 
     let content = r#"1. First step
    ```bash

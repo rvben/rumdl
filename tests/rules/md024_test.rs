@@ -1,9 +1,10 @@
 use rumdl::rule::Rule;
-use rumdl::rules::MD024MultipleHeadings;
+use rumdl::rules::MD024NoDuplicateHeading;
+use std::io::Write;
 
 #[test]
 fn test_md024_valid() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "# Heading 1\n## Heading 2\n### Heading 3\n";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
@@ -11,7 +12,7 @@ fn test_md024_valid() {
 
 #[test]
 fn test_md024_invalid() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "# Heading\n## Subheading\n# Heading\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -20,7 +21,7 @@ fn test_md024_invalid() {
 
 #[test]
 fn test_md024_different_levels() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "# Heading\n## Heading\n### Heading\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
@@ -28,7 +29,7 @@ fn test_md024_different_levels() {
 
 #[test]
 fn test_md024_different_levels_with_allow_different_nesting() {
-    let rule = MD024MultipleHeadings::new(true);
+    let rule = MD024NoDuplicateHeading::new(true, false);
     let content = "# Heading\n## Heading\n### Heading\n";
     let result = rule.check(content).unwrap();
 
@@ -45,7 +46,7 @@ fn test_md024_different_levels_with_allow_different_nesting() {
 
 #[test]
 fn test_md024_different_case() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "# Heading\n## Subheading\n# heading\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
@@ -53,7 +54,7 @@ fn test_md024_different_case() {
 
 #[test]
 fn test_md024_with_setext_headings() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "Heading 1\n=========\nSome text\n\nHeading 1\n=========\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -62,7 +63,7 @@ fn test_md024_with_setext_headings() {
 
 #[test]
 fn test_md024_mixed_heading_styles() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "# Heading\n\nHeading\n=======\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -71,7 +72,7 @@ fn test_md024_mixed_heading_styles() {
 
 #[test]
 fn test_md024_with_empty_headings() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     // Empty headings should be ignored by the rule
     let content = "#\n## \n###  \n";
     let result = rule.check(content).unwrap();
@@ -80,17 +81,18 @@ fn test_md024_with_empty_headings() {
 
 #[test]
 fn test_md024_in_code_blocks() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "# Heading\n\n```markdown\n# Heading\n```\n# Heading\n";
     let result = rule.check(content).unwrap();
-    // The heading in the code block should not be counted
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 6);
+    println!("{:?}", result);
+    std::io::stdout().flush().unwrap();
 }
 
 #[test]
 fn test_md024_with_front_matter() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "---\ntitle: My Document\n---\n# Heading\n\nSome text\n\n# Heading\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -99,7 +101,7 @@ fn test_md024_with_front_matter() {
 
 #[test]
 fn test_md024_with_closed_atx_headings() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "# Heading #\n\n## Subheading ##\n\n# Heading #\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -108,7 +110,7 @@ fn test_md024_with_closed_atx_headings() {
 
 #[test]
 fn test_md024_with_multiple_duplicates() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "# Heading\n\n## Subheading\n\n# Heading\n\n## Subheading\n\n# Heading\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3);
@@ -119,7 +121,7 @@ fn test_md024_with_multiple_duplicates() {
 
 #[test]
 fn test_md024_with_trailing_whitespace() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "# Heading \n\n# Heading\n";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 1);
@@ -128,7 +130,7 @@ fn test_md024_with_trailing_whitespace() {
 
 #[test]
 fn test_md024_performance_with_many_headings() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
 
     // Create a document with 100 unique headings
     let mut content = String::new();
@@ -149,7 +151,7 @@ fn test_md024_performance_with_many_headings() {
 
 #[test]
 fn test_md024_fix() {
-    let rule = MD024MultipleHeadings::default();
+    let rule = MD024NoDuplicateHeading::default();
     let content = "# Heading\n## Subheading\n# Heading\n";
     let result = rule.fix(content).unwrap();
     assert_eq!(result, content, "Fix method should not modify content");

@@ -1,5 +1,4 @@
-
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
 #[derive(Debug, Default)]
@@ -16,8 +15,8 @@ impl MD011NoReversedLinks {
             for cap in re.captures_iter(line) {
                 if cap.get(3).is_some() {
                     // Found reversed link syntax (text)[url]
-                    let url = cap[3].trim_matches('(').trim_matches(')');
-                    let text = &cap[4];
+                    let text = cap[3].trim_matches('(').trim_matches(')');
+                    let url = &cap[4];
                     let start = line_start + cap.get(0).unwrap().start();
                     results.push((current_line, start - line_start + 1, text.to_string(), url.to_string()));
                 }
@@ -65,13 +64,13 @@ impl Rule for MD011NoReversedLinks {
             for cap in re.captures_iter(line) {
                 let column = line_start + cap.get(0).unwrap().start() + 1;
                 warnings.push(LintWarning {
-            rule_name: Some(self.name()),
+                    rule_name: Some(self.name()),
                     message: "Reversed link syntax".to_string(),
                     line: line_num + 1,
                     column,
+                    severity: Severity::Warning,
                     fix: Some(Fix {
-                        line: line_num + 1,
-                        column,
+                        range: (0..0), // TODO: Replace with correct byte range if available
                         replacement: format!("[{}]({})", &cap[2], &cap[1]),
                     }),
                 });
@@ -115,5 +114,9 @@ impl Rule for MD011NoReversedLinks {
         }
 
         Ok(result)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 } 
