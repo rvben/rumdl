@@ -1,4 +1,5 @@
 use crate::utils::range_utils::LineIndex;
+use toml;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity, RuleCategory};
 use crate::rules::heading_utils::HeadingUtils;
@@ -185,3 +186,15 @@ impl Rule for MD024NoDuplicateHeading {
 
         Ok(result)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("allow_different_nesting".to_string(), toml::Value::Boolean(self.allow_different_nesting));
+        map.insert("siblings_only".to_string(), toml::Value::Boolean(self.siblings_only));
+        Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+}

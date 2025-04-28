@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
+use toml;
 
 // Thread-local cache for file existence checks to avoid redundant filesystem operations
 thread_local! {
@@ -248,6 +249,13 @@ impl MD057ExistingRelativeLinks {
                 }
             }
         }
+    }
+
+    /// Return the default config section for this rule
+    pub fn default_config_section() -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("skip_media_files".to_string(), toml::Value::Boolean(true));
+        Some(("MD057".to_string(), toml::Value::Table(map)))
     }
 }
 

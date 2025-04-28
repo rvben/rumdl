@@ -1,4 +1,5 @@
 use crate::utils::range_utils::LineIndex;
+use toml;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
@@ -219,5 +220,11 @@ impl Rule for MD012NoMultipleBlanks {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("maximum".to_string(), toml::Value::Integer(self.maximum as i64));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

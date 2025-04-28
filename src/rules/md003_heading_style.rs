@@ -4,6 +4,7 @@ use crate::utils::document_structure::DocumentStructure;
 use crate::utils::markdown_elements::{ElementQuality, ElementType, MarkdownElements};
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
 
 lazy_static! {
     static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
@@ -458,6 +459,18 @@ impl Rule for MD003HeadingStyle {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("style".to_string(), toml::Value::String(format!("{}", match self.style {
+            HeadingStyle::Atx => "atx",
+            HeadingStyle::AtxClosed => "atx_closed",
+            HeadingStyle::Setext1 => "setext",
+            HeadingStyle::Setext2 => "setext",
+            HeadingStyle::Consistent => "consistent",
+        })));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
 

@@ -2,6 +2,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::element_cache::ElementCache;
 use crate::utils::element_cache::ListMarkerType;
 use crate::utils::range_utils::LineIndex;
+use toml;
 
 #[derive(Debug, Default)]
 pub struct MD016NoMultipleSpaceAfterListMarker {
@@ -138,6 +139,12 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("allow_multiple_spaces".to_string(), toml::Value::Boolean(self.allow_multiple_spaces));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
 

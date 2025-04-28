@@ -3,6 +3,7 @@ use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
+use toml;
 
 lazy_static! {
     // Simplified HR patterns - more efficient
@@ -253,5 +254,11 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("require_space".to_string(), toml::Value::Boolean(self.require_space));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

@@ -1,6 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::range_utils::LineIndex;
+use toml;
 
 /// Rule MD055: Table pipe style should be consistent
 ///
@@ -203,6 +204,13 @@ impl MD055TablePipeStyle {
             // Reapply the original indentation
             format!("{}{}", leading_whitespace, result)
         }
+    }
+
+    /// Return the default config section for this rule
+    pub fn default_config_section() -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("style".to_string(), toml::Value::String("consistent".to_string()));
+        Some(("MD055".to_string(), toml::Value::Table(map)))
     }
 }
 

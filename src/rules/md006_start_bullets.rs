@@ -4,6 +4,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
 
 /// Rule that ensures bullet lists start at the beginning of the line
 ///
@@ -281,6 +282,10 @@ impl Rule for MD006StartBullets {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        None
     }
 }
 

@@ -5,6 +5,7 @@ use crate::utils::element_cache::ListMarkerType;
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
 
 #[derive(Debug)]
 pub struct MD007ULIndent {
@@ -190,6 +191,12 @@ impl Rule for MD007ULIndent {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("indent".to_string(), toml::Value::Integer(self.indent as i64));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
 

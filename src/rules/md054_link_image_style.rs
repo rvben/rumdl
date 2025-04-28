@@ -2,6 +2,7 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
 
 lazy_static! {
     // Updated regex patterns that work with Unicode characters
@@ -112,6 +113,18 @@ impl MD054LinkImageStyle {
             "url_inline" => self.url_inline,
             _ => false,
         }
+    }
+
+    /// Return the default config section for this rule
+    pub fn default_config_section() -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("autolink".to_string(), toml::Value::Boolean(true));
+        map.insert("inline".to_string(), toml::Value::Boolean(true));
+        map.insert("url_inline".to_string(), toml::Value::Boolean(true));
+        map.insert("shortcut".to_string(), toml::Value::Boolean(true));
+        map.insert("collapsed".to_string(), toml::Value::Boolean(true));
+        map.insert("full".to_string(), toml::Value::Boolean(true));
+        Some(("MD054".to_string(), toml::Value::Table(map)))
     }
 }
 

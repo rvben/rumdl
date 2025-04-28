@@ -3,6 +3,7 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
 
 lazy_static! {
     // Updated regex to handle blockquote markers at the beginning of lines
@@ -351,6 +352,16 @@ impl Rule for MD008ULStyle {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        let style_str = match &self.style_mode {
+            StyleMode::Consistent => "consistent".to_string(),
+            StyleMode::Specific(s) => s.clone(),
+        };
+        map.insert("style".to_string(), toml::Value::String(style_str));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
 

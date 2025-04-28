@@ -4,6 +4,7 @@ use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
+use toml;
 
 lazy_static! {
     // Link reference format: [text][reference]
@@ -280,6 +281,13 @@ impl MD053LinkImageReferenceDefinitions {
         while !lines.is_empty() && lines[0].trim().is_empty() {
             lines.remove(0);
         }
+    }
+
+    /// Return the default config section for this rule
+    pub fn default_config_section() -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("ignored_definitions".to_string(), toml::Value::Array(vec![]));
+        Some(("MD053".to_string(), toml::Value::Table(map)))
     }
 }
 

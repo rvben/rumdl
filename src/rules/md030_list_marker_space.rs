@@ -4,6 +4,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
 
 lazy_static! {
     // Regex to capture list markers and the spaces *after* them
@@ -300,6 +301,15 @@ impl Rule for MD030ListMarkerSpace {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("ul_single".to_string(), toml::Value::Integer(self.ul_single as i64));
+        map.insert("ul_multi".to_string(), toml::Value::Integer(self.ul_multi as i64));
+        map.insert("ol_single".to_string(), toml::Value::Integer(self.ol_single as i64));
+        map.insert("ol_multi".to_string(), toml::Value::Integer(self.ol_multi as i64));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
 

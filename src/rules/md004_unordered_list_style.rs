@@ -3,6 +3,7 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
 
 lazy_static! {
     static ref UNORDERED_LIST_REGEX: FancyRegex =
@@ -229,6 +230,17 @@ impl Rule for MD004UnorderedListStyle {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("style".to_string(), toml::Value::String(match self.style {
+            UnorderedListStyle::Asterisk => "asterisk".to_string(),
+            UnorderedListStyle::Plus => "plus".to_string(),
+            UnorderedListStyle::Dash => "dash".to_string(),
+            UnorderedListStyle::Consistent => "consistent".to_string(),
+        }));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
 

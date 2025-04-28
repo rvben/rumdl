@@ -4,6 +4,7 @@ use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
+use toml;
 
 lazy_static! {
     // Refined regex patterns with better performance characteristics
@@ -220,6 +221,13 @@ impl Rule for MD033NoInlineHtml {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let allowed_vec: Vec<toml::Value> = self.allowed.iter().cloned().map(toml::Value::String).collect();
+        let mut map = toml::map::Map::new();
+        map.insert("allowed".to_string(), toml::Value::Array(allowed_vec));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
 

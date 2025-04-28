@@ -5,6 +5,7 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
+use toml;
 
 lazy_static! {
     static ref LIST_MARKER_REGEX: Regex = Regex::new(r"^\d+[.)]").unwrap();
@@ -727,6 +728,10 @@ impl Rule for MD005ListIndent {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        None
     }
 }
 

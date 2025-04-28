@@ -3,6 +3,7 @@ use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
 
 lazy_static! {
     static ref HR_DASH: Regex = Regex::new(r"^\-{3,}\s*$").unwrap();
@@ -182,5 +183,11 @@ impl Rule for MD035HRStyle {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("style".to_string(), toml::Value::String(self.style.clone()));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

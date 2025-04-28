@@ -3,6 +3,7 @@ use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
 
 lazy_static! {
     static ref HEADING_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})\s+(.+?)(?:\s+#*)?$").unwrap();
@@ -319,6 +320,12 @@ impl Rule for MD002FirstHeadingH1 {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("level".to_string(), toml::Value::Integer(self.level as i64));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
 

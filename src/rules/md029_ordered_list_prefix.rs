@@ -3,6 +3,7 @@ use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
+use toml;
 
 // Cache regex patterns for better performance
 lazy_static! {
@@ -287,5 +288,11 @@ impl Rule for MD029OrderedListPrefix {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("style".to_string(), toml::Value::String(self.style.clone()));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
