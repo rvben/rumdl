@@ -171,7 +171,6 @@ fn test_kebab_vs_snake_case_config() {
         &snake_pyproject_path,
         r#"[tool.rumdl]
 line_length = 100
-ignore_gitignore = true
 "#,
     )
     .unwrap();
@@ -184,7 +183,6 @@ ignore_gitignore = true
         &kebab_pyproject_path,
         r#"[tool.rumdl]
 line-length = 100
-ignore-gitignore = true
 "#,
     )
     .unwrap();

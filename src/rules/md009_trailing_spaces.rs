@@ -2,6 +2,8 @@ use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
+use toml;
+
 #[derive(Debug)]
 pub struct MD009TrailingSpaces {
     pub br_spaces: usize,
@@ -201,5 +203,12 @@ impl Rule for MD009TrailingSpaces {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("br_spaces".to_string(), toml::Value::Integer(self.br_spaces as i64));
+        map.insert("strict".to_string(), toml::Value::Boolean(self.strict));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

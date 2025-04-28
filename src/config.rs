@@ -44,10 +44,6 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub include: Vec<String>,
 
-    /// Ignore .gitignore file
-    #[serde(default)]
-    pub ignore_gitignore: bool,
-
     /// Respect .gitignore files when scanning directories
     #[serde(default = "default_respect_gitignore")]
     pub respect_gitignore: bool,
@@ -65,7 +61,6 @@ impl Default for GlobalConfig {
             disable: Vec::new(),
             exclude: Vec::new(),
             include: Vec::new(),
-            ignore_gitignore: false,
             respect_gitignore: true,
         }
     }
@@ -149,15 +144,6 @@ fn load_config_from_pyproject(path: &str) -> Result<Config, ConfigError> {
                             }
                         }
 
-                        if let Some(ignore_gitignore) = rumdl_table
-                            .get("ignore-gitignore")
-                            .or_else(|| rumdl_table.get("ignore_gitignore"))
-                        {
-                            if let Ok(value) = bool::deserialize(ignore_gitignore.clone()) {
-                                config.global.ignore_gitignore = value;
-                            }
-                        }
-
                         if let Some(respect_gitignore) = rumdl_table
                             .get("respect-gitignore")
                             .or_else(|| rumdl_table.get("respect_gitignore"))
@@ -195,12 +181,10 @@ fn load_config_from_pyproject(path: &str) -> Result<Config, ConfigError> {
                                 "disable",
                                 "include",
                                 "exclude",
-                                "ignore-gitignore",
-                                "ignore_gitignore",
-                                "line-length",
-                                "line_length",
                                 "respect-gitignore",
                                 "respect_gitignore",
+                                "line-length",
+                                "line_length",
                             ]
                             .contains(&key.as_str())
                             {
@@ -283,9 +267,6 @@ exclude = [
 
 # Respect .gitignore files when scanning directories (default: true)
 respect_gitignore = true
-
-# Ignore .gitignore files when scanning directories (default: false, deprecated, use respect_gitignore instead)
-ignore_gitignore = false
 
 # Rule-specific configurations (uncomment and modify as needed)
 
@@ -506,7 +487,6 @@ pub struct SourcedGlobalConfig {
     pub disable: SourcedValue<Vec<String>>,
     pub exclude: SourcedValue<Vec<String>>,
     pub include: SourcedValue<Vec<String>>,
-    pub ignore_gitignore: SourcedValue<bool>,
     pub respect_gitignore: SourcedValue<bool>,
 }
 
@@ -517,7 +497,6 @@ impl Default for SourcedGlobalConfig {
             disable: SourcedValue::new(Vec::new(), ConfigSource::Default),
             exclude: SourcedValue::new(Vec::new(), ConfigSource::Default),
             include: SourcedValue::new(Vec::new(), ConfigSource::Default),
-            ignore_gitignore: SourcedValue::new(false, ConfigSource::Default),
             respect_gitignore: SourcedValue::new(true, ConfigSource::Default),
         }
     }
@@ -546,7 +525,6 @@ impl SourcedConfig {
             disable: SourcedValue::new(Vec::new(), Default),
             exclude: SourcedValue::new(Vec::new(), Default),
             include: SourcedValue::new(Vec::new(), Default),
-            ignore_gitignore: SourcedValue::new(false, Default),
             respect_gitignore: SourcedValue::new(true, Default),
         };
         let mut rules: std::collections::HashMap<String, SourcedRuleConfig> = std::collections::HashMap::new();
@@ -599,11 +577,6 @@ impl SourcedConfig {
                                     "exclude" => {
                                         if let Ok(values) = Vec::<String>::deserialize(value.clone()) {
                                             update_vec(&mut global.exclude, values, PyprojectToml, Some("pyproject.toml".to_string()));
-                                        }
-                                    }
-                                    "ignore-gitignore" | "ignore_gitignore" => {
-                                        if let Ok(val) = bool::deserialize(value.clone()) {
-                                            update_bool(&mut global.ignore_gitignore, val, PyprojectToml, Some("pyproject.toml".to_string()));
                                         }
                                     }
                                     "respect-gitignore" | "respect_gitignore" => {
@@ -663,11 +636,6 @@ impl SourcedConfig {
                                                 update_vec(&mut global.exclude, values, RumdlToml, Some(filename.to_string()));
                                             }
                                         }
-                                        "ignore_gitignore" => {
-                                            if let Ok(val) = bool::deserialize(value.clone()) {
-                                                update_bool(&mut global.ignore_gitignore, val, RumdlToml, Some(filename.to_string()));
-                                            }
-                                        }
                                         "respect_gitignore" => {
                                             if let Ok(val) = bool::deserialize(value.clone()) {
                                                 update_bool(&mut global.respect_gitignore, val, RumdlToml, Some(filename.to_string()));
@@ -725,11 +693,6 @@ impl SourcedConfig {
                                         update_vec(&mut global.exclude, values, RumdlToml, Some(path.to_string()));
                                     }
                                 }
-                                "ignore_gitignore" => {
-                                    if let Ok(val) = bool::deserialize(value.clone()) {
-                                        update_bool(&mut global.ignore_gitignore, val, RumdlToml, Some(path.to_string()));
-                                    }
-                                }
                                 "respect_gitignore" => {
                                     if let Ok(val) = bool::deserialize(value.clone()) {
                                         update_bool(&mut global.respect_gitignore, val, RumdlToml, Some(path.to_string()));
@@ -762,7 +725,6 @@ impl SourcedConfig {
             update_vec(&mut global.disable, cli.disable.value.clone(), Cli, None);
             update_vec(&mut global.exclude, cli.exclude.value.clone(), Cli, None);
             update_vec(&mut global.include, cli.include.value.clone(), Cli, None);
-            update_bool(&mut global.ignore_gitignore, cli.ignore_gitignore.value, Cli, None);
             update_bool(&mut global.respect_gitignore, cli.respect_gitignore.value, Cli, None);
             // No rule-specific CLI overrides for now
         }

@@ -16,7 +16,6 @@ disable = ["MD013"]
 enable = ["MD001", "MD003"]
 include = ["docs/*.md"]
 exclude = [".git"]
-ignore_gitignore = false
 
 [MD013]
 line_length = 120
@@ -43,7 +42,7 @@ tables = true
     assert_eq!(config.global.enable, vec!["MD001", "MD003"]);
     assert_eq!(config.global.include, vec!["docs/*.md"]);
     assert_eq!(config.global.exclude, vec![".git"]);
-    assert!(!config.global.ignore_gitignore);
+    assert!(!config.global.respect_gitignore);
 
     // Verify rule-specific settings
     let line_length =
@@ -97,10 +96,6 @@ fn test_default_config() {
     assert!(
         config.global.disable.is_empty(),
         "Default disable should be empty"
-    );
-    assert!(
-        !config.global.ignore_gitignore,
-        "Default ignore_gitignore should be false"
     );
     assert!(
         config.global.respect_gitignore,

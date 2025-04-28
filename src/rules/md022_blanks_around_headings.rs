@@ -3,6 +3,7 @@ use crate::rules::heading_utils::{is_heading, is_setext_heading_marker};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use fancy_regex::Regex;
 use lazy_static::lazy_static;
+use toml;
 
 lazy_static! {
     static ref HEADING_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})(\s+)(.*)$").unwrap();
@@ -794,6 +795,13 @@ impl Rule for MD022BlanksAroundHeadings {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("lines_above".to_string(), toml::Value::Integer(self.lines_above as i64));
+        map.insert("lines_below".to_string(), toml::Value::Integer(self.lines_below as i64));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
 

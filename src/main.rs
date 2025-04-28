@@ -58,16 +58,7 @@ struct Cli {
     #[arg(long, hide = true)]
     include: Option<String>,
 
-    /// Ignore .gitignore files when scanning directories
-    #[arg(
-        long,
-        default_value = "false",
-        help = "Ignore .gitignore files when scanning directories (does not apply to explicitly provided paths)",
-        hide = true
-    )]
-    ignore_gitignore: bool,
-
-    /// Respect .gitignore files when scanning directories (takes precedence over ignore_gitignore)
+    /// Respect .gitignore files when scanning directories
     #[arg(
         long,
         default_value = "true",
@@ -161,15 +152,7 @@ struct CheckArgs {
     #[arg(long)]
     include: Option<String>,
 
-    /// Ignore .gitignore files when scanning directories
-    #[arg(
-        long,
-        default_value = "false",
-        help = "Ignore .gitignore files when scanning directories (does not apply to explicitly provided paths)"
-    )]
-    ignore_gitignore: bool,
-
-    /// Respect .gitignore files when scanning directories (takes precedence over ignore_gitignore)
+    /// Respect .gitignore files when scanning directories
     #[arg(
         long,
         default_value = "true",
@@ -294,9 +277,9 @@ fn get_enabled_rules_from_checkargs(
         Box::new(MD044ProperNames::new(Vec::new(), true)),
         Box::new(MD045NoAltText::new()),
         Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
-        Box::new(MD047FileEndNewline),
+        Box::new(MD047FileEndNewline::default()),
         Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
-        Box::new(MD049EmphasisStyle::new(EmphasisStyle::Consistent)),
+        Box::new(MD049EmphasisStyle::default()),
         Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
         Box::new(MD051LinkFragments),
         Box::new(MD052ReferenceLinkImages),
@@ -497,9 +480,9 @@ fn find_markdown_files(
 
     // Configure gitignore handling *SECOND*
     let use_gitignore = if args.respect_gitignore {
-        !args.ignore_gitignore // If respect is true, only ignore if ignore_gitignore is false
+        true // If respect is true, always include gitignore
     } else {
-        false // If respect is false, always ignore gitignore
+        false // If respect is false, always exclude gitignore
     };
 
     walk_builder.ignore(use_gitignore); // Enable/disable .ignore
@@ -796,9 +779,9 @@ build-backend = \"setuptools.build_meta\"
                 Box::new(MD044ProperNames::new(Vec::new(), true)),
                 Box::new(MD045NoAltText::new()),
                 Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
-                Box::new(MD047FileEndNewline),
+                Box::new(MD047FileEndNewline::default()),
                 Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
-                Box::new(MD049EmphasisStyle::new(EmphasisStyle::Consistent)),
+                Box::new(MD049EmphasisStyle::default()),
                 Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
                 Box::new(MD051LinkFragments),
                 Box::new(MD052ReferenceLinkImages),
@@ -876,10 +859,6 @@ build-backend = \"setuptools.build_meta\"
                                     println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.include.value), format!("[from {}]", file_for_source(sourced.global.include.source)).color(color_for_source(sourced.global.include.source)));
                                     return;
                                 }
-                                "ignore_gitignore" => {
-                                    println!("{} = {} {}", key.cyan(), sourced.global.ignore_gitignore.value.to_string(), format!("[from {}]", file_for_source(sourced.global.ignore_gitignore.source)).color(color_for_source(sourced.global.ignore_gitignore.source)));
-                                    return;
-                                }
                                 "respect_gitignore" => {
                                     println!("{} = {} {}", key.cyan(), sourced.global.respect_gitignore.value.to_string(), format!("[from {}]", file_for_source(sourced.global.respect_gitignore.source)).color(color_for_source(sourced.global.respect_gitignore.source)));
                                     return;
@@ -912,14 +891,93 @@ build-backend = \"setuptools.build_meta\"
                     }
                 },
                 Some(ConfigSubcommand::PrintDefaults) => {
-                    // Print the default config in TOML format
-                    let default_config = rumdl_config::Config::default();
-                    match toml::to_string_pretty(&default_config) {
-                        Ok(toml_str) => println!("{}", toml_str),
-                        Err(e) => {
-                            eprintln!("Failed to serialize default config: {}", e);
-                            std::process::exit(1);
+                    use toml::Value;
+                    use std::collections::BTreeMap;
+                    use rumdl::rules::*;
+                    
+                    // Collect rule default configs into a BTreeMap for alphabetical order
+                    let mut rule_map = BTreeMap::new();
+                    let all_rules: Vec<Box<dyn Rule>> = vec![
+                        Box::new(MD001HeadingIncrement),
+                        Box::new(MD002FirstHeadingH1::default()),
+                        Box::new(MD003HeadingStyle::default()),
+                        Box::new(MD004UnorderedListStyle::default()),
+                        Box::new(MD005ListIndent),
+                        Box::new(MD006StartBullets),
+                        Box::new(MD007ULIndent::default()),
+                        Box::new(MD008ULStyle::default()),
+                        Box::new(MD009TrailingSpaces::default()),
+                        Box::new(MD010NoHardTabs::default()),
+                        Box::new(MD011ReversedLink {}),
+                        Box::new(MD012NoMultipleBlanks::default()),
+                        Box::new(MD013LineLength::default()),
+                        Box::new(MD015NoMissingSpaceAfterListMarker::default()),
+                        Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
+                        Box::new(MD017NoEmphasisAsHeading),
+                        Box::new(MD018NoMissingSpaceAtx {}),
+                        Box::new(MD019NoMultipleSpaceAtx {}),
+                        Box::new(MD020NoMissingSpaceClosedAtx {}),
+                        Box::new(MD021NoMultipleSpaceClosedAtx {}),
+                        Box::new(MD022BlanksAroundHeadings::default()),
+                        Box::new(MD023HeadingStartLeft {}),
+                        Box::new(MD024MultipleHeadings::default()),
+                        Box::new(MD025SingleTitle::default()),
+                        Box::new(MD026NoTrailingPunctuation::default()),
+                        Box::new(MD027MultipleSpacesBlockquote {}),
+                        Box::new(MD028NoBlanksBlockquote {}),
+                        Box::new(MD029OrderedListPrefix::default()),
+                        Box::new(MD030ListMarkerSpace::default()),
+                        Box::new(MD031BlanksAroundFences {}),
+                        Box::new(MD032BlanksAroundLists {}),
+                        Box::new(MD033NoInlineHtml::default()),
+                        Box::new(MD034NoBareUrls {}),
+                        Box::new(MD035HRStyle::default()),
+                        Box::new(MD036NoEmphasisOnlyFirst),
+                        Box::new(MD037SpacesAroundEmphasis::default()),
+                        Box::new(MD038NoSpaceInCode::default()),
+                        Box::new(MD039NoSpaceInLinks::default()),
+                        Box::new(MD040FencedCodeLanguage::default()),
+                        Box::new(MD041FirstLineHeading::default()),
+                        Box::new(MD042NoEmptyLinks::default()),
+                        Box::new(MD043RequiredHeadings::new(Vec::new())),
+                        Box::new(MD044ProperNames::new(Vec::new(), true)),
+                        Box::new(MD045NoAltText::default()),
+                        Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
+                        Box::new(MD047FileEndNewline::default()),
+                        Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
+                        Box::new(MD049EmphasisStyle::default()),
+                        Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
+                        Box::new(MD051LinkFragments::default()),
+                        Box::new(MD052ReferenceLinkImages::default()),
+                        Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
+                        Box::new(MD054LinkImageStyle::default()),
+                        Box::new(MD055TablePipeStyle::default()),
+                        Box::new(MD056TableColumnCount::default()),
+                        Box::new(MD057ExistingRelativeLinks::default()),
+                        Box::new(MD058BlanksAroundTables::default()),
+                    ];
+                    for rule in all_rules {
+                        if let Some((name, value)) = rule.default_config_section() {
+                            rule_map.insert(name, value);
                         }
+                    }
+
+                    // Print [global] section first
+                    let global = rumdl_config::GlobalConfig::default();
+                    let global_value = toml::Value::try_from(global).unwrap_or(Value::Table(Default::default()));
+                    let mut global_map = toml::map::Map::new();
+                    global_map.insert("global".to_string(), global_value);
+                    let global_toml = toml::Value::Table(global_map);
+                    let global_str = toml::to_string_pretty(&global_toml).unwrap();
+                    println!("{}", global_str.trim());
+
+                    // Print each rule section in alpha order
+                    for (name, value) in rule_map {
+                        let mut rule_section = toml::map::Map::new();
+                        rule_section.insert(name.clone(), value);
+                        let rule_toml = toml::Value::Table(rule_section);
+                        let rule_str = toml::to_string_pretty(&rule_toml).unwrap();
+                        println!("\n{}", rule_str.trim());
                     }
                     return;
                 },
@@ -965,14 +1023,13 @@ build-backend = \"setuptools.build_meta\"
                     }
                     // Align per section: global
                     let global_keys = [
-                        "enable", "disable", "exclude", "include", "ignore_gitignore", "respect_gitignore"
+                        "enable", "disable", "exclude", "include", "respect_gitignore"
                     ];
                     let global_val_strs = [
                         to_toml_string_vec_string(&sourced.global.enable.value),
                         to_toml_string_vec_string(&sourced.global.disable.value),
                         to_toml_string_vec_string(&sourced.global.exclude.value),
                         to_toml_string_vec_string(&sourced.global.include.value),
-                        sourced.global.ignore_gitignore.value.to_string(),
                         sourced.global.respect_gitignore.value.to_string(),
                     ];
                     // Build 'key = value' strings
@@ -990,9 +1047,7 @@ build-backend = \"setuptools.build_meta\"
                     if *show_overrides { print_override_chain_vec_string(&sourced.global.exclude); }
                     println!("  {} {}", gpad(&global_lines[3]), format!("[from {}]", file_for_source(sourced.global.include.source)).color(color_for_source(sourced.global.include.source)));
                     if *show_overrides { print_override_chain_vec_string(&sourced.global.include); }
-                    println!("  {} {}", gpad(&global_lines[4]), format!("[from {}]", file_for_source(sourced.global.ignore_gitignore.source)).color(color_for_source(sourced.global.ignore_gitignore.source)));
-                    if *show_overrides { print_override_chain_bool(&sourced.global.ignore_gitignore); }
-                    println!("  {} {}", gpad(&global_lines[5]), format!("[from {}]", file_for_source(sourced.global.respect_gitignore.source)).color(color_for_source(sourced.global.respect_gitignore.source)));
+                    println!("  {} {}", gpad(&global_lines[4]), format!("[from {}]", file_for_source(sourced.global.respect_gitignore.source)).color(color_for_source(sourced.global.respect_gitignore.source)));
                     if *show_overrides { print_override_chain_bool(&sourced.global.respect_gitignore); }
 
                     // Align per section: each rule, and order rules alphabetically
@@ -1041,7 +1096,6 @@ build-backend = \"setuptools.build_meta\"
                     enable: cli.enable.clone(),
                     exclude: cli.exclude.clone(),
                     include: cli.include.clone(),
-                    ignore_gitignore: cli.ignore_gitignore,
                     respect_gitignore: cli.respect_gitignore,
                     verbose: cli.verbose,
                     profile: cli.profile,

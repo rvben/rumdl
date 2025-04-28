@@ -98,6 +98,11 @@ pub trait Rule {
     fn as_maybe_document_structure(&self) -> Option<&dyn MaybeDocumentStructure> {
         None
     }
+
+    /// Returns the rule's default config as a TOML table, or None if not configurable
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        None
+    }
 }
 
 /// Extension trait to add downcasting capabilities to Rule
