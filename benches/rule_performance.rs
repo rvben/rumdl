@@ -1,9 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rumdl::rule::Rule;
 use rumdl::rules::{
-    MD013LineLength, MD015NoMissingSpaceAfterListMarker, MD033NoInlineHtml,
-    MD037SpacesAroundEmphasis, MD044ProperNames, MD051LinkFragments,
-    MD053LinkImageReferenceDefinitions,
+    MD013LineLength, MD015NoMissingSpaceAfterListMarker, MD033NoInlineHtml, MD037NoSpaceInEmphasis,
+    MD044ProperNames, MD051LinkFragments, MD053LinkImageReferenceDefinitions,
 };
 
 /// Benchmark MD013 rule on a large content with long lines
@@ -66,7 +65,7 @@ fn bench_md037(c: &mut Criterion) {
         }
     }
 
-    let rule = MD037SpacesAroundEmphasis;
+    let rule = MD037NoSpaceInEmphasis;
 
     c.bench_function("MD037 check 500 emphasis markers", |b| {
         b.iter(|| rule.check(black_box(&content)))

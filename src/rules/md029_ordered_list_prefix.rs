@@ -9,11 +9,6 @@ lazy_static! {
     static ref FIX_LINE_REGEX: Regex = Regex::new(r"^(\s*)\d+(\.\s.*)$").unwrap();
 }
 
-#[derive(Debug)]
-pub struct MD029OrderedListMarker {
-    style: ListStyle,
-}
-
 #[derive(Debug, PartialEq)]
 pub enum ListStyle {
     OneOne,   // All ones (1. 1. 1.)
@@ -21,7 +16,12 @@ pub enum ListStyle {
     Ordered0, // Zero-based (0. 1. 2.)
 }
 
-impl Default for MD029OrderedListMarker {
+#[derive(Debug)]
+pub struct MD029OrderedListPrefix {
+    pub style: ListStyle,
+}
+
+impl Default for MD029OrderedListPrefix {
     fn default() -> Self {
         Self {
             style: ListStyle::Ordered,
@@ -29,7 +29,7 @@ impl Default for MD029OrderedListMarker {
     }
 }
 
-impl MD029OrderedListMarker {
+impl MD029OrderedListPrefix {
     pub fn new(style: ListStyle) -> Self {
         Self { style }
     }
@@ -55,7 +55,7 @@ impl MD029OrderedListMarker {
     }
 }
 
-impl Rule for MD029OrderedListMarker {
+impl Rule for MD029OrderedListPrefix {
     fn name(&self) -> &'static str {
         "MD029"
     }
@@ -298,7 +298,7 @@ impl Rule for MD029OrderedListMarker {
     }
 }
 
-impl DocumentStructureExtensions for MD029OrderedListMarker {
+impl DocumentStructureExtensions for MD029OrderedListPrefix {
     fn has_relevant_elements(&self, content: &str, doc_structure: &DocumentStructure) -> bool {
         // This rule is only relevant if there are list items AND they might be ordered lists
         !doc_structure.list_lines.is_empty()
@@ -306,7 +306,7 @@ impl DocumentStructureExtensions for MD029OrderedListMarker {
     }
 }
 
-impl MD029OrderedListMarker {
+impl MD029OrderedListPrefix {
     fn check_list_section(&self, items: &[(usize, String)], warnings: &mut Vec<LintWarning>) {
         // Improved grouping: start a new group when indentation decreases or stays the same after a break
         let mut groups: Vec<Vec<(usize, String)>> = Vec::new();
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn test_with_document_structure() {
         // Test with default style (ordered)
-        let rule = MD029OrderedListMarker::default();
+        let rule = MD029OrderedListPrefix::default();
 
         // Test with correctly ordered list
         let content = "1. First item\n2. Second item\n3. Third item";
@@ -386,14 +386,14 @@ mod tests {
         assert_eq!(result.len(), 2); // Should have warnings for items 3 and 5
 
         // Test with one-one style
-        let rule = MD029OrderedListMarker::new(ListStyle::OneOne);
+        let rule = MD029OrderedListPrefix::new(ListStyle::OneOne);
         let content = "1. First item\n2. Second item\n3. Third item";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 2 and 3
 
         // Test with ordered0 style
-        let rule = MD029OrderedListMarker::new(ListStyle::Ordered0);
+        let rule = MD029OrderedListPrefix::new(ListStyle::Ordered0);
         let content = "0. First item\n1. Second item\n2. Third item";
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(content, &structure).unwrap();

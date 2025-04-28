@@ -150,10 +150,9 @@ fn replace_inline_code(line: &str) -> String {
     result
 }
 
-#[derive(Default)]
-pub struct MD037SpacesAroundEmphasis;
+pub struct MD037NoSpaceInEmphasis;
 
-impl Rule for MD037SpacesAroundEmphasis {
+impl Rule for MD037NoSpaceInEmphasis {
     fn name(&self) -> &'static str {
         "MD037"
     }
@@ -353,7 +352,7 @@ impl Rule for MD037SpacesAroundEmphasis {
     }
 }
 
-impl DocumentStructureExtensions for MD037SpacesAroundEmphasis {
+impl DocumentStructureExtensions for MD037NoSpaceInEmphasis {
     fn has_relevant_elements(&self, content: &str, _doc_structure: &DocumentStructure) -> bool {
         !content.is_empty() && (content.contains('*') || content.contains('_'))
     }
@@ -421,7 +420,7 @@ fn check_emphasis_patterns(
     warnings: &mut Vec<LintWarning>,
 ) {
     // Instance of the rule to call the check_pattern method
-    let rule = MD037SpacesAroundEmphasis;
+    let rule = MD037NoSpaceInEmphasis;
 
     // Skip documentation patterns
     let trimmed = line.trim_start();
@@ -623,7 +622,7 @@ fn check_emphasis_patterns(
     }
 }
 
-impl MD037SpacesAroundEmphasis {
+impl MD037NoSpaceInEmphasis {
     // Check a specific emphasis pattern and add warnings
     fn check_pattern(
         &self,
@@ -683,7 +682,7 @@ mod tests {
 
     #[test]
     fn test_with_document_structure() {
-        let rule = MD037SpacesAroundEmphasis;
+        let rule = MD037NoSpaceInEmphasis;
 
         // Test with no spaces inside emphasis
         let content = "This is *correct* emphasis and **strong emphasis**";

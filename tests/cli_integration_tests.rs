@@ -4,7 +4,6 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
-use toml;
 
 fn setup_test_files() -> tempfile::TempDir {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -1089,25 +1088,42 @@ exclude = ["docs/temp"]
         .expect("Failed to execute 'rumdl config --defaults'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    assert!(output.status.success(), "'rumdl config --defaults' did not exit successfully: {stderr}");
+    assert!(
+        output.status.success(),
+        "'rumdl config --defaults' did not exit successfully: {stderr}"
+    );
     // [global] should be at the top
-    assert!(stdout.trim_start().starts_with("[global]"), "Output should start with [global], got: {}", &stdout[..stdout.find('\n').unwrap_or(stdout.len())]);
+    assert!(
+        stdout.trim_start().starts_with("[global]"),
+        "Output should start with [global], got: {}",
+        &stdout[..stdout.find('\n').unwrap_or(stdout.len())]
+    );
     // Should not contain any [from ...] annotation
-    assert!(!stdout.contains("[from "), "Output should not contain [from ...] annotations");
+    assert!(
+        !stdout.contains("[from "),
+        "Output should not contain [from ...] annotations"
+    );
     // Should not mention .rumdl.toml
-    assert!(!stdout.contains(".rumdl.toml"), "Output should not mention .rumdl.toml");
+    assert!(
+        !stdout.contains(".rumdl.toml"),
+        "Output should not mention .rumdl.toml"
+    );
     // Should contain a known default (e.g., enable = [])
-    assert!(stdout.contains("enable = ["), "Output should contain default enable = []");
+    assert!(
+        stdout.contains("enable = ["),
+        "Output should contain default enable = []"
+    );
     // Should NOT contain the custom value from .rumdl.toml
-    assert!(!stdout.contains("enable = [\"MD013\"]"), "Output should not contain custom config values from .rumdl.toml");
+    assert!(
+        !stdout.contains("enable = [\"MD013\"]"),
+        "Output should not contain custom config values from .rumdl.toml"
+    );
     // Output should be valid TOML (parse all [section] blocks)
     let mut current = String::new();
     for line in stdout.lines() {
-        if line.starts_with('[') {
-            if !current.is_empty() {
-                toml::from_str::<Value>(&current).expect("Section is not valid TOML");
-                current.clear();
-            }
+        if line.starts_with('[') && !current.is_empty() {
+            toml::from_str::<Value>(&current).expect("Section is not valid TOML");
+            current.clear();
         }
         current.push_str(line);
         current.push('\n');
@@ -1137,11 +1153,23 @@ exclude = ["docs/temp"]
         .expect("Failed to execute 'rumdl config'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    assert!(output.status.success(), "'rumdl config' did not exit successfully: {stderr}");
+    assert!(
+        output.status.success(),
+        "'rumdl config' did not exit successfully: {stderr}"
+    );
     // Should contain [global]
-    assert!(stdout.contains("[global]"), "Output missing [global] section");
+    assert!(
+        stdout.contains("[global]"),
+        "Output missing [global] section"
+    );
     // Should contain a value from the config file
-    assert!(stdout.contains("enable = [\"MD013\"]"), "Output missing enable = [\"MD013\"] from config");
+    assert!(
+        stdout.contains("enable = [\"MD013\"]"),
+        "Output missing enable = [\"MD013\"] from config"
+    );
     // Should contain [from .rumdl.toml] annotation
-    assert!(stdout.contains("[from .rumdl.toml]"), "Output missing [from .rumdl.toml] annotation");
+    assert!(
+        stdout.contains("[from .rumdl.toml]"),
+        "Output missing [from .rumdl.toml] annotation"
+    );
 }

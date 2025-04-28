@@ -1,5 +1,5 @@
 use rumdl::{
-    rule::Rule, MD033NoInlineHtml, MD037SpacesAroundEmphasis, MD053LinkImageReferenceDefinitions,
+    rule::Rule, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD053LinkImageReferenceDefinitions,
 };
 use std::time::Instant;
 
@@ -42,7 +42,7 @@ fn test_optimized_rules_performance() {
     );
 
     // Test MD037 (emphasis rule)
-    let emphasis_rule = MD037SpacesAroundEmphasis;
+    let emphasis_rule = MD037NoSpaceInEmphasis;
     let start = Instant::now();
     let emphasis_warnings = emphasis_rule.check(&content).unwrap();
     let emphasis_duration = start.elapsed();

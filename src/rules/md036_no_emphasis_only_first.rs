@@ -18,9 +18,9 @@ lazy_static! {
 }
 
 #[derive(Debug, Default)]
-pub struct MD036NoEmphasisOnlyFirst;
+pub struct MD036NoEmphasisAsHeading;
 
-impl MD036NoEmphasisOnlyFirst {
+impl MD036NoEmphasisAsHeading {
     fn is_entire_line_emphasized(
         line: &str,
         content: &str,
@@ -109,7 +109,7 @@ impl MD036NoEmphasisOnlyFirst {
     }
 }
 
-impl Rule for MD036NoEmphasisOnlyFirst {
+impl Rule for MD036NoEmphasisAsHeading {
     fn name(&self) -> &'static str {
         "MD036"
     }

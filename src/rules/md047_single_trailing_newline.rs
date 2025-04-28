@@ -3,9 +3,9 @@ use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug, Default)]
-pub struct MD047FileEndNewline;
+pub struct MD047SingleTrailingNewline;
 
-impl Rule for MD047FileEndNewline {
+impl Rule for MD047SingleTrailingNewline {
     fn name(&self) -> &'static str {
         "MD047"
     }
@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn test_empty_content() {
-        let rule = MD047FileEndNewline;
+        let rule = MD047SingleTrailingNewline;
         let content = "";
         let result = rule.check(content).unwrap();
         assert!(
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn test_single_newline() {
-        let rule = MD047FileEndNewline;
+        let rule = MD047SingleTrailingNewline;
         let content = "# Test\n";
         let result = rule.check(content).unwrap();
         assert!(
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn test_missing_newline() {
-        let rule = MD047FileEndNewline;
+        let rule = MD047SingleTrailingNewline;
         let content = "# Test";
         let result = rule.check(content).unwrap();
         assert_eq!(
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_multiple_newlines() {
-        let rule = MD047FileEndNewline;
+        let rule = MD047SingleTrailingNewline;
         let content = "# Test\n\n";
         let result = rule.check(content).unwrap();
         assert_eq!(
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_only_whitespace() {
-        let rule = MD047FileEndNewline;
+        let rule = MD047SingleTrailingNewline;
         let content = "  \n\n";
         let result = rule.check(content).unwrap();
         assert_eq!(
