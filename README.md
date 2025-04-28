@@ -33,8 +33,7 @@
   - [Rules](#rules)
   - [Command-line Interface](#command-line-interface)
     - [Commands](#commands)
-    - [Options (for `check`)](#options-for-check)
-    - [Example Help Output](#example-help-output)
+    - [Usage Examples](#usage-examples)
   - [Configuration](#configuration)
     - [Configuration File Example](#configuration-file-example)
     - [Initializing Configuration](#initializing-configuration)
@@ -203,43 +202,59 @@ rumdl <command> [options] [file or directory...]
 ### Commands
 
 - `check`: Lint Markdown files and print warnings/errors (main subcommand)
+  - Options:
+    - `-c, --config <file>`: Use custom configuration file
+    - `--fix`: Automatically fix issues where possible
+    - `-l, --list-rules`: List all available rules
+    - `-d, --disable <rules>`: Disable specific rules (comma-separated)
+    - `-e, --enable <rules>`: Enable only specific rules (comma-separated)
+    - `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
+    - `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
+    - `--no-respect-gitignore`: Don't respect .gitignore files
+    - `-v, --verbose`: Show detailed output
+    - `--profile`: Show profiling information
+    - `-q, --quiet`: Suppress all output except errors
+
 - `init`: Create a default `.rumdl.toml` configuration file in the current directory
+  - `--pyproject`: Generate configuration for `pyproject.toml` instead of `.rumdl.toml`
 
-### Options (for `check`)
+- `rule [<rule>]`: Show information about a rule or list all rules
+  - If a rule name or ID is provided, shows details for that rule
+  - If no argument is given, lists all available rules
 
-- `-c, --config <file>`: Use custom configuration file
-- `--fix`: Automatically fix issues where possible
-- `-l, --list-rules`: List all available rules
-- `-d, --disable <rules>`: Disable specific rules (comma-separated)
-- `-e, --enable <rules>`: Enable only specific rules (comma-separated)
-- `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
-- `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
-- `--respect-gitignore`: Respect .gitignore files when scanning directories (default: true)
-- `--no-respect-gitignore`: Don't respect .gitignore files (same as --ignore-gitignore)
-- `-v, --verbose`: Show detailed output
-- `--profile`: Show profiling information
-- `-q, --quiet`: Suppress all output except errors
+- `config [<subcommand>] [--show-overrides]`: Show configuration or query a specific key
+  - Subcommands:
+    - `get <key>`: Query a specific config key (e.g. `global.exclude` or `MD013.line_length`)
+  - `--show-overrides`: Show the override chain for each config value
 
-### Example Help Output
+- `version`: Show version information
+
+### Usage Examples
 
 ```bash
-rumdl --help
+# Lint all Markdown files in the current directory
+rumdl check .
 
-Usage: rumdl <COMMAND> [OPTIONS] [PATHS...]
+# Automatically fix issues
+rumdl check --fix .
 
-Commands:
-  check    Lint Markdown files and print warnings/errors
-  init     Create a default configuration file
+# Create a default configuration file
+rumdl init
 
-Options (for 'check' subcommand):
-  --fix                  Automatically fix fixable issues
-  --rules <RULES>        Comma-separated list of rules to enable
-  --config <FILE>        Path to configuration file
-  --format <FORMAT>      Output format (default: text)
-  --help                 Print help information
-  --version              Print version information
+# Create or update a pyproject.toml file with rumdl configuration
+rumdl init --pyproject
 
-If no command is given, 'check' is assumed (deprecated).
+# Show information about a specific rule
+rumdl rule MD013
+
+# List all available rules
+rumdl rule
+
+# Query a specific config key
+rumdl config get global.exclude
+
+# Show version information
+rumdl version
 ```
 
 ## Configuration

@@ -5,3 +5,4 @@ cov-report
 benchmark
 *.bak*
 .env
+*.log
