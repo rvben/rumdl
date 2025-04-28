@@ -241,7 +241,6 @@ jobs:
             artifacts/rumdl-x86_64-apple-darwin/rumdl-x86_64-apple-darwin
             artifacts/rumdl-aarch64-apple-darwin/rumdl-aarch64-apple-darwin
             artifacts/rumdl-x86_64-pc-windows-msvc/rumdl-x86_64-pc-windows-msvc.exe
-            artifacts/sdist/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
