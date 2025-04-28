@@ -223,7 +223,10 @@ impl Rule for MD014CommandsShowOutput {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("show_output".to_string(), toml::Value::Boolean(self.show_output));
+        map.insert(
+            "show_output".to_string(),
+            toml::Value::Boolean(self.show_output),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

@@ -305,10 +305,22 @@ impl Rule for MD030ListMarkerSpace {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("ul_single".to_string(), toml::Value::Integer(self.ul_single as i64));
-        map.insert("ul_multi".to_string(), toml::Value::Integer(self.ul_multi as i64));
-        map.insert("ol_single".to_string(), toml::Value::Integer(self.ol_single as i64));
-        map.insert("ol_multi".to_string(), toml::Value::Integer(self.ol_multi as i64));
+        map.insert(
+            "ul_single".to_string(),
+            toml::Value::Integer(self.ul_single as i64),
+        );
+        map.insert(
+            "ul_multi".to_string(),
+            toml::Value::Integer(self.ul_multi as i64),
+        );
+        map.insert(
+            "ol_single".to_string(),
+            toml::Value::Integer(self.ol_single as i64),
+        );
+        map.insert(
+            "ol_multi".to_string(),
+            toml::Value::Integer(self.ol_multi as i64),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

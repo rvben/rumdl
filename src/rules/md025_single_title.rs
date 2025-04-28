@@ -215,7 +215,10 @@ impl Rule for MD025SingleTitle {
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
         map.insert("level".to_string(), toml::Value::Integer(self.level as i64));
-        map.insert("front_matter_title".to_string(), toml::Value::String(self.front_matter_title.clone()));
+        map.insert(
+            "front_matter_title".to_string(),
+            toml::Value::String(self.front_matter_title.clone()),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

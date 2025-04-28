@@ -169,8 +169,14 @@ impl Rule for MD013LineLength {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("line_length".to_string(), toml::Value::Integer(self.line_length as i64));
-        map.insert("code_blocks".to_string(), toml::Value::Boolean(self.code_blocks));
+        map.insert(
+            "line_length".to_string(),
+            toml::Value::Integer(self.line_length as i64),
+        );
+        map.insert(
+            "code_blocks".to_string(),
+            toml::Value::Boolean(self.code_blocks),
+        );
         map.insert("tables".to_string(), toml::Value::Boolean(self.tables));
         map.insert("headings".to_string(), toml::Value::Boolean(self.headings));
         map.insert("strict".to_string(), toml::Value::Boolean(self.strict));

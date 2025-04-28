@@ -377,7 +377,10 @@ impl Rule for MD026NoTrailingPunctuation {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("punctuation".to_string(), toml::Value::String(self.punctuation.clone()));
+        map.insert(
+            "punctuation".to_string(),
+            toml::Value::String(self.punctuation.clone()),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

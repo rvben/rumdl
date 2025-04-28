@@ -913,8 +913,14 @@ fn test_rule_command_lists_all_rules() {
         .output()
         .expect("Failed to execute 'rumdl rule'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(output.status.success(), "'rumdl rule' did not exit successfully");
-    assert!(stdout.contains("Available rules:"), "Output missing 'Available rules:'");
+    assert!(
+        output.status.success(),
+        "'rumdl rule' did not exit successfully"
+    );
+    assert!(
+        stdout.contains("Available rules:"),
+        "Output missing 'Available rules:'"
+    );
     assert!(stdout.contains("MD013"), "Output missing rule MD013");
 }
 
@@ -926,9 +932,15 @@ fn test_rule_command_shows_specific_rule() {
         .output()
         .expect("Failed to execute 'rumdl rule MD013'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(output.status.success(), "'rumdl rule MD013' did not exit successfully");
+    assert!(
+        output.status.success(),
+        "'rumdl rule MD013' did not exit successfully"
+    );
     assert!(stdout.contains("MD013"), "Output missing rule name MD013");
-    assert!(stdout.contains("Description"), "Output missing 'Description'");
+    assert!(
+        stdout.contains("Description"),
+        "Output missing 'Description'"
+    );
 }
 
 #[test]
@@ -939,9 +951,18 @@ fn test_config_command_lists_options() {
         .output()
         .expect("Failed to execute 'rumdl config'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(output.status.success(), "'rumdl config' did not exit successfully");
-    assert!(stdout.contains("[global]"), "Output missing [global] section");
-    assert!(stdout.contains("enable =") || stdout.contains("disable =") || stdout.contains("exclude ="), "Output missing expected config keys");
+    assert!(
+        output.status.success(),
+        "'rumdl config' did not exit successfully"
+    );
+    assert!(
+        stdout.contains("[global]"),
+        "Output missing [global] section"
+    );
+    assert!(
+        stdout.contains("enable =") || stdout.contains("disable =") || stdout.contains("exclude ="),
+        "Output missing expected config keys"
+    );
 }
 
 #[test]
@@ -952,7 +973,94 @@ fn test_version_command_prints_version() {
         .output()
         .expect("Failed to execute 'rumdl version'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(output.status.success(), "'rumdl version' did not exit successfully");
-    assert!(stdout.contains("rumdl"), "Output missing 'rumdl' in version output");
+    assert!(
+        output.status.success(),
+        "'rumdl version' did not exit successfully"
+    );
+    assert!(
+        stdout.contains("rumdl"),
+        "Output missing 'rumdl' in version output"
+    );
     assert!(stdout.contains("."), "Output missing version number");
+}
+
+#[test]
+fn test_config_get_subcommand() {
+    use std::fs;
+    use std::process::Command;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[global]
+exclude = ["docs/temp", "node_modules"]
+
+[MD013]
+line_length = 123
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let run_cmd = |args: &[&str]| -> (bool, String, String) {
+        let output = Command::new(rumdl_exe)
+            .current_dir(temp_dir.path())
+            .args(args)
+            .output()
+            .expect("Failed to execute command");
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        (output.status.success(), stdout, stderr)
+    };
+
+    // Test global.exclude
+    let (success, stdout, stderr) = run_cmd(&["config", "get", "global.exclude"]);
+    assert!(
+        success,
+        "config get global.exclude should succeed, stderr: {}",
+        stderr
+    );
+    assert!(
+        stdout.contains("global.exclude = [\"docs/temp\", \"node_modules\"] [from .rumdl.toml]"),
+        "Unexpected output: {}",
+        stdout
+    );
+
+    // Test MD013.line_length
+    let (success, stdout, stderr) = run_cmd(&["config", "get", "MD013.line_length"]);
+    assert!(
+        success,
+        "config get MD013.line_length should succeed, stderr: {}",
+        stderr
+    );
+    assert!(
+        stdout.contains("MD013.line_length = 123 [from .rumdl.toml]"),
+        "Unexpected output: {}",
+        stdout
+    );
+
+    // Test unknown key
+    let (success, _stdout, stderr) = run_cmd(&["config", "get", "global.unknown"]);
+    assert!(!success, "config get global.unknown should fail");
+    assert!(
+        stderr.contains("Unknown global key: unknown"),
+        "Unexpected stderr: {}",
+        stderr
+    );
+
+    let (success, _stdout, stderr) = run_cmd(&["config", "get", "MD999.line_length"]);
+    assert!(!success, "config get MD999.line_length should fail");
+    assert!(
+        stderr.contains("Unknown rule key: MD999.line_length"),
+        "Unexpected stderr: {}",
+        stderr
+    );
+
+    let (success, _stdout, stderr) = run_cmd(&["config", "get", "notavalidkey"]);
+    assert!(!success, "config get notavalidkey should fail");
+    assert!(
+        stderr.contains("Key must be in the form global.key or MDxxx.key"),
+        "Unexpected stderr: {}",
+        stderr
+    );
 }

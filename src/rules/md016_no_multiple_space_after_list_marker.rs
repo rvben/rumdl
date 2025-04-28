@@ -143,7 +143,10 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("allow_multiple_spaces".to_string(), toml::Value::Boolean(self.allow_multiple_spaces));
+        map.insert(
+            "allow_multiple_spaces".to_string(),
+            toml::Value::Boolean(self.allow_multiple_spaces),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

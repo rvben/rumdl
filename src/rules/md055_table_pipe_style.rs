@@ -209,7 +209,10 @@ impl MD055TablePipeStyle {
     /// Return the default config section for this rule
     pub fn default_config_section() -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String("consistent".to_string()));
+        map.insert(
+            "style".to_string(),
+            toml::Value::String("consistent".to_string()),
+        );
         Some(("MD055".to_string(), toml::Value::Table(map)))
     }
 }

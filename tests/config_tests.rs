@@ -42,7 +42,7 @@ tables = true
     assert_eq!(config.global.enable, vec!["MD001", "MD003"]);
     assert_eq!(config.global.include, vec!["docs/*.md"]);
     assert_eq!(config.global.exclude, vec![".git"]);
-    assert!(!config.global.respect_gitignore);
+    assert!(config.global.respect_gitignore);
 
     // Verify rule-specific settings
     let line_length =

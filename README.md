@@ -38,6 +38,9 @@
     - [Configuration File Example](#configuration-file-example)
     - [Initializing Configuration](#initializing-configuration)
     - [Configuration in pyproject.toml](#configuration-in-pyprojecttoml)
+    - [Configuration Output](#configuration-output)
+      - [Effective Configuration (`rumdl config`)](#effective-configuration-rumdl-config)
+      - [Defaults Only (`rumdl config --defaults`)](#defaults-only-rumdl-config---defaults)
   - [Output Style](#output-style)
     - [Output Format](#output-format)
   - [Development](#development)
@@ -222,10 +225,10 @@ rumdl <command> [options] [file or directory...]
   - If a rule name or ID is provided, shows details for that rule
   - If no argument is given, lists all available rules
 
-- `config [<subcommand>] [--show-overrides]`: Show configuration or query a specific key
+- `config [--defaults]`: Show the full effective configuration (default), or only the defaults.
+  - `--defaults`: Show only the default configuration as TOML.
   - Subcommands:
     - `get <key>`: Query a specific config key (e.g. `global.exclude` or `MD013.line_length`)
-  - `--show-overrides`: Show the override chain for each config value
 
 - `version`: Show version information
 
@@ -333,6 +336,51 @@ names = ["rumdl", "Markdown", "GitHub"]
 ```
 
 Both kebab-case (`line-length`, `ignore-gitignore`) and snake_case (`line_length`, `ignore_gitignore`) formats are supported for compatibility with different Python tooling conventions.
+
+### Configuration Output
+
+#### Effective Configuration (`rumdl config`)
+
+The `rumdl config` command prints the **full effective configuration** (defaults + all overrides), showing every key and its value, annotated with the source of each value. The output is colorized and the `[from ...]` annotation is globally aligned for easy scanning.
+
+**Example output:**
+
+```text
+[global]
+  enable             = []                             [from default]
+  disable            = ["MD033"]                      [from .rumdl.toml]
+  include            = ["README.md"]                  [from .rumdl.toml]
+  respect_gitignore  = true                           [from .rumdl.toml]
+
+[MD013]
+  line_length        = 200                            [from .rumdl.toml]
+  code_blocks        = true                           [from .rumdl.toml]
+  ...
+```
+- **Keys** are cyan, **values** are yellow, and the `[from ...]` annotation is colored by source:
+  - Green: CLI
+  - Blue: `.rumdl.toml`
+  - Magenta: `pyproject.toml`
+  - Yellow: default
+- The `[from ...]` column is aligned across all sections.
+
+#### Defaults Only (`rumdl config --defaults`)
+
+The `--defaults` flag prints only the default configuration as TOML, suitable for copy-paste or reference:
+
+```toml
+[global]
+enable = []
+disable = []
+exclude = []
+include = []
+respect_gitignore = true
+
+[MD013]
+line_length = 80
+code_blocks = true
+...
+```
 
 ## Output Style
 

@@ -463,13 +463,19 @@ impl Rule for MD003HeadingStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(format!("{}", match self.style {
-            HeadingStyle::Atx => "atx",
-            HeadingStyle::AtxClosed => "atx_closed",
-            HeadingStyle::Setext1 => "setext",
-            HeadingStyle::Setext2 => "setext",
-            HeadingStyle::Consistent => "consistent",
-        })));
+        map.insert(
+            "style".to_string(),
+            toml::Value::String(
+                (match self.style {
+                    HeadingStyle::Atx => "atx",
+                    HeadingStyle::AtxClosed => "atx_closed",
+                    HeadingStyle::Setext1 => "setext",
+                    HeadingStyle::Setext2 => "setext",
+                    HeadingStyle::Consistent => "consistent",
+                })
+                .to_string(),
+            ),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

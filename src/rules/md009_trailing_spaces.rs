@@ -207,7 +207,10 @@ impl Rule for MD009TrailingSpaces {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("br_spaces".to_string(), toml::Value::Integer(self.br_spaces as i64));
+        map.insert(
+            "br_spaces".to_string(),
+            toml::Value::Integer(self.br_spaces as i64),
+        );
         map.insert("strict".to_string(), toml::Value::Boolean(self.strict));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }

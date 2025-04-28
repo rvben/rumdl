@@ -234,12 +234,15 @@ impl Rule for MD004UnorderedListStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(match self.style {
-            UnorderedListStyle::Asterisk => "asterisk".to_string(),
-            UnorderedListStyle::Plus => "plus".to_string(),
-            UnorderedListStyle::Dash => "dash".to_string(),
-            UnorderedListStyle::Consistent => "consistent".to_string(),
-        }));
+        map.insert(
+            "style".to_string(),
+            toml::Value::String(match self.style {
+                UnorderedListStyle::Asterisk => "asterisk".to_string(),
+                UnorderedListStyle::Plus => "plus".to_string(),
+                UnorderedListStyle::Dash => "dash".to_string(),
+                UnorderedListStyle::Consistent => "consistent".to_string(),
+            }),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
