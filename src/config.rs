@@ -1,11 +1,11 @@
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::Path;
 
 /// Represents a rule-specific configuration
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct RuleConfig {
     /// Configuration values for the rule
     #[serde(flatten)]
@@ -13,7 +13,7 @@ pub struct RuleConfig {
 }
 
 /// Represents the complete configuration loaded from rumdl.toml
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Config {
     /// Global configuration options
     #[serde(default)]
@@ -25,7 +25,7 @@ pub struct Config {
 }
 
 /// Global configuration options
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GlobalConfig {
     /// Enabled rules

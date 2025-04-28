@@ -122,6 +122,8 @@ enum ConfigSubcommand {
     Get {
         key: String,
     },
+    /// Print the default configuration in TOML format
+    PrintDefaults,
 }
 
 #[derive(Args, Debug)]
@@ -634,6 +636,14 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
     }
 }
 
+fn to_toml_string<T: serde::Serialize>(v: &T) -> String {
+    toml::to_string(v).expect("TOML serialization failed").trim().to_string()
+}
+
+fn to_toml_string_vec_string(v: &Vec<String>) -> String {
+    format!("[{}]", v.iter().map(|s| format!("{:?}", s)).collect::<Vec<_>>().join(", "))
+}
+
 fn main() {
     let _timer = rumdl::profiling::ScopedTimer::new("main");
 
@@ -843,165 +853,175 @@ build-backend = \"setuptools.build_meta\"
                 rumdl_config::ConfigSource::PyprojectToml => "magenta",
                 rumdl_config::ConfigSource::Default => "yellow",
             };
-            if let Some(ConfigSubcommand::Get { key }) = subcmd {
-                // Support global.key or MDxxx.key
-                let parts: Vec<_> = key.split('.').collect();
-                if parts.len() == 2 {
-                    if parts[0].eq_ignore_ascii_case("global") {
-                        match parts[1] {
-                            "enable" => {
-                                println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.enable.value), format!("[from {}]", file_for_source(sourced.global.enable.source)).color(color_for_source(sourced.global.enable.source)));
-                                return;
+            match subcmd {
+                Some(ConfigSubcommand::Get { key }) => {
+                    // Support global.key or MDxxx.key
+                    let parts: Vec<_> = key.split('.').collect();
+                    if parts.len() == 2 {
+                        if parts[0].eq_ignore_ascii_case("global") {
+                            match parts[1] {
+                                "enable" => {
+                                    println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.enable.value), format!("[from {}]", file_for_source(sourced.global.enable.source)).color(color_for_source(sourced.global.enable.source)));
+                                    return;
+                                }
+                                "disable" => {
+                                    println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.disable.value), format!("[from {}]", file_for_source(sourced.global.disable.source)).color(color_for_source(sourced.global.disable.source)));
+                                    return;
+                                }
+                                "exclude" => {
+                                    println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.exclude.value), format!("[from {}]", file_for_source(sourced.global.exclude.source)).color(color_for_source(sourced.global.exclude.source)));
+                                    return;
+                                }
+                                "include" => {
+                                    println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.include.value), format!("[from {}]", file_for_source(sourced.global.include.source)).color(color_for_source(sourced.global.include.source)));
+                                    return;
+                                }
+                                "ignore_gitignore" => {
+                                    println!("{} = {} {}", key.cyan(), sourced.global.ignore_gitignore.value.to_string(), format!("[from {}]", file_for_source(sourced.global.ignore_gitignore.source)).color(color_for_source(sourced.global.ignore_gitignore.source)));
+                                    return;
+                                }
+                                "respect_gitignore" => {
+                                    println!("{} = {} {}", key.cyan(), sourced.global.respect_gitignore.value.to_string(), format!("[from {}]", file_for_source(sourced.global.respect_gitignore.source)).color(color_for_source(sourced.global.respect_gitignore.source)));
+                                    return;
+                                }
+                                _ => {
+                                    println!("{} {}", format!("Unknown global key: {}", parts[1]).red().bold(), "(not set)".yellow());
+                                    return;
+                                }
                             }
-                            "disable" => {
-                                println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.disable.value), format!("[from {}]", file_for_source(sourced.global.disable.source)).color(color_for_source(sourced.global.disable.source)));
-                                return;
-                            }
-                            "exclude" => {
-                                println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.exclude.value), format!("[from {}]", file_for_source(sourced.global.exclude.source)).color(color_for_source(sourced.global.exclude.source)));
-                                return;
-                            }
-                            "include" => {
-                                println!("{} = {} {}", key.cyan(), to_toml_string_vec_string(&sourced.global.include.value), format!("[from {}]", file_for_source(sourced.global.include.source)).color(color_for_source(sourced.global.include.source)));
-                                return;
-                            }
-                            "ignore_gitignore" => {
-                                println!("{} = {} {}", key.cyan(), sourced.global.ignore_gitignore.value.to_string(), format!("[from {}]", file_for_source(sourced.global.ignore_gitignore.source)).color(color_for_source(sourced.global.ignore_gitignore.source)));
-                                return;
-                            }
-                            "respect_gitignore" => {
-                                println!("{} = {} {}", key.cyan(), sourced.global.respect_gitignore.value.to_string(), format!("[from {}]", file_for_source(sourced.global.respect_gitignore.source)).color(color_for_source(sourced.global.respect_gitignore.source)));
-                                return;
-                            }
-                            _ => {
-                                println!("{} {}", format!("Unknown global key: {}", parts[1]).red().bold(), "(not set)".yellow());
+                        } else {
+                            // Rule-specific
+                            let rule = parts[0];
+                            let k = parts[1];
+                            if let Some(rule_cfg) = sourced.rules.get(rule) {
+                                if let Some(sv) = rule_cfg.values.get(k) {
+                                    println!("{}.{} = {} {}", rule.cyan(), k.cyan(), to_toml_string(&sv.value), format!("[from {}]", file_for_source(sv.source)).color(color_for_source(sv.source)));
+                                    return;
+                                } else {
+                                    println!("{} {}", format!("Unknown key: {}.{}", rule, k).red().bold(), "(not set)".yellow());
+                                    return;
+                                }
+                            } else {
+                                println!("{} {}", format!("Unknown rule: {}", rule).red().bold(), "(not set)".yellow());
                                 return;
                             }
                         }
                     } else {
-                        // Rule-specific
-                        let rule = parts[0];
-                        let k = parts[1];
-                        if let Some(rule_cfg) = sourced.rules.get(rule) {
-                            if let Some(sv) = rule_cfg.values.get(k) {
-                                println!("{}.{} = {} {}", rule.cyan(), k.cyan(), to_toml_string(&sv.value), format!("[from {}]", file_for_source(sv.source)).color(color_for_source(sv.source)));
-                                return;
-                            } else {
-                                println!("{} {}", format!("Unknown key: {}.{}", rule, k).red().bold(), "(not set)".yellow());
-                                return;
-                            }
-                        } else {
-                            println!("{} {}", format!("Unknown rule: {}", rule).red().bold(), "(not set)".yellow());
-                            return;
+                        println!("{}", "Key must be in the form global.key or MDxxx.key".red().bold());
+                        return;
+                    }
+                },
+                Some(ConfigSubcommand::PrintDefaults) => {
+                    // Print the default config in TOML format
+                    let default_config = rumdl_config::Config::default();
+                    match toml::to_string_pretty(&default_config) {
+                        Ok(toml_str) => println!("{}", toml_str),
+                        Err(e) => {
+                            eprintln!("Failed to serialize default config: {}", e);
+                            std::process::exit(1);
                         }
                     }
-                } else {
-                    println!("{}", "Key must be in the form global.key or MDxxx.key".red().bold());
                     return;
-                }
-            }
-            // Print loaded config files
-            if !sourced.loaded_files.is_empty() {
-                println!("{}", "Loaded config files:".bold());
-                for f in &sourced.loaded_files {
-                    println!("  {}", f.blue().bold());
-                }
-                println!();
-            } else {
-                println!("{}", "No config files loaded (using defaults)".yellow());
-            }
-            // Print global config
-            println!("{}", "[global]".bold().underline());
-            fn to_toml_string<T: serde::Serialize>(v: &T) -> String {
-                toml::to_string(v).expect("TOML serialization failed").trim().to_string()
-            }
-            fn to_toml_string_vec_string(v: &Vec<String>) -> String {
-                format!("[{}]", v.iter().map(|s| format!("{:?}", s)).collect::<Vec<_>>().join(", "))
-            }
-            fn to_toml_string_toml_value(v: &toml::Value) -> String {
-                v.to_string()
-            }
-            fn print_override_chain_vec_string(sv: &rumdl_config::SourcedValue<Vec<String>>) {
-                if sv.overrides.len() > 1 {
-                    println!("    overrides:");
-                    for o in &sv.overrides {
-                        println!("      {}: {}", o.file.clone().unwrap_or_else(|| format!("{:?}", o.source)), to_toml_string_vec_string(&o.value));
+                },
+                None => {
+                    // Print loaded config files
+                    if !sourced.loaded_files.is_empty() {
+                        println!("{}", "Loaded config files:".bold());
+                        for f in &sourced.loaded_files {
+                            println!("  {}", f.blue().bold());
+                        }
+                        println!();
+                    } else {
+                        println!("{}", "No config files loaded (using defaults)".yellow());
                     }
-                }
-            }
-            fn print_override_chain_bool(sv: &rumdl_config::SourcedValue<bool>) {
-                if sv.overrides.len() > 1 {
-                    println!("    overrides:");
-                    for o in &sv.overrides {
-                        println!("      {}: {}", o.file.clone().unwrap_or_else(|| format!("{:?}", o.source)), o.value.to_string());
+                    // Print global config
+                    println!("{}", "[global]".bold().underline());
+                    fn to_toml_string_toml_value(v: &toml::Value) -> String {
+                        v.to_string()
                     }
-                }
-            }
-            fn print_override_chain_toml_value(sv: &rumdl_config::SourcedValue<toml::Value>) {
-                if sv.overrides.len() > 1 {
-                    println!("    overrides:");
-                    for o in &sv.overrides {
-                        println!("      {}: {}", o.file.clone().unwrap_or_else(|| format!("{:?}", o.source)), to_toml_string_toml_value(&o.value));
+                    fn print_override_chain_vec_string(sv: &rumdl_config::SourcedValue<Vec<String>>) {
+                        if sv.overrides.len() > 1 {
+                            println!("    overrides:");
+                            for o in &sv.overrides {
+                                println!("      {}: {}", o.file.clone().unwrap_or_else(|| format!("{:?}", o.source)), to_toml_string_vec_string(&o.value));
+                            }
+                        }
                     }
-                }
-            }
-            // Align per section: global
-            let global_keys = [
-                "enable", "disable", "exclude", "include", "ignore_gitignore", "respect_gitignore"
-            ];
-            let global_val_strs = [
-                to_toml_string_vec_string(&sourced.global.enable.value),
-                to_toml_string_vec_string(&sourced.global.disable.value),
-                to_toml_string_vec_string(&sourced.global.exclude.value),
-                to_toml_string_vec_string(&sourced.global.include.value),
-                sourced.global.ignore_gitignore.value.to_string(),
-                sourced.global.respect_gitignore.value.to_string(),
-            ];
-            // Build 'key = value' strings
-            let global_lines: Vec<String> = global_keys.iter().zip(global_val_strs.iter())
-                .map(|(k, v)| format!("{} = {}", k, v)).collect();
-            // Compute max width for [from ...] alignment
-            let global_max_line_width = global_lines.iter().map(|s| s.len()).max().unwrap_or(0);
-            let gpad = |s: &str| format!("{s:width$}", s=s, width=global_max_line_width);
+                    fn print_override_chain_bool(sv: &rumdl_config::SourcedValue<bool>) {
+                        if sv.overrides.len() > 1 {
+                            println!("    overrides:");
+                            for o in &sv.overrides {
+                                println!("      {}: {}", o.file.clone().unwrap_or_else(|| format!("{:?}", o.source)), o.value.to_string());
+                            }
+                        }
+                    }
+                    fn print_override_chain_toml_value(sv: &rumdl_config::SourcedValue<toml::Value>) {
+                        if sv.overrides.len() > 1 {
+                            println!("    overrides:");
+                            for o in &sv.overrides {
+                                println!("      {}: {}", o.file.clone().unwrap_or_else(|| format!("{:?}", o.source)), to_toml_string_toml_value(&o.value));
+                            }
+                        }
+                    }
+                    // Align per section: global
+                    let global_keys = [
+                        "enable", "disable", "exclude", "include", "ignore_gitignore", "respect_gitignore"
+                    ];
+                    let global_val_strs = [
+                        to_toml_string_vec_string(&sourced.global.enable.value),
+                        to_toml_string_vec_string(&sourced.global.disable.value),
+                        to_toml_string_vec_string(&sourced.global.exclude.value),
+                        to_toml_string_vec_string(&sourced.global.include.value),
+                        sourced.global.ignore_gitignore.value.to_string(),
+                        sourced.global.respect_gitignore.value.to_string(),
+                    ];
+                    // Build 'key = value' strings
+                    let global_lines: Vec<String> = global_keys.iter().zip(global_val_strs.iter())
+                        .map(|(k, v)| format!("{} = {}", k, v)).collect();
+                    // Compute max width for [from ...] alignment
+                    let global_max_line_width = global_lines.iter().map(|s| s.len()).max().unwrap_or(0);
+                    let gpad = |s: &str| format!("{s:width$}", s=s, width=global_max_line_width);
 
-            println!("  {} {}", gpad(&global_lines[0]), format!("[from {}]", file_for_source(sourced.global.enable.source)).color(color_for_source(sourced.global.enable.source)));
-            if *show_overrides { print_override_chain_vec_string(&sourced.global.enable); }
-            println!("  {} {}", gpad(&global_lines[1]), format!("[from {}]", file_for_source(sourced.global.disable.source)).color(color_for_source(sourced.global.disable.source)));
-            if *show_overrides { print_override_chain_vec_string(&sourced.global.disable); }
-            println!("  {} {}", gpad(&global_lines[2]), format!("[from {}]", file_for_source(sourced.global.exclude.source)).color(color_for_source(sourced.global.exclude.source)));
-            if *show_overrides { print_override_chain_vec_string(&sourced.global.exclude); }
-            println!("  {} {}", gpad(&global_lines[3]), format!("[from {}]", file_for_source(sourced.global.include.source)).color(color_for_source(sourced.global.include.source)));
-            if *show_overrides { print_override_chain_vec_string(&sourced.global.include); }
-            println!("  {} {}", gpad(&global_lines[4]), format!("[from {}]", file_for_source(sourced.global.ignore_gitignore.source)).color(color_for_source(sourced.global.ignore_gitignore.source)));
-            if *show_overrides { print_override_chain_bool(&sourced.global.ignore_gitignore); }
-            println!("  {} {}", gpad(&global_lines[5]), format!("[from {}]", file_for_source(sourced.global.respect_gitignore.source)).color(color_for_source(sourced.global.respect_gitignore.source)));
-            if *show_overrides { print_override_chain_bool(&sourced.global.respect_gitignore); }
+                    println!("  {} {}", gpad(&global_lines[0]), format!("[from {}]", file_for_source(sourced.global.enable.source)).color(color_for_source(sourced.global.enable.source)));
+                    if *show_overrides { print_override_chain_vec_string(&sourced.global.enable); }
+                    println!("  {} {}", gpad(&global_lines[1]), format!("[from {}]", file_for_source(sourced.global.disable.source)).color(color_for_source(sourced.global.disable.source)));
+                    if *show_overrides { print_override_chain_vec_string(&sourced.global.disable); }
+                    println!("  {} {}", gpad(&global_lines[2]), format!("[from {}]", file_for_source(sourced.global.exclude.source)).color(color_for_source(sourced.global.exclude.source)));
+                    if *show_overrides { print_override_chain_vec_string(&sourced.global.exclude); }
+                    println!("  {} {}", gpad(&global_lines[3]), format!("[from {}]", file_for_source(sourced.global.include.source)).color(color_for_source(sourced.global.include.source)));
+                    if *show_overrides { print_override_chain_vec_string(&sourced.global.include); }
+                    println!("  {} {}", gpad(&global_lines[4]), format!("[from {}]", file_for_source(sourced.global.ignore_gitignore.source)).color(color_for_source(sourced.global.ignore_gitignore.source)));
+                    if *show_overrides { print_override_chain_bool(&sourced.global.ignore_gitignore); }
+                    println!("  {} {}", gpad(&global_lines[5]), format!("[from {}]", file_for_source(sourced.global.respect_gitignore.source)).color(color_for_source(sourced.global.respect_gitignore.source)));
+                    if *show_overrides { print_override_chain_bool(&sourced.global.respect_gitignore); }
 
-            // Align per section: each rule, and order rules alphabetically
-            let mut rule_names: Vec<_> = sourced.rules.keys().collect();
-            rule_names.sort();
-            for rule in rule_names {
-                let rule_cfg = &sourced.rules[rule];
-                if !rule_cfg.values.is_empty() {
-                    println!("\n{}", format!("[{}]", rule).bold().underline());
-                    // Build 'key = value' strings for this rule
-                    let rule_lines: Vec<String> = rule_cfg.values.iter()
-                        .map(|(k, sv)| format!("{} = {}", k, to_toml_string_toml_value(&sv.value))).collect();
-                    let rule_max_line_width = rule_lines.iter().map(|s| s.len()).max().unwrap_or(0);
-                    let rule_pad = |s: &str| format!("{s:width$}", s=s, width=rule_max_line_width);
-                    for ((_, sv), line) in rule_cfg.values.iter().zip(rule_lines.iter()) {
-                        let src = sv.source;
-                        let color = color_for_source(src);
-                        println!("  {} {}", rule_pad(line), format!("[from {}]", file_for_source(src)).color(color));
-                        if *show_overrides { print_override_chain_toml_value(sv); }
+                    // Align per section: each rule, and order rules alphabetically
+                    let mut rule_names: Vec<_> = sourced.rules.keys().collect();
+                    rule_names.sort();
+                    for rule in rule_names {
+                        let rule_cfg = &sourced.rules[rule];
+                        if !rule_cfg.values.is_empty() {
+                            println!("\n{}", format!("[{}]", rule).bold().underline());
+                            // Build 'key = value' strings for this rule
+                            let rule_lines: Vec<String> = rule_cfg.values.iter()
+                                .map(|(k, sv)| format!("{} = {}", k, to_toml_string_toml_value(&sv.value))).collect();
+                            let rule_max_line_width = rule_lines.iter().map(|s| s.len()).max().unwrap_or(0);
+                            let rule_pad = |s: &str| format!("{s:width$}", s=s, width=rule_max_line_width);
+                            for ((_, sv), line) in rule_cfg.values.iter().zip(rule_lines.iter()) {
+                                let src = sv.source;
+                                let color = color_for_source(src);
+                                println!("  {} {}", rule_pad(line), format!("[from {}]", file_for_source(src)).color(color));
+                                if *show_overrides { print_override_chain_toml_value(sv); }
+                            }
+                        }
                     }
-                }
-            }
-            // Print unknown keys
-            if !sourced.unknown_keys.is_empty() {
-                println!("\n{}", "Warnings:".red().bold());
-                for (section, key) in &sourced.unknown_keys {
-                    println!("  {} {}", "Unknown key:".red(), format!("{} -> {}", section, key).yellow());
+                    // Print unknown keys
+                    if !sourced.unknown_keys.is_empty() {
+                        println!("\n{}", "Warnings:".red().bold());
+                        for (section, key) in &sourced.unknown_keys {
+                            println!("  {} {}", "Unknown key:".red(), format!("{} -> {}", section, key).yellow());
+                        }
+                    }
                 }
             }
         }
