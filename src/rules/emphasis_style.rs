@@ -1,8 +1,9 @@
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::fmt;
 
 /// The style for emphasis (MD049)
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default, Hash)]
 pub enum EmphasisStyle {
     /// Consistent with the first emphasis style found
     #[default]
@@ -11,6 +12,16 @@ pub enum EmphasisStyle {
     Asterisk,
     /// Underscore style (_)
     Underscore,
+}
+
+impl fmt::Display for EmphasisStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EmphasisStyle::Asterisk => write!(f, "asterisk"),
+            EmphasisStyle::Underscore => write!(f, "underscore"),
+            EmphasisStyle::Consistent => write!(f, "consistent"),
+        }
+    }
 }
 
 impl From<&str> for EmphasisStyle {

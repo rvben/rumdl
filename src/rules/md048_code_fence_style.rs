@@ -1,6 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::code_fence_utils::CodeFenceStyle;
 use crate::utils::range_utils::LineIndex;
+use toml;
 
 /// Rule MD048: Code fence style
 ///
@@ -110,5 +111,11 @@ impl Rule for MD048CodeFenceStyle {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }

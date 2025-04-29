@@ -4,6 +4,7 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
 
 lazy_static! {
     static ref LIST_MARKER: Regex = Regex::new(r"^[\s]*[-+*][\s]+|^[\s]*\d+\.[\s]+").unwrap();
@@ -546,6 +547,12 @@ impl Rule for MD046CodeBlockStyle {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 }
 

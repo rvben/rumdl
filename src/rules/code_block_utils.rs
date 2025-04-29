@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::fmt;
 
 lazy_static! {
     // Standard code block detection patterns
@@ -432,4 +433,14 @@ pub enum CodeBlockStyle {
     Indented,
     /// Fenced code blocks (``` or ~~~)
     Fenced,
+}
+
+impl fmt::Display for CodeBlockStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CodeBlockStyle::Fenced => write!(f, "fenced"),
+            CodeBlockStyle::Indented => write!(f, "indented"),
+            CodeBlockStyle::Consistent => write!(f, "consistent"),
+        }
+    }
 }

@@ -8,7 +8,6 @@ include = [
 ]
 # Globally disable specific rules
 disable = ["MD033"]
-
 respect_gitignore = true
 
 [MD013]
