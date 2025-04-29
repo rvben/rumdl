@@ -119,18 +119,6 @@ impl MD054LinkImageStyle {
             _ => false,
         }
     }
-
-    /// Return the default config section for this rule
-    pub fn default_config_section() -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert("autolink".to_string(), toml::Value::Boolean(true));
-        map.insert("inline".to_string(), toml::Value::Boolean(true));
-        map.insert("url_inline".to_string(), toml::Value::Boolean(true));
-        map.insert("shortcut".to_string(), toml::Value::Boolean(true));
-        map.insert("collapsed".to_string(), toml::Value::Boolean(true));
-        map.insert("full".to_string(), toml::Value::Boolean(true));
-        Some(("MD054".to_string(), toml::Value::Table(map)))
-    }
 }
 
 impl Rule for MD054LinkImageStyle {
@@ -308,5 +296,16 @@ impl Rule for MD054LinkImageStyle {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert("autolink".to_string(), toml::Value::Boolean(true));
+        map.insert("inline".to_string(), toml::Value::Boolean(true));
+        map.insert("url_inline".to_string(), toml::Value::Boolean(true));
+        map.insert("shortcut".to_string(), toml::Value::Boolean(true));
+        map.insert("collapsed".to_string(), toml::Value::Boolean(true));
+        map.insert("full".to_string(), toml::Value::Boolean(true));
+        Some(("MD054".to_string(), toml::Value::Table(map)))
     }
 }

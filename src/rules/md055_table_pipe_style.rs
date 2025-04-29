@@ -207,16 +207,6 @@ impl MD055TablePipeStyle {
             format!("{}{}", leading_whitespace, result)
         }
     }
-
-    /// Return the default config section for this rule
-    pub fn default_config_section() -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "style".to_string(),
-            toml::Value::String("consistent".to_string()),
-        );
-        Some(("MD055".to_string(), toml::Value::Table(map)))
-    }
 }
 
 impl Rule for MD055TablePipeStyle {
@@ -439,6 +429,15 @@ impl Rule for MD055TablePipeStyle {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert(
+            "style".to_string(),
+            toml::Value::String("consistent".to_string()),
+        );
+        Some(("MD055".to_string(), toml::Value::Table(map)))
     }
 }
 

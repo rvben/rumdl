@@ -284,16 +284,6 @@ impl MD053LinkImageReferenceDefinitions {
             lines.remove(0);
         }
     }
-
-    /// Return the default config section for this rule
-    pub fn default_config_section() -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "ignored_definitions".to_string(),
-            toml::Value::Array(vec![]),
-        );
-        Some(("MD053".to_string(), toml::Value::Table(map)))
-    }
 }
 
 impl Rule for MD053LinkImageReferenceDefinitions {
