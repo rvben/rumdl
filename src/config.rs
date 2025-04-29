@@ -7,6 +7,12 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::Path;
+use crate::rule::Rule;
+
+/// Normalize a config key by converting kebab-case to snake_case
+fn normalize_key(key: &str) -> String {
+    key.replace('-', "_")
+}
 
 /// Represents a rule-specific configuration
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
@@ -169,10 +175,14 @@ fn load_config_from_pyproject(path: &str) -> Result<Config, ConfigError> {
                         }
 
                         // Handle line-length special case
-                        if let Some(line_length) = rumdl_table
-                            .get("line-length")
-                            .or_else(|| rumdl_table.get("line_length"))
-                        {
+                        let mut found_line_length = None;
+                        for (k, v) in rumdl_table.iter() {
+                            if normalize_key(k) == "line_length" {
+                                found_line_length = Some(v.clone());
+                                break;
+                            }
+                        }
+                        if let Some(line_length) = found_line_length {
                             // Create MD013 rule config if it doesn't exist
                             if !config.rules.contains_key("MD013") {
                                 config
@@ -184,24 +194,23 @@ fn load_config_from_pyproject(path: &str) -> Result<Config, ConfigError> {
                             if let Some(rule_config) = config.rules.get_mut("MD013") {
                                 rule_config
                                     .values
-                                    .insert("line_length".to_string(), line_length.clone());
+                                    .insert("line_length".to_string(), line_length);
                             }
                         }
 
                         // Extract rule-specific configurations
                         for (key, value) in rumdl_table {
+                            let norm_key = normalize_key(key);
                             // Skip keys that we've already processed as global options
                             if [
                                 "enable",
                                 "disable",
                                 "include",
                                 "exclude",
-                                "respect-gitignore",
                                 "respect_gitignore",
-                                "line-length",
                                 "line_length",
                             ]
-                            .contains(&key.as_str())
+                            .contains(&norm_key.as_str())
                             {
                                 continue;
                             }
@@ -212,13 +221,14 @@ fn load_config_from_pyproject(path: &str) -> Result<Config, ConfigError> {
 
                                 // Add all values from the table to the rule config
                                 for (rule_key, rule_value) in rule_table {
+                                    let norm_rule_key = normalize_key(rule_key);
                                     rule_config
                                         .values
-                                        .insert(rule_key.to_string(), rule_value.clone());
+                                        .insert(norm_rule_key, rule_value.clone());
                                 }
 
                                 // Add to the config
-                                config.rules.insert(key.to_string(), rule_config);
+                                config.rules.insert(norm_key, rule_config);
                             }
                         }
                     }
@@ -509,7 +519,7 @@ impl<T: Clone> SourcedValue<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourcedGlobalConfig {
     pub enable: SourcedValue<Vec<String>>,
     pub disable: SourcedValue<Vec<String>>,
@@ -530,12 +540,12 @@ impl Default for SourcedGlobalConfig {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SourcedRuleConfig {
     pub values: BTreeMap<String, SourcedValue<toml::Value>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SourcedConfig {
     pub global: SourcedGlobalConfig,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
@@ -547,7 +557,7 @@ impl SourcedConfig {
     pub fn load_sourced_config(
         config_path: Option<&str>,
         cli_overrides: Option<&SourcedGlobalConfig>,
-    ) -> Self {
+    ) -> Result<Self, ConfigError> {
         use ConfigSource::*;
         let mut loaded_files = Vec::new();
         let mut unknown_keys = Vec::new();
@@ -590,102 +600,144 @@ impl SourcedConfig {
         let mut loaded_toml_or_pyproject = false;
         // 1. Load pyproject.toml if present
         if config_path.is_none() && std::path::Path::new("pyproject.toml").exists() {
-            if let Ok(content) = std::fs::read_to_string("pyproject.toml") {
-                if let Ok(pyproject) = toml::from_str::<toml::Value>(&content) {
-                    if let Some(rumdl_config) = pyproject.get("tool").and_then(|t| t.get("rumdl")) {
-                        loaded_files.push("pyproject.toml".to_string());
-                        loaded_toml_or_pyproject = true;
-                        if let Some(rumdl_table) = rumdl_config.as_table() {
-                            for (key, value) in rumdl_table {
-                                match key.as_str() {
-                                    "enable" => {
-                                        if let Ok(values) =
-                                            Vec::<String>::deserialize(value.clone())
-                                        {
-                                            update_vec(
-                                                &mut global.enable,
-                                                values,
-                                                PyprojectToml,
-                                                Some("pyproject.toml".to_string()),
-                                            );
-                                        }
-                                    }
-                                    "disable" => {
-                                        if let Ok(values) =
-                                            Vec::<String>::deserialize(value.clone())
-                                        {
-                                            update_vec(
-                                                &mut global.disable,
-                                                values,
-                                                PyprojectToml,
-                                                Some("pyproject.toml".to_string()),
-                                            );
-                                        }
-                                    }
-                                    "include" => {
-                                        if let Ok(values) =
-                                            Vec::<String>::deserialize(value.clone())
-                                        {
-                                            update_vec(
-                                                &mut global.include,
-                                                values,
-                                                PyprojectToml,
-                                                Some("pyproject.toml".to_string()),
-                                            );
-                                        }
-                                    }
-                                    "exclude" => {
-                                        if let Ok(values) =
-                                            Vec::<String>::deserialize(value.clone())
-                                        {
-                                            update_vec(
-                                                &mut global.exclude,
-                                                values,
-                                                PyprojectToml,
-                                                Some("pyproject.toml".to_string()),
-                                            );
-                                        }
-                                    }
-                                    "respect-gitignore" | "respect_gitignore" => {
-                                        if let Ok(val) = bool::deserialize(value.clone()) {
-                                            update_bool(
-                                                &mut global.respect_gitignore,
-                                                val,
-                                                PyprojectToml,
-                                                Some("pyproject.toml".to_string()),
-                                            );
-                                        }
-                                    }
-                                    _ => {
-                                        // Rule-specific or unknown
-                                        if let Some(rule_table) = value.as_table() {
-                                            let rule_entry = rules.entry(key.clone()).or_default();
-                                            for (rk, rv) in rule_table {
-                                                let mut sv = rule_entry
-                                                    .values
-                                                    .remove(rk)
-                                                    .unwrap_or_else(|| {
-                                                        SourcedValue::new(
-                                                            rv.clone(),
-                                                            ConfigSource::Default,
-                                                        )
-                                                    });
-                                                sv.push_override(
+            let content = std::fs::read_to_string("pyproject.toml")
+                .map_err(|e| ConfigError::IoError { source: e, path: "pyproject.toml".to_string() })?;
+            let pyproject = toml::from_str::<toml::Value>(&content)
+                .map_err(ConfigError::ParseError)?;
+            if let Some(rumdl_config) = pyproject.get("tool").and_then(|t| t.get("rumdl")) {
+                loaded_files.push("pyproject.toml".to_string());
+                loaded_toml_or_pyproject = true;
+                if let Some(rumdl_table) = rumdl_config.as_table() {
+                    // Handle line-length special case for sourced config
+                    let mut found_line_length = None;
+                    for (k, v) in rumdl_table.iter() {
+                        if normalize_key(k) == "line_length" {
+                            found_line_length = Some(v.clone());
+                            break;
+                        }
+                    }
+                    if let Some(line_length) = found_line_length {
+                        let rule_entry = rules.entry("MD013".to_string()).or_default();
+                        let mut sv = rule_entry
+                            .values
+                            .remove("line_length")
+                            .unwrap_or_else(|| {
+                                SourcedValue::new(
+                                    line_length.clone(),
+                                    ConfigSource::Default,
+                                )
+                            });
+                        sv.push_override(
+                            line_length,
+                            PyprojectToml,
+                            Some("pyproject.toml".to_string()),
+                            None,
+                        );
+                        rule_entry.values.insert("line_length".to_string(), sv);
+                    }
+                    for (key, value) in rumdl_table {
+                        let norm_key = normalize_key(key);
+                        // Skip keys that we've already processed as global options
+                        if [
+                            "enable",
+                            "disable",
+                            "include",
+                            "exclude",
+                            "respect_gitignore",
+                            "line_length",
+                        ]
+                        .contains(&norm_key.as_str())
+                        {
+                            continue;
+                        }
+                        match norm_key.as_str() {
+                            "enable" => {
+                                if let Ok(values) =
+                                    Vec::<String>::deserialize(value.clone())
+                                {
+                                    update_vec(
+                                        &mut global.enable,
+                                        values,
+                                        PyprojectToml,
+                                        Some("pyproject.toml".to_string()),
+                                    );
+                                }
+                            }
+                            "disable" => {
+                                if let Ok(values) =
+                                    Vec::<String>::deserialize(value.clone())
+                                {
+                                    update_vec(
+                                        &mut global.disable,
+                                        values,
+                                        PyprojectToml,
+                                        Some("pyproject.toml".to_string()),
+                                    );
+                                }
+                            }
+                            "include" => {
+                                if let Ok(values) =
+                                    Vec::<String>::deserialize(value.clone())
+                                {
+                                    update_vec(
+                                        &mut global.include,
+                                        values,
+                                        PyprojectToml,
+                                        Some("pyproject.toml".to_string()),
+                                    );
+                                }
+                            }
+                            "exclude" => {
+                                if let Ok(values) =
+                                    Vec::<String>::deserialize(value.clone())
+                                {
+                                    update_vec(
+                                        &mut global.exclude,
+                                        values,
+                                        PyprojectToml,
+                                        Some("pyproject.toml".to_string()),
+                                    );
+                                }
+                            }
+                            "respect-gitignore" | "respect_gitignore" => {
+                                if let Ok(val) = bool::deserialize(value.clone()) {
+                                    update_bool(
+                                        &mut global.respect_gitignore,
+                                        val,
+                                        PyprojectToml,
+                                        Some("pyproject.toml".to_string()),
+                                    );
+                                }
+                            }
+                            _ => {
+                                // Rule-specific or unknown
+                                if let Some(rule_table) = value.as_table() {
+                                    let rule_entry = rules.entry(norm_key.clone()).or_default();
+                                    for (rk, rv) in rule_table {
+                                        let norm_rk = normalize_key(rk);
+                                        let mut sv = rule_entry
+                                            .values
+                                            .remove(&norm_rk)
+                                            .unwrap_or_else(|| {
+                                                SourcedValue::new(
                                                     rv.clone(),
-                                                    PyprojectToml,
-                                                    Some("pyproject.toml".to_string()),
-                                                    None,
-                                                );
-                                                rule_entry.values.insert(rk.clone(), sv);
-                                            }
-                                        } else {
-                                            // Unknown key
-                                            unknown_keys.push((
-                                                "[tool.rumdl] (pyproject.toml)".to_string(),
-                                                key.clone(),
-                                            ));
-                                        }
+                                                    ConfigSource::Default,
+                                                )
+                                            });
+                                        sv.push_override(
+                                            rv.clone(),
+                                            PyprojectToml,
+                                            Some("pyproject.toml".to_string()),
+                                            None,
+                                        );
+                                        rule_entry.values.insert(norm_rk, sv);
                                     }
+                                } else {
+                                    // Unknown key
+                                    unknown_keys.push((
+                                        "[tool.rumdl] (pyproject.toml)".to_string(),
+                                        norm_key.clone(),
+                                    ));
                                 }
                             }
                         }
@@ -699,103 +751,106 @@ impl SourcedConfig {
                 if std::path::Path::new(filename).exists() {
                     loaded_files.push(filename.to_string());
                     loaded_toml_or_pyproject = true;
-                    if let Ok(content) = std::fs::read_to_string(filename) {
-                        if let Ok(toml_val) = toml::from_str::<toml::Value>(&content) {
-                            if let Some(global_table) =
-                                toml_val.get("global").and_then(|v| v.as_table())
-                            {
-                                for (key, value) in global_table {
-                                    match key.as_str() {
-                                        "enable" => {
-                                            if let Ok(values) =
-                                                Vec::<String>::deserialize(value.clone())
-                                            {
-                                                update_vec(
-                                                    &mut global.enable,
-                                                    values,
-                                                    RumdlToml,
-                                                    Some(filename.to_string()),
-                                                );
-                                            }
-                                        }
-                                        "disable" => {
-                                            if let Ok(values) =
-                                                Vec::<String>::deserialize(value.clone())
-                                            {
-                                                update_vec(
-                                                    &mut global.disable,
-                                                    values,
-                                                    RumdlToml,
-                                                    Some(filename.to_string()),
-                                                );
-                                            }
-                                        }
-                                        "include" => {
-                                            if let Ok(values) =
-                                                Vec::<String>::deserialize(value.clone())
-                                            {
-                                                update_vec(
-                                                    &mut global.include,
-                                                    values,
-                                                    RumdlToml,
-                                                    Some(filename.to_string()),
-                                                );
-                                            }
-                                        }
-                                        "exclude" => {
-                                            if let Ok(values) =
-                                                Vec::<String>::deserialize(value.clone())
-                                            {
-                                                update_vec(
-                                                    &mut global.exclude,
-                                                    values,
-                                                    RumdlToml,
-                                                    Some(filename.to_string()),
-                                                );
-                                            }
-                                        }
-                                        "respect_gitignore" => {
-                                            if let Ok(val) = bool::deserialize(value.clone()) {
-                                                update_bool(
-                                                    &mut global.respect_gitignore,
-                                                    val,
-                                                    RumdlToml,
-                                                    Some(filename.to_string()),
-                                                );
-                                            }
-                                        }
-                                        _ => {
-                                            unknown_keys.push((
-                                                "[global] (.rumdl.toml)".to_string(),
-                                                key.clone(),
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
-                            // Rule-specific
-                            for (key, value) in
-                                toml_val.as_table().unwrap_or(&toml::map::Map::new())
-                            {
-                                if key == "global" {
-                                    continue;
-                                }
-                                if let Some(rule_table) = value.as_table() {
-                                    let rule_entry = rules.entry(key.clone()).or_default();
-                                    for (rk, rv) in rule_table {
-                                        let mut sv =
-                                            rule_entry.values.remove(rk).unwrap_or_else(|| {
-                                                SourcedValue::new(rv.clone(), ConfigSource::Default)
-                                            });
-                                        sv.push_override(
-                                            rv.clone(),
+                    let content = std::fs::read_to_string(filename)
+                        .map_err(|e| ConfigError::IoError { source: e, path: filename.to_string() })?;
+                    let toml_val = toml::from_str::<toml::Value>(&content)
+                        .map_err(ConfigError::ParseError)?;
+                    if let Some(global_table) =
+                        toml_val.get("global").and_then(|v| v.as_table())
+                    {
+                        for (key, value) in global_table {
+                            let norm_key = normalize_key(key);
+                            match norm_key.as_str() {
+                                "enable" => {
+                                    if let Ok(values) =
+                                        Vec::<String>::deserialize(value.clone())
+                                    {
+                                        update_vec(
+                                            &mut global.enable,
+                                            values,
                                             RumdlToml,
                                             Some(filename.to_string()),
-                                            None,
                                         );
-                                        rule_entry.values.insert(rk.clone(), sv);
                                     }
                                 }
+                                "disable" => {
+                                    if let Ok(values) =
+                                        Vec::<String>::deserialize(value.clone())
+                                    {
+                                        update_vec(
+                                            &mut global.disable,
+                                            values,
+                                            RumdlToml,
+                                            Some(filename.to_string()),
+                                        );
+                                    }
+                                }
+                                "include" => {
+                                    if let Ok(values) =
+                                        Vec::<String>::deserialize(value.clone())
+                                    {
+                                        update_vec(
+                                            &mut global.include,
+                                            values,
+                                            RumdlToml,
+                                            Some(filename.to_string()),
+                                        );
+                                    }
+                                }
+                                "exclude" => {
+                                    if let Ok(values) =
+                                        Vec::<String>::deserialize(value.clone())
+                                    {
+                                        update_vec(
+                                            &mut global.exclude,
+                                            values,
+                                            RumdlToml,
+                                            Some(filename.to_string()),
+                                        );
+                                    }
+                                }
+                                "respect_gitignore" => {
+                                    if let Ok(val) = bool::deserialize(value.clone()) {
+                                        update_bool(
+                                            &mut global.respect_gitignore,
+                                            val,
+                                            RumdlToml,
+                                            Some(filename.to_string()),
+                                        );
+                                    }
+                                }
+                                _ => {
+                                    unknown_keys.push((
+                                        "[global] (.rumdl.toml)".to_string(),
+                                        norm_key.clone(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    // Rule-specific
+                    for (key, value) in
+                        toml_val.as_table().unwrap_or(&toml::map::Map::new())
+                    {
+                        let norm_key = normalize_key(key);
+                        if norm_key == "global" {
+                            continue;
+                        }
+                        if let Some(rule_table) = value.as_table() {
+                            let rule_entry = rules.entry(norm_key.clone()).or_default();
+                            for (rk, rv) in rule_table {
+                                let norm_rk = normalize_key(rk);
+                                let mut sv =
+                                    rule_entry.values.remove(&norm_rk).unwrap_or_else(|| {
+                                        SourcedValue::new(rv.clone(), ConfigSource::Default)
+                                    });
+                                sv.push_override(
+                                    rv.clone(),
+                                    RumdlToml,
+                                    Some(filename.to_string()),
+                                    None,
+                                );
+                                rule_entry.values.insert(norm_rk, sv);
                             }
                         }
                     }
@@ -807,90 +862,93 @@ impl SourcedConfig {
         if let Some(path) = config_path {
             loaded_files.push(path.to_string());
             loaded_toml_or_pyproject = true;
-            if let Ok(content) = std::fs::read_to_string(path) {
-                if let Ok(toml_val) = toml::from_str::<toml::Value>(&content) {
-                    if let Some(global_table) = toml_val.get("global").and_then(|v| v.as_table()) {
-                        for (key, value) in global_table {
-                            match key.as_str() {
-                                "enable" => {
-                                    if let Ok(values) = Vec::<String>::deserialize(value.clone()) {
-                                        update_vec(
-                                            &mut global.enable,
-                                            values,
-                                            RumdlToml,
-                                            Some(path.to_string()),
-                                        );
-                                    }
-                                }
-                                "disable" => {
-                                    if let Ok(values) = Vec::<String>::deserialize(value.clone()) {
-                                        update_vec(
-                                            &mut global.disable,
-                                            values,
-                                            RumdlToml,
-                                            Some(path.to_string()),
-                                        );
-                                    }
-                                }
-                                "include" => {
-                                    if let Ok(values) = Vec::<String>::deserialize(value.clone()) {
-                                        update_vec(
-                                            &mut global.include,
-                                            values,
-                                            RumdlToml,
-                                            Some(path.to_string()),
-                                        );
-                                    }
-                                }
-                                "exclude" => {
-                                    if let Ok(values) = Vec::<String>::deserialize(value.clone()) {
-                                        update_vec(
-                                            &mut global.exclude,
-                                            values,
-                                            RumdlToml,
-                                            Some(path.to_string()),
-                                        );
-                                    }
-                                }
-                                "respect_gitignore" => {
-                                    if let Ok(val) = bool::deserialize(value.clone()) {
-                                        update_bool(
-                                            &mut global.respect_gitignore,
-                                            val,
-                                            RumdlToml,
-                                            Some(path.to_string()),
-                                        );
-                                    }
-                                }
-                                _ => {
-                                    unknown_keys.push((
-                                        "[global] (explicit config)".to_string(),
-                                        key.clone(),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    // Rule-specific
-                    for (key, value) in toml_val.as_table().unwrap_or(&toml::map::Map::new()) {
-                        if key == "global" {
-                            continue;
-                        }
-                        if let Some(rule_table) = value.as_table() {
-                            let rule_entry = rules.entry(key.clone()).or_default();
-                            for (rk, rv) in rule_table {
-                                let mut sv = rule_entry.values.remove(rk).unwrap_or_else(|| {
-                                    SourcedValue::new(rv.clone(), ConfigSource::Default)
-                                });
-                                sv.push_override(
-                                    rv.clone(),
+            let content = std::fs::read_to_string(path)
+                .map_err(|e| ConfigError::IoError { source: e, path: path.to_string() })?;
+            let toml_val = toml::from_str::<toml::Value>(&content)
+                .map_err(ConfigError::ParseError)?;
+            if let Some(global_table) = toml_val.get("global").and_then(|v| v.as_table()) {
+                for (key, value) in global_table {
+                    let norm_key = normalize_key(key);
+                    match norm_key.as_str() {
+                        "enable" => {
+                            if let Ok(values) = Vec::<String>::deserialize(value.clone()) {
+                                update_vec(
+                                    &mut global.enable,
+                                    values,
                                     RumdlToml,
                                     Some(path.to_string()),
-                                    None,
                                 );
-                                rule_entry.values.insert(rk.clone(), sv);
                             }
                         }
+                        "disable" => {
+                            if let Ok(values) = Vec::<String>::deserialize(value.clone()) {
+                                update_vec(
+                                    &mut global.disable,
+                                    values,
+                                    RumdlToml,
+                                    Some(path.to_string()),
+                                );
+                            }
+                        }
+                        "include" => {
+                            if let Ok(values) = Vec::<String>::deserialize(value.clone()) {
+                                update_vec(
+                                    &mut global.include,
+                                    values,
+                                    RumdlToml,
+                                    Some(path.to_string()),
+                                );
+                            }
+                        }
+                        "exclude" => {
+                            if let Ok(values) = Vec::<String>::deserialize(value.clone()) {
+                                update_vec(
+                                    &mut global.exclude,
+                                    values,
+                                    RumdlToml,
+                                    Some(path.to_string()),
+                                );
+                            }
+                        }
+                        "respect_gitignore" => {
+                            if let Ok(val) = bool::deserialize(value.clone()) {
+                                update_bool(
+                                    &mut global.respect_gitignore,
+                                    val,
+                                    RumdlToml,
+                                    Some(path.to_string()),
+                                );
+                            }
+                        }
+                        _ => {
+                            unknown_keys.push((
+                                "[global] (explicit config)".to_string(),
+                                norm_key.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+            // Rule-specific
+            for (key, value) in toml_val.as_table().unwrap_or(&toml::map::Map::new()) {
+                let norm_key = normalize_key(key);
+                if norm_key == "global" {
+                    continue;
+                }
+                if let Some(rule_table) = value.as_table() {
+                    let rule_entry = rules.entry(norm_key.clone()).or_default();
+                    for (rk, rv) in rule_table {
+                        let norm_rk = normalize_key(rk);
+                        let mut sv = rule_entry.values.remove(&norm_rk).unwrap_or_else(|| {
+                            SourcedValue::new(rv.clone(), ConfigSource::Default)
+                        });
+                        sv.push_override(
+                            rv.clone(),
+                            RumdlToml,
+                            Some(path.to_string()),
+                            None,
+                        );
+                        rule_entry.values.insert(norm_rk, sv);
                     }
                 }
             }
@@ -977,12 +1035,12 @@ impl SourcedConfig {
             );
             // No rule-specific CLI overrides for now
         }
-        SourcedConfig {
+        Ok(SourcedConfig {
             global,
             rules,
             loaded_files,
             unknown_keys,
-        }
+        })
     }
 }
 
@@ -1004,5 +1062,140 @@ impl From<SourcedConfig> for Config {
             rules.insert(rule_name, rule_config);
         }
         Config { global, rules }
+    }
+}
+
+/// Registry of all known rules and their config schemas
+pub struct RuleRegistry {
+    /// Map of rule name (e.g. "MD013") to set of valid config keys and their TOML value types
+    pub rule_schemas: std::collections::BTreeMap<String, toml::map::Map<String, toml::Value>>,
+}
+
+impl RuleRegistry {
+    /// Build a registry from a list of rules
+    pub fn from_rules(rules: &[Box<dyn Rule>]) -> Self {
+        let mut rule_schemas = std::collections::BTreeMap::new();
+        for rule in rules {
+            if let Some((name, toml::Value::Table(table))) = rule.default_config_section() {
+                rule_schemas.insert(name, table);
+            } else {
+                // Insert empty schema for rules with no config
+                rule_schemas.insert(rule.name().to_string(), toml::map::Map::new());
+            }
+        }
+        RuleRegistry { rule_schemas }
+    }
+
+    /// Get all known rule names
+    pub fn rule_names(&self) -> std::collections::BTreeSet<String> {
+        self.rule_schemas.keys().cloned().collect()
+    }
+
+    /// Get valid config keys for a rule
+    pub fn config_keys_for(&self, rule: &str) -> Option<std::collections::BTreeSet<String>> {
+        self.rule_schemas.get(rule).map(|m| m.keys().cloned().collect())
+    }
+
+    /// Get the expected TOML value for a rule's config key (for type checking)
+    pub fn expected_value_for(&self, rule: &str, key: &str) -> Option<&toml::Value> {
+        self.rule_schemas.get(rule).and_then(|m| m.get(key))
+    }
+}
+
+/// Represents a config validation warning or error
+#[derive(Debug, Clone)]
+pub struct ConfigValidationWarning {
+    pub message: String,
+    pub rule: Option<String>,
+    pub key: Option<String>,
+}
+
+/// Validate a loaded config against the rule registry, using SourcedConfig for unknown key tracking
+pub fn validate_config_sourced(
+    sourced: &SourcedConfig,
+    registry: &RuleRegistry,
+) -> Vec<ConfigValidationWarning> {
+    let mut warnings = Vec::new();
+    let known_rules = registry.rule_names();
+    // 1. Unknown rules
+    for rule in sourced.rules.keys() {
+        if !known_rules.contains(rule) {
+            warnings.push(ConfigValidationWarning {
+                message: format!("Unknown rule in config: {}", rule),
+                rule: Some(rule.clone()),
+                key: None,
+            });
+        }
+    }
+    // 2. Unknown options and type mismatches
+    for (rule, rule_cfg) in &sourced.rules {
+        if let Some(valid_keys) = registry.config_keys_for(rule) {
+            for key in rule_cfg.values.keys() {
+                if !valid_keys.contains(key) {
+                    warnings.push(ConfigValidationWarning {
+                        message: format!("Unknown option for rule {}: {}", rule, key),
+                        rule: Some(rule.clone()),
+                        key: Some(key.clone()),
+                    });
+                } else {
+                    // Type check: compare type of value to type of default
+                    if let Some(expected) = registry.expected_value_for(rule, key) {
+                        let actual = &rule_cfg.values[key].value;
+                        if !toml_value_type_matches(expected, actual) {
+                            warnings.push(ConfigValidationWarning {
+                                message: format!(
+                                    "Type mismatch for {}.{}: expected {}, got {}",
+                                    rule,
+                                    key,
+                                    toml_type_name(expected),
+                                    toml_type_name(actual)
+                                ),
+                                rule: Some(rule.clone()),
+                                key: Some(key.clone()),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // 3. Unknown global options (from unknown_keys)
+    for (section, key) in &sourced.unknown_keys {
+        if section.contains("[global]") {
+            warnings.push(ConfigValidationWarning {
+                message: format!("Unknown global option: {}", key),
+                rule: None,
+                key: Some(key.clone()),
+            });
+        }
+    }
+    warnings
+}
+
+fn toml_type_name(val: &toml::Value) -> &'static str {
+    match val {
+        toml::Value::String(_) => "string",
+        toml::Value::Integer(_) => "integer",
+        toml::Value::Float(_) => "float",
+        toml::Value::Boolean(_) => "boolean",
+        toml::Value::Array(_) => "array",
+        toml::Value::Table(_) => "table",
+        toml::Value::Datetime(_) => "datetime",
+    }
+}
+
+fn toml_value_type_matches(expected: &toml::Value, actual: &toml::Value) -> bool {
+    use toml::Value::*;
+    match (expected, actual) {
+        (String(_), String(_)) => true,
+        (Integer(_), Integer(_)) => true,
+        (Float(_), Float(_)) => true,
+        (Boolean(_), Boolean(_)) => true,
+        (Array(_), Array(_)) => true,
+        (Table(_), Table(_)) => true,
+        (Datetime(_), Datetime(_)) => true,
+        // Allow integer for float
+        (Float(_), Integer(_)) => true,
+        _ => false,
     }
 }

@@ -2,6 +2,7 @@ use rumdl::config::Config; // Ensure Config is imported
 use rumdl::rules::*;
 use std::fs;
 use tempfile::tempdir; // For temporary directory // Add back env import
+use rumdl::config::{RuleRegistry};
 
 #[test]
 fn test_load_config_file() {
@@ -340,4 +341,76 @@ style = "dash"
     // (Similar setup: create rule, apply config, test with relevant content)
     // ... add MD004 test logic here if desired ...
     // No explicit cleanup needed.
+}
+
+#[test]
+fn test_config_validation_unknown_rule() {
+    let config_content = r#"
+[MD999]
+foo = "bar"
+"#;
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("unknown_rule.toml");
+    fs::write(&config_path, config_content).expect("Failed to write test config file");
+    let sourced = rumdl::config::SourcedConfig::load_sourced_config(Some(config_path.to_str().unwrap()), None).expect("config should load successfully");
+    let all_rules: Vec<Box<dyn rumdl::rule::Rule>> = vec![
+        Box::new(MD013LineLength::default()),
+        Box::new(MD004UnorderedListStyle::default()),
+    ];
+    let registry = RuleRegistry::from_rules(&all_rules);
+    let warnings = rumdl::config::validate_config_sourced(&sourced, &registry);
+    assert!(warnings.iter().any(|w| w.message.contains("Unknown rule")), "Should warn about unknown rule");
+}
+
+#[test]
+fn test_config_validation_unknown_option() {
+    let config_content = r#"
+[MD013]
+not_a_real_option = 123
+"#;
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("unknown_option.toml");
+    fs::write(&config_path, config_content).expect("Failed to write test config file");
+    let sourced = rumdl::config::SourcedConfig::load_sourced_config(Some(config_path.to_str().unwrap()), None).expect("config should load successfully");
+    let all_rules: Vec<Box<dyn rumdl::rule::Rule>> = vec![Box::new(MD013LineLength::default())];
+    let registry = RuleRegistry::from_rules(&all_rules);
+    let warnings = rumdl::config::validate_config_sourced(&sourced, &registry);
+    assert!(warnings.iter().any(|w| w.message.contains("Unknown option")), "Should warn about unknown option");
+}
+
+#[test]
+fn test_config_validation_type_mismatch() {
+    let config_content = r#"
+[MD013]
+line_length = "not a number"
+"#;
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("type_mismatch.toml");
+    fs::write(&config_path, config_content).expect("Failed to write test config file");
+    let sourced = rumdl::config::SourcedConfig::load_sourced_config(Some(config_path.to_str().unwrap()), None).expect("config should load successfully");
+    let all_rules: Vec<Box<dyn rumdl::rule::Rule>> = vec![Box::new(MD013LineLength::default())];
+    let registry = RuleRegistry::from_rules(&all_rules);
+    let warnings = rumdl::config::validate_config_sourced(&sourced, &registry);
+    assert!(warnings.iter().any(|w| w.message.contains("Type mismatch")), "Should warn about type mismatch");
+}
+
+#[test]
+fn test_config_validation_unknown_global_option() {
+    let config_content = r#"
+[global]
+include = ["docs/**/*.md"]
+verify_configasdf = true
+respect_gitignore = true
+
+[MD013]
+line_length = 80
+"#;
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("unknown_global.toml");
+    fs::write(&config_path, config_content).expect("Failed to write test config file");
+    let sourced = rumdl::config::SourcedConfig::load_sourced_config(Some(config_path.to_str().unwrap()), None).expect("config should load successfully");
+    let all_rules: Vec<Box<dyn rumdl::rule::Rule>> = vec![Box::new(MD013LineLength::default())];
+    let registry = RuleRegistry::from_rules(&all_rules);
+    let warnings = rumdl::config::validate_config_sourced(&sourced, &registry);
+    assert!(warnings.iter().any(|w| w.message.contains("Unknown global option")), "Should warn about unknown global option");
 }

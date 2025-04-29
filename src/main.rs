@@ -988,7 +988,13 @@ build-backend = \"setuptools.build_meta\"
         Some(Commands::Config { subcmd, defaults, output }) => {
             // Handle 'config get' subcommand for querying a specific key
             if let Some(ConfigSubcommand::Get { key }) = subcmd {
-                let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
+                let sourced = match rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("{}: {}", "Config error".red().bold(), e);
+                        std::process::exit(2);
+                    }
+                };
                 let parts: Vec<&str> = key.split('.').collect();
                 if parts.len() == 2 {
                     let (section, field) = (parts[0], parts[1]);
@@ -1034,99 +1040,43 @@ build-backend = \"setuptools.build_meta\"
                 }
             }
 
-            let mut config = if *defaults {
-                rumdl_config::Config::default()
+            // --- CONFIG VALIDATION ---
+            let all_rules = rumdl::rules::all_rules();
+            let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
+            let sourced;
+            if *defaults {
+                sourced = rumdl_config::SourcedConfig::default();
             } else {
-                let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
-                sourced.into()
-            };
-
-            // Always ensure all rule sections are present and filled with defaults if missing
-            use rumdl::rules::*;
-            use rumdl::rule::Rule;
-            let all_rules: Vec<Box<dyn Rule>> = vec![
-                Box::new(MD001HeadingIncrement),
-                Box::new(MD002FirstHeadingH1::default()),
-                Box::new(MD003HeadingStyle::default()),
-                Box::new(MD004UnorderedListStyle::default()),
-                Box::new(MD005ListIndent),
-                Box::new(MD006StartBullets),
-                Box::new(MD007ULIndent::default()),
-                Box::new(MD008ULStyle::default()),
-                Box::new(MD009TrailingSpaces::default()),
-                Box::new(MD010NoHardTabs::default()),
-                Box::new(MD011NoReversedLinks {}),
-                Box::new(MD012NoMultipleBlanks::default()),
-                Box::new(MD013LineLength::default()),
-                Box::new(MD015NoMissingSpaceAfterListMarker::default()),
-                Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
-                Box::new(MD018NoMissingSpaceAtx {}),
-                Box::new(MD019NoMultipleSpaceAtx {}),
-                Box::new(MD020NoMissingSpaceClosedAtx {}),
-                Box::new(MD021NoMultipleSpaceClosedAtx {}),
-                Box::new(MD022BlanksAroundHeadings::default()),
-                Box::new(MD023HeadingStartLeft {}),
-                Box::new(MD024NoDuplicateHeading::default()),
-                Box::new(MD025SingleTitle::default()),
-                Box::new(MD026NoTrailingPunctuation::default()),
-                Box::new(MD027MultipleSpacesBlockquote {}),
-                Box::new(MD028NoBlanksBlockquote {}),
-                Box::new(MD029OrderedListPrefix::default()),
-                Box::new(MD030ListMarkerSpace::default()),
-                Box::new(MD031BlanksAroundFences {}),
-                Box::new(MD032BlanksAroundLists {}),
-                Box::new(MD033NoInlineHtml::default()),
-                Box::new(MD034NoBareUrls {}),
-                Box::new(MD035HRStyle::default()),
-                Box::new(MD036NoEmphasisAsHeading {}),
-                Box::new(MD037NoSpaceInEmphasis),
-                Box::new(MD038NoSpaceInCode::default()),
-                Box::new(MD039NoSpaceInLinks),
-                Box::new(MD040FencedCodeLanguage {}),
-                Box::new(MD041FirstLineHeading::default()),
-                Box::new(MD042NoEmptyLinks::new()),
-                Box::new(MD043RequiredHeadings::new(Vec::new())),
-                Box::new(MD044ProperNames::new(Vec::new(), true)),
-                Box::new(MD045NoAltText::new()),
-                Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
-                Box::new(MD047SingleTrailingNewline),
-                Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
-                Box::new(MD049EmphasisStyle::default()),
-                Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
-                Box::new(MD051LinkFragments),
-                Box::new(MD052ReferenceLinkImages),
-                Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
-                Box::new(MD054LinkImageStyle::default()),
-                Box::new(MD055TablePipeStyle::default()),
-                Box::new(MD056TableColumnCount),
-                Box::new(MD057ExistingRelativeLinks::default()),
-                Box::new(MD058BlanksAroundTables),
-            ];
-            for rule in all_rules {
-                let rule_name = rule.name();
-                if let Some((_, default_value)) = rule.default_config_section() {
-                    if let toml::Value::Table(default_table) = default_value {
-                        let rule_entry = config.rules.entry(rule_name.to_string())
-                            .or_insert_with(|| rumdl_config::RuleConfig { values: std::collections::BTreeMap::new() });
-                        for (k, v) in default_table {
-                            rule_entry.values.entry(k.clone()).or_insert(v.clone());
-                        }
+                sourced = match rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("{}: {}", "Config error".red().bold(), e);
+                        std::process::exit(2);
                     }
-                }
+                };
             }
+            let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
+            if !validation_warnings.is_empty() {
+                for warn in &validation_warnings {
+                    eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
+                }
+                // Optionally: exit with error if strict mode is enabled
+                // std::process::exit(2);
+            }
+            // --- END CONFIG VALIDATION ---
 
             // If --output toml is set, print as valid TOML
             if output.as_deref() == Some("toml") {
+                let config = if *defaults {
+                    rumdl_config::Config::default()
+                } else {
+                    sourced.into()
+                };
                 println!("{}", toml::to_string_pretty(&config).unwrap());
                 return;
             }
 
             // Otherwise, print the smart output with provenance annotations (default for --defaults)
-            let sourced = if *defaults {
-                rumdl_config::SourcedConfig::default()
-            } else {
-                rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None)
-            };
             print_config_with_provenance(&sourced);
             return;
         }
@@ -1165,17 +1115,29 @@ build-backend = \"setuptools.build_meta\"
 }
 
 fn run_check(args: &CheckArgs) {
-    // Load configuration
-    let config = match rumdl_config::load_config(args.config.as_deref()) {
-        Ok(config) => config,
+    // 1. Load sourced config (for provenance and validation)
+    let sourced = match rumdl_config::SourcedConfig::load_sourced_config(args.config.as_deref(), None) {
+        Ok(sourced) => sourced,
         Err(e) => {
-            if args.config.is_some() {
-                eprintln!("{}: {}", "Error".red().bold(), e);
-                std::process::exit(1);
-            }
-            rumdl_config::Config::default()
+            // Syntax error or type mismatch: fail and exit
+            eprintln!("{}: {}", "Config error".red().bold(), e);
+            std::process::exit(2);
         }
     };
+
+    // 2. Validate config (unknown keys/rules/options)
+    let all_rules = rumdl::rules::all_rules();
+    let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
+    let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
+    if !validation_warnings.is_empty() {
+        for warn in &validation_warnings {
+            eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
+        }
+        // Do NOT exit; continue with valid config
+    }
+
+    // 3. Convert to Config for the rest of the linter
+    let config: rumdl_config::Config = sourced.into();
 
     // Initialize rules with configuration
     let enabled_rules = get_enabled_rules_from_checkargs(args, &config);

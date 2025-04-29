@@ -133,3 +133,70 @@ pub use md023_heading_start_left::MD023HeadingStartLeft;
 mod md057_existing_relative_links;
 
 pub use md057_existing_relative_links::MD057ExistingRelativeLinks;
+
+use crate::rule::Rule;
+use crate::rules::code_block_utils::CodeBlockStyle;
+use crate::rules::code_fence_utils::CodeFenceStyle;
+use crate::rules::strong_style::StrongStyle;
+
+/// Returns all rule instances for config validation and CLI
+pub fn all_rules() -> Vec<Box<dyn Rule>> {
+    vec![
+        Box::new(MD001HeadingIncrement),
+        Box::new(MD002FirstHeadingH1::default()),
+        Box::new(MD003HeadingStyle::default()),
+        Box::new(MD004UnorderedListStyle::default()),
+        Box::new(MD005ListIndent),
+        Box::new(MD006StartBullets),
+        Box::new(MD007ULIndent::default()),
+        Box::new(MD008ULStyle::default()),
+        Box::new(MD009TrailingSpaces::default()),
+        Box::new(MD010NoHardTabs::default()),
+        Box::new(MD011NoReversedLinks {}),
+        Box::new(MD012NoMultipleBlanks::default()),
+        Box::new(MD013LineLength::default()),
+        Box::new(MD015NoMissingSpaceAfterListMarker::default()),
+        Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
+        Box::new(MD018NoMissingSpaceAtx {}),
+        Box::new(MD019NoMultipleSpaceAtx {}),
+        Box::new(MD020NoMissingSpaceClosedAtx {}),
+        Box::new(MD021NoMultipleSpaceClosedAtx {}),
+        Box::new(MD022BlanksAroundHeadings::default()),
+        Box::new(MD023HeadingStartLeft {}),
+        Box::new(MD024NoDuplicateHeading::default()),
+        Box::new(MD025SingleTitle::default()),
+        Box::new(MD026NoTrailingPunctuation::default()),
+        Box::new(MD027MultipleSpacesBlockquote {}),
+        Box::new(MD028NoBlanksBlockquote {}),
+        Box::new(MD029OrderedListPrefix::default()),
+        Box::new(MD030ListMarkerSpace::default()),
+        Box::new(MD031BlanksAroundFences {}),
+        Box::new(MD032BlanksAroundLists {}),
+        Box::new(MD033NoInlineHtml::default()),
+        Box::new(MD034NoBareUrls {}),
+        Box::new(MD035HRStyle::default()),
+        Box::new(MD036NoEmphasisAsHeading {}),
+        Box::new(MD037NoSpaceInEmphasis),
+        Box::new(MD038NoSpaceInCode::default()),
+        Box::new(MD039NoSpaceInLinks),
+        Box::new(MD040FencedCodeLanguage {}),
+        Box::new(MD041FirstLineHeading::default()),
+        Box::new(MD042NoEmptyLinks::new()),
+        Box::new(MD043RequiredHeadings::new(Vec::new())),
+        Box::new(MD044ProperNames::new(Vec::new(), true)),
+        Box::new(MD045NoAltText::new()),
+        Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
+        Box::new(MD047SingleTrailingNewline),
+        Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
+        Box::new(MD049EmphasisStyle::default()),
+        Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
+        Box::new(MD051LinkFragments),
+        Box::new(MD052ReferenceLinkImages),
+        Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
+        Box::new(MD054LinkImageStyle::default()),
+        Box::new(MD055TablePipeStyle::default()),
+        Box::new(MD056TableColumnCount),
+        Box::new(MD057ExistingRelativeLinks::default()),
+        Box::new(MD058BlanksAroundTables),
+    ]
+}

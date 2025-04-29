@@ -124,3 +124,46 @@ maturin-build:
 
 maturin-sdist:
 	uv run --with pip,maturin[zig],cffi maturin sdist
+	
+run:
+	cargo run --release --bin rumdl check .
+
+run-readme:
+	cargo run --release --bin rumdl check README.md
+
+run-small:
+	cargo run --release --bin rumdl check benchmark/test-data/small
+
+run-medium:
+	cargo run --release --bin rumdl check benchmark/test-data/medium
+
+run-large:
+	cargo run --release --bin rumdl check benchmark/test-data/large
+
+run-rule:
+	cargo run --release --bin rumdl -- rule MD001
+
+run-config:
+	cargo run --release --bin rumdl -- config
+
+run-config-defaults:
+	cargo run --release --bin rumdl -- config --defaults
+
+run-config-toml:
+	cargo run --release --bin rumdl -- config --output toml
+
+run-config-defaults-toml:
+	cargo run --release --bin rumdl -- config --defaults --output toml
+
+run-config-defaults-smart:
+	cargo run --release --bin rumdl -- config --defaults --output smart
+
+run-help:
+	cargo run --release --bin rumdl -- help
+
+trigger-pre-commit:
+	curl -X POST \
+	-H "Accept: application/vnd.github+json" \
+	-H "Authorization: Bearer $(PRECOMMIT_DISPATCH_TOKEN)" \
+	https://api.github.com/repos/rvben/rumdl-pre-commit/dispatches \
+	-d '{"event_type": "pypi_release"}'

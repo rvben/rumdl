@@ -122,7 +122,7 @@ fn test_pyproject_toml_config_loading() {
 
     // First run without config (should detect line length issue with default 80 chars)
     let (success, stdout, _stderr) =
-        run_rumdl_command(&[test_file.to_str().unwrap()], temp_dir.path());
+        run_rumdl_command(&[test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
 
     assert!(!success, "Command should fail with line length issues");
     assert!(
@@ -144,12 +144,20 @@ line-length = 100
     .unwrap();
 
     // Run again with the config (should not detect line length issue now)
-    let (success, stdout, _stderr) =
-        run_rumdl_command(&[test_file.to_str().unwrap()], temp_dir.path());
+    let (success, stdout, stderr) =
+        run_rumdl_command(&[test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
+
+    // Print output for debugging
+    println!("STDOUT (pyproject_toml_config_loading):\n{}", stdout);
+    println!("STDERR (pyproject_toml_config_loading):\n{}", stderr);
 
     assert!(success, "Command should succeed with custom line length");
+    // Only fail if an actual MD013 warning line is present (not just in enabled rules)
+    let md013_warning_present = stdout
+        .lines()
+        .any(|line| line.contains(": MD013 "));
     assert!(
-        !stdout.contains("MD013"),
+        !md013_warning_present,
         "MD013 rule warning should not be present"
     );
     assert!(
@@ -197,12 +205,20 @@ line-length = 100
     fs::write(&kebab_test_file, test_file_content).unwrap();
 
     // Test snake_case config
-    let (snake_success, snake_stdout, _snake_stderr) =
-        run_rumdl_command(&[snake_test_file.to_str().unwrap()], snake_case_dir.path());
+    let (snake_success, snake_stdout, snake_stderr) =
+        run_rumdl_command(&[snake_test_file.to_str().unwrap(), "--verbose"], snake_case_dir.path());
+
+    // Print output for debugging
+    println!("STDOUT (snake_case):\n{}", snake_stdout);
+    println!("STDERR (snake_case):\n{}", snake_stderr);
 
     // Test kebab-case config
-    let (kebab_success, kebab_stdout, _kebab_stderr) =
-        run_rumdl_command(&[kebab_test_file.to_str().unwrap()], kebab_case_dir.path());
+    let (kebab_success, kebab_stdout, kebab_stderr) =
+        run_rumdl_command(&[kebab_test_file.to_str().unwrap(), "--verbose"], kebab_case_dir.path());
+
+    // Print output for debugging
+    println!("STDOUT (kebab_case):\n{}", kebab_stdout);
+    println!("STDERR (kebab_case):\n{}", kebab_stderr);
 
     // Both should succeed with custom line length
     assert!(
@@ -214,13 +230,29 @@ line-length = 100
         "Command should succeed with kebab-case config"
     );
 
+    // Both should NOT emit MD013 warning, since the config disables it for the test file
+    let snake_md013_warning_present = snake_stdout
+        .lines()
+        .any(|line| line.contains(": MD013 "));
+    let kebab_md013_warning_present = kebab_stdout
+        .lines()
+        .any(|line| line.contains(": MD013 "));
     assert!(
-        !snake_stdout.contains("MD013"),
+        !snake_md013_warning_present,
         "MD013 rule warning should not be present with snake_case"
     );
     assert!(
-        !kebab_stdout.contains("MD013"),
+        !kebab_md013_warning_present,
         "MD013 rule warning should not be present with kebab-case"
+    );
+    // Both should report no issues found
+    assert!(
+        snake_stdout.contains("No issues found"),
+        "Expected 'No issues found' message with snake_case config"
+    );
+    assert!(
+        kebab_stdout.contains("No issues found"),
+        "Expected 'No issues found' message with kebab-case config"
     );
 }
 
