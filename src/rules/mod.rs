@@ -113,9 +113,6 @@ pub use md015_no_missing_space_after_list_marker::MD015NoMissingSpaceAfterListMa
 mod md016_no_multiple_space_after_list_marker;
 pub use md016_no_multiple_space_after_list_marker::MD016NoMultipleSpaceAfterListMarker;
 
-mod md017_no_emphasis_as_heading;
-pub use md017_no_emphasis_as_heading::MD017NoEmphasisAsHeading;
-
 mod md018_no_missing_space_atx;
 pub use md018_no_missing_space_atx::MD018NoMissingSpaceAtx;
 

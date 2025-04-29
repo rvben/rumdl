@@ -135,7 +135,7 @@ impl MD034NoBareUrls {
         warnings
     }
 
-    // New: check_with_structure using DocumentStructure for code block and code span detection
+    // Uses DocumentStructure for code block and code span detection in check_with_structure.
     pub fn check_with_structure(
         &self,
         content: &str,

@@ -5,7 +5,7 @@ use std::io;
 use std::path::Path;
 
 /// Represents a rule-specific configuration
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
 pub struct RuleConfig {
     /// Configuration values for the rule
     #[serde(flatten)]
@@ -13,7 +13,7 @@ pub struct RuleConfig {
 }
 
 /// Represents the complete configuration loaded from rumdl.toml
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
 pub struct Config {
     /// Global configuration options
     #[serde(default)]
@@ -25,7 +25,7 @@ pub struct Config {
 }
 
 /// Global configuration options
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct GlobalConfig {
     /// Enabled rules
@@ -63,6 +63,25 @@ impl Default for GlobalConfig {
             include: Vec::new(),
             respect_gitignore: true,
         }
+    }
+}
+
+const MARKDOWNLINT_CONFIG_FILES: &[&str] = &[
+    ".markdownlint.json",
+    ".markdownlint.jsonc",
+    ".markdownlint.yaml",
+    ".markdownlint.yml",
+    "markdownlint.json",
+    "markdownlint.jsonc",
+    "markdownlint.yaml",
+    "markdownlint.yml",
+];
+
+fn is_markdownlint_config_file(path: &str) -> bool {
+    if let Some(file_name) = Path::new(path).file_name().and_then(|n| n.to_str()) {
+        MARKDOWNLINT_CONFIG_FILES.contains(&file_name)
+    } else {
+        false
     }
 }
 
@@ -444,6 +463,8 @@ pub enum ConfigSource {
     RumdlToml,
     PyprojectToml,
     Cli,
+    /// Value was loaded from a markdownlint config file (e.g. .markdownlint.json, .markdownlint.yaml)
+    Markdownlint,
 }
 
 #[derive(Debug, Clone)]
@@ -564,17 +585,21 @@ impl SourcedConfig {
             match src {
                 ConfigSource::Default => 0,
                 ConfigSource::PyprojectToml => 1,
-                ConfigSource::RumdlToml => 2,
-                ConfigSource::Cli => 3,
+                ConfigSource::Markdownlint => 2,
+                ConfigSource::RumdlToml => 3,
+                ConfigSource::Cli => 4,
             }
         }
 
+        // Track if any TOML/pyproject config was loaded
+        let mut loaded_toml_or_pyproject = false;
         // 1. Load pyproject.toml if present
         if config_path.is_none() && std::path::Path::new("pyproject.toml").exists() {
-            loaded_files.push("pyproject.toml".to_string());
             if let Ok(content) = std::fs::read_to_string("pyproject.toml") {
                 if let Ok(pyproject) = toml::from_str::<toml::Value>(&content) {
                     if let Some(rumdl_config) = pyproject.get("tool").and_then(|t| t.get("rumdl")) {
+                        loaded_files.push("pyproject.toml".to_string());
+                        loaded_toml_or_pyproject = true;
                         if let Some(rumdl_table) = rumdl_config.as_table() {
                             for (key, value) in rumdl_table {
                                 match key.as_str() {
@@ -673,12 +698,12 @@ impl SourcedConfig {
                 }
             }
         }
-
         // 2. Load .rumdl.toml or rumdl.toml if present (higher precedence)
         if config_path.is_none() {
             for filename in [".rumdl.toml", "rumdl.toml"] {
                 if std::path::Path::new(filename).exists() {
                     loaded_files.push(filename.to_string());
+                    loaded_toml_or_pyproject = true;
                     if let Ok(content) = std::fs::read_to_string(filename) {
                         if let Ok(toml_val) = toml::from_str::<toml::Value>(&content) {
                             if let Some(global_table) =
@@ -786,6 +811,7 @@ impl SourcedConfig {
         // 3. If explicit config path is given, load it (highest precedence except CLI)
         if let Some(path) = config_path {
             loaded_files.push(path.to_string());
+            loaded_toml_or_pyproject = true;
             if let Ok(content) = std::fs::read_to_string(path) {
                 if let Ok(toml_val) = toml::from_str::<toml::Value>(&content) {
                     if let Some(global_table) = toml_val.get("global").and_then(|v| v.as_table()) {
@@ -874,7 +900,75 @@ impl SourcedConfig {
                 }
             }
         }
-        // 4. CLI overrides (if provided)
+        // 4. Markdownlint config fallback if no TOML/pyproject config was loaded
+        if !loaded_toml_or_pyproject {
+            for filename in MARKDOWNLINT_CONFIG_FILES {
+                if std::path::Path::new(filename).exists() {
+                    let result = crate::markdownlint_config::load_markdownlint_config(filename);
+                    if let Ok(ml_config) = result {
+                        let sourced = ml_config.map_to_sourced_rumdl_config(Some(filename));
+                        // Merge rule configs
+                        for (rule, rule_cfg) in sourced.rules {
+                            rules.insert(rule, rule_cfg);
+                        }
+                        // Set provenance for global config values to Markdownlint
+                        global.enable = SourcedValue {
+                            value: Vec::new(),
+                            source: ConfigSource::Markdownlint,
+                            overrides: vec![ConfigOverride {
+                                value: Vec::new(),
+                                source: ConfigSource::Markdownlint,
+                                file: Some(filename.to_string()),
+                                line: None,
+                            }],
+                        };
+                        global.disable = SourcedValue {
+                            value: Vec::new(),
+                            source: ConfigSource::Markdownlint,
+                            overrides: vec![ConfigOverride {
+                                value: Vec::new(),
+                                source: ConfigSource::Markdownlint,
+                                file: Some(filename.to_string()),
+                                line: None,
+                            }],
+                        };
+                        global.exclude = SourcedValue {
+                            value: Vec::new(),
+                            source: ConfigSource::Markdownlint,
+                            overrides: vec![ConfigOverride {
+                                value: Vec::new(),
+                                source: ConfigSource::Markdownlint,
+                                file: Some(filename.to_string()),
+                                line: None,
+                            }],
+                        };
+                        global.include = SourcedValue {
+                            value: Vec::new(),
+                            source: ConfigSource::Markdownlint,
+                            overrides: vec![ConfigOverride {
+                                value: Vec::new(),
+                                source: ConfigSource::Markdownlint,
+                                file: Some(filename.to_string()),
+                                line: None,
+                            }],
+                        };
+                        global.respect_gitignore = SourcedValue {
+                            value: true,
+                            source: ConfigSource::Markdownlint,
+                            overrides: vec![ConfigOverride {
+                                value: true,
+                                source: ConfigSource::Markdownlint,
+                                file: Some(filename.to_string()),
+                                line: None,
+                            }],
+                        };
+                        loaded_files.push(filename.to_string());
+                    }
+                    break;
+                }
+            }
+        }
+        // 5. CLI overrides (if provided)
         if let Some(cli) = cli_overrides {
             update_vec(&mut global.enable, cli.enable.value.clone(), Cli, None);
             update_vec(&mut global.disable, cli.disable.value.clone(), Cli, None);
@@ -894,5 +988,26 @@ impl SourcedConfig {
             loaded_files,
             unknown_keys,
         }
+    }
+}
+
+impl From<SourcedConfig> for Config {
+    fn from(sourced: SourcedConfig) -> Self {
+        let global = GlobalConfig {
+            enable: sourced.global.enable.value,
+            disable: sourced.global.disable.value,
+            exclude: sourced.global.exclude.value,
+            include: sourced.global.include.value,
+            respect_gitignore: sourced.global.respect_gitignore.value,
+        };
+        let mut rules = HashMap::new();
+        for (rule_name, sourced_rule) in sourced.rules {
+            let mut rule_config = RuleConfig::default();
+            for (k, v) in sourced_rule.values {
+                rule_config.values.insert(k, v.value);
+            }
+            rules.insert(rule_name, rule_config);
+        }
+        Config { global, rules }
     }
 }

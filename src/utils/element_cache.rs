@@ -55,7 +55,7 @@ pub enum ListMarkerType {
 pub struct ListItem {
     pub line_number: usize, // 1-indexed
     pub indentation: usize,
-    pub indent_str: String, // NEW: actual leading whitespace
+    pub indent_str: String, // Actual leading whitespace
     pub marker_type: ListMarkerType,
     pub marker: String,
     pub content: String,

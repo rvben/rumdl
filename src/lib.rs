@@ -4,6 +4,7 @@ pub mod profiling;
 pub mod rule;
 pub mod rules;
 pub mod utils;
+pub mod markdownlint_config;
 
 #[cfg(feature = "python")]
 pub mod python;

@@ -15,7 +15,7 @@ pub struct DocumentStructure {
     pub heading_lines: Vec<usize>,
     /// Heading levels (1-6) for each heading
     pub heading_levels: Vec<usize>,
-    /// NEW: Heading regions (start_line, end_line) for each heading (ATX: start==end, Setext: start=content, end=marker)
+    /// Heading regions (start_line, end_line) for each heading (ATX: start==end, Setext: start=content, end=marker)
     pub heading_regions: Vec<(usize, usize)>,
     /// Line numbers of list items (1-indexed)
     pub list_lines: Vec<usize>,
