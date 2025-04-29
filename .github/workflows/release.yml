@@ -24,7 +24,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install maturin[zig]
+          python -m pip install maturin[zig] cffi
       - name: Build wheel
         run: maturin build --release --target x86_64-unknown-linux-gnu --compatibility manylinux2014 --zig
       - name: Build binary
@@ -57,7 +57,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install maturin[zig]
+          python -m pip install maturin[zig] cffi
       - name: Install cross toolchain for aarch64
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Build wheel
@@ -94,7 +94,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install maturin[zig]
+          python -m pip install maturin[zig] cffi
       - name: Build wheel
         shell: pwsh
         run: maturin build --release --target x86_64-pc-windows-msvc
@@ -130,7 +130,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install maturin[zig]
+          python -m pip install maturin[zig] cffi
       - name: Build wheel
         run: maturin build --release --target x86_64-apple-darwin
       - name: Build binary
@@ -163,7 +163,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install maturin[zig]
+          python -m pip install maturin[zig] cffi
       - name: Build wheel
         run: maturin build --release --target aarch64-apple-darwin
       - name: Build binary
@@ -192,7 +192,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install maturin[zig]
+          python -m pip install maturin[zig] cffi
       - name: Build source distribution
         run: maturin sdist
       - name: Upload sdist

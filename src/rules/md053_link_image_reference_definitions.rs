@@ -4,7 +4,6 @@ use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
-use toml;
 
 lazy_static! {
     // Link reference format: [text][reference]

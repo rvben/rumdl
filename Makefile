@@ -118,3 +118,9 @@ version-push:
 release-major: version-major version-push
 release-minor: version-minor version-push
 release-patch: version-patch version-push 
+
+maturin-build:
+	uv run --with pip,maturin[zig],cffi maturin build --release
+
+maturin-sdist:
+	uv run --with pip,maturin[zig],cffi maturin sdist

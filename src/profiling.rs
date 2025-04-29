@@ -13,10 +13,10 @@ lazy_static! {
 
 // Enable/disable profiling with a feature flag
 #[cfg(feature = "profiling")]
-pub const PROFILING_ENABLED: bool = true;
+pub(crate) const PROFILING_ENABLED: bool = true;
 
 #[cfg(not(feature = "profiling"))]
-pub const PROFILING_ENABLED: bool = false;
+pub(crate) const PROFILING_ENABLED: bool = false;
 
 /// A simple profiling utility to measure and report execution times
 pub struct Profiler {
