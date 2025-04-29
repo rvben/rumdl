@@ -1,3 +1,8 @@
+//!
+//! Rule MD054: Link and image style should be consistent
+//!
+//! See [docs/md054.md](../../docs/md054.md) for full documentation, configuration, and examples.
+
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
 use lazy_static::lazy_static;

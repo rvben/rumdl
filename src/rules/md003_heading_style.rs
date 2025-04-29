@@ -1,3 +1,8 @@
+//!
+//! Rule MD003: Heading style
+//!
+//! See [docs/md003.md](../../docs/md003.md) for full documentation, configuration, and examples.
+
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
 use crate::utils::document_structure::DocumentStructure;

@@ -1,3 +1,6 @@
+/// Rule MD007: Unordered list indentation
+///
+/// See [docs/md007.md](../../docs/md007.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::element_cache::ElementCache;

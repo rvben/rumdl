@@ -10,9 +10,9 @@ lazy_static! {
     static ref SETEXT_UNDERLINE: Regex = Regex::new(r"^([=-]+)$").unwrap();
 }
 
-/// Rule MD043: Required headings
+/// Rule MD043: Required headings present
 ///
-/// This rule is triggered when the headings in a markdown document don't match the specified structure.
+/// See [docs/md043.md](../../docs/md043.md) for full documentation, configuration, and examples.
 pub struct MD043RequiredHeadings {
     headings: Vec<String>,
 }

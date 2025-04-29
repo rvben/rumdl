@@ -3,6 +3,10 @@ use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::blockquote_utils::BlockquoteUtils;
 
+/// Rule MD027: No multiple spaces after blockquote symbol
+///
+/// See [docs/md027.md](../../docs/md027.md) for full documentation, configuration, and examples.
+
 #[derive(Debug, Default)]
 pub struct MD027MultipleSpacesBlockquote;
 

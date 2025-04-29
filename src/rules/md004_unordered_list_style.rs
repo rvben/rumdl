@@ -1,3 +1,53 @@
+/// Rule MD004: Use consistent style for unordered list markers
+///
+/// See [docs/md004.md](../../docs/md004.md) for full documentation, configuration, and examples.
+///
+/// Enforces that all unordered list items in a Markdown document use the same marker style ("*", "+", or "-") or are consistent with the first marker used, depending on configuration.
+///
+/// ## Purpose
+///
+/// Ensures visual and stylistic consistency for unordered lists, making documents easier to read and maintain.
+///
+/// ## Configuration Options
+///
+/// The rule supports configuring the required marker style:
+/// ```yaml
+/// MD004:
+///   style: dash      # Options: "dash", "asterisk", "plus", or "consistent" (default)
+/// ```
+///
+/// ## Examples
+///
+/// ### Correct (with style: dash)
+/// ```markdown
+/// - Item 1
+/// - Item 2
+///   - Nested item
+/// - Item 3
+/// ```
+///
+/// ### Incorrect (with style: dash)
+/// ```markdown
+/// * Item 1
+/// - Item 2
+/// + Item 3
+/// ```
+///
+/// ## Behavior
+///
+/// - Checks each unordered list item for its marker character.
+/// - In "consistent" mode, the first marker sets the style for the document.
+/// - Skips code blocks and front matter.
+/// - Reports a warning if a list item uses a different marker than the configured or detected style.
+///
+/// ## Fix Behavior
+///
+/// - Rewrites all unordered list markers to match the configured or detected style.
+/// - Preserves indentation and content after the marker.
+///
+/// ## Rationale
+///
+/// Consistent list markers improve readability and reduce distraction, especially in large documents or when collaborating with others. This rule helps enforce a uniform style across all unordered lists.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use fancy_regex::Regex as FancyRegex;

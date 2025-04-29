@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{CodeSpan, DocumentStructure, DocumentStructureExtensions};
 
+/// Rule MD038: No space inside code span markers
+///
+/// See [docs/md038.md](../../docs/md038.md) for full documentation, configuration, and examples.
+///
 /// MD038: Spaces inside code span elements
 ///
 /// This rule is triggered when there are spaces inside code span elements.

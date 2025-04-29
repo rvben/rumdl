@@ -1,3 +1,8 @@
+//!
+//! Rule MD005: Inconsistent indentation for list items at the same level
+//!
+//! See [docs/md005.md](../../docs/md005.md) for full documentation, configuration, and examples.
+
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};

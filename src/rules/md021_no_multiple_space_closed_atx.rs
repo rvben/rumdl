@@ -1,3 +1,6 @@
+/// Rule MD021: No multiple spaces inside closed ATX heading
+///
+/// See [docs/md021.md](../../docs/md021.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;

@@ -1,3 +1,6 @@
+/// Rule MD034: No bare URLs
+///
+/// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::early_returns;
 use crate::utils::regex_cache;

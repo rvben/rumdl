@@ -1,3 +1,6 @@
+//!
+//! Utility functions for detecting and handling code blocks and code spans in Markdown for rumdl.
+
 use lazy_static::lazy_static;
 use regex::Regex;
 

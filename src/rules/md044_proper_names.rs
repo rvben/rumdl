@@ -14,7 +14,9 @@ lazy_static! {
 
 type WarningPosition = (usize, usize, String); // (line, column, found_name)
 
-/// Rule MD044: Proper names should have the correct capitalization
+/// Rule MD044: Proper names should be capitalized
+///
+/// See [docs/md044.md](../../docs/md044.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when proper names are not capitalized correctly in the document.
 /// For example, if you have defined "JavaScript" as a proper name, the rule will flag any

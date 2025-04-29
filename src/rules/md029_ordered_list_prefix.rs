@@ -1,3 +1,6 @@
+/// Rule MD029: Ordered list item prefix
+///
+/// See [docs/md029.md](../../docs/md029.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;

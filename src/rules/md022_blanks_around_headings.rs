@@ -1,3 +1,6 @@
+/// Rule MD022: Headings should be surrounded by blank lines
+///
+/// See [docs/md022.md](../../docs/md022.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::{is_heading, is_setext_heading_marker};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
@@ -11,7 +14,6 @@ lazy_static! {
     static ref FRONT_MATTER_PATTERN: Regex = Regex::new(r"^---\s*$").unwrap();
 }
 
-/// Rule MD022: Headings should be surrounded by blank lines
 ///
 /// This rule enforces consistent spacing around headings to improve document readability
 /// and visual structure.

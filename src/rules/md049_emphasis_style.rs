@@ -16,7 +16,9 @@ lazy_static! {
     static ref URL_PATTERN: Regex = Regex::new(r"https?://[^\s)]+").unwrap();
 }
 
-/// MD049 - Emphasis style should be consistent
+/// Rule MD049: Emphasis style
+///
+/// See [docs/md049.md](../../docs/md049.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when the style for emphasis is inconsistent:
 /// - Asterisks: `*text*`

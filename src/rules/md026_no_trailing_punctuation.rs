@@ -1,3 +1,6 @@
+/// Rule MD026: No trailing punctuation in headings
+///
+/// See [docs/md026.md](../../docs/md026.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;

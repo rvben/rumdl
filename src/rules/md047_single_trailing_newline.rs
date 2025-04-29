@@ -2,6 +2,10 @@ use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
+/// Rule MD047: File should end with a single newline
+///
+/// See [docs/md047.md](../../docs/md047.md) for full documentation, configuration, and examples.
+
 #[derive(Debug, Default)]
 pub struct MD047SingleTrailingNewline;
 

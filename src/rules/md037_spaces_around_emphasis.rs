@@ -1,3 +1,6 @@
+/// Rule MD037: No spaces around emphasis markers
+///
+/// See [docs/md037.md](../../docs/md037.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use fancy_regex::Regex as FancyRegex;

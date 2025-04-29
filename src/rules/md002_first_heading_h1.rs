@@ -14,6 +14,8 @@ lazy_static! {
 
 /// Rule MD002: First heading should be a top-level heading
 ///
+/// See [docs/md002.md](../../docs/md002.md) for full documentation, configuration, and examples.
+///
 /// This rule enforces that the first heading in a document is a top-level heading (typically h1),
 /// which establishes the main topic or title of the document.
 ///

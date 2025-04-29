@@ -4,6 +4,10 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::document_structure::DocumentStructure;
 
+/// Rule MD041: First line in file should be a top-level heading
+///
+/// See [docs/md041.md](../../docs/md041.md) for full documentation, configuration, and examples.
+
 #[derive(Debug)]
 pub struct MD041FirstLineHeading {
     pub level: usize,

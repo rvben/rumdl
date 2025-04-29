@@ -2,7 +2,9 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::LineIndex;
 
-/// Rule MD039: Spaces inside link text
+/// Rule MD039: No space inside link text
+///
+/// See [docs/md039.md](../../docs/md039.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when link text has leading or trailing spaces which can cause
 /// unexpected rendering in some Markdown parsers.

@@ -1,3 +1,8 @@
+//!
+//! Rule MD033: No inline HTML
+//!
+//! See [docs/md033.md](../../docs/md033.md) for full documentation, configuration, and examples.
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;

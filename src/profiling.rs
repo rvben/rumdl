@@ -1,3 +1,6 @@
+//!
+//! This module provides profiling utilities for measuring and reporting execution times in rumdl.
+
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::Mutex;

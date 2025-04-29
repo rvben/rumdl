@@ -2,6 +2,9 @@ use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
+/// Rule MD056: Table column count
+///
+/// See [docs/md056.md](../../docs/md056.md) for full documentation, configuration, and examples.
 /// Ensures all rows in a table have the same number of cells
 #[derive(Debug)]
 pub struct MD056TableColumnCount;

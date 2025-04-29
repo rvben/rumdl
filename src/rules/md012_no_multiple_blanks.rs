@@ -3,6 +3,10 @@ use toml;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
+/// Rule MD012: No multiple consecutive blank lines
+///
+/// See [docs/md012.md](../../docs/md012.md) for full documentation, configuration, and examples.
+
 #[derive(Debug)]
 pub struct MD012NoMultipleBlanks {
     pub maximum: usize,

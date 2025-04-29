@@ -1,3 +1,6 @@
+/// Rule MD018: No missing space after ATX heading marker
+///
+/// See [docs/md018.md](../../docs/md018.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;

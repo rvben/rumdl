@@ -1,3 +1,8 @@
+//!
+//! Rule MD030: Spaces after list markers
+//!
+//! See [docs/md030.md](../../docs/md030.md) for full documentation, configuration, and examples.
+
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};

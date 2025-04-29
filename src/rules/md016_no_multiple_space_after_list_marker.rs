@@ -1,3 +1,6 @@
+/// Rule MD016: No multiple spaces after list marker
+///
+/// See [docs/md016.md](../../docs/md016.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::element_cache::ElementCache;
 use crate::utils::element_cache::ListMarkerType;

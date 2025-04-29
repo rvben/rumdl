@@ -1,3 +1,8 @@
+//!
+//! Rule MD036: No emphasis used as a heading
+//!
+//! See [docs/md036.md](../../docs/md036.md) for full documentation, configuration, and examples. 
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
 use crate::utils::range_utils::LineIndex;

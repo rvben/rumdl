@@ -2,7 +2,9 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::code_fence_utils::CodeFenceStyle;
 use crate::utils::range_utils::LineIndex;
 
-/// Rule MD048: Code fence style should be consistent
+/// Rule MD048: Code fence style
+///
+/// See [docs/md048.md](../../docs/md048.md) for full documentation, configuration, and examples.
 pub struct MD048CodeFenceStyle {
     style: CodeFenceStyle,
 }

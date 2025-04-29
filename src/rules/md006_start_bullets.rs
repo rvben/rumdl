@@ -6,7 +6,9 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
 
-/// Rule that ensures bullet lists start at the beginning of the line
+/// Rule MD006: Consider starting bulleted lists at the leftmost column
+///
+/// See [docs/md006.md](../../docs/md006.md) for full documentation, configuration, and examples.
 ///
 /// In standard Markdown:
 /// - Top-level bullet items should start at column 0 (no indentation)

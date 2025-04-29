@@ -1,3 +1,7 @@
+//!
+//! This module defines the Rule trait and related types for implementing linting rules in rumdl.
+//! Includes rule categories, dynamic dispatch helpers, and inline comment handling for rule enable/disable.
+
 use std::ops::Range;
 use thiserror::Error;
 

@@ -1,9 +1,36 @@
+//!
+//! Cached Regex Patterns and Fast Content Checks for Markdown Linting
+//!
+//! This module provides a centralized collection of pre-compiled, cached regex patterns
+//! for all major Markdown constructs (headings, lists, code blocks, links, images, etc.).
+//! It also includes fast-path utility functions for quickly checking if content
+//! potentially contains certain Markdown elements, allowing rules to skip expensive
+//! processing when unnecessary.
+//!
+//! # Performance
+//!
+//! All regexes are compiled once at startup using `lazy_static`, avoiding repeated
+//! compilation and improving performance across the linter. Use these shared patterns
+//! in rules instead of compiling new regexes.
+//!
+//! # Usage
+//!
+//! - Use the provided statics for common Markdown patterns.
+//! - Use the `regex_lazy!` macro for ad-hoc regexes that are not predefined.
+//! - Use the utility functions for fast content checks before running regexes.
+
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
-/// A module that provides cached regex patterns for use across multiple rules
-/// This helps avoid recompiling the same patterns repeatedly, improving performance
+/// Macro for defining a lazily-initialized, cached regex pattern.
+/// Use this for ad-hoc regexes that are not already defined in this module.
+/// Example:
+/// ```
+/// use rumdl::regex_lazy;
+/// let my_re = regex_lazy!(r"^foo.*bar$");
+/// assert!(my_re.is_match("foobar"));
+/// ```
 #[macro_export]
 macro_rules! regex_lazy {
     ($pattern:expr) => {{

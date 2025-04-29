@@ -6,6 +6,8 @@ use regex::Regex;
 
 /// Rule MD042: No empty links
 ///
+/// See [docs/md042.md](../../docs/md042.md) for full documentation, configuration, and examples.
+///
 /// This rule is triggered when a link has no content (text) or destination (URL).
 pub struct MD042NoEmptyLinks;
 

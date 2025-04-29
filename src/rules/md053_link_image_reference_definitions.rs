@@ -33,7 +33,9 @@ lazy_static! {
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
 }
 
-/// Rule MD053: Link and image reference definitions should be needed
+/// Rule MD053: Link and image reference definitions should be used
+///
+/// See [docs/md053.md](../../docs/md053.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when a link or image reference definition is declared but not used
 /// anywhere in the document. Unused reference definitions can create confusion and clutter.

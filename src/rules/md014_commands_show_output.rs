@@ -1,3 +1,8 @@
+//!
+//! Rule MD014: Commands should show output
+//!
+//! See [docs/md014.md](../../docs/md014.md) for full documentation, configuration, and examples.
+
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};

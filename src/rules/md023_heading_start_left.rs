@@ -1,3 +1,6 @@
+/// Rule MD023: Headings must start at the left margin
+///
+/// See [docs/md023.md](../../docs/md023.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::markdown_elements::{ElementType, MarkdownElements};

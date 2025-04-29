@@ -1,3 +1,6 @@
+/// Rule MD011: No reversed link syntax
+///
+/// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 

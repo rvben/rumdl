@@ -108,7 +108,7 @@ enum Commands {
     Version,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum ConfigSubcommand {
     /// Query a specific config key (e.g. global.exclude or MD013.line_length)
     Get { key: String },
@@ -621,6 +621,169 @@ fn to_toml_string_vec_string(v: &[String]) -> String {
     )
 }
 
+fn format_provenance(src: rumdl_config::ConfigSource) -> &'static str {
+    match src {
+        rumdl_config::ConfigSource::Cli => "CLI",
+        rumdl_config::ConfigSource::RumdlToml => ".rumdl.toml",
+        rumdl_config::ConfigSource::PyprojectToml => "pyproject.toml",
+        rumdl_config::ConfigSource::Default => "default",
+        rumdl_config::ConfigSource::Markdownlint => "markdownlint",
+    }
+}
+
+fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
+    use colored::*;
+    use rumdl::rules::*;
+    use rumdl::rule::Rule;
+    let g = &sourced.global;
+    let mut all_lines = Vec::new();
+    // [global] section
+    let global_lines = vec![
+        ("[global]".to_string(), String::new()),
+        (format!("enable = {:?}", g.enable.value), format!("[from {}]", format_provenance(g.enable.source))),
+        (format!("disable = {:?}", g.disable.value), format!("[from {}]", format_provenance(g.disable.source))),
+        (format!("exclude = {:?}", g.exclude.value), format!("[from {}]", format_provenance(g.exclude.source))),
+        (format!("include = {:?}", g.include.value), format!("[from {}]", format_provenance(g.include.source))),
+        (format!("respect_gitignore = {}", g.respect_gitignore.value), format!("[from {}]", format_provenance(g.respect_gitignore.source))),
+        (String::new(), String::new()),
+    ];
+    all_lines.extend(global_lines);
+    // All rules, but only if they have config items
+    let all_rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(MD001HeadingIncrement),
+        Box::new(MD002FirstHeadingH1::default()),
+        Box::new(MD003HeadingStyle::default()),
+        Box::new(MD004UnorderedListStyle::default()),
+        Box::new(MD005ListIndent),
+        Box::new(MD006StartBullets),
+        Box::new(MD007ULIndent::default()),
+        Box::new(MD008ULStyle::default()),
+        Box::new(MD009TrailingSpaces::default()),
+        Box::new(MD010NoHardTabs::default()),
+        Box::new(MD011NoReversedLinks {}),
+        Box::new(MD012NoMultipleBlanks::default()),
+        Box::new(MD013LineLength::default()),
+        Box::new(MD015NoMissingSpaceAfterListMarker::default()),
+        Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
+        Box::new(MD018NoMissingSpaceAtx {}),
+        Box::new(MD019NoMultipleSpaceAtx {}),
+        Box::new(MD020NoMissingSpaceClosedAtx {}),
+        Box::new(MD021NoMultipleSpaceClosedAtx {}),
+        Box::new(MD022BlanksAroundHeadings::default()),
+        Box::new(MD023HeadingStartLeft {}),
+        Box::new(MD024NoDuplicateHeading::default()),
+        Box::new(MD025SingleTitle::default()),
+        Box::new(MD026NoTrailingPunctuation::default()),
+        Box::new(MD027MultipleSpacesBlockquote {}),
+        Box::new(MD028NoBlanksBlockquote {}),
+        Box::new(MD029OrderedListPrefix::default()),
+        Box::new(MD030ListMarkerSpace::default()),
+        Box::new(MD031BlanksAroundFences {}),
+        Box::new(MD032BlanksAroundLists {}),
+        Box::new(MD033NoInlineHtml::default()),
+        Box::new(MD034NoBareUrls {}),
+        Box::new(MD035HRStyle::default()),
+        Box::new(MD036NoEmphasisAsHeading {}),
+        Box::new(MD037NoSpaceInEmphasis),
+        Box::new(MD038NoSpaceInCode::default()),
+        Box::new(MD039NoSpaceInLinks),
+        Box::new(MD040FencedCodeLanguage {}),
+        Box::new(MD041FirstLineHeading::default()),
+        Box::new(MD042NoEmptyLinks::new()),
+        Box::new(MD043RequiredHeadings::new(Vec::new())),
+        Box::new(MD044ProperNames::new(Vec::new(), true)),
+        Box::new(MD045NoAltText::new()),
+        Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
+        Box::new(MD047SingleTrailingNewline),
+        Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
+        Box::new(MD049EmphasisStyle::default()),
+        Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
+        Box::new(MD051LinkFragments),
+        Box::new(MD052ReferenceLinkImages),
+        Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
+        Box::new(MD054LinkImageStyle::default()),
+        Box::new(MD055TablePipeStyle::default()),
+        Box::new(MD056TableColumnCount),
+        Box::new(MD057ExistingRelativeLinks::default()),
+        Box::new(MD058BlanksAroundTables),
+    ];
+    let mut rule_names: Vec<_> = all_rules.iter().map(|r| r.name().to_string()).collect();
+    rule_names.sort();
+    for rule_name in rule_names {
+        let mut lines = Vec::new();
+        if let Some(rule_cfg) = sourced.rules.get(&rule_name) {
+            let mut keys: Vec<_> = rule_cfg.values.keys().collect();
+            keys.sort();
+            for key in keys {
+                let sv = &rule_cfg.values[key];
+                let value_str = match &sv.value {
+                    toml::Value::Array(arr) => {
+                        let vals: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
+                        format!("[{}]", vals.join(", "))
+                    }
+                    toml::Value::String(s) => format!("\"{}\"", s),
+                    toml::Value::Boolean(b) => b.to_string(),
+                    toml::Value::Integer(i) => i.to_string(),
+                    toml::Value::Float(f) => f.to_string(),
+                    _ => sv.value.to_string(),
+                };
+                lines.push((format!("{} = {}", key, value_str), format!("[from {}]", format_provenance(sv.source))));
+            }
+        } else {
+            // Print default config for this rule, if available
+            if let Some((_, value)) = all_rules.iter().find(|r| r.name() == rule_name).and_then(|r| r.default_config_section()) {
+                if let toml::Value::Table(table) = value {
+                    let mut keys: Vec<_> = table.keys().collect();
+                    keys.sort();
+                    for key in keys {
+                        let v = &table[key];
+                        let value_str = match v {
+                            toml::Value::Array(arr) => {
+                                let vals: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
+                                format!("[{}]", vals.join(", "))
+                            }
+                            toml::Value::String(s) => format!("\"{}\"", s),
+                            toml::Value::Boolean(b) => b.to_string(),
+                            toml::Value::Integer(i) => i.to_string(),
+                            toml::Value::Float(f) => f.to_string(),
+                            _ => v.to_string(),
+                        };
+                        lines.push((format!("{} = {}", key, value_str), format!("[from {}]", format_provenance(rumdl_config::ConfigSource::Default))));
+                    }
+                }
+            }
+        }
+        if !lines.is_empty() {
+            all_lines.push((format!("[{}]", rule_name), String::new()));
+            all_lines.extend(lines);
+            all_lines.push((String::new(), String::new()));
+        }
+    }
+    let max_left = all_lines.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
+    for (left, right) in &all_lines {
+        if left.is_empty() && right.is_empty() {
+            println!("");
+        } else {
+            println!("{:<width$} {}", left, right, width = max_left);
+        }
+    }
+}
+
+fn format_toml_value(val: &toml::Value) -> String {
+    match val {
+        toml::Value::String(s) => format!("\"{}\"", s),
+        toml::Value::Integer(i) => i.to_string(),
+        toml::Value::Float(f) => f.to_string(),
+        toml::Value::Boolean(b) => b.to_string(),
+        toml::Value::Array(arr) => {
+            let vals: Vec<String> = arr.iter().map(format_toml_value).collect();
+            format!("[{}]", vals.join(", "))
+        }
+        toml::Value::Table(_) => "<table>".to_string(),
+        toml::Value::Datetime(dt) => dt.to_string(),
+    }
+}
+
 fn main() {
     let _timer = rumdl::profiling::ScopedTimer::new("main");
 
@@ -649,7 +812,6 @@ fn main() {
                                 if content.contains("[tool.rumdl]") {
                                     println!("The pyproject.toml file already contains a [tool.rumdl] section.");
                                     println!("Please edit the file manually to avoid overwriting existing configuration.");
-                                    return;
                                 }
 
                                 // Append with a blank line for separation
@@ -704,7 +866,6 @@ build-backend = \"setuptools.build_meta\"
                         }
                     }
                 }
-                return;
             }
 
             // Create default config file
@@ -810,114 +971,34 @@ build-backend = \"setuptools.build_meta\"
             }
         }
         Some(Commands::Config { subcmd, defaults, output }) => {
-            let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
-            if cli.verbose {
-                if !sourced.loaded_files.is_empty() {
-                    eprintln!("Loaded config file: {}", sourced.loaded_files[0]);
-                } else {
-                    eprintln!("No config file found, using defaults.");
-                }
-            }
-            if let Some(output_format) = output {
-                if output_format == "toml" {
-                    let config: rumdl_config::Config = sourced.into();
-                    println!("{}", toml::to_string_pretty(&config).unwrap());
-                    return;
-                }
-            }
+            // Handle 'config get' subcommand for querying a specific key
             if let Some(ConfigSubcommand::Get { key }) = subcmd {
-                // Support keys like global.exclude or MD013.line_length
+                let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
                 let parts: Vec<&str> = key.split('.').collect();
                 if parts.len() == 2 {
                     let (section, field) = (parts[0], parts[1]);
                     if section.eq_ignore_ascii_case("global") {
                         // Global key
-                        match field {
-                            "enable" => {
-                                let val = &sourced.global.enable.value;
-                                let src_str_colored = match sourced.global.enable.source {
-                                    rumdl_config::ConfigSource::Cli => "CLI".green(),
-                                    rumdl_config::ConfigSource::RumdlToml => ".rumdl.toml".blue(),
-                                    rumdl_config::ConfigSource::PyprojectToml => {
-                                        "pyproject.toml".magenta()
-                                    }
-                                    rumdl_config::ConfigSource::Default => "default".yellow(),
-                                    rumdl_config::ConfigSource::Markdownlint => "markdownlint".cyan(),
-                                };
-                                let value_str = to_toml_string_vec_string(val).yellow();
-                                let key_str = "global.enable".cyan();
-                                println!("{} = {} [from {}]", key_str, value_str, src_str_colored);
-                                return;
-                            }
-                            "disable" => {
-                                let val = &sourced.global.disable.value;
-                                let src_str_colored = match sourced.global.disable.source {
-                                    rumdl_config::ConfigSource::Cli => "CLI".green(),
-                                    rumdl_config::ConfigSource::RumdlToml => ".rumdl.toml".blue(),
-                                    rumdl_config::ConfigSource::PyprojectToml => {
-                                        "pyproject.toml".magenta()
-                                    }
-                                    rumdl_config::ConfigSource::Default => "default".yellow(),
-                                    rumdl_config::ConfigSource::Markdownlint => "markdownlint".cyan(),
-                                };
-                                let value_str = to_toml_string_vec_string(val).yellow();
-                                let key_str = "global.disable".cyan();
-                                println!("{} = {} [from {}]", key_str, value_str, src_str_colored);
-                                return;
-                            }
-                            "exclude" => {
-                                let val = &sourced.global.exclude.value;
-                                let src_str_colored = match sourced.global.exclude.source {
-                                    rumdl_config::ConfigSource::Cli => "CLI".green(),
-                                    rumdl_config::ConfigSource::RumdlToml => ".rumdl.toml".blue(),
-                                    rumdl_config::ConfigSource::PyprojectToml => {
-                                        "pyproject.toml".magenta()
-                                    }
-                                    rumdl_config::ConfigSource::Default => "default".yellow(),
-                                    rumdl_config::ConfigSource::Markdownlint => "markdownlint".cyan(),
-                                };
-                                let value_str = to_toml_string_vec_string(val).yellow();
-                                let key_str = "global.exclude".cyan();
-                                println!("{} = {} [from {}]", key_str, value_str, src_str_colored);
-                                return;
-                            }
-                            "include" => {
-                                let val = &sourced.global.include.value;
-                                let src_str_colored = match sourced.global.include.source {
-                                    rumdl_config::ConfigSource::Cli => "CLI".green(),
-                                    rumdl_config::ConfigSource::RumdlToml => ".rumdl.toml".blue(),
-                                    rumdl_config::ConfigSource::PyprojectToml => {
-                                        "pyproject.toml".magenta()
-                                    }
-                                    rumdl_config::ConfigSource::Default => "default".yellow(),
-                                    rumdl_config::ConfigSource::Markdownlint => "markdownlint".cyan(),
-                                };
-                                let value_str = to_toml_string_vec_string(val).yellow();
-                                let key_str = "global.include".cyan();
-                                println!("{} = {} [from {}]", key_str, value_str, src_str_colored);
-                                return;
-                            }
-                            "respect_gitignore" => {
-                                let val = sourced.global.respect_gitignore.value;
-                                let src_str_colored = match sourced.global.respect_gitignore.source
-                                {
-                                    rumdl_config::ConfigSource::Cli => "CLI".green(),
-                                    rumdl_config::ConfigSource::RumdlToml => ".rumdl.toml".blue(),
-                                    rumdl_config::ConfigSource::PyprojectToml => {
-                                        "pyproject.toml".magenta()
-                                    }
-                                    rumdl_config::ConfigSource::Default => "default".yellow(),
-                                    rumdl_config::ConfigSource::Markdownlint => "markdownlint".cyan(),
-                                };
-                                let value_str = val.to_string().yellow();
-                                let key_str = "global.respect_gitignore".cyan();
-                                println!("{} = {} [from {}]", key_str, value_str, src_str_colored);
-                                return;
-                            }
-                            _ => {
-                                eprintln!("Unknown global key: {}", field);
-                                std::process::exit(1);
-                            }
+                        if field == "respect_gitignore" {
+                            let val = &sourced.global.respect_gitignore.value;
+                            let src = sourced.global.respect_gitignore.source;
+                            println!("{} = {:?} [from {}]", key, val, format_provenance(src));
+                            return;
+                        } else {
+                            let (val, src) = match field {
+                                "enable" => (&sourced.global.enable.value, sourced.global.enable.source),
+                                "disable" => (&sourced.global.disable.value, sourced.global.disable.source),
+                                "exclude" => (&sourced.global.exclude.value, sourced.global.exclude.source),
+                                "include" => (&sourced.global.include.value, sourced.global.include.source),
+                                _ => {
+                                    eprintln!("Unknown global key: {}", field);
+                                    std::process::exit(1);
+                                }
+                            };
+                            // For global keys, val is &Vec<String>, so format as TOML array
+                            let toml_val = toml::Value::Array(val.iter().map(|s| toml::Value::String(s.clone())).collect());
+                            println!("{} = {} [from {}]", key, format_toml_value(&toml_val), format_provenance(src));
+                            return;
                         }
                     } else {
                         // Rule key
@@ -925,29 +1006,7 @@ build-backend = \"setuptools.build_meta\"
                         let rule_cfg = sourced.rules.get(rule_name);
                         if let Some(rule_cfg) = rule_cfg {
                             if let Some(sv) = rule_cfg.values.get(field) {
-                                let src_str_colored = match sv.source {
-                                    rumdl_config::ConfigSource::Cli => "CLI".green(),
-                                    rumdl_config::ConfigSource::RumdlToml => ".rumdl.toml".blue(),
-                                    rumdl_config::ConfigSource::PyprojectToml => {
-                                        "pyproject.toml".magenta()
-                                    }
-                                    rumdl_config::ConfigSource::Default => "default".yellow(),
-                                    rumdl_config::ConfigSource::Markdownlint => "markdownlint".cyan(),
-                                };
-                                let value_str = match &sv.value {
-                                    toml::Value::Array(arr) => {
-                                        let vals: Vec<String> =
-                                            arr.iter().map(|v| v.to_string()).collect();
-                                        format!("[{}]", vals.join(", ")).yellow()
-                                    }
-                                    toml::Value::String(s) => format!("\"{}\"", s).yellow(),
-                                    toml::Value::Boolean(b) => b.to_string().yellow(),
-                                    toml::Value::Integer(i) => i.to_string().yellow(),
-                                    toml::Value::Float(f) => f.to_string().yellow(),
-                                    _ => sv.value.to_string().yellow(),
-                                };
-                                let key_str = format!("{}.{}", rule_name, field).cyan();
-                                println!("{} = {} [from {}]", key_str, value_str, src_str_colored);
+                                println!("{}.{} = {} [from {}]", rule_name, field, format_toml_value(&sv.value), format_provenance(sv.source));
                                 return;
                             }
                         }
@@ -959,101 +1018,111 @@ build-backend = \"setuptools.build_meta\"
                     std::process::exit(1);
                 }
             }
-            if *defaults {
-                use rumdl::rules::*;
-                use std::collections::BTreeMap;
-                use toml::Value;
-                // Build default global config
-                let global = Value::try_from(rumdl_config::GlobalConfig::default())
-                    .unwrap_or(Value::Table(Default::default()));
-                // Build default rule configs
-                let mut rule_map = BTreeMap::new();
-                let all_rules: Vec<Box<dyn Rule>> = vec![
-                    Box::new(MD001HeadingIncrement),
-                    Box::new(MD002FirstHeadingH1::default()),
-                    Box::new(MD003HeadingStyle::default()),
-                    Box::new(MD004UnorderedListStyle::default()),
-                    Box::new(MD005ListIndent),
-                    Box::new(MD006StartBullets),
-                    Box::new(MD007ULIndent::default()),
-                    Box::new(MD008ULStyle::default()),
-                    Box::new(MD009TrailingSpaces::default()),
-                    Box::new(MD010NoHardTabs::default()),
-                    Box::new(MD011NoReversedLinks {}),
-                    Box::new(MD012NoMultipleBlanks::default()),
-                    Box::new(MD013LineLength::default()),
-                    Box::new(MD015NoMissingSpaceAfterListMarker::default()),
-                    Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
-                    Box::new(MD018NoMissingSpaceAtx {}),
-                    Box::new(MD019NoMultipleSpaceAtx {}),
-                    Box::new(MD020NoMissingSpaceClosedAtx {}),
-                    Box::new(MD021NoMultipleSpaceClosedAtx {}),
-                    Box::new(MD022BlanksAroundHeadings::default()),
-                    Box::new(MD023HeadingStartLeft {}),
-                    Box::new(MD024NoDuplicateHeading::default()),
-                    Box::new(MD025SingleTitle::default()),
-                    Box::new(MD026NoTrailingPunctuation::default()),
-                    Box::new(MD027MultipleSpacesBlockquote {}),
-                    Box::new(MD028NoBlanksBlockquote {}),
-                    Box::new(MD029OrderedListPrefix::default()),
-                    Box::new(MD030ListMarkerSpace::default()),
-                    Box::new(MD031BlanksAroundFences {}),
-                    Box::new(MD032BlanksAroundLists {}),
-                    Box::new(MD033NoInlineHtml::default()),
-                    Box::new(MD034NoBareUrls {}),
-                    Box::new(MD035HRStyle::default()),
-                    Box::new(MD036NoEmphasisAsHeading {}),
-                    Box::new(MD037NoSpaceInEmphasis),
-                    Box::new(MD038NoSpaceInCode::default()),
-                    Box::new(MD039NoSpaceInLinks),
-                    Box::new(MD040FencedCodeLanguage {}),
-                    Box::new(MD041FirstLineHeading::default()),
-                    Box::new(MD042NoEmptyLinks::new()),
-                    Box::new(MD043RequiredHeadings::new(Vec::new())),
-                    Box::new(MD044ProperNames::new(Vec::new(), true)),
-                    Box::new(MD045NoAltText::new()),
-                    Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
-                    Box::new(MD047SingleTrailingNewline),
-                    Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
-                    Box::new(MD049EmphasisStyle::default()),
-                    Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
-                    Box::new(MD051LinkFragments),
-                    Box::new(MD052ReferenceLinkImages),
-                    Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
-                    Box::new(MD054LinkImageStyle::default()),
-                    Box::new(MD055TablePipeStyle::default()),
-                    Box::new(MD056TableColumnCount),
-                    Box::new(MD057ExistingRelativeLinks::default()),
-                    Box::new(MD058BlanksAroundTables),
-                ];
-                for rule in all_rules {
-                    if let Some((name, value)) = rule.default_config_section() {
-                        rule_map.insert(name, value);
+
+            let mut config = if *defaults {
+                rumdl_config::Config::default()
+            } else {
+                let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
+                sourced.into()
+            };
+
+            // Always ensure all rule sections are present and filled with defaults if missing
+            use rumdl::rules::*;
+            use rumdl::rule::Rule;
+            let all_rules: Vec<Box<dyn Rule>> = vec![
+                Box::new(MD001HeadingIncrement),
+                Box::new(MD002FirstHeadingH1::default()),
+                Box::new(MD003HeadingStyle::default()),
+                Box::new(MD004UnorderedListStyle::default()),
+                Box::new(MD005ListIndent),
+                Box::new(MD006StartBullets),
+                Box::new(MD007ULIndent::default()),
+                Box::new(MD008ULStyle::default()),
+                Box::new(MD009TrailingSpaces::default()),
+                Box::new(MD010NoHardTabs::default()),
+                Box::new(MD011NoReversedLinks {}),
+                Box::new(MD012NoMultipleBlanks::default()),
+                Box::new(MD013LineLength::default()),
+                Box::new(MD015NoMissingSpaceAfterListMarker::default()),
+                Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
+                Box::new(MD018NoMissingSpaceAtx {}),
+                Box::new(MD019NoMultipleSpaceAtx {}),
+                Box::new(MD020NoMissingSpaceClosedAtx {}),
+                Box::new(MD021NoMultipleSpaceClosedAtx {}),
+                Box::new(MD022BlanksAroundHeadings::default()),
+                Box::new(MD023HeadingStartLeft {}),
+                Box::new(MD024NoDuplicateHeading::default()),
+                Box::new(MD025SingleTitle::default()),
+                Box::new(MD026NoTrailingPunctuation::default()),
+                Box::new(MD027MultipleSpacesBlockquote {}),
+                Box::new(MD028NoBlanksBlockquote {}),
+                Box::new(MD029OrderedListPrefix::default()),
+                Box::new(MD030ListMarkerSpace::default()),
+                Box::new(MD031BlanksAroundFences {}),
+                Box::new(MD032BlanksAroundLists {}),
+                Box::new(MD033NoInlineHtml::default()),
+                Box::new(MD034NoBareUrls {}),
+                Box::new(MD035HRStyle::default()),
+                Box::new(MD036NoEmphasisAsHeading {}),
+                Box::new(MD037NoSpaceInEmphasis),
+                Box::new(MD038NoSpaceInCode::default()),
+                Box::new(MD039NoSpaceInLinks),
+                Box::new(MD040FencedCodeLanguage {}),
+                Box::new(MD041FirstLineHeading::default()),
+                Box::new(MD042NoEmptyLinks::new()),
+                Box::new(MD043RequiredHeadings::new(Vec::new())),
+                Box::new(MD044ProperNames::new(Vec::new(), true)),
+                Box::new(MD045NoAltText::new()),
+                Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
+                Box::new(MD047SingleTrailingNewline),
+                Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
+                Box::new(MD049EmphasisStyle::default()),
+                Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
+                Box::new(MD051LinkFragments),
+                Box::new(MD052ReferenceLinkImages),
+                Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
+                Box::new(MD054LinkImageStyle::default()),
+                Box::new(MD055TablePipeStyle::default()),
+                Box::new(MD056TableColumnCount),
+                Box::new(MD057ExistingRelativeLinks::default()),
+                Box::new(MD058BlanksAroundTables),
+            ];
+            for rule in all_rules {
+                let rule_name = rule.name();
+                if let Some((_, default_value)) = rule.default_config_section() {
+                    if let toml::Value::Table(default_table) = default_value {
+                        let rule_entry = config.rules.entry(rule_name.to_string())
+                            .or_insert_with(|| rumdl_config::RuleConfig { values: std::collections::BTreeMap::new() });
+                        for (k, v) in default_table {
+                            rule_entry.values.entry(k.clone()).or_insert(v.clone());
+                        }
                     }
                 }
-                // Print [global] section first
-                let mut global_table = toml::map::Map::new();
-                global_table.insert("global".to_string(), global);
-                println!(
-                    "{}",
-                    toml::to_string_pretty(&Value::Table(global_table)).unwrap()
-                );
-                // Then print each rule section
-                let mut rule_names: Vec<_> = rule_map.keys().collect();
-                rule_names.sort();
-                for rule_name in rule_names {
-                    let mut rule_table = toml::map::Map::new();
-                    rule_table.insert(rule_name.clone(), rule_map[rule_name].clone());
-                    println!(
-                        "{}",
-                        toml::to_string_pretty(&Value::Table(rule_table)).unwrap()
-                    );
+            }
+
+            // If --output smart, print with provenance annotations
+            if output.as_deref() == Some("smart") {
+                // If --defaults, use a SourcedConfig with all values from default
+                if *defaults {
+                    let sourced = rumdl_config::SourcedConfig::default();
+                    print_config_with_provenance(&sourced);
+                } else {
+                    let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
+                    print_config_with_provenance(&sourced);
                 }
                 return;
             }
-            // ... annotated config output logic ...
-            // After all uses of sourced, convert if needed
-            // let config: rumdl_config::Config = sourced.into(); // Only if needed after this point
+
+            // 2. If --defaults or --output toml is set, print as valid TOML
+            if *defaults || output.as_deref() == Some("toml") {
+                println!("{}", toml::to_string_pretty(&config).unwrap());
+                return;
+            }
+
+            // 3. Otherwise, print in a human-readable way with provenance
+            let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
+            print_config_with_provenance(&sourced);
+            return;
         }
         Some(Commands::Version) => {
             // Use clap's version info

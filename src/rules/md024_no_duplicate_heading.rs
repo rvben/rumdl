@@ -1,3 +1,6 @@
+/// Rule MD024: No duplicate headings
+///
+/// See [docs/md024.md](../../docs/md024.md) for full documentation, configuration, and examples.
 use crate::utils::range_utils::LineIndex;
 use toml;
 

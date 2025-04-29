@@ -4,6 +4,10 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 use toml;
 
+/// Rule MD009: Trailing spaces
+///
+/// See [docs/md009.md](../../docs/md009.md) for full documentation, configuration, and examples.
+
 #[derive(Debug)]
 pub struct MD009TrailingSpaces {
     pub br_spaces: usize,

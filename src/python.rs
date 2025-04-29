@@ -1,3 +1,6 @@
+//!
+//! This module provides Python bindings and integration for rumdl.
+
 use pyo3::prelude::*;
 
 /// Python module for rumdl

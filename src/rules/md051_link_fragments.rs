@@ -27,7 +27,9 @@ lazy_static! {
     static ref STRIKETHROUGH_REGEX: Regex = Regex::new(r"~~(.+?)~~").unwrap();
 }
 
-/// Rule MD051: Link fragments should exist
+/// Rule MD051: Link fragments should match document headings
+///
+/// See [docs/md051.md](../../docs/md051.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when a link fragment (the part after #) doesn't exist in the document.
 /// This only applies to internal document links, not to external URLs.

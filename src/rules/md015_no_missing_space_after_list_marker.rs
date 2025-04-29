@@ -1,3 +1,6 @@
+/// Rule MD015: No missing space after list marker
+///
+/// See [docs/md015.md](../../docs/md015.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;

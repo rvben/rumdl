@@ -1,4 +1,6 @@
-//! Module for parsing and mapping markdownlint config files (JSON/YAML) to rumdl's internal config format.
+//!
+//! This module handles parsing and mapping markdownlint config files (JSON/YAML) to rumdl's internal config format.
+//! It provides mapping from markdownlint rule keys to rumdl rule keys and provenance tracking for configuration values.
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -147,6 +149,4 @@ impl MarkdownlintConfig {
         }
         sourced_config
     }
-}
-
-// TODO: Add tests for config parsing and mapping 
+} 

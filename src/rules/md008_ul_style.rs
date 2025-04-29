@@ -24,7 +24,10 @@ pub enum StyleMode {
     Consistent,
 }
 
-/// Rule for checking unordered list style
+/// Rule MD008: Unordered list style
+///
+/// See [docs/md008.md](../../docs/md008.md) for full documentation, configuration, and examples.
+///
 /// This rule enforces a specific marker character (* or - or +) for unordered lists
 #[derive(Debug)]
 pub struct MD008ULStyle {

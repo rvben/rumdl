@@ -1,5 +1,9 @@
+//!
+//! This module defines configuration structures, loading logic, and provenance tracking for rumdl.
+//! Supports TOML, pyproject.toml, and markdownlint config formats, and provides merging and override logic.
+
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -9,7 +13,7 @@ use std::path::Path;
 pub struct RuleConfig {
     /// Configuration values for the rule
     #[serde(flatten)]
-    pub values: HashMap<String, toml::Value>,
+    pub values: BTreeMap<String, toml::Value>,
 }
 
 /// Represents the complete configuration loaded from rumdl.toml
@@ -21,7 +25,7 @@ pub struct Config {
 
     /// Rule-specific configurations
     #[serde(flatten)]
-    pub rules: HashMap<String, RuleConfig>,
+    pub rules: BTreeMap<String, RuleConfig>,
 }
 
 /// Global configuration options
@@ -76,14 +80,6 @@ const MARKDOWNLINT_CONFIG_FILES: &[&str] = &[
     "markdownlint.yaml",
     "markdownlint.yml",
 ];
-
-fn is_markdownlint_config_file(path: &str) -> bool {
-    if let Some(file_name) = Path::new(path).file_name().and_then(|n| n.to_str()) {
-        MARKDOWNLINT_CONFIG_FILES.contains(&file_name)
-    } else {
-        false
-    }
-}
 
 /// Load configuration from the specified file or search for a default config file
 pub fn load_config(config_path: Option<&str>) -> Result<Config, ConfigError> {
@@ -536,13 +532,13 @@ impl Default for SourcedGlobalConfig {
 
 #[derive(Debug, Default)]
 pub struct SourcedRuleConfig {
-    pub values: std::collections::HashMap<String, SourcedValue<toml::Value>>,
+    pub values: BTreeMap<String, SourcedValue<toml::Value>>,
 }
 
 #[derive(Debug, Default)]
 pub struct SourcedConfig {
     pub global: SourcedGlobalConfig,
-    pub rules: std::collections::HashMap<String, SourcedRuleConfig>,
+    pub rules: BTreeMap<String, SourcedRuleConfig>,
     pub loaded_files: Vec<String>,
     pub unknown_keys: Vec<(String, String)>, // (section, key)
 }
@@ -562,8 +558,7 @@ impl SourcedConfig {
             include: SourcedValue::new(Vec::new(), Default),
             respect_gitignore: SourcedValue::new(true, Default),
         };
-        let mut rules: std::collections::HashMap<String, SourcedRuleConfig> =
-            std::collections::HashMap::new();
+        let mut rules: BTreeMap<String, SourcedRuleConfig> = BTreeMap::new();
 
         // Helper to update a sourced value if the new source has higher precedence
         let update_vec = |current: &mut SourcedValue<Vec<String>>,
@@ -1000,7 +995,7 @@ impl From<SourcedConfig> for Config {
             include: sourced.global.include.value,
             respect_gitignore: sourced.global.respect_gitignore.value,
         };
-        let mut rules = HashMap::new();
+        let mut rules = BTreeMap::new();
         for (rule_name, sourced_rule) in sourced.rules {
             let mut rule_config = RuleConfig::default();
             for (k, v) in sourced_rule.values {

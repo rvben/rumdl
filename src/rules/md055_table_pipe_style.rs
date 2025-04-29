@@ -3,7 +3,9 @@ use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::range_utils::LineIndex;
 use toml;
 
-/// Rule MD055: Table pipe style should be consistent
+/// Rule MD055: Table pipe style
+///
+/// See [docs/md055.md](../../docs/md055.md) for full documentation, configuration, and examples.
 ///
 /// This rule enforces consistent use of leading and trailing pipe characters in Markdown tables,
 /// which improves readability and ensures uniform document styling.

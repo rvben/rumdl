@@ -10,7 +10,9 @@ lazy_static! {
     static ref ASTERISK_PATTERN: Regex = Regex::new(r"\*\*[^*\\]+\*\*").unwrap();
 }
 
-/// Rule MD050: Strong style should be consistent
+/// Rule MD050: Strong style
+///
+/// See [docs/md050.md](../../docs/md050.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when strong markers (** or __) are used in an inconsistent way.
 pub struct MD050StrongStyle {

@@ -30,7 +30,9 @@ lazy_static! {
     static ref OUTPUT_EXAMPLE_START: Regex = Regex::new(r"^#+\s*(?:Output|Example|Output Style|Output Format)\s*$").unwrap();
 }
 
-/// Rule MD052: Reference links and images should use a reference that exists
+/// Rule MD052: Reference links and images should use reference style
+///
+/// See [docs/md052.md](../../docs/md052.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when a reference link or image uses a reference that isn't defined.
 pub struct MD052ReferenceLinkImages;

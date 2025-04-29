@@ -1,4 +1,4 @@
-use std::fs::{File, remove_file};
+use std::fs::File;
 use std::io::Write;
 use std::process::Command;
 use tempfile::tempdir;
@@ -30,7 +30,7 @@ fn test_markdownlint_config_cli_output_matches() {
 
     // Run the built rumdl CLI binary in the tempdir
     let output = Command::new(rumdl_bin_path())
-        .args(&["config", "--output", "toml"])
+        .args(["config", "--output", "toml"])
         .current_dir(&dir)
         .output()
         .expect("Failed to run rumdl CLI");
@@ -74,7 +74,7 @@ line-length = 88
 
     // Run the built rumdl CLI binary in the tempdir
     let output = Command::new(rumdl_bin_path())
-        .args(&["config", "--output", "toml"])
+        .args(["config", "--output", "toml"])
         .current_dir(&dir)
         .output()
         .expect("Failed to run rumdl CLI");
@@ -123,19 +123,6 @@ fn test_config_command_prints_source_markdownlint_json() {
 
     // In the expected output, update the provenance for global config values to [from default]
     // Only rule-specific values set by markdownlint config should show [from markdownlint]
-    let expected_output = r#"[global]
-  enable = []                     [from default]
-  disable = []                    [from default]
-  exclude = []                    [from default]
-  include = []                    [from default]
-  respect_gitignore = true        [from default]
-
-[MD004]
-  style = "dash"                  [from markdownlint]
-
-[MD046]
-  style = "fenced"                [from markdownlint]
-"#;
 }
 
 #[test]

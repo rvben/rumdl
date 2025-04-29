@@ -1,3 +1,6 @@
+/// Rule MD013: Line length
+///
+/// See [docs/md013.md](../../docs/md013.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
 use lazy_static::lazy_static;

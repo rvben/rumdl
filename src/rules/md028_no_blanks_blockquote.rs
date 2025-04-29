@@ -1,3 +1,6 @@
+/// Rule MD028: No blank lines inside blockquotes
+///
+/// See [docs/md028.md](../../docs/md028.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::blockquote_utils::BlockquoteUtils;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};

@@ -1,3 +1,6 @@
+/// Rule MD010: No hard tabs
+///
+/// See [docs/md010.md](../../docs/md010.md) for full documentation, configuration, and examples.
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};

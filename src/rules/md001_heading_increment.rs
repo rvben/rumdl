@@ -6,6 +6,8 @@ use crate::HeadingStyle;
 
 /// Rule MD001: Heading levels should only increment by one level at a time
 ///
+/// See [docs/md001.md](../../docs/md001.md) for full documentation, configuration, and examples.
+///
 /// This rule enforces a fundamental principle of document structure: heading levels
 /// should increase by exactly one level at a time to maintain a proper document hierarchy.
 ///

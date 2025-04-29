@@ -1,3 +1,8 @@
+//!
+//! Rule MD057: Existing relative links
+//!
+//! See [docs/md057.md](../../docs/md057.md) for full documentation, configuration, and examples.
+
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::element_cache::ElementCache;

@@ -4,6 +4,10 @@ use crate::utils::document_structure::{
 };
 use crate::utils::range_utils::LineIndex;
 
+/// Rule MD040: Fenced code blocks should have a language
+///
+/// See [docs/md040.md](../../docs/md040.md) for full documentation, configuration, and examples.
+
 #[derive(Debug, Default)]
 pub struct MD040FencedCodeLanguage;
 

@@ -1,3 +1,8 @@
+//!
+//! Rule MD035: Horizontal rule style
+//!
+//! See [docs/md035.md](../../docs/md035.md) for full documentation, configuration, and examples.
+
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};

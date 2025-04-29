@@ -1,3 +1,6 @@
+//!
+//! This module provides initialization utilities for rumdl, such as creating default configuration files.
+
 use std::fs;
 use std::io;
 use std::path::Path;

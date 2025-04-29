@@ -1,14 +1,14 @@
 use rumdl::config::{Config, GlobalConfig, RuleConfig};
 use rumdl::rule::Rule;
 use rumdl::rules::*;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 
 fn create_test_config() -> Config {
-    let mut rules = HashMap::new();
+    let mut rules = BTreeMap::new();
 
     // Add MD013 config
-    let mut md013_values = HashMap::new();
+    let mut md013_values = BTreeMap::new();
     md013_values.insert("line_length".to_string(), toml::Value::Integer(120));
     md013_values.insert("code_blocks".to_string(), toml::Value::Boolean(false));
     md013_values.insert("headings".to_string(), toml::Value::Boolean(true));
@@ -18,7 +18,7 @@ fn create_test_config() -> Config {
     rules.insert("MD013".to_string(), md013_config);
 
     // Add MD004 config
-    let mut md004_values = HashMap::new();
+    let mut md004_values = BTreeMap::new();
     md004_values.insert(
         "style".to_string(),
         toml::Value::String("asterisk".to_string()),
@@ -180,7 +180,7 @@ fn test_config_priority() {
     );
 
     // Now change config to 50 chars
-    let mut md013_values = HashMap::new();
+    let mut md013_values = BTreeMap::new();
     md013_values.insert("line_length".to_string(), toml::Value::Integer(50));
     let md013_config = RuleConfig {
         values: md013_values,
@@ -211,8 +211,8 @@ fn test_partial_rule_config() {
         vec![Box::new(MD013LineLength::new(80, true, false, true, false))];
 
     // Create config with only line_length specified
-    let mut rules_map = HashMap::new();
-    let mut md013_values = HashMap::new();
+    let mut rules_map = BTreeMap::new();
+    let mut md013_values = BTreeMap::new();
     md013_values.insert("line_length".to_string(), toml::Value::Integer(100));
     // Note: code_blocks not specified, should keep default value
     let md013_config = RuleConfig {
@@ -245,8 +245,8 @@ fn test_partial_rule_config() {
     );
 
     // Now update config to set line_length to 60
-    let mut rules_map = HashMap::new();
-    let mut md013_values = HashMap::new();
+    let mut rules_map = BTreeMap::new();
+    let mut md013_values = BTreeMap::new();
     md013_values.insert("line_length".to_string(), toml::Value::Integer(60));
     let md013_config = RuleConfig {
         values: md013_values,
