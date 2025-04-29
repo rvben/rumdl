@@ -1187,3 +1187,43 @@ exclude = ["docs/temp"]
         toml::from_str::<Value>(&current).expect("Section is not valid TOML");
     }
 }
+
+#[test]
+fn test_config_command_defaults_provenance_annotation_colored() {
+    let temp_dir = setup_test_files();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Write a .rumdl.toml with non-defaults to ensure it is ignored
+    let config_content = r#"
+[global]
+enable = ["MD013"]
+exclude = ["docs/temp"]
+"#;
+    create_config(base_path, config_content);
+
+    // Run 'rumdl config --defaults --color always'
+    let output = Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(["config", "--defaults", "--color", "always"])
+        .output()
+        .expect("Failed to execute 'rumdl config --defaults --color always'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(
+        output.status.success(),
+        "'rumdl config --defaults --color always' did not exit successfully: {stderr}"
+    );
+    // Should contain provenance annotation [from default]
+    assert!(
+        stdout.contains("[from default]"),
+        "Output should contain provenance annotation [from default]"
+    );
+    // Should contain ANSI color codes for provenance annotation (e.g., dim/gray: \x1b[2m...\x1b[0m)
+    let provenance_colored = "\x1b[2m[from default]\x1b[0m";
+    assert!(
+        stdout.contains(provenance_colored),
+        "Provenance annotation [from default] should be colored dim/gray (found: {:?})",
+        stdout
+    );
+}
