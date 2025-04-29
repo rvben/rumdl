@@ -611,16 +611,6 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
     }
 }
 
-fn to_toml_string_vec_string(v: &[String]) -> String {
-    format!(
-        "[{}]",
-        v.iter()
-            .map(|s| format!("{:?}", s))
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
-}
-
 fn format_provenance(src: rumdl_config::ConfigSource) -> &'static str {
     match src {
         rumdl_config::ConfigSource::Cli => "CLI",
@@ -631,21 +621,28 @@ fn format_provenance(src: rumdl_config::ConfigSource) -> &'static str {
     }
 }
 
+fn color_provenance(src: rumdl_config::ConfigSource, text: &str) -> colored::ColoredString {
+    match src {
+        rumdl_config::ConfigSource::Cli => text.green(),
+        rumdl_config::ConfigSource::RumdlToml => text.blue(),
+        rumdl_config::ConfigSource::PyprojectToml => text.magenta(),
+        rumdl_config::ConfigSource::Default => text.yellow(),
+        rumdl_config::ConfigSource::Markdownlint => text.cyan(),
+    }
+}
+
 fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
-    use colored::*;
-    use rumdl::rules::*;
-    use rumdl::rule::Rule;
     let g = &sourced.global;
-    let mut all_lines = Vec::new();
+    let mut all_lines: Vec<(String, (rumdl_config::ConfigSource, String))> = Vec::new();
     // [global] section
-    let global_lines = vec![
-        ("[global]".to_string(), String::new()),
-        (format!("enable = {:?}", g.enable.value), format!("[from {}]", format_provenance(g.enable.source))),
-        (format!("disable = {:?}", g.disable.value), format!("[from {}]", format_provenance(g.disable.source))),
-        (format!("exclude = {:?}", g.exclude.value), format!("[from {}]", format_provenance(g.exclude.source))),
-        (format!("include = {:?}", g.include.value), format!("[from {}]", format_provenance(g.include.source))),
-        (format!("respect_gitignore = {}", g.respect_gitignore.value), format!("[from {}]", format_provenance(g.respect_gitignore.source))),
-        (String::new(), String::new()),
+    let global_lines: Vec<(String, (rumdl_config::ConfigSource, String))> = vec![
+        ("[global]".to_string(), (rumdl_config::ConfigSource::Default, String::new())),
+        (format!("enable = {:?}", g.enable.value), (g.enable.source, format!("[from {}]", format_provenance(g.enable.source)))),
+        (format!("disable = {:?}", g.disable.value), (g.disable.source, format!("[from {}]", format_provenance(g.disable.source)))),
+        (format!("exclude = {:?}", g.exclude.value), (g.exclude.source, format!("[from {}]", format_provenance(g.exclude.source)))),
+        (format!("include = {:?}", g.include.value), (g.include.source, format!("[from {}]", format_provenance(g.include.source)))),
+        (format!("respect_gitignore = {}", g.respect_gitignore.value), (g.respect_gitignore.source, format!("[from {}]", format_provenance(g.respect_gitignore.source)))),
+        (String::new(), (rumdl_config::ConfigSource::Default, String::new())),
     ];
     all_lines.extend(global_lines);
     // All rules, but only if they have config items
@@ -710,7 +707,7 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
     let mut rule_names: Vec<_> = all_rules.iter().map(|r| r.name().to_string()).collect();
     rule_names.sort();
     for rule_name in rule_names {
-        let mut lines = Vec::new();
+        let mut lines: Vec<(String, (rumdl_config::ConfigSource, String))> = Vec::new();
         if let Some(rule_cfg) = sourced.rules.get(&rule_name) {
             let mut keys: Vec<_> = rule_cfg.values.keys().collect();
             keys.sort();
@@ -727,61 +724,66 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
                     toml::Value::Float(f) => f.to_string(),
                     _ => sv.value.to_string(),
                 };
-                lines.push((format!("{} = {}", key, value_str), format!("[from {}]", format_provenance(sv.source))));
+                lines.push((format!("{} = {}", key, value_str), (sv.source, format!("[from {}]", format_provenance(sv.source)))));
             }
         } else {
             // Print default config for this rule, if available
-            if let Some((_, value)) = all_rules.iter().find(|r| r.name() == rule_name).and_then(|r| r.default_config_section()) {
-                if let toml::Value::Table(table) = value {
-                    let mut keys: Vec<_> = table.keys().collect();
-                    keys.sort();
-                    for key in keys {
-                        let v = &table[key];
-                        let value_str = match v {
-                            toml::Value::Array(arr) => {
-                                let vals: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
-                                format!("[{}]", vals.join(", "))
-                            }
-                            toml::Value::String(s) => format!("\"{}\"", s),
-                            toml::Value::Boolean(b) => b.to_string(),
-                            toml::Value::Integer(i) => i.to_string(),
-                            toml::Value::Float(f) => f.to_string(),
-                            _ => v.to_string(),
-                        };
-                        lines.push((format!("{} = {}", key, value_str), format!("[from {}]", format_provenance(rumdl_config::ConfigSource::Default))));
-                    }
+            if let Some((_, toml::Value::Table(table))) = all_rules.iter().find(|r| r.name() == rule_name).and_then(|r| r.default_config_section()) {
+                let mut keys: Vec<_> = table.keys().collect();
+                keys.sort();
+                for key in keys {
+                    let v = &table[key];
+                    let value_str = match v {
+                        toml::Value::Array(arr) => {
+                            let vals: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
+                            format!("[{}]", vals.join(", "))
+                        }
+                        toml::Value::String(s) => format!("\"{}\"", s),
+                        toml::Value::Boolean(b) => b.to_string(),
+                        toml::Value::Integer(i) => i.to_string(),
+                        toml::Value::Float(f) => f.to_string(),
+                        _ => v.to_string(),
+                    };
+                    lines.push((format!("{} = {}", key, value_str), (rumdl_config::ConfigSource::Default, "[from default]".to_string())));
                 }
             }
         }
         if !lines.is_empty() {
-            all_lines.push((format!("[{}]", rule_name), String::new()));
+            all_lines.push((format!("[{}]", rule_name), (rumdl_config::ConfigSource::Default, String::new())));
             all_lines.extend(lines);
-            all_lines.push((String::new(), String::new()));
+            all_lines.push((String::new(), (rumdl_config::ConfigSource::Default, String::new())));
         }
     }
-    let max_left = all_lines.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
-    for (left, right) in &all_lines {
+    // Calculate max width for left part (key + value) for global alignment
+    let max_left = all_lines
+        .iter()
+        .filter(|(left, (_src, right))| !left.is_empty() && !right.is_empty())
+        .map(|(left, _)| left.len())
+        .max()
+        .unwrap_or(0);
+
+    for (left, (src, right)) in &all_lines {
         if left.is_empty() && right.is_empty() {
-            println!("");
+            println!();
+        } else if left.starts_with('[') && right.is_empty() {
+            // Section header
+            println!("{}", left);
         } else {
-            println!("{:<width$} {}", left, right, width = max_left);
+            // Only provenance is colored, and globally aligned
+            print!("{:<width$} ", left, width = max_left);
+            println!("{}", color_provenance(*src, right));
         }
     }
 }
 
-fn format_toml_value(val: &toml::Value) -> String {
-    match val {
-        toml::Value::String(s) => format!("\"{}\"", s),
-        toml::Value::Integer(i) => i.to_string(),
-        toml::Value::Float(f) => f.to_string(),
-        toml::Value::Boolean(b) => b.to_string(),
-        toml::Value::Array(arr) => {
-            let vals: Vec<String> = arr.iter().map(format_toml_value).collect();
-            format!("[{}]", vals.join(", "))
-        }
-        toml::Value::Table(_) => "<table>".to_string(),
-        toml::Value::Datetime(dt) => dt.to_string(),
-    }
+fn to_toml_string_vec_string(v: &[String]) -> String {
+    format!(
+        "[{}]",
+        v.iter()
+            .map(|s| format!("{:?}", s))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 fn main() {
@@ -971,34 +973,59 @@ build-backend = \"setuptools.build_meta\"
             }
         }
         Some(Commands::Config { subcmd, defaults, output }) => {
-            // Handle 'config get' subcommand for querying a specific key
             if let Some(ConfigSubcommand::Get { key }) = subcmd {
+                // Support keys like global.exclude or MD013.line_length
                 let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
                 let parts: Vec<&str> = key.split('.').collect();
                 if parts.len() == 2 {
                     let (section, field) = (parts[0], parts[1]);
                     if section.eq_ignore_ascii_case("global") {
                         // Global key
-                        if field == "respect_gitignore" {
-                            let val = &sourced.global.respect_gitignore.value;
-                            let src = sourced.global.respect_gitignore.source;
-                            println!("{} = {:?} [from {}]", key, val, format_provenance(src));
-                            return;
-                        } else {
-                            let (val, src) = match field {
-                                "enable" => (&sourced.global.enable.value, sourced.global.enable.source),
-                                "disable" => (&sourced.global.disable.value, sourced.global.disable.source),
-                                "exclude" => (&sourced.global.exclude.value, sourced.global.exclude.source),
-                                "include" => (&sourced.global.include.value, sourced.global.include.source),
-                                _ => {
-                                    eprintln!("Unknown global key: {}", field);
-                                    std::process::exit(1);
-                                }
-                            };
-                            // For global keys, val is &Vec<String>, so format as TOML array
-                            let toml_val = toml::Value::Array(val.iter().map(|s| toml::Value::String(s.clone())).collect());
-                            println!("{} = {} [from {}]", key, format_toml_value(&toml_val), format_provenance(src));
-                            return;
+                        match field {
+                            "enable" => {
+                                let val = &sourced.global.enable.value;
+                                let src = sourced.global.enable.source;
+                                let value_str = to_toml_string_vec_string(val);
+                                let prov = format!("[from {}]", format_provenance(src));
+                                println!("{} = {} {}", key, value_str, color_provenance(src, &prov));
+                                return;
+                            }
+                            "disable" => {
+                                let val = &sourced.global.disable.value;
+                                let src = sourced.global.disable.source;
+                                let value_str = to_toml_string_vec_string(val);
+                                let prov = format!("[from {}]", format_provenance(src));
+                                println!("{} = {} {}", key, value_str, color_provenance(src, &prov));
+                                return;
+                            }
+                            "exclude" => {
+                                let val = &sourced.global.exclude.value;
+                                let src = sourced.global.exclude.source;
+                                let value_str = to_toml_string_vec_string(val);
+                                let prov = format!("[from {}]", format_provenance(src));
+                                println!("{} = {} {}", key, value_str, color_provenance(src, &prov));
+                                return;
+                            }
+                            "include" => {
+                                let val = &sourced.global.include.value;
+                                let src = sourced.global.include.source;
+                                let value_str = to_toml_string_vec_string(val);
+                                let prov = format!("[from {}]", format_provenance(src));
+                                println!("{} = {} {}", key, value_str, color_provenance(src, &prov));
+                                return;
+                            }
+                            "respect_gitignore" => {
+                                let val = sourced.global.respect_gitignore.value;
+                                let src = sourced.global.respect_gitignore.source;
+                                let value_str = val.to_string();
+                                let prov = format!("[from {}]", format_provenance(src));
+                                println!("{} = {} {}", key, value_str, color_provenance(src, &prov));
+                                return;
+                            }
+                            _ => {
+                                eprintln!("Unknown global key: {}", field);
+                                std::process::exit(1);
+                            }
                         }
                     } else {
                         // Rule key
@@ -1006,7 +1033,20 @@ build-backend = \"setuptools.build_meta\"
                         let rule_cfg = sourced.rules.get(rule_name);
                         if let Some(rule_cfg) = rule_cfg {
                             if let Some(sv) = rule_cfg.values.get(field) {
-                                println!("{}.{} = {} [from {}]", rule_name, field, format_toml_value(&sv.value), format_provenance(sv.source));
+                                let src = sv.source;
+                                let value_str = match &sv.value {
+                                    toml::Value::Array(arr) => {
+                                        let vals: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
+                                        format!("[{}]", vals.join(", "))
+                                    }
+                                    toml::Value::String(s) => format!("\"{}\"", s),
+                                    toml::Value::Boolean(b) => b.to_string(),
+                                    toml::Value::Integer(i) => i.to_string(),
+                                    toml::Value::Float(f) => f.to_string(),
+                                    _ => sv.value.to_string(),
+                                };
+                                let prov = format!("[from {}]", format_provenance(src));
+                                println!("{}.{} = {} {}", rule_name, field, value_str, color_provenance(src, &prov));
                                 return;
                             }
                         }
@@ -1089,40 +1129,31 @@ build-backend = \"setuptools.build_meta\"
             ];
             for rule in all_rules {
                 let rule_name = rule.name();
-                if let Some((_, default_value)) = rule.default_config_section() {
-                    if let toml::Value::Table(default_table) = default_value {
-                        let rule_entry = config.rules.entry(rule_name.to_string())
-                            .or_insert_with(|| rumdl_config::RuleConfig { values: std::collections::BTreeMap::new() });
-                        for (k, v) in default_table {
-                            rule_entry.values.entry(k.clone()).or_insert(v.clone());
-                        }
+                if let Some((_, toml::Value::Table(default_table))) = rule.default_config_section() {
+                    let rule_entry = config.rules.entry(rule_name.to_string())
+                        .or_insert_with(|| rumdl_config::RuleConfig { values: std::collections::BTreeMap::new() });
+                    for (k, v) in default_table {
+                        rule_entry.values.entry(k.clone()).or_insert(v.clone());
                     }
                 }
             }
 
             // If --output smart, print with provenance annotations
-            if output.as_deref() == Some("smart") {
-                // If --defaults, use a SourcedConfig with all values from default
-                if *defaults {
-                    let sourced = rumdl_config::SourcedConfig::default();
-                    print_config_with_provenance(&sourced);
-                } else {
-                    let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
-                    print_config_with_provenance(&sourced);
-                }
-                return;
-            }
-
-            // 2. If --defaults or --output toml is set, print as valid TOML
-            if *defaults || output.as_deref() == Some("toml") {
+            if *defaults && output.as_deref() == Some("toml") {
+                // Only print the default config as TOML, no provenance
                 println!("{}", toml::to_string_pretty(&config).unwrap());
-                return;
+            } else if *defaults {
+                // Print the default config with provenance (smart output)
+                let sourced = rumdl_config::SourcedConfig::default();
+                print_config_with_provenance(&sourced);
+            } else if output.as_deref() == Some("toml") {
+                // Print the effective config as TOML (with overrides)
+                println!("{}", toml::to_string_pretty(&config).unwrap());
+            } else {
+                // Default and --output smart: print with provenance annotations
+                let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
+                print_config_with_provenance(&sourced);
             }
-
-            // 3. Otherwise, print in a human-readable way with provenance
-            let sourced = rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None);
-            print_config_with_provenance(&sourced);
-            return;
         }
         Some(Commands::Version) => {
             // Use clap's version info
