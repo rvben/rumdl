@@ -375,4 +375,9 @@ impl Rule for MD053LinkImageReferenceDefinitions {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let ignored_definitions = crate::config::get_rule_config_value::<Vec<String>>(config, "MD053", "ignored_definitions").unwrap_or_default();
+        Box::new(MD053LinkImageReferenceDefinitions::new(ignored_definitions))
+    }
 }

@@ -176,60 +176,12 @@ struct CheckArgs {
     quiet: bool,
 }
 
-// Helper function to apply configuration to rules that need it
-fn apply_rule_configs(rules: &mut Vec<Box<dyn Rule>>, config: &rumdl_config::Config) {
-    // Replace any rules that need configuration with properly configured instances
-
-    // Replace MD013 with configured instance
-    if let Some(pos) = rules.iter().position(|r| r.name() == "MD013") {
-        let line_length =
-            get_rule_config_value::<usize>(config, "MD013", "line_length").unwrap_or(80);
-        let code_blocks =
-            get_rule_config_value::<bool>(config, "MD013", "code_blocks").unwrap_or(true);
-        let tables = get_rule_config_value::<bool>(config, "MD013", "tables").unwrap_or(false);
-        let headings = get_rule_config_value::<bool>(config, "MD013", "headings").unwrap_or(true);
-        let strict = get_rule_config_value::<bool>(config, "MD013", "strict").unwrap_or(false);
-
-        rules[pos] = Box::new(MD013LineLength::new(
-            line_length,
-            code_blocks,
-            tables,
-            headings,
-            strict,
-        ));
-    }
-
-    // Replace MD043 with configured instance
-    if let Some(pos) = rules.iter().position(|r| r.name() == "MD043") {
-        let mut headings =
-            get_rule_config_value::<Vec<String>>(config, "MD043", "headings").unwrap_or_default();
-
-        // Strip leading '#' and spaces from the configured headings to match the format of extracted headings
-        headings = headings
-            .iter()
-            .map(|h| h.trim_start_matches(['#', ' ']).to_string())
-            .collect();
-
-        rules[pos] = Box::new(MD043RequiredHeadings::new(headings));
-    }
-
-    // Replace MD053 with configured instance
-    if let Some(pos) = rules.iter().position(|r| r.name() == "MD053") {
-        let ignored_definitions =
-            get_rule_config_value::<Vec<String>>(config, "MD053", "ignored_definitions")
-                .unwrap_or_default();
-        rules[pos] = Box::new(MD053LinkImageReferenceDefinitions::new(ignored_definitions));
-    }
-
-    // Add more rule configurations as needed
-}
-
 // Get a complete set of enabled rules based on CLI options and config
 fn get_enabled_rules_from_checkargs(
     args: &CheckArgs,
     config: &rumdl_config::Config,
 ) -> Vec<Box<dyn Rule>> {
-    // 1. Initialize all available rules
+    // 1. Initialize all available rules, using from_config for MD013, MD043, MD053
     let mut all_rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD001HeadingIncrement),
         Box::new(MD002FirstHeadingH1::default()),
@@ -243,7 +195,7 @@ fn get_enabled_rules_from_checkargs(
         Box::new(MD010NoHardTabs::default()),
         Box::new(MD011NoReversedLinks {}),
         Box::new(MD012NoMultipleBlanks::default()),
-        Box::new(MD013LineLength::default()),
+        MD013LineLength::from_config(config),
         Box::new(MD015NoMissingSpaceAfterListMarker::default()),
         Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
         Box::new(MD018NoMissingSpaceAtx {}),
@@ -271,7 +223,7 @@ fn get_enabled_rules_from_checkargs(
         Box::new(MD040FencedCodeLanguage {}),
         Box::new(MD041FirstLineHeading::default()),
         Box::new(MD042NoEmptyLinks::new()),
-        Box::new(MD043RequiredHeadings::new(Vec::new())),
+        MD043RequiredHeadings::from_config(config),
         Box::new(MD044ProperNames::new(Vec::new(), true)),
         Box::new(MD045NoAltText::new()),
         Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
@@ -281,7 +233,7 @@ fn get_enabled_rules_from_checkargs(
         Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
         Box::new(MD051LinkFragments),
         Box::new(MD052ReferenceLinkImages),
-        Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
+        MD053LinkImageReferenceDefinitions::from_config(config),
         Box::new(MD054LinkImageStyle::default()),
         Box::new(MD055TablePipeStyle::default()),
         Box::new(MD056TableColumnCount),
@@ -289,11 +241,7 @@ fn get_enabled_rules_from_checkargs(
         Box::new(MD058BlanksAroundTables),
     ];
 
-    // 2. Apply specific rule parameter configurations (e.g., line length for MD013)
-    // This modifies the instances within all_rules
-    apply_rule_configs(&mut all_rules, config);
-
-    // 3. Determine the final list of enabled rules based on precedence
+    // 2. Determine the final list of enabled rules based on precedence
     let final_rules: Vec<Box<dyn Rule>>;
 
     // Rule names provided via CLI flags
@@ -313,13 +261,13 @@ fn get_enabled_rules_from_checkargs(
     // Rule names provided via config file
     let config_enable_set: HashSet<&str> =
         config.global.enable.iter().map(|s| s.as_str()).collect();
+
     let config_disable_set: HashSet<&str> =
         config.global.disable.iter().map(|s| s.as_str()).collect();
-        
+
     if let Some(enabled_cli) = &cli_enable_set {
         // --- Case 1: CLI --enable provided ---
         // CLI --enable overrides *everything* (config enable/disable are ignored).
-        // Filter all_rules directly based on CLI --enable.
         final_rules = all_rules
             .into_iter()
             .filter(|rule| enabled_cli.contains(rule.name()))
@@ -328,7 +276,7 @@ fn get_enabled_rules_from_checkargs(
     } else {
         // --- Case 2: No CLI --enable ---
         // Start with the configured rules.
-        let mut current_rules = all_rules; 
+        let mut current_rules = all_rules;
 
         // Step 2a: Apply config `enable` (if specified).
         // If config.enable is not empty, it acts as an *exclusive* list.
@@ -345,7 +293,6 @@ fn get_enabled_rules_from_checkargs(
              current_rules = current_rules.into_iter().filter(|rule| {
                 let normalized_rule_name = normalize_key(rule.name());
                 let is_disabled = config_disable_set.contains(normalized_rule_name.as_str());
-                
                 !is_disabled // Keep if NOT disabled
             }).collect();
         }

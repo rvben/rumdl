@@ -203,4 +203,13 @@ impl Rule for MD013LineLength {
         map.insert("strict".to_string(), toml::Value::Boolean(self.strict));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let line_length = crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length").unwrap_or(80);
+        let code_blocks = crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks").unwrap_or(true);
+        let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables").unwrap_or(false);
+        let headings = crate::config::get_rule_config_value::<bool>(config, "MD013", "headings").unwrap_or(true);
+        let strict = crate::config::get_rule_config_value::<bool>(config, "MD013", "strict").unwrap_or(false);
+        Box::new(MD013LineLength::new(line_length, code_blocks, tables, headings, strict))
+    }
 }

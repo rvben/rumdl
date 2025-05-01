@@ -109,6 +109,14 @@ pub trait Rule: DynClone {
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         None
     }
+
+    /// Factory: create a rule from config (if present), or use defaults.
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        panic!("from_config not implemented for this rule");
+    }
 }
 
 // Implement the cloning logic for the Rule trait object
