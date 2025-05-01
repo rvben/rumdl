@@ -132,6 +132,10 @@ impl Rule for MD042NoEmptyLinks {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule> {
+        Box::new(MD042NoEmptyLinks::new())
+    }
 }
 
 impl DocumentStructureExtensions for MD042NoEmptyLinks {

@@ -196,4 +196,9 @@ impl Rule for MD035HRStyle {
         map.insert("style".to_string(), toml::Value::String(self.style.clone()));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD035", "style").unwrap_or_else(|| "---".to_string());
+        Box::new(MD035HRStyle::new(style))
+    }
 }

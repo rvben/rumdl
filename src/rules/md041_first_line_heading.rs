@@ -148,4 +148,10 @@ impl Rule for MD041FirstLineHeading {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let level = crate::config::get_rule_config_value::<usize>(config, "MD041", "level").unwrap_or(1);
+        let front_matter_title = crate::config::get_rule_config_value::<bool>(config, "MD041", "front_matter_title").unwrap_or(true);
+        Box::new(MD041FirstLineHeading::new(level, front_matter_title))
+    }
 }

@@ -218,4 +218,10 @@ impl Rule for MD009TrailingSpaces {
         map.insert("strict".to_string(), toml::Value::Boolean(self.strict));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let br_spaces = crate::config::get_rule_config_value::<usize>(config, "MD009", "br_spaces").unwrap_or(2);
+        let strict = crate::config::get_rule_config_value::<bool>(config, "MD009", "strict").unwrap_or(false);
+        Box::new(MD009TrailingSpaces::new(br_spaces, strict))
+    }
 }

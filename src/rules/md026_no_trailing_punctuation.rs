@@ -387,4 +387,9 @@ impl Rule for MD026NoTrailingPunctuation {
         );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let punctuation = crate::config::get_rule_config_value::<String>(config, "MD026", "punctuation").unwrap_or_else(|| ".,;:!?".to_string());
+        Box::new(MD026NoTrailingPunctuation::new(Some(punctuation)))
+    }
 }

@@ -328,6 +328,14 @@ impl Rule for MD030ListMarkerSpace {
         );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let ul_single = crate::config::get_rule_config_value::<usize>(config, "MD030", "ul_single").unwrap_or(1);
+        let ul_multi = crate::config::get_rule_config_value::<usize>(config, "MD030", "ul_multi").unwrap_or(1);
+        let ol_single = crate::config::get_rule_config_value::<usize>(config, "MD030", "ol_single").unwrap_or(1);
+        let ol_multi = crate::config::get_rule_config_value::<usize>(config, "MD030", "ol_multi").unwrap_or(1);
+        Box::new(MD030ListMarkerSpace::new(ul_single, ul_multi, ol_single, ol_multi))
+    }
 }
 
 impl DocumentStructureExtensions for MD030ListMarkerSpace {

@@ -208,6 +208,10 @@ impl Rule for MD031BlanksAroundFences {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule> {
+        Box::new(MD031BlanksAroundFences)
+    }
 }
 
 impl DocumentStructureExtensions for MD031BlanksAroundFences {

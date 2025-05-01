@@ -311,12 +311,22 @@ impl Rule for MD054LinkImageStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("autolink".to_string(), toml::Value::Boolean(true));
-        map.insert("inline".to_string(), toml::Value::Boolean(true));
-        map.insert("url_inline".to_string(), toml::Value::Boolean(true));
-        map.insert("shortcut".to_string(), toml::Value::Boolean(true));
-        map.insert("collapsed".to_string(), toml::Value::Boolean(true));
-        map.insert("full".to_string(), toml::Value::Boolean(true));
-        Some(("MD054".to_string(), toml::Value::Table(map)))
+        map.insert("autolink".to_string(), toml::Value::Boolean(self.autolink));
+        map.insert("collapsed".to_string(), toml::Value::Boolean(self.collapsed));
+        map.insert("full".to_string(), toml::Value::Boolean(self.full));
+        map.insert("inline".to_string(), toml::Value::Boolean(self.inline));
+        map.insert("shortcut".to_string(), toml::Value::Boolean(self.shortcut));
+        map.insert("url_inline".to_string(), toml::Value::Boolean(self.url_inline));
+        Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let autolink = crate::config::get_rule_config_value::<bool>(config, "MD054", "autolink").unwrap_or(true);
+        let collapsed = crate::config::get_rule_config_value::<bool>(config, "MD054", "collapsed").unwrap_or(true);
+        let full = crate::config::get_rule_config_value::<bool>(config, "MD054", "full").unwrap_or(true);
+        let inline = crate::config::get_rule_config_value::<bool>(config, "MD054", "inline").unwrap_or(true);
+        let shortcut = crate::config::get_rule_config_value::<bool>(config, "MD054", "shortcut").unwrap_or(true);
+        let url_inline = crate::config::get_rule_config_value::<bool>(config, "MD054", "url_inline").unwrap_or(true);
+        Box::new(MD054LinkImageStyle::new(autolink, collapsed, full, inline, shortcut, url_inline))
     }
 }

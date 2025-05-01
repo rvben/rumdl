@@ -812,6 +812,16 @@ impl Rule for MD022BlanksAroundHeadings {
         );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let lines_above = crate::config::get_rule_config_value::<usize>(config, "MD022", "lines_above").unwrap_or(1);
+        let lines_below = crate::config::get_rule_config_value::<usize>(config, "MD022", "lines_below").unwrap_or(1);
+        Box::new(MD022BlanksAroundHeadings {
+            lines_above,
+            lines_below,
+            allowed_at_start: true,
+        })
+    }
 }
 
 impl DocumentStructureExtensions for MD022BlanksAroundHeadings {

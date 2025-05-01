@@ -239,6 +239,11 @@ impl Rule for MD033NoInlineHtml {
         map.insert("allowed".to_string(), toml::Value::Array(allowed_vec));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let allowed = crate::config::get_rule_config_value::<Vec<String>>(config, "MD033", "allowed").unwrap_or_default();
+        Box::new(MD033NoInlineHtml::with_allowed(allowed))
+    }
 }
 
 impl DocumentStructureExtensions for MD033NoInlineHtml {

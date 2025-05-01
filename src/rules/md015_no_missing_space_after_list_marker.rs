@@ -261,10 +261,12 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert(
-            "require_space".to_string(),
-            toml::Value::Boolean(self.require_space),
-        );
+        map.insert("require_space".to_string(), toml::Value::Boolean(self.require_space));
         Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let require_space = crate::config::get_rule_config_value::<bool>(config, "MD015", "require_space").unwrap_or(true);
+        Box::new(MD015NoMissingSpaceAfterListMarker::with_require_space(require_space))
     }
 }

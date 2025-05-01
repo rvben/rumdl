@@ -303,6 +303,18 @@ impl Rule for MD029OrderedListPrefix {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+        let style_str = crate::config::get_rule_config_value::<String>(config, "MD029", "style").unwrap_or_else(|| "ordered".to_string());
+        let style = match style_str.to_lowercase().as_str() {
+            "one" => ListStyle::One,
+            "one_one" => ListStyle::OneOne,
+            "ordered" => ListStyle::Ordered,
+            "ordered0" => ListStyle::Ordered0,
+            _ => ListStyle::Ordered,
+        };
+        Box::new(MD029OrderedListPrefix::new(style))
+    }
 }
 
 impl DocumentStructureExtensions for MD029OrderedListPrefix {

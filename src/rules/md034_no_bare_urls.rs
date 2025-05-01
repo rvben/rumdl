@@ -268,6 +268,10 @@ impl Rule for MD034NoBareUrls {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule> {
+        Box::new(MD034NoBareUrls)
+    }
 }
 
 #[cfg(test)]

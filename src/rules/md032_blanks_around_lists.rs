@@ -352,6 +352,10 @@ impl Rule for MD032BlanksAroundLists {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule> {
+        Box::new(MD032BlanksAroundLists)
+    }
 }
 
 impl DocumentStructureExtensions for MD032BlanksAroundLists {

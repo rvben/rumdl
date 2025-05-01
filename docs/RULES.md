@@ -113,7 +113,6 @@ Each rule has a brief description and a link to its detailed documentation.
 |---------|-----------|-------------|
 | [MD015](md015.md) | No multiple space list | Multiple spaces after list marker |
 | [MD016](md016.md) | No multiple space after list | Multiple spaces after list marker |
-| [MD017](md017.md) | No multiple space after list item | Multiple spaces after list item |
 | [MD057](md057.md) | Relative links | Relative links should exist |
 
 ## Using Rules
