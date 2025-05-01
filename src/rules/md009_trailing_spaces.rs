@@ -8,7 +8,7 @@ use toml;
 ///
 /// See [docs/md009.md](../../docs/md009.md) for full documentation, configuration, and examples.
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MD009TrailingSpaces {
     pub br_spaces: usize,
     pub strict: bool,

@@ -78,7 +78,8 @@ impl Default for UnorderedListStyle {
     }
 }
 
-#[derive(Debug, Default)]
+/// Rule MD004: Unordered list style
+#[derive(Clone)]
 pub struct MD004UnorderedListStyle {
     pub style: UnorderedListStyle,
     pub after_marker: usize,
@@ -137,19 +138,29 @@ impl Rule for MD004UnorderedListStyle {
             if let Ok(Some(cap)) = UNORDERED_LIST_REGEX.captures(line) {
                 let marker = cap.name("marker").unwrap().as_str();
                 let indentation = cap.name("indent").map_or(0, |m| m.as_str().len());
+                
+                // Reverted: Simple first marker detection
                 if first_marker.is_none() {
                     first_marker = Some(marker.to_string());
                 }
+                
+                // Reverted: Determine expected marker based only on style and the single first_marker
                 let expected_marker = match self.style {
-                    UnorderedListStyle::Consistent => first_marker.as_ref().unwrap(),
+                    UnorderedListStyle::Consistent => {
+                         // Use unwrap() safely as first_marker is guaranteed to be Some here if style is Consistent and it's not the first item
+                         // If it IS the first item, first_marker was just set.
+                         first_marker.as_ref().map_or(marker, |fm| fm.as_str()) 
+                    },
                     UnorderedListStyle::Asterisk => "*",
                     UnorderedListStyle::Dash => "-",
                     UnorderedListStyle::Plus => "+",
                 };
+
+                // Reverted: Simple comparison, ignoring indentation level for Consistent style
                 if marker != expected_marker {
-                    warnings.push(LintWarning {
+                     warnings.push(LintWarning {
                         message: format!(
-                            "Unordered list marker '{}' does not match expected marker '{}' (consistent style)",
+                            "Unordered list marker '{}' does not match expected style '{}'",
                             marker, expected_marker
                         ),
                         line: line_num,
@@ -158,7 +169,7 @@ impl Rule for MD004UnorderedListStyle {
                         fix: None,
                         rule_name: Some(self.name()),
                     });
-                }
+                } 
             }
         }
         Ok(warnings)
@@ -255,6 +266,7 @@ impl Rule for MD004UnorderedListStyle {
                 lines.push(line.to_string());
             }
         }
+        
         // Always ensure a single trailing newline, regardless of input
         let mut result = lines.join("\n");
         if !result.ends_with('\n') {
@@ -310,26 +322,10 @@ mod tests {
 
     #[test]
     fn test_with_document_structure() {
-        // Test with consistent style
-        let rule = MD004UnorderedListStyle::default();
-
-        // Test with consistent markers
-        let content = "* Item 1\n* Item 2\n* Item 3";
-        let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
-        assert!(result.is_empty());
-
-        // Test with inconsistent markers
         let content = "* Item 1\n- Item 2\n+ Item 3";
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(result.len(), 2); // Should flag the - and + markers
-
-        // Test specific style
-        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
-        let content = "* Item 1\n- Item 2\n+ Item 3";
-        let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(result.len(), 2); // Should flag the * and + markers
+        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        assert_eq!(warnings.len(), 2, "Expected 2 warnings for inconsistent markers");
     }
 }

@@ -8,7 +8,7 @@ use crate::utils::document_structure::DocumentStructure;
 ///
 /// See [docs/md041.md](../../docs/md041.md) for full documentation, configuration, and examples.
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct MD041FirstLineHeading {
     pub level: usize,
     pub front_matter_title: bool,

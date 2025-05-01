@@ -80,7 +80,7 @@ lazy_static! {
 /// - Fast path checks before applying more expensive regex operations
 /// - Efficient list item detection
 /// - Pre-computation of code block lines to avoid redundant processing
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MD032BlanksAroundLists;
 
 impl MD032BlanksAroundLists {

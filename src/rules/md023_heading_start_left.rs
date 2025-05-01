@@ -6,7 +6,7 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use crate::utils::markdown_elements::{ElementType, MarkdownElements};
 use crate::utils::range_utils::LineIndex;
 
-#[derive(Debug, Default)]
+#[derive(Clone)]
 pub struct MD023HeadingStartLeft;
 
 impl Rule for MD023HeadingStartLeft {

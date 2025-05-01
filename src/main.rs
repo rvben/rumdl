@@ -18,6 +18,12 @@ use rumdl::rules::strong_style::StrongStyle;
 use rumdl::rules::*;
 use rumdl::{MD046CodeBlockStyle, MD048CodeFenceStyle, MD049EmphasisStyle, MD050StrongStyle};
 use rumdl_config::get_rule_config_value;
+use rumdl_config::normalize_key;
+use rumdl_config::ConfigSource;
+use rumdl_config::validate_config_sourced;
+use rumdl_config::RuleRegistry;
+use rumdl_config::ConfigError;
+use serde::de::Error as SerdeDeError;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -33,8 +39,8 @@ struct Cli {
     #[arg(required = false, hide = true)]
     paths: Vec<String>,
 
-    /// Configuration file path
-    #[arg(short, long, hide = true)]
+    /// Path to configuration file
+    #[arg(long, global = true, help = "Path to configuration file")]
     config: Option<String>,
 
     /// Fix issues automatically where possible
@@ -124,10 +130,6 @@ struct CheckArgs {
     /// If provided, these paths take precedence over include patterns.
     #[arg(required = false)]
     paths: Vec<String>,
-
-    /// Configuration file path
-    #[arg(short, long)]
-    config: Option<String>,
 
     /// Fix issues automatically where possible
     #[arg(short, long, default_value = "false")]
@@ -232,7 +234,7 @@ fn get_enabled_rules_from_checkargs(
         Box::new(MD001HeadingIncrement),
         Box::new(MD002FirstHeadingH1::default()),
         Box::new(MD003HeadingStyle::default()),
-        Box::new(MD004UnorderedListStyle::default()),
+        Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
         Box::new(MD005ListIndent),
         Box::new(MD006StartBullets),
         Box::new(MD007ULIndent::default()),
@@ -313,7 +315,7 @@ fn get_enabled_rules_from_checkargs(
         config.global.enable.iter().map(|s| s.as_str()).collect();
     let config_disable_set: HashSet<&str> =
         config.global.disable.iter().map(|s| s.as_str()).collect();
-
+        
     if let Some(enabled_cli) = &cli_enable_set {
         // --- Case 1: CLI --enable provided ---
         // CLI --enable overrides *everything* (config enable/disable are ignored).
@@ -325,28 +327,40 @@ fn get_enabled_rules_from_checkargs(
         // Note: CLI --disable is IGNORED if CLI --enable is present.
     } else {
         // --- Case 2: No CLI --enable ---
-        // Start with all (already configured) rules.
-        let mut enabled_rules = all_rules;
+        // Start with the configured rules.
+        let mut current_rules = all_rules; 
 
         // Step 2a: Apply config `enable` (if specified).
         // If config.enable is not empty, it acts as an *exclusive* list.
         if !config_enable_set.is_empty() {
-            enabled_rules.retain(|rule| config_enable_set.contains(rule.name()));
+            current_rules = current_rules.into_iter().filter(|rule| {
+                let normalized_rule_name = normalize_key(rule.name());
+                config_enable_set.contains(normalized_rule_name.as_str())
+            }).collect();
         }
 
         // Step 2b: Apply config `disable`.
         // Remove rules specified in config.disable from the current set.
         if !config_disable_set.is_empty() {
-            enabled_rules.retain(|rule| !config_disable_set.contains(rule.name()));
+             current_rules = current_rules.into_iter().filter(|rule| {
+                let normalized_rule_name = normalize_key(rule.name());
+                let is_disabled = config_disable_set.contains(normalized_rule_name.as_str());
+                
+                !is_disabled // Keep if NOT disabled
+            }).collect();
         }
 
         // Step 2c: Apply CLI `disable`.
         // Remove rules specified in cli.disable from the result of steps 2a & 2b.
         if let Some(disabled_cli) = &cli_disable_set {
-            enabled_rules.retain(|rule| !disabled_cli.contains(rule.name()));
+            current_rules = current_rules.into_iter().filter(|rule| {
+                let rule_name_upper = rule.name();
+                let rule_name_lower = normalize_key(rule_name_upper);
+                !disabled_cli.contains(rule_name_upper) && !disabled_cli.contains(rule_name_lower.as_str())
+            }).collect();
         }
 
-        final_rules = enabled_rules;
+        final_rules = current_rules; // Assign the final filtered vector
     }
 
     // 4. Print enabled rules if verbose
@@ -389,89 +403,77 @@ fn find_markdown_files(
     walk_builder.types(types);
     // -----------------------------------------
 
-    // Determine if running in discovery mode (e.g., "rumdl ." vs explicit path mode
-    let is_discovery_mode = paths.len() == 1 && paths[0] == ".";
+    // Determine if running in discovery mode (e.g., "rumdl ." or "rumdl check .")
+    // Adjusted to handle both legacy and subcommand paths
+    let is_discovery_mode = paths == ["."]; 
 
-    // Determine effective patterns based on CLI overrides
-    let exclude_patterns = if let Some(exclude_str) = args.exclude.as_deref() {
-        // If CLI exclude is given, IT REPLACES config excludes
-        exclude_str
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+    // --- Determine Effective Include/Exclude Patterns ---
+
+    // Include patterns: CLI > Config (only in discovery mode) > Default (only in discovery mode)
+    let final_include_patterns: Vec<String> = if let Some(cli_include) = args.include.as_deref() {
+        // 1. CLI --include always wins
+        cli_include.split(',')
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .collect()
+    } else if is_discovery_mode && !config.global.include.is_empty() {
+        // 2. Config include is used ONLY in discovery mode if specified
+        config.global.include.clone()
+    } else if is_discovery_mode {
+        // 3. Default include (*.md, *.markdown) ONLY in discovery mode if no CLI/Config include
+        vec!["*.md".to_string(), "*.markdown".to_string()]
+    } else {
+        // 4. Explicit path mode: No includes applied by default. Walk starts from explicit paths.
+        Vec::new()
+    };
+
+    // Exclude patterns: CLI > Config
+    let final_exclude_patterns: Vec<String> = if let Some(cli_exclude) = args.exclude.as_deref() {
+        cli_exclude.split(',')
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
             .collect()
     } else {
-        // Otherwise, use config excludes
-        config.global.exclude.clone() // Already Vec<String>
+        config.global.exclude.clone()
     };
+    // --- End Pattern Determination ---
 
-    let include_patterns = if is_discovery_mode {
-        if let Some(include_str) = args.include.as_deref() {
-            // If CLI include is given, IT REPLACES config includes
-            include_str
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        } else {
-            // Otherwise, use config includes
-            config.global.include.clone() // Already Vec<String>
+    // Apply overrides using the determined patterns
+    if !final_include_patterns.is_empty() || !final_exclude_patterns.is_empty() {
+        let mut override_builder = OverrideBuilder::new("."); // Root context
+
+        // Add includes (these act as positive filters)
+        for pattern in &final_include_patterns {
+            // Important: In ignore crate, bare patterns act as includes if no exclude (!) is present.
+            // If we add excludes later, these includes ensure *only* matching files are considered.
+            // If no excludes are added, these effectively define the set of files to walk.
+             if let Err(e) = override_builder.add(pattern) {
+                 eprintln!("Warning: Invalid include pattern '{}': {}", pattern, e);
+             }
         }
-    } else {
-        // Includes are ignored if explicit paths are given (not discovery mode)
-        Vec::new()
-    };
 
-    // --- Determine Effective Include Patterns ---
-    let default_markdown_patterns = vec!["*.md".to_string(), "*.markdown".to_string()];
-
-    let effective_include_patterns = if is_discovery_mode {
-        if include_patterns.is_empty() {
-            // Discovery mode, no user includes: Use defaults
-            default_markdown_patterns
-        } else {
-            // Discovery mode, user includes provided: Use user's patterns.
-            // The type filter added earlier already restricts to MD files.
-            // If user includes non-MD, type filter handles it.
-            // If user includes specific MD, this override refines it.
-            include_patterns
-        }
-    } else {
-        // Explicit path mode: Include patterns are ignored, rely on type filter + explicit paths.
-        // Return empty vec here, as overrides shouldn't add includes in this mode.
-        Vec::new()
-    };
-
-    // Apply overrides from effective patterns
-    let has_include_patterns = !effective_include_patterns.is_empty(); // Use effective patterns
-    let has_exclude_patterns = !exclude_patterns.is_empty();
-
-    if has_include_patterns || has_exclude_patterns {
-        // Initialize OverrideBuilder
-        let mut override_builder = OverrideBuilder::new("."); // Root context for patterns
-
-        // Add includes first (using effective patterns)
-        if has_include_patterns {
-            for pattern in &effective_include_patterns {
-                // Use effective patterns
-                if let Err(e) = override_builder.add(pattern) {
-                    eprintln!("[Effective] Warning: Invalid include pattern '{pattern}': {e}");
-                }
+        // Add excludes (these filter *out* files) - MUST start with '!'
+        for pattern in &final_exclude_patterns {
+            // Ensure exclude patterns start with '!' for ignore crate overrides
+            let exclude_rule = if pattern.starts_with('!') {
+                pattern.clone() // Already formatted
+            } else {
+                format!("!{}", pattern)
+            };
+            if let Err(e) = override_builder.add(&exclude_rule) {
+                eprintln!("Warning: Invalid exclude pattern '{}': {}", pattern, e);
             }
         }
-        // Add excludes second (as ignore rules !pattern)
-        if has_exclude_patterns {
-            for pattern in &exclude_patterns {
-                let exclude_rule = format!("!{}", pattern);
-                if let Err(e) = override_builder.add(&exclude_rule) {
-                    // Log the original pattern, not the modified rule
-                    eprintln!("[Effective] Warning: Invalid exclude pattern '{pattern}': {e}");
-                }
-            }
-        }
+
         // Build and apply the overrides
-        let overrides = override_builder.build()?;
-        walk_builder.overrides(overrides);
+        match override_builder.build() {
+            Ok(overrides) => {
+                walk_builder.overrides(overrides);
+            }
+            Err(e) => {
+                eprintln!("Error building path overrides: {}", e);
+            }
+        };
     }
 
     // Configure gitignore handling *SECOND*
@@ -615,16 +617,6 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
     }
 }
 
-fn to_toml_string_vec_string(v: &[String]) -> String {
-    format!(
-        "[{}]",
-        v.iter()
-            .map(|s| format!("{:?}", s))
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
-}
-
 fn format_provenance(src: rumdl_config::ConfigSource) -> &'static str {
     match src {
         rumdl_config::ConfigSource::Cli => "CLI",
@@ -657,7 +649,7 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
         Box::new(MD001HeadingIncrement),
         Box::new(MD002FirstHeadingH1::default()),
         Box::new(MD003HeadingStyle::default()),
-        Box::new(MD004UnorderedListStyle::default()),
+        Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
         Box::new(MD005ListIndent),
         Box::new(MD006StartBullets),
         Box::new(MD007ULIndent::default()),
@@ -715,7 +707,8 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
     rule_names.sort();
     for rule_name in rule_names {
         let mut lines = Vec::new();
-        if let Some(rule_cfg) = sourced.rules.get(&rule_name) {
+        let norm_rule_name = rule_name.to_ascii_uppercase(); // Use uppercase for lookup
+        if let Some(rule_cfg) = sourced.rules.get(&norm_rule_name) {
             let mut keys: Vec<_> = rule_cfg.values.keys().collect();
             keys.sort();
             for key in keys {
@@ -735,25 +728,23 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
             }
         } else {
             // Print default config for this rule, if available
-            if let Some((_, value)) = all_rules.iter().find(|r| r.name() == rule_name).and_then(|r| r.default_config_section()) {
-                if let toml::Value::Table(table) = value {
-                    let mut keys: Vec<_> = table.keys().collect();
-                    keys.sort();
-                    for key in keys {
-                        let v = &table[key];
-                        let value_str = match v {
-                            toml::Value::Array(arr) => {
-                                let vals: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
-                                format!("[{}]", vals.join(", "))
-                            }
-                            toml::Value::String(s) => format!("\"{}\"", s),
-                            toml::Value::Boolean(b) => b.to_string(),
-                            toml::Value::Integer(i) => i.to_string(),
-                            toml::Value::Float(f) => f.to_string(),
-                            _ => v.to_string(),
-                        };
-                        lines.push((format!("{} = {}", key, value_str), format!("[from {}]", format_provenance(rumdl_config::ConfigSource::Default))));
-                    }
+            if let Some((_, toml::Value::Table(table))) = all_rules.iter().find(|r| r.name() == rule_name).and_then(|r| r.default_config_section()) {
+                let mut keys: Vec<_> = table.keys().collect();
+                keys.sort();
+                for key in keys {
+                    let v = &table[key];
+                    let value_str = match v {
+                        toml::Value::Array(arr) => {
+                            let vals: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
+                            format!("[{}]", vals.join(", "))
+                        }
+                        toml::Value::String(s) => format!("\"{}\"", s),
+                        toml::Value::Boolean(b) => b.to_string(),
+                        toml::Value::Integer(i) => i.to_string(),
+                        toml::Value::Float(f) => f.to_string(),
+                        _ => v.to_string(),
+                    };
+                    lines.push((format!("{} = {}", key, value_str), format!("[from {}]", format_provenance(rumdl_config::ConfigSource::Default))));
                 }
             }
         }
@@ -766,13 +757,11 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
     let max_left = all_lines.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
     for (left, right) in &all_lines {
         if left.is_empty() && right.is_empty() {
-            println!("");
+            println!();
+        } else if !right.is_empty() {
+            println!("{:<width$} {}", left, right.dimmed(), width = max_left);
         } else {
-            if !right.is_empty() {
-                println!("{:<width$} {}", left, right.dimmed(), width = max_left);
-            } else {
-                println!("{:<width$} {}", left, right, width = max_left);
-            }
+            println!("{:<width$} {}", left, right, width = max_left);
         }
     }
 }
@@ -793,6 +782,7 @@ fn format_toml_value(val: &toml::Value) -> String {
 }
 
 fn main() {
+    eprintln!("[DEBUG: entered main()]");
     let _timer = rumdl::profiling::ScopedTimer::new("main");
 
     let cli = Cli::parse();
@@ -801,327 +791,378 @@ fn main() {
     match cli.color.as_str() {
         "always" => colored::control::set_override(true),
         "never" => colored::control::set_override(false),
-        "auto" | _ => colored::control::unset_override(),
+        "auto" => colored::control::unset_override(),
+        _ => colored::control::unset_override(),
     }
 
-    match &cli.command {
-        Some(Commands::Init { pyproject }) => {
-            if *pyproject {
-                // Handle pyproject.toml initialization
-                let config_content = rumdl_config::generate_pyproject_config();
+    // Catch panics and print a message, exit 1
+    let result = std::panic::catch_unwind(|| {
+        match &cli.command {
+            Some(Commands::Init { pyproject }) => {
+                if *pyproject {
+                    // Handle pyproject.toml initialization
+                    let config_content = rumdl_config::generate_pyproject_config();
 
-                if Path::new("pyproject.toml").exists() {
-                    // pyproject.toml exists, ask to append
-                    println!("pyproject.toml already exists. Would you like to append rumdl configuration? [y/N]");
-                    print!("> ");
-                    io::stdout().flush().unwrap();
+                    if Path::new("pyproject.toml").exists() {
+                        // pyproject.toml exists, ask to append
+                        println!("pyproject.toml already exists. Would you like to append rumdl configuration? [y/N]");
+                        print!("> ");
+                        io::stdout().flush().unwrap();
 
-                    let mut answer = String::new();
-                    io::stdin().read_line(&mut answer).unwrap();
+                        let mut answer = String::new();
+                        io::stdin().read_line(&mut answer).unwrap();
 
-                    if answer.trim().eq_ignore_ascii_case("y") {
-                        // Append to existing file
-                        match fs::read_to_string("pyproject.toml") {
-                            Ok(content) => {
-                                // Check if [tool.rumdl] section already exists
-                                if content.contains("[tool.rumdl]") {
-                                    println!("The pyproject.toml file already contains a [tool.rumdl] section.");
-                                    println!("Please edit the file manually to avoid overwriting existing configuration.");
-                                }
-
-                                // Append with a blank line for separation
-                                let new_content =
-                                    format!("{}\n\n{}", content.trim_end(), config_content);
-                                match fs::write("pyproject.toml", new_content) {
-                                    Ok(_) => {
-                                        println!("Added rumdl configuration to pyproject.toml")
+                        if answer.trim().eq_ignore_ascii_case("y") {
+                            // Append to existing file
+                            match fs::read_to_string("pyproject.toml") {
+                                Ok(content) => {
+                                    // Check if [tool.rumdl] section already exists
+                                    if content.contains("[tool.rumdl]") {
+                                        println!("The pyproject.toml file already contains a [tool.rumdl] section.");
+                                        println!("Please edit the file manually to avoid overwriting existing configuration.");
                                     }
-                                    Err(e) => {
-                                        eprintln!(
-                                            "{}: Failed to update pyproject.toml: {}",
-                                            "Error".red().bold(),
-                                            e
-                                        );
-                                        std::process::exit(1);
+
+                                    // Append with a blank line for separation
+                                    let new_content =
+                                        format!("{}\n\n{}", content.trim_end(), config_content);
+                                    match fs::write("pyproject.toml", new_content) {
+                                        Ok(_) => {
+                                            println!("Added rumdl configuration to pyproject.toml")
+                                        }
+                                        Err(e) => {
+                                            eprintln!(
+                                                "{}: Failed to update pyproject.toml: {}",
+                                                "Error".red().bold(),
+                                                e
+                                            );
+                                            std::process::exit(1);
+                                        }
                                     }
                                 }
+                                Err(e) => {
+                                    eprintln!(
+                                        "{}: Failed to read pyproject.toml: {}",
+                                        "Error".red().bold(),
+                                        e
+                                    );
+                                    std::process::exit(1);
+                                }
+                            }
+                        } else {
+                            println!("Aborted. No changes made to pyproject.toml");
+                        }
+                    } else {
+                        // Create new pyproject.toml with basic structure
+                        let basic_content = r#"[build-system]
+requires = [\"setuptools>=42\", \"wheel\"]
+build-backend = \"setuptools.build_meta\"
+
+"#;
+                        let content = basic_content.to_owned() + &config_content;
+
+                        match fs::write("pyproject.toml", content) {
+                            Ok(_) => {
+                                println!("Created pyproject.toml with rumdl configuration");
                             }
                             Err(e) => {
                                 eprintln!(
-                                    "{}: Failed to read pyproject.toml: {}",
+                                    "{}: Failed to create pyproject.toml: {}",
                                     "Error".red().bold(),
                                     e
                                 );
                                 std::process::exit(1);
                             }
                         }
-                    } else {
-                        println!("Aborted. No changes made to pyproject.toml");
-                    }
-                } else {
-                    // Create new pyproject.toml with basic structure
-                    let basic_content = r#"[build-system]
-requires = [\"setuptools>=42\", \"wheel\"]
-build-backend = \"setuptools.build_meta\"
-
-"#;
-                    let content = basic_content.to_owned() + &config_content;
-
-                    match fs::write("pyproject.toml", content) {
-                        Ok(_) => {
-                            println!("Created pyproject.toml with rumdl configuration");
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "{}: Failed to create pyproject.toml: {}",
-                                "Error".red().bold(),
-                                e
-                            );
-                            std::process::exit(1);
-                        }
                     }
                 }
-            }
 
-            // Create default config file
-            match rumdl_config::create_default_config(".rumdl.toml") {
-                Ok(_) => {
-                    println!("Created default configuration file: .rumdl.toml");
-                }
-                Err(e) => {
-                    eprintln!(
-                        "{}: Failed to create config file: {}",
-                        "Error".red().bold(),
-                        e
-                    );
-                    std::process::exit(1);
-                }
-            }
-        }
-        Some(Commands::Check(args)) => {
-            run_check(args);
-        }
-        Some(Commands::Rule { rule }) => {
-            use rumdl::rules::*;
-            let all_rules: Vec<Box<dyn Rule>> = vec![
-                Box::new(MD001HeadingIncrement),
-                Box::new(MD002FirstHeadingH1::default()),
-                Box::new(MD003HeadingStyle::default()),
-                Box::new(MD004UnorderedListStyle::default()),
-                Box::new(MD005ListIndent),
-                Box::new(MD006StartBullets),
-                Box::new(MD007ULIndent::default()),
-                Box::new(MD008ULStyle::default()),
-                Box::new(MD009TrailingSpaces::default()),
-                Box::new(MD010NoHardTabs::default()),
-                Box::new(MD011NoReversedLinks {}),
-                Box::new(MD012NoMultipleBlanks::default()),
-                Box::new(MD013LineLength::default()),
-                Box::new(MD015NoMissingSpaceAfterListMarker::default()),
-                Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
-                Box::new(MD018NoMissingSpaceAtx {}),
-                Box::new(MD019NoMultipleSpaceAtx {}),
-                Box::new(MD020NoMissingSpaceClosedAtx {}),
-                Box::new(MD021NoMultipleSpaceClosedAtx {}),
-                Box::new(MD022BlanksAroundHeadings::default()),
-                Box::new(MD023HeadingStartLeft {}),
-                Box::new(MD024NoDuplicateHeading::default()),
-                Box::new(MD025SingleTitle::default()),
-                Box::new(MD026NoTrailingPunctuation::default()),
-                Box::new(MD027MultipleSpacesBlockquote {}),
-                Box::new(MD028NoBlanksBlockquote {}),
-                Box::new(MD029OrderedListPrefix::default()),
-                Box::new(MD030ListMarkerSpace::default()),
-                Box::new(MD031BlanksAroundFences {}),
-                Box::new(MD032BlanksAroundLists {}),
-                Box::new(MD033NoInlineHtml::default()),
-                Box::new(MD034NoBareUrls {}),
-                Box::new(MD035HRStyle::default()),
-                Box::new(MD036NoEmphasisAsHeading {}),
-                Box::new(MD037NoSpaceInEmphasis),
-                Box::new(MD038NoSpaceInCode::default()),
-                Box::new(MD039NoSpaceInLinks),
-                Box::new(MD040FencedCodeLanguage {}),
-                Box::new(MD041FirstLineHeading::default()),
-                Box::new(MD042NoEmptyLinks::new()),
-                Box::new(MD043RequiredHeadings::new(Vec::new())),
-                Box::new(MD044ProperNames::new(Vec::new(), true)),
-                Box::new(MD045NoAltText::new()),
-                Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
-                Box::new(MD047SingleTrailingNewline),
-                Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
-                Box::new(MD049EmphasisStyle::default()),
-                Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
-                Box::new(MD051LinkFragments),
-                Box::new(MD052ReferenceLinkImages),
-                Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
-                Box::new(MD054LinkImageStyle::default()),
-                Box::new(MD055TablePipeStyle::default()),
-                Box::new(MD056TableColumnCount),
-                Box::new(MD057ExistingRelativeLinks::default()),
-                Box::new(MD058BlanksAroundTables),
-            ];
-            if let Some(rule_query) = rule {
-                let rule_query = rule_query.to_ascii_uppercase();
-                let found = all_rules.iter().find(|r| {
-                    r.name().eq_ignore_ascii_case(&rule_query)
-                        || r.name().replace("MD", "") == rule_query.replace("MD", "")
-                });
-                if let Some(rule) = found {
-                    println!(
-                        "{} - {}\n\nDescription:\n  {}",
-                        rule.name(),
-                        rule.description(),
-                        rule.description()
-                    );
-                } else {
-                    eprintln!("Rule '{}' not found.", rule_query);
-                    std::process::exit(1);
-                }
-            } else {
-                println!("Available rules:");
-                for rule in &all_rules {
-                    println!("  {} - {}", rule.name(), rule.description());
-                }
-            }
-        }
-        Some(Commands::Config { subcmd, defaults, output }) => {
-            // Handle 'config get' subcommand for querying a specific key
-            if let Some(ConfigSubcommand::Get { key }) = subcmd {
-                let sourced = match rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None) {
-                    Ok(s) => s,
+                // Create default config file
+                match rumdl_config::create_default_config(".rumdl.toml") {
+                    Ok(_) => {
+                        println!("Created default configuration file: .rumdl.toml");
+                    }
                     Err(e) => {
-                        eprintln!("{}: {}", "Config error".red().bold(), e);
-                        std::process::exit(2);
+                        eprintln!(
+                            "{}: Failed to create config file: {}",
+                            "Error".red().bold(),
+                            e
+                        );
+                        std::process::exit(1);
                     }
-                };
-                let parts: Vec<&str> = key.split('.').collect();
-                if parts.len() == 2 {
-                    let (section, field) = (parts[0], parts[1]);
-                    if section.eq_ignore_ascii_case("global") {
-                        // Global key
-                        if field == "respect_gitignore" {
-                            let val = &sourced.global.respect_gitignore.value;
-                            let src = sourced.global.respect_gitignore.source;
-                            println!("{} = {:?} [from {}]", key, val, format_provenance(src));
-                            return;
-                        } else {
-                            let (val, src) = match field {
-                                "enable" => (&sourced.global.enable.value, sourced.global.enable.source),
-                                "disable" => (&sourced.global.disable.value, sourced.global.disable.source),
-                                "exclude" => (&sourced.global.exclude.value, sourced.global.exclude.source),
-                                "include" => (&sourced.global.include.value, sourced.global.include.source),
-                                _ => {
-                                    eprintln!("Unknown global key: {}", field);
-                                    std::process::exit(1);
-                                }
-                            };
-                            // For global keys, val is &Vec<String>, so format as TOML array
-                            let toml_val = toml::Value::Array(val.iter().map(|s| toml::Value::String(s.clone())).collect());
-                            println!("{} = {} [from {}]", key, format_toml_value(&toml_val), format_provenance(src));
-                            return;
-                        }
+                }
+            }
+            Some(Commands::Check(args)) => {
+                run_check(args, cli.config.as_deref());
+            }
+            Some(Commands::Rule { rule }) => {
+                use rumdl::rules::*;
+                let all_rules: Vec<Box<dyn Rule>> = vec![
+                    Box::new(MD001HeadingIncrement),
+                    Box::new(MD002FirstHeadingH1::default()),
+                    Box::new(MD003HeadingStyle::default()),
+                    Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
+                    Box::new(MD005ListIndent),
+                    Box::new(MD006StartBullets),
+                    Box::new(MD007ULIndent::default()),
+                    Box::new(MD008ULStyle::default()),
+                    Box::new(MD009TrailingSpaces::default()),
+                    Box::new(MD010NoHardTabs::default()),
+                    Box::new(MD011NoReversedLinks {}),
+                    Box::new(MD012NoMultipleBlanks::default()),
+                    Box::new(MD013LineLength::default()),
+                    Box::new(MD015NoMissingSpaceAfterListMarker::default()),
+                    Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
+                    Box::new(MD018NoMissingSpaceAtx {}),
+                    Box::new(MD019NoMultipleSpaceAtx {}),
+                    Box::new(MD020NoMissingSpaceClosedAtx {}),
+                    Box::new(MD021NoMultipleSpaceClosedAtx {}),
+                    Box::new(MD022BlanksAroundHeadings::default()),
+                    Box::new(MD023HeadingStartLeft {}),
+                    Box::new(MD024NoDuplicateHeading::default()),
+                    Box::new(MD025SingleTitle::default()),
+                    Box::new(MD026NoTrailingPunctuation::default()),
+                    Box::new(MD027MultipleSpacesBlockquote {}),
+                    Box::new(MD028NoBlanksBlockquote {}),
+                    Box::new(MD029OrderedListPrefix::default()),
+                    Box::new(MD030ListMarkerSpace::default()),
+                    Box::new(MD031BlanksAroundFences {}),
+                    Box::new(MD032BlanksAroundLists {}),
+                    Box::new(MD033NoInlineHtml::default()),
+                    Box::new(MD034NoBareUrls {}),
+                    Box::new(MD035HRStyle::default()),
+                    Box::new(MD036NoEmphasisAsHeading {}),
+                    Box::new(MD037NoSpaceInEmphasis),
+                    Box::new(MD038NoSpaceInCode::default()),
+                    Box::new(MD039NoSpaceInLinks),
+                    Box::new(MD040FencedCodeLanguage {}),
+                    Box::new(MD041FirstLineHeading::default()),
+                    Box::new(MD042NoEmptyLinks::new()),
+                    Box::new(MD043RequiredHeadings::new(Vec::new())),
+                    Box::new(MD044ProperNames::new(Vec::new(), true)),
+                    Box::new(MD045NoAltText::new()),
+                    Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
+                    Box::new(MD047SingleTrailingNewline),
+                    Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
+                    Box::new(MD049EmphasisStyle::default()),
+                    Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
+                    Box::new(MD051LinkFragments),
+                    Box::new(MD052ReferenceLinkImages),
+                    Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
+                    Box::new(MD054LinkImageStyle::default()),
+                    Box::new(MD055TablePipeStyle::default()),
+                    Box::new(MD056TableColumnCount),
+                    Box::new(MD057ExistingRelativeLinks::default()),
+                    Box::new(MD058BlanksAroundTables),
+                ];
+                if let Some(rule_query) = rule {
+                    let rule_query = rule_query.to_ascii_uppercase();
+                    let found = all_rules.iter().find(|r| {
+                        r.name().eq_ignore_ascii_case(&rule_query)
+                            || r.name().replace("MD", "") == rule_query.replace("MD", "")
+                    });
+                    if let Some(rule) = found {
+                        println!(
+                            "{} - {}\n\nDescription:\n  {}",
+                            rule.name(),
+                            rule.description(),
+                            rule.description()
+                        );
                     } else {
-                        // Rule key
-                        let rule_name = section;
-                        let rule_cfg = sourced.rules.get(rule_name);
-                        if let Some(rule_cfg) = rule_cfg {
-                            if let Some(sv) = rule_cfg.values.get(field) {
-                                println!("{}.{} = {} [from {}]", rule_name, field, format_toml_value(&sv.value), format_provenance(sv.source));
-                                return;
-                            }
-                        }
-                        eprintln!("Unknown rule key: {}.{}", rule_name, field);
+                        eprintln!("Rule '{}' not found.", rule_query);
                         std::process::exit(1);
                     }
                 } else {
-                    eprintln!("Key must be in the form global.key or MDxxx.key");
+                    println!("Available rules:");
+                    for rule in &all_rules {
+                        println!("  {} - {}", rule.name(), rule.description());
+                    }
+                }
+            }
+            Some(Commands::Config { subcmd, defaults, output }) => {
+                // Handle 'config get' subcommand for querying a specific key
+                if let Some(ConfigSubcommand::Get { key }) = subcmd {
+                    if let Some((section_part, field_part)) = key.split_once('.') {
+                        // 1. Load the full SourcedConfig once
+                        let sourced = match rumdl_config::SourcedConfig::load(cli.config.as_deref(), None) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("[DEBUG: config get error branch]");
+                                eprintln!("{}: {}", "Config error".red().bold(), e);
+                                std::process::exit(1);
+                            }
+                        };
+                        // 2. Convert to final Config once
+                        let final_config: rumdl_config::Config = sourced.clone().into();
+
+                        let normalized_field = normalize_key(field_part);
+
+                        // Handle GLOBAL keys
+                        if section_part.eq_ignore_ascii_case("global") {
+                            let maybe_value_source: Option<(toml::Value, ConfigSource)> = match normalized_field.as_str() {
+                                "enable" => Some((toml::Value::Array(final_config.global.enable.iter().map(|s| toml::Value::String(s.clone())).collect()), sourced.global.enable.source)),
+                                "disable" => Some((toml::Value::Array(final_config.global.disable.iter().map(|s| toml::Value::String(s.clone())).collect()), sourced.global.disable.source)),
+                                "exclude" => Some((toml::Value::Array(final_config.global.exclude.iter().map(|s| toml::Value::String(s.clone())).collect()), sourced.global.exclude.source)),
+                                "include" => Some((toml::Value::Array(final_config.global.include.iter().map(|s| toml::Value::String(s.clone())).collect()), sourced.global.include.source)),
+                                "respect-gitignore" => Some((toml::Value::Boolean(final_config.global.respect_gitignore), sourced.global.respect_gitignore.source)),
+                                _ => None,
+                            };
+
+                            if let Some((value, source)) = maybe_value_source {
+                                println!("{} = {} [from {}]", key, format_toml_value(&value), format_provenance(source));
+                                // Successfully handled 'get', exit the command processing
+                                return; 
+                            } else {
+                                 eprintln!("Unknown global key: {}", field_part);
+                                 std::process::exit(1);
+                            }
+                        }
+                        // Handle RULE keys (MDxxx.field)
+                        else {
+                            let normalized_rule_name = normalize_key(section_part);
+
+                            // Try to get the value from the final config first
+                            let final_value: Option<&toml::Value> =
+                                final_config.rules.get(&normalized_rule_name)
+                                    .and_then(|rule_cfg| rule_cfg.values.get(&normalized_field));
+
+                            if let Some(value) = final_value {
+                                let provenance = sourced.rules.get(&normalized_rule_name)
+                                    .and_then(|sc| sc.values.get(&normalized_field))
+                                    .map_or(ConfigSource::Default, |sv| sv.source);
+
+                                println!("{}.{} = {} [from {}]", normalized_rule_name, normalized_field, format_toml_value(value), format_provenance(provenance));
+                                // Successfully handled 'get', exit the command processing
+                                return; 
+                            } else {
+                                let all_rules = rumdl::rules::all_rules();
+                                if let Some(rule) = all_rules.iter().find(|r| r.name() == section_part) {
+                                    if let Some((_, toml::Value::Table(table))) = rule.default_config_section() {
+                                        if let Some(v) = table.get(&normalized_field) {
+                                            let value_str = format_toml_value(v);
+                                            println!("{}.{} = {} [from default]", normalized_rule_name, normalized_field, value_str);
+                                             // Successfully handled 'get', exit the command processing
+                                            return; 
+                                        }
+                                    }
+                                }
+                                eprintln!("Unknown config key: {}.{}", normalized_rule_name, normalized_field);
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Key must be in the form global.key or MDxxx.key");
+                        std::process::exit(1);
+                    }
+                } 
+                // --- Fallthrough logic for `rumdl config` (no subcommand) ---
+                // This code now runs ONLY if `subcmd` is None
+                else {
+                    // --- CONFIG VALIDATION --- (Duplicated from original position, needs to run for display)
+                    let all_rules_reg = rumdl::rules::all_rules(); // Rename to avoid conflict
+                    let registry_reg = rumdl_config::RuleRegistry::from_rules(&all_rules_reg);
+                    let sourced_reg = if *defaults {
+                        rumdl_config::SourcedConfig::default()
+                    } else {
+                        match rumdl_config::SourcedConfig::load(cli.config.as_deref(), None) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("[DEBUG: config error branch]");
+                                eprintln!("{}: {}", "Config error".red().bold(), e);
+                                std::process::exit(1);
+                            }
+                        }
+                    };
+                    let validation_warnings = rumdl_config::validate_config_sourced(&sourced_reg, &registry_reg);
+                    if !validation_warnings.is_empty() {
+                        for warn in &validation_warnings {
+                            eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
+                        }
+                        // Optionally: exit with error if strict mode is enabled
+                        // std::process::exit(2);
+                    }
+                    // --- END CONFIG VALIDATION ---
+
+                    // Decide which config to print based on --defaults
+                    let final_sourced_to_print = if *defaults {
+                        rumdl_config::SourcedConfig::default()
+                    } else {
+                         // Reload config if not defaults (necessary because we exited early in 'get' case)
+                         match rumdl_config::SourcedConfig::load(cli.config.as_deref(), None) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("[DEBUG: config error branch]");
+                                eprintln!("{}: {}", "Config error".red().bold(), e);
+                                std::process::exit(1);
+                            }
+                        }
+                    };
+
+                    // If --output toml is set, print as valid TOML
+                    if output.as_deref() == Some("toml") {
+                        let config_to_print = if *defaults {
+                            rumdl_config::Config::default()
+                        } else {
+                            final_sourced_to_print.into()
+                        };
+                        match toml::to_string_pretty(&config_to_print) {
+                            Ok(s) => println!("{}", s),
+                            Err(e) => {
+                                eprintln!("Failed to serialize config to TOML: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        // Otherwise, print the smart output with provenance annotations
+                        print_config_with_provenance(&final_sourced_to_print);
+                    }
+                }
+            }
+            Some(Commands::Version) => {
+                // Use clap's version info
+                println!("rumdl {}", env!("CARGO_PKG_VERSION"));
+            }
+            None => {
+                // Legacy: rumdl . or rumdl [PATHS...]
+                if !cli.paths.is_empty() {
+                    let args = CheckArgs {
+                        paths: cli.paths.clone(),
+                        fix: cli.fix,
+                        list_rules: cli.list_rules,
+                        disable: cli.disable.clone(),
+                        enable: cli.enable.clone(),
+                        exclude: cli.exclude.clone(),
+                        include: cli.include.clone(),
+                        respect_gitignore: cli.respect_gitignore,
+                        verbose: cli.verbose,
+                        profile: cli.profile,
+                        quiet: cli.quiet,
+                    };
+                    eprintln!("{}: Deprecation warning: Running 'rumdl .' or 'rumdl [PATHS...]' without a subcommand is deprecated and will be removed in a future release. Please use 'rumdl check .' instead.", "[rumdl]".yellow().bold());
+                    run_check(&args, cli.config.as_deref());
+                } else {
+                    eprintln!(
+                "{}: No files or directories specified. Please provide at least one path to lint.",
+                "Error".red().bold()
+            );
                     std::process::exit(1);
                 }
             }
-
-            // --- CONFIG VALIDATION ---
-            let all_rules = rumdl::rules::all_rules();
-            let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
-            let sourced;
-            if *defaults {
-                sourced = rumdl_config::SourcedConfig::default();
-            } else {
-                sourced = match rumdl_config::SourcedConfig::load_sourced_config(cli.config.as_deref(), None) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!("{}: {}", "Config error".red().bold(), e);
-                        std::process::exit(2);
-                    }
-                };
-            }
-            let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
-            if !validation_warnings.is_empty() {
-                for warn in &validation_warnings {
-                    eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
-                }
-                // Optionally: exit with error if strict mode is enabled
-                // std::process::exit(2);
-            }
-            // --- END CONFIG VALIDATION ---
-
-            // If --output toml is set, print as valid TOML
-            if output.as_deref() == Some("toml") {
-                let config = if *defaults {
-                    rumdl_config::Config::default()
-                } else {
-                    sourced.into()
-                };
-                println!("{}", toml::to_string_pretty(&config).unwrap());
-                return;
-            }
-
-            // Otherwise, print the smart output with provenance annotations (default for --defaults)
-            print_config_with_provenance(&sourced);
-            return;
         }
-        Some(Commands::Version) => {
-            // Use clap's version info
-            println!("rumdl {}", env!("CARGO_PKG_VERSION"));
-        }
-        None => {
-            // Legacy: rumdl . or rumdl [PATHS...]
-            if !cli.paths.is_empty() {
-                let args = CheckArgs {
-                    paths: cli.paths.clone(),
-                    config: cli.config.clone(),
-                    fix: cli.fix,
-                    list_rules: cli.list_rules,
-                    disable: cli.disable.clone(),
-                    enable: cli.enable.clone(),
-                    exclude: cli.exclude.clone(),
-                    include: cli.include.clone(),
-                    respect_gitignore: cli.respect_gitignore,
-                    verbose: cli.verbose,
-                    profile: cli.profile,
-                    quiet: cli.quiet,
-                };
-                eprintln!("{}: Deprecation warning: Running 'rumdl .' or 'rumdl [PATHS...]' without a subcommand is deprecated and will be removed in a future release. Please use 'rumdl check .' instead.", "[rumdl]".yellow().bold());
-                run_check(&args);
-            } else {
-                eprintln!(
-            "{}: No files or directories specified. Please provide at least one path to lint.",
-            "Error".red().bold()
-        );
-                std::process::exit(1);
-            }
-        }
+    });
+    if let Err(e) = result {
+        eprintln!("[rumdl panic handler] Uncaught panic: {:?}", e);
+        std::process::exit(1);
     }
 }
 
-fn run_check(args: &CheckArgs) {
+fn run_check(args: &CheckArgs, global_config_path: Option<&str>) {
     // 1. Load sourced config (for provenance and validation)
-    let sourced = match rumdl_config::SourcedConfig::load_sourced_config(args.config.as_deref(), None) {
+    let sourced = match rumdl_config::SourcedConfig::load(global_config_path, None) {
         Ok(sourced) => sourced,
         Err(e) => {
             // Syntax error or type mismatch: fail and exit
             eprintln!("{}: {}", "Config error".red().bold(), e);
-            std::process::exit(2);
+            std::process::exit(1);
         }
     };
 

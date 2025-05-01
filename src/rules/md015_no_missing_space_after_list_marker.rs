@@ -17,7 +17,7 @@ lazy_static! {
     static ref LIST_ITEM_RE: Regex = Regex::new(r"^(\s*)([-*+]|\d+[.)])(\S.*)").unwrap();
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MD015NoMissingSpaceAfterListMarker {
     pub require_space: bool,
 }

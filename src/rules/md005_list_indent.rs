@@ -16,7 +16,8 @@ lazy_static! {
     static ref LIST_MARKER_REGEX: Regex = Regex::new(r"^\d+[.)]").unwrap();
 }
 
-#[derive(Debug, Default)]
+/// Rule MD005: Inconsistent indentation for list items at the same level
+#[derive(Clone)]
 pub struct MD005ListIndent;
 
 impl MD005ListIndent {

@@ -85,6 +85,7 @@ lazy_static! {
 /// - Proper handling of front matter
 /// - Smart code block detection
 ///
+#[derive(Clone)]
 pub struct MD022BlanksAroundHeadings {
     /// Required number of blank lines before heading
     pub lines_above: usize,

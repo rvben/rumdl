@@ -3,12 +3,13 @@ use crate::utils::document_structure::{
     CodeBlockType, DocumentStructure, DocumentStructureExtensions,
 };
 use crate::utils::range_utils::LineIndex;
+use lazy_static::lazy_static;
 
 /// Rule MD040: Fenced code blocks should have a language
 ///
 /// See [docs/md040.md](../../docs/md040.md) for full documentation, configuration, and examples.
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MD040FencedCodeLanguage;
 
 impl Rule for MD040FencedCodeLanguage {

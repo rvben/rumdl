@@ -1022,8 +1022,9 @@ line_length = 123
     );
     assert!(
         stdout.contains("global.exclude = [\"docs/temp\", \"node_modules\"] [from .rumdl.toml]"),
-        "Unexpected output: {}",
-        stdout
+        "Unexpected output: {}. Stderr: {}",
+        stdout,
+        stderr
     );
 
     // Test MD013.line_length
@@ -1034,9 +1035,10 @@ line_length = 123
         stderr
     );
     assert!(
-        stdout.contains("MD013.line_length = 123 [from .rumdl.toml]"),
-        "Unexpected output: {}",
-        stdout
+        stdout.contains("md013.line-length = 123 [from .rumdl.toml]"),
+        "Unexpected output: {}. Stderr: {}",
+        stdout,
+        stderr
     );
 
     // Test unknown key
@@ -1051,7 +1053,7 @@ line_length = 123
     let (success, _stdout, stderr) = run_cmd(&["config", "get", "MD999.line_length"]);
     assert!(!success, "config get MD999.line_length should fail");
     assert!(
-        stderr.contains("Unknown rule key: MD999.line_length"),
+        stderr.contains("Unknown config key: md999.line-length"), 
         "Unexpected stderr: {}",
         stderr
     );

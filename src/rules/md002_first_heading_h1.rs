@@ -1,4 +1,5 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, RuleCategory, Severity};
+use crate::rule::Rule;
 use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
@@ -86,7 +87,7 @@ lazy_static! {
 /// a logical structure. This follows semantic HTML principles where each page should have
 /// a single `<h1>` element that defines its main subject.
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MD002FirstHeadingH1 {
     level: u32,
 }

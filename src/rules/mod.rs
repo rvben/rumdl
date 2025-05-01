@@ -60,6 +60,7 @@ pub use md001_heading_increment::MD001HeadingIncrement;
 pub use md002_first_heading_h1::MD002FirstHeadingH1;
 pub use md003_heading_style::MD003HeadingStyle;
 pub use md004_unordered_list_style::MD004UnorderedListStyle;
+pub use md004_unordered_list_style::UnorderedListStyle;
 pub use md005_list_indent::MD005ListIndent;
 pub use md006_start_bullets::MD006StartBullets;
 pub use md007_ul_indent::MD007ULIndent;
@@ -145,7 +146,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MD001HeadingIncrement),
         Box::new(MD002FirstHeadingH1::default()),
         Box::new(MD003HeadingStyle::default()),
-        Box::new(MD004UnorderedListStyle::default()),
+        Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
         Box::new(MD005ListIndent),
         Box::new(MD006StartBullets),
         Box::new(MD007ULIndent::default()),
@@ -200,3 +201,68 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MD058BlanksAroundTables),
     ]
 }
+
+// Filter rules based on config (moved from main.rs)
+// Note: This needs access to GlobalConfig from the config module.
+use crate::config::GlobalConfig;
+use std::collections::HashSet;
+
+pub fn filter_rules(
+    rules: &[Box<dyn Rule>],
+    global_config: &GlobalConfig,
+) -> Vec<Box<dyn Rule>> {
+    let mut enabled_rules: Vec<Box<dyn Rule>> = Vec::new();
+    let mut disabled_rules: HashSet<String> = global_config
+        .disable
+        .iter()
+        .cloned()
+        .collect();
+
+    // Handle 'disable: ["all"]'
+    if disabled_rules.contains("all") {
+        // If 'enable' is also provided, only those rules are enabled, overriding "disable all"
+        if !global_config.enable.is_empty() {
+            let enabled_set: HashSet<String> = global_config.enable.iter().cloned().collect();
+            for rule in rules {
+                if enabled_set.contains(rule.name()) {
+                    // Clone the rule (rules need to implement Clone or we need another approach)
+                    // For now, assuming rules are copyable/default constructible easily is complex.
+                    // Let's recreate the rule instance instead. This is brittle.
+                    // A better approach would involve rule registration and instantiation by name.
+                    // --> Reverting to filtering the input slice by cloning Box<dyn Rule>.
+                    enabled_rules.push(dyn_clone::clone_box(&**rule));
+                }
+            }
+        }
+        // If 'enable' is empty and 'disable: ["all"]', return empty vector.
+        return enabled_rules;
+    }
+
+    // If 'enable' is specified, only use those rules
+    if !global_config.enable.is_empty() {
+        let enabled_set: HashSet<String> = global_config.enable.iter().cloned().collect();
+        for rule in rules {
+            if enabled_set.contains(rule.name()) && !disabled_rules.contains(rule.name()) {
+                 enabled_rules.push(dyn_clone::clone_box(&**rule));
+            }
+        }
+    } else {
+        // Otherwise, use all rules except the disabled ones
+        for rule in rules {
+            if !disabled_rules.contains(rule.name()) {
+                enabled_rules.push(dyn_clone::clone_box(&**rule));
+            }
+        }
+    }
+
+    enabled_rules
+}
+
+// Make sure dyn_clone is added as a dependency in Cargo.toml if not already present
+// And add `use dyn_clone::DynClone;` and `impl DynClone for MyTrait {}` where needed.
+// For Rule trait:
+// Add `use dyn_clone::DynClone;` in src/rule.rs
+// Add `pub trait Rule: DynClone { ... }` in src/rule.rs
+// Add `dyn_clone::clone_trait_object!(Rule);` in src/rule.rs
+
+// TODO: Need to add dyn_clone dependency and update Rule trait definition.

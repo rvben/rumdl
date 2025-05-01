@@ -13,7 +13,8 @@ lazy_static! {
     static ref HTML_COMMENT_END: Regex = Regex::new(r"-->").unwrap();
 }
 
-#[derive(Debug)]
+/// Rule MD010: Hard tabs
+#[derive(Clone)]
 pub struct MD010NoHardTabs {
     pub spaces_per_tab: usize,
     pub code_blocks: bool,

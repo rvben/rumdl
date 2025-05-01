@@ -22,7 +22,8 @@ lazy_static! {
     static ref HEADING_WITH_EMPHASIS: Regex = Regex::new(r"^(#+\s+).*(?:\*\*|\*|__|_)").unwrap();
 }
 
-#[derive(Debug, Default)]
+/// Rule MD036: Emphasis used instead of a heading
+#[derive(Clone)]
 pub struct MD036NoEmphasisAsHeading;
 
 impl MD036NoEmphasisAsHeading {

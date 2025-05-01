@@ -10,7 +10,7 @@ lazy_static! {
     static ref ATX_NO_SPACE_PATTERN: Regex = Regex::new(r"^(#+)([^#\s])").unwrap();
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone)]
 pub struct MD018NoMissingSpaceAtx;
 
 impl MD018NoMissingSpaceAtx {

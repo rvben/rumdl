@@ -9,6 +9,7 @@ use regex::Regex;
 /// See [docs/md042.md](../../docs/md042.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when a link has no content (text) or destination (URL).
+#[derive(Clone)]
 pub struct MD042NoEmptyLinks;
 
 impl Default for MD042NoEmptyLinks {

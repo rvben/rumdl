@@ -50,6 +50,9 @@ pretty_assertions = "1.4"
 markdown = "1.0.0-alpha.23"
 config = "0.15"
 regex = "1.11.1"
+toml_edit = "0.22"
+dyn-clone = "1"
+url = { version = "2", features = ["serde"] }
 
 [features]
 default = ["parallel", "profiling"]

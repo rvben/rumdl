@@ -11,7 +11,7 @@ lazy_static! {
     static ref ATX_MULTIPLE_SPACE_PATTERN: Regex = Regex::new(r"^(#+)\s{2,}").unwrap();
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone)]
 pub struct MD019NoMultipleSpaceAtx;
 
 impl MD019NoMultipleSpaceAtx {

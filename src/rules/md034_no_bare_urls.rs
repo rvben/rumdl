@@ -33,7 +33,7 @@ lazy_static! {
     static ref MARKDOWN_IMAGE_PATTERN: Regex = Regex::new(r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap();
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct MD034NoBareUrls;
 
 impl MD034NoBareUrls {

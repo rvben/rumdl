@@ -6,7 +6,7 @@ use crate::rules::blockquote_utils::BlockquoteUtils;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
 
-#[derive(Debug, Default)]
+#[derive(Clone)]
 pub struct MD028NoBlanksBlockquote;
 
 impl MD028NoBlanksBlockquote {

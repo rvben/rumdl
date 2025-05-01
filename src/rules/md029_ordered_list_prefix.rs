@@ -5,6 +5,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 lazy_static! {
     static ref ORDERED_LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)\d+\.\s").unwrap();
@@ -12,14 +13,16 @@ lazy_static! {
     static ref FIX_LINE_REGEX: Regex = Regex::new(r"^(\s*)\d+(\.\s.*)$").unwrap();
 }
 
-#[derive(Debug, PartialEq)]
+/// Represents the style for ordered lists
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum ListStyle {
-    OneOne,   // All ones (1. 1. 1.)
-    Ordered,  // Sequential (1. 2. 3.)
-    Ordered0, // Zero-based (0. 1. 2.)
+    One,        // Use '1.' for all items
+    OneOne,     // All ones (1. 1. 1.)
+    Ordered,    // Sequential (1. 2. 3.)
+    Ordered0,   // Zero-based (0. 1. 2.)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MD029OrderedListPrefix {
     pub style: ListStyle,
 }
@@ -45,6 +48,7 @@ impl MD029OrderedListPrefix {
 
     fn get_expected_number(&self, index: usize) -> usize {
         match self.style {
+            ListStyle::One => 1,
             ListStyle::OneOne => 1,
             ListStyle::Ordered => index + 1,
             ListStyle::Ordered0 => index,

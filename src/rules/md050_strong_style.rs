@@ -16,6 +16,7 @@ lazy_static! {
 /// See [docs/md050.md](../../docs/md050.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when strong markers (** or __) are used in an inconsistent way.
+#[derive(Clone)]
 pub struct MD050StrongStyle {
     style: StrongStyle,
 }

@@ -35,6 +35,7 @@ lazy_static! {
 /// See [docs/md052.md](../../docs/md052.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when a reference link or image uses a reference that isn't defined.
+#[derive(Clone)]
 pub struct MD052ReferenceLinkImages;
 
 impl Default for MD052ReferenceLinkImages {

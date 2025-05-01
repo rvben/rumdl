@@ -17,6 +17,8 @@ use crate::utils::document_structure::DocumentStructure;
 use std::time::Instant;
 
 /// Lint a file against the given rules
+/// Assumes the provided `rules` vector contains the final, 
+/// configured, and filtered set of rules to be executed.
 pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResult {
     let mut warnings = Vec::new();
     let _overall_start = Instant::now();

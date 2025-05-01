@@ -28,7 +28,7 @@ lazy_static! {
     // Removed HTML_TAG_PATTERN as it seemed redundant with HTML_TAG_FINDER
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct MD033NoInlineHtml {
     allowed: HashSet<String>,
 }

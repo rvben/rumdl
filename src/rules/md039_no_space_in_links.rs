@@ -1,6 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::LineIndex;
+use lazy_static::lazy_static;
 
 /// Rule MD039: No space inside link text
 ///
@@ -8,7 +9,7 @@ use crate::utils::range_utils::LineIndex;
 ///
 /// This rule is triggered when link text has leading or trailing spaces which can cause
 /// unexpected rendering in some Markdown parsers.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MD039NoSpaceInLinks;
 
 impl MD039NoSpaceInLinks {

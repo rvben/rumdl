@@ -14,7 +14,7 @@ use toml;
 /// - Top-level bullet items should start at column 0 (no indentation)
 /// - Nested bullet items should be indented under their parent
 /// - A bullet item following non-list content should start a new list at column 0
-#[derive(Default)]
+#[derive(Clone)]
 pub struct MD006StartBullets;
 
 lazy_static! {

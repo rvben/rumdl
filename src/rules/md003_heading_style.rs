@@ -17,6 +17,8 @@ lazy_static! {
         Regex::new(r"(?m)^(\s*)#|^(\s*)[^\s].*\n(\s*)(=+|-+)\s*$").unwrap();
 }
 
+/// Rule MD003: Heading style
+#[derive(Clone)]
 pub struct MD003HeadingStyle {
     style: HeadingStyle,
 }

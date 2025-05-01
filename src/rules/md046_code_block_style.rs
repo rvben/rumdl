@@ -15,6 +15,7 @@ lazy_static! {
 /// See [docs/md046.md](../../docs/md046.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when code blocks do not use a consistent style (either fenced or indented).
+#[derive(Clone)]
 pub struct MD046CodeBlockStyle {
     style: CodeBlockStyle,
 }

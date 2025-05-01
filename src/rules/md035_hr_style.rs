@@ -19,7 +19,8 @@ lazy_static! {
     static ref HR_SPACED_UNDERSCORE: Regex = Regex::new(r"^(_\s+){2,}_\s*$").unwrap();
 }
 
-#[derive(Debug)]
+/// Represents the style for horizontal rules
+#[derive(Clone)]
 pub struct MD035HRStyle {
     style: String,
 }

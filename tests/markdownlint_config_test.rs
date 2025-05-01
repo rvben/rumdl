@@ -1,5 +1,5 @@
 use rumdl::markdownlint_config::MarkdownlintConfig;
-use rumdl::config::ConfigSource;
+use rumdl::config::{ConfigSource, normalize_key};
 
 #[test]
 fn test_markdownlint_config_mapping() {
@@ -43,83 +43,83 @@ fn test_markdownlint_config_mapping() {
 
     // Check that all expected rules are mapped
     let expected_rules = vec![
-        ("MD046", "code-block-style"),
-        ("MD048", "code-fence-style"),
-        ("MD049", "emphasis-style"),
+        ("md046", "code-block-style"),
+        ("md048", "code-fence-style"),
+        ("md049", "emphasis-style"),
         // "extended-ascii" is not mapped (not a standard markdownlint rule)
-        ("MD040", "fenced-code-language"),
-        ("MD003", "heading-style"),
-        ("MD035", "hr-style"),
-        ("MD013", "line-length"),
-        ("MD054", "link-image-style"),
-        ("MD024", "no-duplicate-heading"),
-        ("MD029", "ol-prefix"),
-        ("MD044", "proper-names"),
-        ("MD052", "reference-links-images"),
-        ("MD050", "strong-style"),
-        ("MD004", "ul-style"),
+        ("md040", "fenced-code-language"),
+        ("md003", "heading-style"),
+        ("md035", "hr-style"),
+        ("md013", "line-length"),
+        ("md054", "link-image-style"),
+        ("md024", "no-duplicate-heading"),
+        ("md029", "ol-prefix"),
+        ("md044", "proper-names"),
+        ("md052", "reference-links-images"),
+        ("md050", "strong-style"),
+        ("md004", "ul-style"),
     ];
 
     for (rumdl_key, ml_key) in &expected_rules {
         assert!(rumdl_config.rules.contains_key(*rumdl_key), "Missing mapping for {} (from {})", rumdl_key, ml_key);
     }
 
-    // MD046: code-block-style
-    let code_block_style = &rumdl_config.rules["MD046"].values["style"];
+    // md046: code-block-style
+    let code_block_style = &rumdl_config.rules["md046"].values["style"];
     assert!(code_block_style.as_str().unwrap() == "fenced");
 
-    // MD048: code-fence-style
-    let code_fence_style = &rumdl_config.rules["MD048"].values["style"];
+    // md048: code-fence-style
+    let code_fence_style = &rumdl_config.rules["md048"].values["style"];
     assert!(code_fence_style.as_str().unwrap() == "backtick");
 
-    // MD049: emphasis-style
-    let emphasis_style = &rumdl_config.rules["MD049"].values["style"];
+    // md049: emphasis-style
+    let emphasis_style = &rumdl_config.rules["md049"].values["style"];
     assert!(emphasis_style.as_str().unwrap() == "asterisk");
 
-    // MD040: fenced-code-language
-    let fenced_code_langs = &rumdl_config.rules["MD040"].values["allowed_languages"];
+    // md040: fenced-code-language
+    let fenced_code_langs = &rumdl_config.rules["md040"].values[&normalize_key("allowed_languages")];
     let langs = fenced_code_langs.as_array().unwrap();
     let expected_langs = ["bash", "html", "javascript", "json", "markdown", "text"];
     for (i, lang) in expected_langs.iter().enumerate() {
         assert!(langs[i].as_str().unwrap() == *lang);
     }
-    let language_only = &rumdl_config.rules["MD040"].values["language_only"];
+    let language_only = &rumdl_config.rules["md040"].values[&normalize_key("language_only")];
     assert!(language_only.as_bool().unwrap());
 
-    // MD003: heading-style
-    let heading_style = &rumdl_config.rules["MD003"].values["style"];
+    // md003: heading-style
+    let heading_style = &rumdl_config.rules["md003"].values["style"];
     assert!(heading_style.as_str().unwrap() == "atx");
 
-    // MD035: hr-style
-    let hr_style = &rumdl_config.rules["MD035"].values["style"];
+    // md035: hr-style
+    let hr_style = &rumdl_config.rules["md035"].values["style"];
     assert!(hr_style.as_str().unwrap() == "---");
 
-    // MD013: line-length
-    let line_length_strict = &rumdl_config.rules["MD013"].values["strict"];
+    // md013: line-length
+    let line_length_strict = &rumdl_config.rules["md013"].values["strict"];
     assert!(line_length_strict.as_bool().unwrap());
-    let line_length_code_blocks = &rumdl_config.rules["MD013"].values["code_blocks"];
+    let line_length_code_blocks = &rumdl_config.rules["md013"].values[&normalize_key("code_blocks")];
     assert!(!line_length_code_blocks.as_bool().unwrap());
 
-    // MD054: link-image-style
-    let link_image_collapsed = &rumdl_config.rules["MD054"].values["collapsed"];
+    // md054: link-image-style
+    let link_image_collapsed = &rumdl_config.rules["md054"].values["collapsed"];
     assert!(!link_image_collapsed.as_bool().unwrap());
-    let link_image_shortcut = &rumdl_config.rules["MD054"].values["shortcut"];
+    let link_image_shortcut = &rumdl_config.rules["md054"].values["shortcut"];
     assert!(!link_image_shortcut.as_bool().unwrap());
-    let link_image_url_inline = &rumdl_config.rules["MD054"].values["url_inline"];
+    let link_image_url_inline = &rumdl_config.rules["md054"].values[&normalize_key("url_inline")];
     assert!(!link_image_url_inline.as_bool().unwrap());
 
-    // MD024: no-duplicate-heading
-    let no_duplicate_heading_siblings = &rumdl_config.rules["MD024"].values["siblings_only"];
+    // md024: no-duplicate-heading
+    let no_duplicate_heading_siblings = &rumdl_config.rules["md024"].values[&normalize_key("siblings_only")];
     assert!(no_duplicate_heading_siblings.as_bool().unwrap());
 
-    // MD029: ol-prefix
-    let ol_prefix_style = &rumdl_config.rules["MD029"].values["style"];
+    // md029: ol-prefix
+    let ol_prefix_style = &rumdl_config.rules["md029"].values["style"];
     assert!(ol_prefix_style.as_str().unwrap() == "ordered");
 
-    // MD044: proper-names
-    let proper_names_code_blocks = &rumdl_config.rules["MD044"].values["code_blocks"];
+    // md044: proper-names
+    let proper_names_code_blocks = &rumdl_config.rules["md044"].values[&normalize_key("code_blocks")];
     assert!(!proper_names_code_blocks.as_bool().unwrap());
-    let proper_names_names = &rumdl_config.rules["MD044"].values["names"];
+    let proper_names_names = &rumdl_config.rules["md044"].values[&normalize_key("names")];
     let expected_names = [
         "Cake.Markdownlint",
         "CommonMark",
@@ -134,16 +134,16 @@ fn test_markdownlint_config_mapping() {
         assert!(names[i].as_str().unwrap() == *name);
     }
 
-    // MD052: reference-links-images
-    let ref_links_shortcut = &rumdl_config.rules["MD052"].values["shortcut_syntax"];
+    // md052: reference-links-images
+    let ref_links_shortcut = &rumdl_config.rules["md052"].values[&normalize_key("shortcut_syntax")];
     assert!(ref_links_shortcut.as_bool().unwrap());
 
-    // MD050: strong-style
-    let strong_style = &rumdl_config.rules["MD050"].values["style"];
+    // md050: strong-style
+    let strong_style = &rumdl_config.rules["md050"].values["style"];
     assert!(strong_style.as_str().unwrap() == "asterisk");
 
-    // MD004: ul-style
-    let ul_style = &rumdl_config.rules["MD004"].values["style"];
+    // md004: ul-style
+    let ul_style = &rumdl_config.rules["md004"].values["style"];
     assert!(ul_style.as_str().unwrap() == "dash");
 
     // Check that unmapped rules are not present

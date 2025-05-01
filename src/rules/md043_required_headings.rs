@@ -13,6 +13,7 @@ lazy_static! {
 /// Rule MD043: Required headings present
 ///
 /// See [docs/md043.md](../../docs/md043.md) for full documentation, configuration, and examples.
+#[derive(Clone)]
 pub struct MD043RequiredHeadings {
     headings: Vec<String>,
 }

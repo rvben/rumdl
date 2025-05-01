@@ -6,6 +6,7 @@ use toml;
 /// Rule MD048: Code fence style
 ///
 /// See [docs/md048.md](../../docs/md048.md) for full documentation, configuration, and examples.
+#[derive(Clone)]
 pub struct MD048CodeFenceStyle {
     style: CodeFenceStyle,
 }

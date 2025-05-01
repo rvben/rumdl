@@ -1,6 +1,5 @@
-use crate::utils::range_utils::LineIndex;
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::range_utils::LineIndex;
 
 /// Rule MD058: Blanks around tables
 ///
@@ -8,7 +7,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 ///
 /// Ensures tables have blank lines before and after them
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct MD058BlanksAroundTables;
 
 impl Default for MD058BlanksAroundTables {

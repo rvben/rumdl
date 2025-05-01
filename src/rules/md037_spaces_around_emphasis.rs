@@ -153,6 +153,8 @@ fn replace_inline_code(line: &str) -> String {
     result
 }
 
+/// Rule MD037: Spaces inside emphasis markers
+#[derive(Clone)]
 pub struct MD037NoSpaceInEmphasis;
 
 impl Rule for MD037NoSpaceInEmphasis {

@@ -105,15 +105,29 @@ impl MarkdownlintConfig {
         let file = file_path.map(|s| s.to_string());
         for (key, value) in &self.0 {
             let mapped = markdownlint_to_rumdl_rule_key(key);
+            eprintln!("[DEBUG] Processing key: {:?}, mapped: {:?}, value: {:?}", key, mapped, value);
             if let Some(rumdl_key) = mapped {
+                let norm_rule_key = rumdl_key.to_ascii_uppercase();
                 let toml_value: Option<toml::Value> = serde_yaml::from_value::<toml::Value>(value.clone()).ok();
-                let mut rule_config = SourcedRuleConfig::default();
+                eprintln!("[DEBUG]   TOML value for {:?}: {:?}", key, toml_value);
+                let rule_config = sourced_config.rules.entry(norm_rule_key.clone()).or_default();
                 if let Some(tv) = toml_value {
                     if let toml::Value::Table(table) = tv {
                         for (k, v) in table {
-                            rule_config.values.insert(
-                                k,
-                                SourcedValue {
+                            let norm_config_key = crate::config::normalize_key(&k);
+                            eprintln!("[DEBUG]     Inserting config key: {:?} = {:?} into rule {:?}", norm_config_key, v, norm_rule_key);
+                            rule_config.values.entry(norm_config_key.clone())
+                                .and_modify(|sv| {
+                                    sv.value = v.clone();
+                                    sv.source = ConfigSource::Markdownlint;
+                                    sv.overrides.push(crate::config::ConfigOverride {
+                                        value: v.clone(),
+                                        source: ConfigSource::Markdownlint,
+                                        file: file.clone(),
+                                        line: None,
+                                    });
+                                })
+                                .or_insert_with(|| SourcedValue {
                                     value: v.clone(),
                                     source: ConfigSource::Markdownlint,
                                     overrides: vec![crate::config::ConfigOverride {
@@ -122,13 +136,22 @@ impl MarkdownlintConfig {
                                         file: file.clone(),
                                         line: None,
                                     }],
-                                }
-                            );
+                                });
                         }
                     } else {
-                        rule_config.values.insert(
-                            "value".to_string(),
-                            SourcedValue {
+                        eprintln!("[DEBUG]     Inserting value for rule {:?}: {:?}", norm_rule_key, tv);
+                        rule_config.values.entry("value".to_string())
+                            .and_modify(|sv| {
+                                sv.value = tv.clone();
+                                sv.source = ConfigSource::Markdownlint;
+                                sv.overrides.push(crate::config::ConfigOverride {
+                                    value: tv.clone(),
+                                    source: ConfigSource::Markdownlint,
+                                    file: file.clone(),
+                                    line: None,
+                                });
+                            })
+                            .or_insert_with(|| SourcedValue {
                                 value: tv.clone(),
                                 source: ConfigSource::Markdownlint,
                                 overrides: vec![crate::config::ConfigOverride {
@@ -137,11 +160,11 @@ impl MarkdownlintConfig {
                                     file: file.clone(),
                                     line: None,
                                 }],
-                            }
-                        );
+                            });
                     }
+                } else {
+                    eprintln!("[DEBUG]   Could not convert value for {:?} to TOML", key);
                 }
-                sourced_config.rules.insert(rumdl_key.to_string(), rule_config);
             }
         }
         if let Some(f) = file {
@@ -149,4 +172,6 @@ impl MarkdownlintConfig {
         }
         sourced_config
     }
-} 
+}
+
+// NOTE: 'code-block-style' (MD046) and 'code-fence-style' (MD048) are distinct and must not be merged. See markdownlint docs for details. 

@@ -7,7 +7,7 @@ use crate::rules::blockquote_utils::BlockquoteUtils;
 ///
 /// See [docs/md027.md](../../docs/md027.md) for full documentation, configuration, and examples.
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MD027MultipleSpacesBlockquote;
 
 impl Rule for MD027MultipleSpacesBlockquote {

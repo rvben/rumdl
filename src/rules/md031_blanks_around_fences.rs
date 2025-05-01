@@ -11,7 +11,8 @@ lazy_static! {
     static ref CODE_FENCE: Regex = Regex::new(r"^(```|~~~)").unwrap();
 }
 
-#[derive(Debug, Default)]
+/// Rule MD031: Fenced code blocks should be surrounded by blank lines
+#[derive(Clone)]
 pub struct MD031BlanksAroundFences;
 
 impl MD031BlanksAroundFences {

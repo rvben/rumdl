@@ -19,7 +19,7 @@ lazy_static! {
         Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone)]
 pub struct MD020NoMissingSpaceClosedAtx;
 
 impl MD020NoMissingSpaceClosedAtx {

@@ -2,6 +2,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::range_utils::LineIndex;
 use toml;
+use lazy_static::lazy_static;
 
 /// Rule MD055: Table pipe style
 ///
@@ -75,6 +76,7 @@ use toml;
 /// - Optimized string manipulation for pipe character handling
 ///
 /// Enforces consistent use of leading and trailing pipe characters in tables
+#[derive(Clone)]
 pub struct MD055TablePipeStyle {
     pub style: String,
 }

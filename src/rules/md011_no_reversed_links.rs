@@ -4,7 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
 
-#[derive(Debug, Default)]
+#[derive(Clone)]
 pub struct MD011NoReversedLinks;
 
 impl MD011NoReversedLinks {

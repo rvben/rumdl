@@ -7,13 +7,15 @@ use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
+use crate::rules::front_matter_utils::FrontMatterUtils;
+use crate::rules::heading_utils::{get_heading_level, is_heading};
 
 lazy_static! {
     // Pattern for quick check if content has any headings at all
     static ref HEADING_CHECK: Regex = Regex::new(r"(?m)^(?:\s*)#").unwrap();
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct MD025SingleTitle {
     level: usize,
     front_matter_title: String,
@@ -33,6 +35,33 @@ impl MD025SingleTitle {
         Self {
             level,
             front_matter_title: front_matter_title.to_string(),
+        }
+    }
+
+    fn find_first_h1(&self, content: &str) -> Option<(usize, String)> {
+        // Check front matter first
+        if let Some(fm_title) = FrontMatterUtils::get_front_matter_field_value(content, &self.front_matter_title) {
+            // Front matter title counts as the first H1, return line 0
+            Some((0, fm_title.to_string()))
+        } else {
+            // Check Markdown content if no front matter title found
+            let structure = DocumentStructure::new(content);
+            for (idx, &line_num) in structure.heading_lines.iter().enumerate() {
+                if idx < structure.heading_levels.len() && structure.heading_levels[idx] == self.level {
+                    // Correct line index for heading text
+                    let (content_line, _marker_line) = if idx < structure.heading_regions.len() {
+                         structure.heading_regions[idx]
+                    } else {
+                         (line_num, line_num) // Fallback
+                    };
+                    let lines: Vec<&str> = content.lines().collect();
+                    if content_line > 0 && content_line <= lines.len() {
+                         let text = lines[content_line - 1].trim_start_matches('#').trim();
+                         return Some((line_num, text.to_string()));
+                    }
+                }
+            }
+            None // No H1 found
         }
     }
 }

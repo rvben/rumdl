@@ -6,7 +6,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 ///
 /// See [docs/md056.md](../../docs/md056.md) for full documentation, configuration, and examples.
 /// Ensures all rows in a table have the same number of cells
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MD056TableColumnCount;
 
 impl Default for MD056TableColumnCount {

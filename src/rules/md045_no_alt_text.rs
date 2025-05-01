@@ -2,12 +2,14 @@ use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
+use lazy_static::lazy_static;
 
 /// Rule MD045: Images should have alt text
 ///
 /// See [docs/md045.md](../../docs/md045.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when an image is missing alternate text (alt text).
+#[derive(Clone)]
 pub struct MD045NoAltText;
 
 impl Default for MD045NoAltText {

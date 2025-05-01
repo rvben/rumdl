@@ -4,6 +4,7 @@
 
 use std::ops::Range;
 use thiserror::Error;
+use dyn_clone::DynClone;
 
 // Import document structure
 use crate::utils::document_structure::DocumentStructure;
@@ -73,13 +74,12 @@ pub enum RuleCategory {
     Other,
 }
 
-pub trait Rule {
+// Define the Rule trait with DynClone
+pub trait Rule: DynClone {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn check(&self, content: &str) -> LintResult;
-    fn fix(&self, _content: &str) -> Result<String, LintError> {
-        Err(LintError::FixFailed("Fix not implemented".to_string()))
-    }
+    fn fix(&self, content: &str) -> Result<String, LintError>;
 
     /// Enhanced check method using document structure
     /// By default, calls the regular check method if not overridden
@@ -103,11 +103,16 @@ pub trait Rule {
         None
     }
 
-    /// Returns the rule's default config as a TOML table, or None if not configurable
+    /// Returns the rule name and default config table if the rule has config.
+    /// If a rule implements this, it MUST be defined on the `impl Rule for ...` block,
+    /// not just the inherent impl.
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         None
     }
 }
+
+// Implement the cloning logic for the Rule trait object
+dyn_clone::clone_trait_object!(Rule);
 
 /// Extension trait to add downcasting capabilities to Rule
 pub trait RuleExt {

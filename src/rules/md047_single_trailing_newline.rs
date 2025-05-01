@@ -6,7 +6,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 ///
 /// See [docs/md047.md](../../docs/md047.md) for full documentation, configuration, and examples.
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MD047SingleTrailingNewline;
 
 impl Rule for MD047SingleTrailingNewline {

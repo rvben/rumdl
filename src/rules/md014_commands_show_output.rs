@@ -3,9 +3,8 @@
 //!
 //! See [docs/md014.md](../../docs/md014.md) for full documentation, configuration, and examples.
 
-use crate::utils::range_utils::LineIndex;
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -16,7 +15,7 @@ lazy_static! {
         Regex::new(r"^(?i)(bash|sh|shell|console|terminal)").unwrap();
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct MD014CommandsShowOutput {
     pub show_output: bool,
 }

@@ -57,7 +57,7 @@ use crate::HeadingStyle;
 /// by creating gaps in the document structure. Consistent heading increments create a proper
 /// hierarchical outline essential for well-structured documents.
 ///
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MD001HeadingIncrement;
 
 impl Rule for MD001HeadingIncrement {

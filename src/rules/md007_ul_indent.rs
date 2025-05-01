@@ -10,7 +10,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MD007ULIndent {
     pub indent: usize,
 }

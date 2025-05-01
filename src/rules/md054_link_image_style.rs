@@ -8,6 +8,7 @@ use crate::utils::document_structure::DocumentStructure;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
+use serde::{Serialize, Deserialize};
 
 lazy_static! {
     // Updated regex patterns that work with Unicode characters
@@ -65,7 +66,17 @@ lazy_static! {
 /// styles have different advantages (e.g., inline links are self-contained, reference links
 /// keep the content cleaner), but mixing styles can create confusion.
 ///
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Clone)]
+pub enum LinkImageStyle {
+    Autolink,
+    Inline,
+    UrlInline,
+    Shortcut,
+    Collapsed,
+    Full,
+}
+
+#[derive(Clone)]
 pub struct MD054LinkImageStyle {
     pub autolink: bool,
     pub collapsed: bool,

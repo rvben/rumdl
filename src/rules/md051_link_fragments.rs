@@ -1,6 +1,5 @@
-use crate::utils::document_structure::DocumentStructure;
-
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::document_structure::DocumentStructure;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -33,6 +32,7 @@ lazy_static! {
 ///
 /// This rule is triggered when a link fragment (the part after #) doesn't exist in the document.
 /// This only applies to internal document links, not to external URLs.
+#[derive(Clone)]
 pub struct MD051LinkFragments;
 
 impl Default for MD051LinkFragments {

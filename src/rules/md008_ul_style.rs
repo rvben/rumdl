@@ -29,7 +29,7 @@ pub enum StyleMode {
 /// See [docs/md008.md](../../docs/md008.md) for full documentation, configuration, and examples.
 ///
 /// This rule enforces a specific marker character (* or - or +) for unordered lists
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MD008ULStyle {
     pub style_mode: StyleMode,
 }

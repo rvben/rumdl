@@ -8,7 +8,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct MD024NoDuplicateHeading {
     pub allow_different_nesting: bool,
     pub siblings_only: bool,

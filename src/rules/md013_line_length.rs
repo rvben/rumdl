@@ -13,7 +13,7 @@ lazy_static! {
     static ref LINK_REF_PATTERN: Regex = Regex::new(r"^\s*\[.*?\]:\s*https?://\S+\s*$").unwrap();
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct MD013LineLength {
     pub line_length: usize,
     pub code_blocks: bool,
@@ -121,30 +121,49 @@ impl Rule for MD013LineLength {
 
     fn check(&self, content: &str) -> LintResult {
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
         let structure = DocumentStructure::new(content);
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Create a quick lookup set for heading lines
+        let heading_lines_set: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
+        // Create a quick lookup for setext headings (where start_line != end_line in regions)
+        let setext_lines_set: std::collections::HashSet<usize> = structure.heading_regions.iter()
+            .filter(|(start, end)| start != end)
+            .flat_map(|(start, end)| (*start..=*end).collect::<Vec<usize>>())
+            .collect();
 
         for (line_num, &line) in lines.iter().enumerate() {
+            let line_number = line_num + 1; // 1-based line number
+
             // Skip setext underline lines (=== or ---)
             if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
                 continue;
             }
-            if line.len() > self.line_length {
+
+            // Use the precomputed setext check
+            let effective_length = if self.strict && setext_lines_set.contains(&line_number) {
+                line.trim_end().len() // Strict mode for setext headings
+            } else {
+                line.len() // Normal length check
+            };
+
+            if effective_length > self.line_length {
                 // Check if line should be skipped based on configuration
-                let skip = (!self.code_blocks && structure.is_in_code_block(line_num + 1))
+                let is_heading = heading_lines_set.contains(&line_number); // Use the set
+                let skip = (!self.code_blocks && structure.is_in_code_block(line_number))
                     || (!self.tables && Self::is_in_table(&lines, line_num))
-                    || (!self.headings && structure.heading_lines.contains(&(line_num + 1)))
+                    || (!self.headings && is_heading) // Use the variable
                     || self.should_ignore_line(line, &lines, line_num, &structure);
 
                 if !skip {
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name()), // Restore Option<&str>
                         message: format!(
                             "Line length {} exceeds {} characters",
-                            line.len(),
+                            effective_length,
                             self.line_length
                         ),
-                        line: line_num + 1,
+                        line: line_number,
                         column: self.line_length + 1,
                         severity: Severity::Warning,
                         fix: None, // Line wrapping requires manual intervention
@@ -152,8 +171,7 @@ impl Rule for MD013LineLength {
                 }
             }
         }
-
-        Ok(warnings)
+        Ok(warnings) // Restore Ok() wrapper
     }
 
     fn fix(&self, content: &str) -> Result<String, LintError> {
@@ -173,7 +191,7 @@ impl Rule for MD013LineLength {
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
         map.insert(
-            "line_length".to_string(),
+            "line-length".to_string(),
             toml::Value::Integer(self.line_length as i64),
         );
         map.insert(

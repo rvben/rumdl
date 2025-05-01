@@ -2,23 +2,150 @@ use rumdl::rule::Rule;
 use rumdl::rules::{md004_unordered_list_style::UnorderedListStyle, MD004UnorderedListStyle};
 
 #[test]
-fn test_md004_consistent_valid() {
-    let rule = MD004UnorderedListStyle::default();
-    let content = "* Item 1\n* Item 2\n  * Nested 1\n  * Nested 2\n* Item 3\n";
-    let result = rule.check(content).unwrap();
-    assert!(result.is_empty());
+fn test_check_consistent_valid() {
+    let content = "* Item 1\n* Item 2\n  * Nested item";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let warnings = rule.check(content).unwrap();
+    assert!(warnings.is_empty());
 }
 
 #[test]
-fn test_md004_consistent_invalid() {
-    let rule = MD004UnorderedListStyle::default();
-    let content = "* Item 1\n+ Item 2\n  - Nested 1\n  * Nested 2\n- Item 3\n";
-    let result = rule.check(content).unwrap();
-    // The most common marker is '*', so all others are flagged
-    assert_eq!(result.len(), 3); // + Item 2, - Nested 1, - Item 3
-    let mut flagged_lines: Vec<_> = result.iter().map(|w| w.line).collect();
-    flagged_lines.sort();
-    assert_eq!(flagged_lines, vec![2, 3, 5]);
+fn test_check_consistent_invalid() {
+    let content = "* Item 1\n- Item 2\n  + Nested item";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let warnings = rule.check(content).unwrap();
+    assert_eq!(warnings.len(), 2);
+}
+
+#[test]
+fn test_check_specific_style_valid() {
+    let content = "- Item 1\n- Item 2";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+    let warnings = rule.check(content).unwrap();
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn test_check_specific_style_invalid() {
+    let content = "* Item 1\n- Item 2";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+    let warnings = rule.check(content).unwrap();
+    assert_eq!(warnings.len(), 1);
+}
+
+#[test]
+fn test_fix_consistent() {
+    let content = "* Item 1\n- Item 2\n+ Item 3";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "* Item 1\n* Item 2\n* Item 3\n");
+}
+
+#[test]
+fn test_fix_specific_style() {
+    let content = "* Item 1\n- Item 2\n+ Item 3";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "* Item 1\n* Item 2\n* Item 3\n");
+}
+
+#[test]
+fn test_fix_with_indentation() {
+    let content = "  * Item 1\n    - Item 2";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "  * Item 1\n    * Item 2\n");
+}
+
+#[test]
+fn test_check_skip_code_blocks() {
+    let content = "```\n* Item 1\n- Item 2\n```\n* Item 3";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let warnings = rule.check(content).unwrap();
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn test_check_skip_front_matter() {
+    let content = "---\ntitle: Test\n---\n* Item 1\n- Item 2";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let warnings = rule.check(content).unwrap();
+    assert_eq!(warnings.len(), 1);
+}
+
+#[test]
+fn test_fix_skip_code_blocks() {
+    let content = "```\n* Item 1\n- Item 2\n```\n* Item 3\n- Item 4";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "```\n* Item 1\n- Item 2\n```\n* Item 3\n* Item 4\n");
+}
+
+#[test]
+fn test_fix_skip_front_matter() {
+    let content = "---\ntitle: Test\n---\n* Item 1\n- Item 2";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "---\ntitle: Test\n---\n* Item 1\n* Item 2\n");
+}
+
+#[test]
+fn test_check_mixed_indentation() {
+    let content = "* Item 1\n  - Sub Item 1\n* Item 2";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let warnings = rule.check(content).unwrap();
+    // Expect 1 warning because the simple consistent logic flags the nested item
+    assert_eq!(warnings.len(), 1, "Should flag nested inconsistent marker with simple consistent logic");
+    assert_eq!(warnings[0].line, 2);
+    assert!(warnings[0].message.contains("marker '-' does not match expected style '*'"));
+}
+
+#[test]
+fn test_check_consistent_first_marker_plus() {
+    let content = "+ Item 1\n* Item 2\n- Item 3";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let warnings = rule.check(content).unwrap();
+    assert_eq!(warnings.len(), 2, "Should flag * and - when + is first");
+}
+
+#[test]
+fn test_check_consistent_first_marker_dash() {
+    let content = "- Item 1\n* Item 2\n+ Item 3";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let warnings = rule.check(content).unwrap();
+    assert_eq!(warnings.len(), 2, "Should flag * and + when - is first");
+}
+
+#[test]
+fn test_fix_consistent_first_marker_plus() {
+    let content = "+ Item 1\n* Item 2\n- Item 3";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "+ Item 1\n+ Item 2\n+ Item 3\n", "Should fix to + style");
+}
+
+#[test]
+fn test_fix_consistent_first_marker_dash() {
+    let content = "- Item 1\n* Item 2\n+ Item 3";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let fixed = rule.fix(content).unwrap();
+    assert_eq!(fixed, "- Item 1\n- Item 2\n- Item 3\n", "Should fix to - style");
+}
+
+#[test]
+fn test_empty_content() {
+    let content = "";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let warnings = rule.check(content).unwrap();
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn test_no_list_items() {
+    let content = "# Heading\nSome text";
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let warnings = rule.check(content).unwrap();
+    assert!(warnings.is_empty());
 }
 
 #[test]
@@ -62,7 +189,7 @@ fn test_md004_dash_style() {
 
 #[test]
 fn test_md004_deeply_nested() {
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let content =
         "* Level 1\n  + Level 2\n    - Level 3\n      + Level 4\n  * Back to 2\n* Level 1\n";
     let mut result = rule.check(content).unwrap();
@@ -91,7 +218,7 @@ fn test_md004_deeply_nested() {
 
 #[test]
 fn test_md004_mixed_content() {
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let content =
         "# Heading\n\n* Item 1\n  Some text\n  + Nested with text\n    More text\n* Item 2\n";
     let result = rule.check(content).unwrap();
@@ -106,7 +233,7 @@ fn test_md004_mixed_content() {
 
 #[test]
 fn test_md004_empty_content() {
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let content = "";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
@@ -116,7 +243,7 @@ fn test_md004_empty_content() {
 
 #[test]
 fn test_md004_no_lists() {
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let content = "# Heading\n\nSome text\nMore text";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
@@ -126,7 +253,7 @@ fn test_md004_no_lists() {
 
 #[test]
 fn test_md004_code_blocks() {
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let content = "* Item 1\n```\n* Not a list\n+ Also not a list\n```\n* Item 2\n";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
@@ -139,7 +266,7 @@ fn test_md004_code_blocks() {
 
 #[test]
 fn test_md004_blockquotes() {
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let content = "* Item 1\n> * Quoted item\n> + Another quoted item\n* Item 2\n";
     let result = rule.check(content).unwrap();
     assert!(result.is_empty());
@@ -152,7 +279,7 @@ fn test_md004_blockquotes() {
 
 #[test]
 fn test_md004_list_continuations() {
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let content = "* Item 1\n  Continuation 1\n  + Nested item\n    Continuation 2\n* Item 2\n";
     let result = rule.check(content).unwrap();
     // All unordered list items must match the first marker ('*')
@@ -167,7 +294,7 @@ fn test_md004_list_continuations() {
 
 #[test]
 fn test_md004_mixed_ordered_unordered() {
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let content =
         "1. Ordered item\n   * Unordered sub-item\n   + Another sub-item\n2. Ordered item\n";
     let result = rule.check(content).unwrap();
@@ -183,7 +310,7 @@ fn test_md004_mixed_ordered_unordered() {
 fn test_complex_list_patterns() {
     // Test with different list marker styles in different levels
     let content = "* Level 1 item 1\n  - Level 2 item 1\n    + Level 3 item 1\n  - Level 2 item 2\n* Level 1 item 2";
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(content).unwrap();
     // All unordered list items must match the first marker ('*')
     assert_eq!(result.len(), 3); // - Level 2 item 1, + Level 3 item 1, - Level 2 item 2
@@ -202,21 +329,21 @@ fn test_lists_in_code_blocks() {
     // Test lists inside code blocks (should be ignored)
     let content = "* Valid list item\n\n```\n* This is in a code block\n- Also in code block\n```\n\n* Another valid item";
 
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0); // No warnings, code blocks ignored
 
     // Ensure fenced code blocks with language specifiers work too
     let content = "* Valid list item\n\n```markdown\n* This is in a code block\n- Also in code block\n```\n\n* Another valid item";
 
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0);
 }
 
 #[test]
 fn test_nested_list_complexity() {
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let content = "* Item 1\n  - Item 2\n    + Item 3\n  - Item 5\n* Item 6\n";
     let result = rule.check(content).unwrap();
     // All unordered list items must match the first marker ('*')
@@ -236,7 +363,7 @@ fn test_indentation_handling() {
     // Test different indentation styles
     let content = "* Level 1\n    * Indented with 4 spaces\n  * Indented with 2 spaces";
 
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0); // Should handle different indentation levels
 
@@ -244,7 +371,7 @@ fn test_indentation_handling() {
     let content =
         "* Actual list item\nText with * asterisk that's not a list\n  * Indented list item";
 
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 0); // Asterisk in middle of line isn't a list marker
 }
@@ -254,7 +381,7 @@ fn test_fix_list_markers() {
     // Test that fix correctly standardizes list markers
     let content = "* First item\n- Second item\n+ Third item";
 
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let fixed = rule.fix(content).unwrap();
     assert_eq!(fixed, "* First item\n* Second item\n* Third item\n");
 
@@ -315,7 +442,7 @@ fn test_performance_md004() {
 
     // Measure performance
     let start = std::time::Instant::now();
-    let rule = MD004UnorderedListStyle::default();
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&content).unwrap();
     let _check_duration = start.elapsed();
 

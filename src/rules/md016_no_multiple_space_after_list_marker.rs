@@ -7,7 +7,7 @@ use crate::utils::element_cache::ListMarkerType;
 use crate::utils::range_utils::LineIndex;
 use toml;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct MD016NoMultipleSpaceAfterListMarker {
     pub allow_multiple_spaces: bool,
 }

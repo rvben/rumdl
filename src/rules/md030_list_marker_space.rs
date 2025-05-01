@@ -21,7 +21,7 @@ lazy_static! {
     static ref CODE_BLOCK_REGEX: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct MD030ListMarkerSpace {
     ul_single: usize,
     ul_multi: usize,

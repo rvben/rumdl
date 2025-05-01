@@ -25,7 +25,8 @@ lazy_static! {
     static ref SETEXT_UNDERLINE_RE: Regex = Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
 }
 
-#[derive(Debug, Clone)]
+/// Rule MD026: Trailing punctuation in heading
+#[derive(Clone)]
 pub struct MD026NoTrailingPunctuation {
     punctuation: String,
 }

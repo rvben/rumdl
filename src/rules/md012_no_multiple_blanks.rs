@@ -7,7 +7,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 ///
 /// See [docs/md012.md](../../docs/md012.md) for full documentation, configuration, and examples.
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MD012NoMultipleBlanks {
     pub maximum: usize,
 }

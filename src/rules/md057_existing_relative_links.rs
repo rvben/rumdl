@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use toml;
+use url::Url;
 
 // Thread-local cache for file existence checks to avoid redundant filesystem operations
 thread_local! {
@@ -66,11 +67,8 @@ lazy_static! {
     static ref CURRENT_DIR: PathBuf = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 }
 
-/// Rule MD057: Relative links should point to existing files
-///
-/// This rule checks if relative links in Markdown files point to files that actually exist
-/// in the file system. It helps identify broken links to other files.
-#[derive(Debug, Clone)]
+/// Rule MD057: Existing relative links should point to valid files or directories.
+#[derive(Clone)]
 pub struct MD057ExistingRelativeLinks {
     /// Base directory for resolving relative links
     base_path: RefCell<Option<PathBuf>>,
