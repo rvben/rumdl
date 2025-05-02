@@ -47,7 +47,7 @@ indicatif = "0.17.11"
 
 log = "0.4.27"
 pretty_assertions = "1.4"
-markdown = "1.0.0-alpha.23"
+markdown = "1.0.0"
 config = "0.15"
 regex = "1.11.1"
 toml_edit = "0.22"

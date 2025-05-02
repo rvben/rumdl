@@ -5,6 +5,7 @@ pub mod rule;
 pub mod rules;
 pub mod utils;
 pub mod markdownlint_config;
+pub mod lint_context;
 
 #[cfg(feature = "python")]
 pub mod python;
@@ -15,6 +16,7 @@ pub use rules::*;
 use crate::rule::{LintResult, Rule};
 use crate::utils::document_structure::DocumentStructure;
 use std::time::Instant;
+pub use crate::lint_context::LintContext;
 
 /// Lint a file against the given rules
 /// Assumes the provided `rules` vector contains the final, 
@@ -25,6 +27,10 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
 
     // Parse DocumentStructure once
     let structure = DocumentStructure::new(content);
+
+    // Parse LintContext once (migration step)
+    let lint_ctx = crate::lint_context::LintContext::new(content);
+    // TODO: In the next migration step, rules will use &LintContext instead of &str
 
     for rule in rules {
         let _rule_start = Instant::now();
