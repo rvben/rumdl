@@ -485,6 +485,22 @@ impl Rule for MD003HeadingStyle {
         );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD003", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        let style = match style.as_str() {
+            "atx" => HeadingStyle::Atx,
+            "atx_closed" => HeadingStyle::AtxClosed,
+            "setext" => HeadingStyle::Setext1, // Assume Setext1 for configuration
+            "consistent" => HeadingStyle::Consistent,
+            _ => HeadingStyle::Consistent,
+        };
+        Box::new(MD003HeadingStyle::new(style))
+    }
 }
 
 #[cfg(test)]

@@ -149,9 +149,14 @@ impl Rule for MD041FirstLineHeading {
         self
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
-        let level = crate::config::get_rule_config_value::<usize>(config, "MD041", "level").unwrap_or(1);
-        let front_matter_title = crate::config::get_rule_config_value::<bool>(config, "MD041", "front_matter_title").unwrap_or(true);
-        Box::new(MD041FirstLineHeading::new(level, front_matter_title))
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let level = crate::config::get_rule_config_value::<u32>(config, "MD041", "level").unwrap_or(1);
+        let front_matter_title = crate::config::get_rule_config_value::<String>(config, "MD041", "front_matter_title").unwrap_or_else(|| "title".to_string());
+        let level_usize = level as usize;
+        let use_front_matter = !front_matter_title.is_empty();
+        Box::new(MD041FirstLineHeading::new(level_usize, use_front_matter))
     }
 }

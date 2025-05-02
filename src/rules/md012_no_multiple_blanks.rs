@@ -235,7 +235,10 @@ impl Rule for MD012NoMultipleBlanks {
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
         let maximum = crate::config::get_rule_config_value::<usize>(config, "MD012", "maximum").unwrap_or(1);
         Box::new(MD012NoMultipleBlanks::new(maximum))
     }

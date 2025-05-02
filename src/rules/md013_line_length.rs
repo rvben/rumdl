@@ -204,7 +204,10 @@ impl Rule for MD013LineLength {
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
         let line_length = crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length").unwrap_or(80);
         let code_blocks = crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks").unwrap_or(true);
         let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables").unwrap_or(false);

@@ -119,4 +119,19 @@ impl Rule for MD048CodeFenceStyle {
         map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD048", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        let style = match style.as_str() {
+            "backtick" => CodeFenceStyle::Backtick,
+            "tilde" => CodeFenceStyle::Tilde,
+            "consistent" => CodeFenceStyle::Consistent,
+            _ => CodeFenceStyle::Consistent,
+        };
+        Box::new(MD048CodeFenceStyle::new(style))
+    }
 }

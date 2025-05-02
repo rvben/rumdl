@@ -220,6 +220,13 @@ impl Rule for MD038NoSpaceInCode {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD038NoSpaceInCode::default())
+    }
 }
 
 impl DocumentStructureExtensions for MD038NoSpaceInCode {

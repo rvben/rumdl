@@ -296,16 +296,30 @@ impl Rule for MD004UnorderedListStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert(
-            "style".to_string(),
-            toml::Value::String(match self.style {
-                UnorderedListStyle::Asterisk => "asterisk".to_string(),
-                UnorderedListStyle::Plus => "plus".to_string(),
-                UnorderedListStyle::Dash => "dash".to_string(),
-                UnorderedListStyle::Consistent => "consistent".to_string(),
-            }),
-        );
+        let style_str = match self.style {
+            UnorderedListStyle::Asterisk => "asterisk",
+            UnorderedListStyle::Plus => "plus",
+            UnorderedListStyle::Dash => "dash",
+            UnorderedListStyle::Consistent => "consistent",
+        };
+        map.insert("style".to_string(), toml::Value::String(style_str.to_string()));
         Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD004", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        let style = match style.as_str() {
+            "dash" => UnorderedListStyle::Dash,
+            "asterisk" => UnorderedListStyle::Asterisk,
+            "plus" => UnorderedListStyle::Plus,
+            "consistent" => UnorderedListStyle::Consistent,
+            _ => UnorderedListStyle::Consistent,
+        };
+        Box::new(MD004UnorderedListStyle::new(style))
     }
 }
 

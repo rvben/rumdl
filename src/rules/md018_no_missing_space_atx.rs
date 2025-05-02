@@ -156,6 +156,13 @@ impl Rule for MD018NoMissingSpaceAtx {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD018NoMissingSpaceAtx::new())
+    }
 }
 
 impl DocumentStructureExtensions for MD018NoMissingSpaceAtx {

@@ -330,6 +330,14 @@ impl Rule for MD002FirstHeadingH1 {
         map.insert("level".to_string(), toml::Value::Integer(self.level as i64));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let level = crate::config::get_rule_config_value::<u32>(config, "MD002", "level").unwrap_or(1);
+        Box::new(MD002FirstHeadingH1::new(level))
+    }
 }
 
 impl DocumentStructureExtensions for MD002FirstHeadingH1 {

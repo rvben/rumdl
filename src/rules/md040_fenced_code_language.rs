@@ -204,6 +204,13 @@ impl Rule for MD040FencedCodeLanguage {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD040FencedCodeLanguage)
+    }
 }
 
 impl DocumentStructureExtensions for MD040FencedCodeLanguage {

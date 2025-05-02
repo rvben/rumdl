@@ -209,7 +209,10 @@ impl Rule for MD031BlanksAroundFences {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule> {
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
         Box::new(MD031BlanksAroundFences)
     }
 }

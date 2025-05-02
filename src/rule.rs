@@ -74,7 +74,7 @@ pub enum RuleCategory {
     Other,
 }
 
-// Define the Rule trait with DynClone
+/// Remove marker /// TRAIT_MARKER_V1
 pub trait Rule: DynClone {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
@@ -115,7 +115,7 @@ pub trait Rule: DynClone {
     where
         Self: Sized,
     {
-        panic!("from_config not implemented for this rule");
+        panic!("from_config not implemented for rule: {}", std::any::type_name::<Self>());
     }
 }
 

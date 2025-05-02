@@ -198,11 +198,16 @@ impl Rule for MD007ULIndent {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert(
-            "indent".to_string(),
-            toml::Value::Integer(self.indent as i64),
-        );
+        map.insert("indent".to_string(), toml::Value::Integer(self.indent as i64));
         Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let indent = crate::config::get_rule_config_value::<usize>(config, "MD007", "indent").unwrap_or(2);
+        Box::new(MD007ULIndent::new(indent))
     }
 }
 

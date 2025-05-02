@@ -171,4 +171,19 @@ impl Rule for MD050StrongStyle {
         map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD050", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        let style = match style.as_str() {
+            "asterisk" => StrongStyle::Asterisk,
+            "underscore" => StrongStyle::Underscore,
+            "consistent" => StrongStyle::Consistent,
+            _ => StrongStyle::Consistent,
+        };
+        Box::new(MD050StrongStyle::new(style))
+    }
 }

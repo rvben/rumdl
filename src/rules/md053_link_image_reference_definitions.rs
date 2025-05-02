@@ -32,6 +32,19 @@ lazy_static! {
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum DefinitionStyle {
+    Consistent,
+    Alphabetical,
+    Length,
+}
+
+impl Default for DefinitionStyle {
+    fn default() -> Self {
+        DefinitionStyle::Consistent
+    }
+}
+
 /// Rule MD053: Link and image reference definitions should be used
 ///
 /// See [docs/md053.md](../../docs/md053.md) for full documentation, configuration, and examples.
@@ -86,18 +99,13 @@ lazy_static! {
 /// the removed definitions.
 #[derive(Clone, Default)]
 pub struct MD053LinkImageReferenceDefinitions {
-    ignored_definitions: HashSet<String>,
+    style: DefinitionStyle,
 }
 
 impl MD053LinkImageReferenceDefinitions {
     /// Create a new instance of the MD053 rule
-    pub fn new(ignored_definitions: Vec<String>) -> Self {
-        Self {
-            ignored_definitions: ignored_definitions
-                .into_iter()
-                .map(|s| s.to_lowercase())
-                .collect(),
-        }
+    pub fn new(style: DefinitionStyle) -> Self {
+        Self { style }
     }
 
     /// Unescape a reference string by removing backslashes before special characters.
@@ -247,10 +255,6 @@ impl MD053LinkImageReferenceDefinitions {
     ) -> Vec<(String, usize, usize)> {
         let mut unused = Vec::new();
         for (id, ranges) in definitions {
-            // Ignore if in ignored_definitions
-            if self.ignored_definitions.contains(id) {
-                continue;
-            }
             // If this id is not used anywhere, all its ranges are unused
             if !usages.contains(id) {
                 for (start, end) in ranges {
@@ -376,8 +380,18 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         self
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
-        let ignored_definitions = crate::config::get_rule_config_value::<Vec<String>>(config, "MD053", "ignored_definitions").unwrap_or_default();
-        Box::new(MD053LinkImageReferenceDefinitions::new(ignored_definitions))
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD053", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        let style = match style.as_str() {
+            "consistent" => DefinitionStyle::Consistent,
+            "alphabetical" => DefinitionStyle::Alphabetical,
+            "length" => DefinitionStyle::Length,
+            _ => DefinitionStyle::Consistent,
+        };
+        Box::new(MD053LinkImageReferenceDefinitions::new(style))
     }
 }

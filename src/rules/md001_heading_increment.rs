@@ -295,6 +295,13 @@ impl Rule for MD001HeadingIncrement {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+        fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD001HeadingIncrement)
+    }
 }
 
 impl DocumentStructureExtensions for MD001HeadingIncrement {

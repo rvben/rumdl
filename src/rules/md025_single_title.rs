@@ -254,10 +254,13 @@ impl Rule for MD025SingleTitle {
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
-        let level = crate::config::get_rule_config_value::<usize>(config, "MD025", "level").unwrap_or(1);
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let level = crate::config::get_rule_config_value::<u32>(config, "MD025", "level").unwrap_or(1);
         let front_matter_title = crate::config::get_rule_config_value::<String>(config, "MD025", "front_matter_title").unwrap_or_else(|| "title".to_string());
-        Box::new(MD025SingleTitle::new(level, &front_matter_title))
+        Box::new(MD025SingleTitle::new(level as usize, &front_matter_title))
     }
 }
 

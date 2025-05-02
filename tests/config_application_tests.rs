@@ -94,7 +94,7 @@ fn apply_rule_configs(rules_in: &Vec<Box<dyn Rule>>, config: &Config) -> Vec<Box
 #[test]
 fn test_apply_rule_configs() {
     // Create test rules using all_rules()
-    let initial_rules = rumdl::rules::all_rules();
+    let initial_rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
 
     // Create a test config
     let config = create_test_config();
@@ -152,7 +152,7 @@ fn test_config_priority() {
     // Test that rule-specific configs override defaults
 
     // Create test rules with defaults using all_rules()
-    let initial_rules = rumdl::rules::all_rules();
+    let initial_rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
 
     // Create config with different line_length
     let mut config = create_test_config(); // line_length: 120
@@ -207,7 +207,7 @@ fn test_partial_rule_config() {
     // Test that partial configurations only override specified fields
 
     // Create rules using all_rules()
-    let initial_rules = rumdl::rules::all_rules();
+    let initial_rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
 
     // Create config with only line_length specified
     let mut rules_map = BTreeMap::new();
@@ -309,7 +309,7 @@ This line exceeds 20 characters.
 "#;
 
     // Get all rules and apply the config using the LOCAL helper
-    let initial_rules_1 = rumdl::rules::all_rules();
+    let initial_rules_1 = rumdl::rules::all_rules(&rumdl::config::Config::default());
     let configured_rules_1 = apply_rule_configs(&initial_rules_1, &config_1);
 
     // Run linting (MD001 should still run here as we haven't filtered)
@@ -351,7 +351,7 @@ line_length = 20 # Set a low limit to trigger it
     let config_2: Config = sourced_config_2.into(); // Convert
 
     // Get all rules and apply config
-    let initial_rules_2 = rumdl::rules::all_rules();
+    let initial_rules_2 = rumdl::rules::all_rules(&rumdl::config::Config::default());
     let configured_rules_2 = apply_rule_configs(&initial_rules_2, &config_2);
 
     // Run linting
@@ -411,7 +411,7 @@ line_length = 10
     let config: Config = sourced_config.into(); // Convert
 
     // Get all rules and apply config
-    let initial_rules = rumdl::rules::all_rules();
+    let initial_rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
     let configured_rules = apply_rule_configs(&initial_rules, &config);
 
     // Test with content that would normally trigger multiple rules

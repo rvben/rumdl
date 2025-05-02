@@ -44,10 +44,10 @@ fn test_markdownlint_config_cli_output_matches() {
     let toml_value: toml::Value = toml::from_str(&toml_str).expect("Failed to parse TOML output");
 
     // Check that the mapped values are present and correct at the top level
-    let md046 = toml_value.get("md046").expect("No [md046] table in output");
-    assert_eq!(md046["style"].as_str().unwrap(), "fenced");
-    let md004 = toml_value.get("md004").expect("No [md004] table in output");
-    assert_eq!(md004["style"].as_str().unwrap(), "dash");
+    let md046_table = toml_value.get("MD046").expect("No [MD046] table in output");
+    assert_eq!(md046_table["style"].as_str().unwrap(), "fenced");
+    let md004_table = toml_value.get("MD004").expect("No [MD004] table in output");
+    assert_eq!(md004_table["style"].as_str().unwrap(), "dash");
 }
 
 #[test]
@@ -88,10 +88,10 @@ line-length = 88
     let toml_value: toml::Value = toml::from_str(&toml_str).expect("Failed to parse TOML output");
 
     // Check that the mapped values are present and correct at the top level
-    let md046 = toml_value.get("md046").expect("No [md046] table in output");
-    assert_eq!(md046["style"].as_str().unwrap(), "fenced");
-    let md004 = toml_value.get("md004").expect("No [md004] table in output");
-    assert_eq!(md004["style"].as_str().unwrap(), "dash");
+    let md046_table = toml_value.get("MD046").expect("No [MD046] table in output");
+    assert_eq!(md046_table["style"].as_str().unwrap(), "fenced");
+    let md004_table = toml_value.get("MD004").expect("No [MD004] table in output");
+    assert_eq!(md004_table["style"].as_str().unwrap(), "dash");
 }
 
 #[test]

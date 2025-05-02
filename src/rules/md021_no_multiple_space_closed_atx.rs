@@ -210,6 +210,13 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD021NoMultipleSpaceClosedAtx::new())
+    }
 }
 
 impl DocumentStructureExtensions for MD021NoMultipleSpaceClosedAtx {

@@ -84,7 +84,9 @@ fn test_code_block_skipping() {
 fn test_explicitly_configured_style() {
     // When explicitly configured with a specific style,
     // it should enforce that style regardless of what's in the document
-    let rule = MD008ULStyle::new('-'); // Uses specific mode
+
+    // Use StyleMode::Specific to enforce the '-' style
+    let rule = MD008ULStyle::new(StyleMode::Specific("-".to_string()));
     let content = "* Item 1\n  * Item 2\n    * Item 3";
     let result = rule.check(content).unwrap();
     assert_eq!(result.len(), 3);
@@ -93,17 +95,21 @@ fn test_explicitly_configured_style() {
     let expected = "- Item 1\n  - Item 2\n    - Item 3";
     assert_eq!(fixed, expected);
 
-    // Explicitly test with StyleMode::Specific
-    let rule = MD008ULStyle::with_mode('*', StyleMode::Specific("*".to_string()));
-    let content = "- Item 1\n  - Item 2\n    - Item 3";
-    let result = rule.check(content).unwrap();
-    assert_eq!(result.len(), 3);
+    // Explicitly test with StyleMode::Specific - This seems redundant now, but we can keep it
+    // let rule = MD008ULStyle::with_mode('*', StyleMode::Specific("*".to_string())); // with_mode seems to have been removed or changed
+    // Recreate with ::new
+    let rule_star = MD008ULStyle::new(StyleMode::Specific("*".to_string()));
+    let content_dash = "- Item 1\n  - Item 2\n    - Item 3";
+    let result_star = rule_star.check(content_dash).unwrap();
+    assert_eq!(result_star.len(), 3);
 
     // Explicitly test with StyleMode::Consistent
-    let rule = MD008ULStyle::with_mode('*', StyleMode::Consistent);
-    let content = "- Item 1\n  - Item 2\n    - Item 3";
-    let result = rule.check(content).unwrap();
-    assert!(result.is_empty());
+    // let rule = MD008ULStyle::with_mode('*', StyleMode::Consistent); // with_mode seems to have been removed or changed
+    // Recreate with ::new
+    let rule_consistent = MD008ULStyle::new(StyleMode::Consistent);
+    let content_consistent = "- Item 1\n  - Item 2\n    - Item 3";
+    let result_consistent = rule_consistent.check(content_consistent).unwrap();
+    assert!(result_consistent.is_empty());
 }
 
 #[test]

@@ -286,6 +286,13 @@ impl Rule for MD006StartBullets {
         self
     }
 
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD006StartBullets)
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         None
     }

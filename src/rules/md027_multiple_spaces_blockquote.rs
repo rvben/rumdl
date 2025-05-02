@@ -73,4 +73,11 @@ impl Rule for MD027MultipleSpacesBlockquote {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD027MultipleSpacesBlockquote::default())
+    }
 }

@@ -197,8 +197,12 @@ impl Rule for MD035HRStyle {
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
-        let style = crate::config::get_rule_config_value::<String>(config, "MD035", "style").unwrap_or_else(|| "---".to_string());
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD035", "style")
+            .unwrap_or_else(|| "consistent".to_string());
         Box::new(MD035HRStyle::new(style))
     }
 }

@@ -196,7 +196,10 @@ impl Rule for MD024NoDuplicateHeading {
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
         let allow_different_nesting = crate::config::get_rule_config_value::<bool>(config, "MD024", "allow_different_nesting").unwrap_or(false);
         let siblings_only = crate::config::get_rule_config_value::<bool>(config, "MD024", "siblings_only").unwrap_or(false);
         Box::new(MD024NoDuplicateHeading::new(allow_different_nesting, siblings_only))

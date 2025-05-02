@@ -435,11 +435,29 @@ impl Rule for MD055TablePipeStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert(
-            "style".to_string(),
-            toml::Value::String("consistent".to_string()),
-        );
-        Some(("MD055".to_string(), toml::Value::Table(map)))
+        map.insert("style".to_string(), toml::Value::String(self.style.clone()));
+        Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD055", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        let valid_styles = [
+            "consistent",
+            "leading_and_trailing",
+            "no_leading_or_trailing",
+            "leading_only",
+            "trailing_only",
+        ];
+        let style = if valid_styles.contains(&style.as_str()) {
+            style
+        } else {
+            "consistent".to_string() // Default to consistent if invalid
+        };
+        Box::new(MD055TablePipeStyle::new(&style))
     }
 }
 

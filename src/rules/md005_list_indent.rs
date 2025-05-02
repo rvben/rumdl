@@ -739,6 +739,13 @@ impl Rule for MD005ListIndent {
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         None
     }
+
+        fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD005ListIndent)
+    }
 }
 
 impl DocumentStructureExtensions for MD005ListIndent {

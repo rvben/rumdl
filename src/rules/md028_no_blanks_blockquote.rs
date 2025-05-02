@@ -193,6 +193,13 @@ impl Rule for MD028NoBlanksBlockquote {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD028NoBlanksBlockquote)
+    }
 }
 
 impl DocumentStructureExtensions for MD028NoBlanksBlockquote {

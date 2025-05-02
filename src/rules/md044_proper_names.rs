@@ -310,4 +310,13 @@ impl Rule for MD044ProperNames {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let names = crate::config::get_rule_config_value::<Vec<String>>(config, "MD044", "names").unwrap_or_default();
+        let code_blocks_excluded = crate::config::get_rule_config_value::<bool>(config, "MD044", "code_blocks_excluded").unwrap_or(true);
+        Box::new(MD044ProperNames::new(names, code_blocks_excluded))
+    }
 }

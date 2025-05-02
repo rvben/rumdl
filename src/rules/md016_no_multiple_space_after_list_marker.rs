@@ -153,7 +153,10 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
         let allow_multiple_spaces = crate::config::get_rule_config_value::<bool>(config, "MD016", "allow_multiple_spaces").unwrap_or(false);
         Box::new(MD016NoMultipleSpaceAfterListMarker::with_allow_multiple_spaces(allow_multiple_spaces))
     }

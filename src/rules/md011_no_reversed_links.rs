@@ -124,4 +124,11 @@ impl Rule for MD011NoReversedLinks {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+        fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD011NoReversedLinks)
+    }
 }

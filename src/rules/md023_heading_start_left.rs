@@ -397,6 +397,13 @@ impl Rule for MD023HeadingStartLeft {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD023HeadingStartLeft)
+    }
 }
 
 impl DocumentStructureExtensions for MD023HeadingStartLeft {

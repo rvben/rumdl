@@ -24,6 +24,9 @@ use rumdl_config::validate_config_sourced;
 use rumdl_config::RuleRegistry;
 use rumdl_config::ConfigError;
 use serde::de::Error as SerdeDeError;
+use rumdl::config::Config;
+use rumdl::rules::DefinitionStyle;
+use rumdl::rules::MD058BlanksAroundTables;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -181,65 +184,8 @@ fn get_enabled_rules_from_checkargs(
     args: &CheckArgs,
     config: &rumdl_config::Config,
 ) -> Vec<Box<dyn Rule>> {
-    // 1. Initialize all available rules, using from_config for MD013, MD043, MD053
-    let mut all_rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD001HeadingIncrement),
-        Box::new(MD002FirstHeadingH1::default()),
-        Box::new(MD003HeadingStyle::default()),
-        Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
-        Box::new(MD005ListIndent),
-        Box::new(MD006StartBullets),
-        Box::new(MD007ULIndent::default()),
-        Box::new(MD008ULStyle::default()),
-        MD009TrailingSpaces::from_config(config),
-        Box::new(MD010NoHardTabs::default()),
-        Box::new(MD011NoReversedLinks {}),
-        MD012NoMultipleBlanks::from_config(config),
-        MD013LineLength::from_config(config),
-        MD015NoMissingSpaceAfterListMarker::from_config(config),
-        MD016NoMultipleSpaceAfterListMarker::from_config(config),
-        Box::new(MD018NoMissingSpaceAtx {}),
-        Box::new(MD019NoMultipleSpaceAtx {}),
-        Box::new(MD020NoMissingSpaceClosedAtx {}),
-        Box::new(MD021NoMultipleSpaceClosedAtx {}),
-        Box::new(MD022BlanksAroundHeadings::default()),
-        Box::new(MD023HeadingStartLeft {}),
-        MD024NoDuplicateHeading::from_config(config),
-        Box::new(MD025SingleTitle::default()),
-        Box::new(MD026NoTrailingPunctuation::default()),
-        Box::new(MD027MultipleSpacesBlockquote {}),
-        Box::new(MD028NoBlanksBlockquote {}),
-        Box::new(MD029OrderedListPrefix::default()),
-        Box::new(MD030ListMarkerSpace::default()),
-        Box::new(MD031BlanksAroundFences {}),
-        Box::new(MD032BlanksAroundLists {}),
-        Box::new(MD033NoInlineHtml::default()),
-        Box::new(MD034NoBareUrls {}),
-        MD035HRStyle::from_config(config),
-        Box::new(MD036NoEmphasisAsHeading {}),
-        Box::new(MD037NoSpaceInEmphasis),
-        Box::new(MD038NoSpaceInCode::default()),
-        Box::new(MD039NoSpaceInLinks),
-        Box::new(MD040FencedCodeLanguage {}),
-        MD041FirstLineHeading::from_config(config),
-        MD042NoEmptyLinks::from_config(config),
-        MD043RequiredHeadings::from_config(config),
-        Box::new(MD044ProperNames::new(Vec::new(), true)),
-        Box::new(MD045NoAltText::new()),
-        Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
-        Box::new(MD047SingleTrailingNewline),
-        Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
-        Box::new(MD049EmphasisStyle::default()),
-        Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
-        Box::new(MD051LinkFragments),
-        Box::new(MD052ReferenceLinkImages),
-        MD053LinkImageReferenceDefinitions::from_config(config),
-        MD054LinkImageStyle::from_config(config),
-        Box::new(MD055TablePipeStyle::default()),
-        Box::new(MD056TableColumnCount),
-        Box::new(MD057ExistingRelativeLinks::default()),
-        Box::new(MD058BlanksAroundTables),
-    ];
+    // 1. Initialize all available rules using from_config only
+    let mut all_rules: Vec<Box<dyn Rule>> = rumdl::rules::all_rules(config);
 
     // 2. Determine the final list of enabled rules based on precedence
     let final_rules: Vec<Box<dyn Rule>>;
@@ -641,13 +587,12 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
         Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
         Box::new(MD049EmphasisStyle::default()),
         Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
-        Box::new(MD051LinkFragments),
-        Box::new(MD052ReferenceLinkImages),
-        Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
+        Box::new(MD051LinkFragments::new()),
+        Box::new(MD052ReferenceLinkImages::new()),
+        Box::new(MD053LinkImageReferenceDefinitions::new(DefinitionStyle::default())),
         Box::new(MD054LinkImageStyle::default()),
         Box::new(MD055TablePipeStyle::default()),
         Box::new(MD056TableColumnCount),
-        Box::new(MD057ExistingRelativeLinks::default()),
         Box::new(MD058BlanksAroundTables),
     ];
     let mut rule_names: Vec<_> = all_rules.iter().map(|r| r.name().to_string()).collect();
@@ -728,10 +673,15 @@ fn format_toml_value(val: &toml::Value) -> String {
     }
 }
 
-fn main() {
-    eprintln!("[DEBUG: entered main()]");
-    let _timer = rumdl::profiling::ScopedTimer::new("main");
+fn list_rules(config: &Config) {
+    println!("Available rules:");
+    let rules = rumdl::rules::all_rules(config);
+    for rule in rules {
+        println!("  {} - {}", rule.name(), rule.description());
+    }
+}
 
+fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     // Set color override globally based on --color flag
@@ -892,13 +842,12 @@ build-backend = \"setuptools.build_meta\"
                     Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
                     Box::new(MD049EmphasisStyle::default()),
                     Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
-                    Box::new(MD051LinkFragments),
-                    Box::new(MD052ReferenceLinkImages),
-                    Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
+                    Box::new(MD051LinkFragments::new()),
+                    Box::new(MD052ReferenceLinkImages::new()),
+                    Box::new(MD053LinkImageReferenceDefinitions::new(DefinitionStyle::default())),
                     Box::new(MD054LinkImageStyle::default()),
                     Box::new(MD055TablePipeStyle::default()),
                     Box::new(MD056TableColumnCount),
-                    Box::new(MD057ExistingRelativeLinks::default()),
                     Box::new(MD058BlanksAroundTables),
                 ];
                 if let Some(rule_query) = rule {
@@ -933,7 +882,6 @@ build-backend = \"setuptools.build_meta\"
                         let sourced = match rumdl_config::SourcedConfig::load(cli.config.as_deref(), None) {
                             Ok(s) => s,
                             Err(e) => {
-                                eprintln!("[DEBUG: config get error branch]");
                                 eprintln!("{}: {}", "Config error".red().bold(), e);
                                 std::process::exit(1);
                             }
@@ -981,7 +929,7 @@ build-backend = \"setuptools.build_meta\"
                                 // Successfully handled 'get', exit the command processing
                                 return; 
                             } else {
-                                let all_rules = rumdl::rules::all_rules();
+                                let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
                                 if let Some(rule) = all_rules.iter().find(|r| r.name() == section_part) {
                                     if let Some((_, toml::Value::Table(table))) = rule.default_config_section() {
                                         if let Some(v) = table.get(&normalized_field) {
@@ -1005,7 +953,7 @@ build-backend = \"setuptools.build_meta\"
                 // This code now runs ONLY if `subcmd` is None
                 else {
                     // --- CONFIG VALIDATION --- (Duplicated from original position, needs to run for display)
-                    let all_rules_reg = rumdl::rules::all_rules(); // Rename to avoid conflict
+                    let all_rules_reg = rumdl::rules::all_rules(&rumdl_config::Config::default()); // Rename to avoid conflict
                     let registry_reg = rumdl_config::RuleRegistry::from_rules(&all_rules_reg);
                     let sourced_reg = if *defaults {
                         rumdl_config::SourcedConfig::default()
@@ -1013,7 +961,6 @@ build-backend = \"setuptools.build_meta\"
                         match rumdl_config::SourcedConfig::load(cli.config.as_deref(), None) {
                             Ok(s) => s,
                             Err(e) => {
-                                eprintln!("[DEBUG: config error branch]");
                                 eprintln!("{}: {}", "Config error".red().bold(), e);
                                 std::process::exit(1);
                             }
@@ -1037,7 +984,6 @@ build-backend = \"setuptools.build_meta\"
                          match rumdl_config::SourcedConfig::load(cli.config.as_deref(), None) {
                             Ok(s) => s,
                             Err(e) => {
-                                eprintln!("[DEBUG: config error branch]");
                                 eprintln!("{}: {}", "Config error".red().bold(), e);
                                 std::process::exit(1);
                             }
@@ -1099,6 +1045,8 @@ build-backend = \"setuptools.build_meta\"
     if let Err(e) = result {
         eprintln!("[rumdl panic handler] Uncaught panic: {:?}", e);
         std::process::exit(1);
+    } else {
+        Ok(())
     }
 }
 
@@ -1114,7 +1062,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>) {
     };
 
     // 2. Validate config (unknown keys/rules/options)
-    let all_rules = rumdl::rules::all_rules();
+    let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
     let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
     let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
     if !validation_warnings.is_empty() {
@@ -1380,4 +1328,30 @@ fn process_file(
     }
 
     (true, total_warnings, warnings_fixed, fixable_warnings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*; // Import items from outer scope
+    use rumdl::config::Config;
+
+    #[test]
+    fn test_list_rules_with_default_config() {
+        // Ensure list_rules works with a default config
+        let config = Config::default();
+        list_rules(&config);
+        // Basic check: ensure it doesn't panic. More robust checks could verify output.
+    }
+
+    // #[test]
+    // fn test_process_files_with_default_config() {
+    //     // Example test: Create a dummy file, process it, check results
+    //     // This requires more setup (temp files, etc.)
+    //     // For now, just ensures the function can be called with default config
+    //     let config = Config::default();
+    //     let files = vec!["README.md".to_string()]; // Assuming README.md exists
+    //     let fix = false;
+    //     let _result = process_files(&files, fix, &config);
+    //     // Add assertions based on expected outcome for README.md
+    // }
 }

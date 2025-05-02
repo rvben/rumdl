@@ -240,9 +240,15 @@ impl Rule for MD033NoInlineHtml {
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
-        let allowed = crate::config::get_rule_config_value::<Vec<String>>(config, "MD033", "allowed").unwrap_or_default();
-        Box::new(MD033NoInlineHtml::with_allowed(allowed))
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let allowed_vec = crate::config::get_rule_config_value::<Vec<String>>(config, "MD033", "allowed_elements")
+            .unwrap_or_default();
+        // Convert Vec to HashSet for the struct field
+        let allowed: HashSet<String> = allowed_vec.into_iter().map(|s| s.to_lowercase()).collect();
+        Box::new(MD033NoInlineHtml { allowed })
     }
 }
 

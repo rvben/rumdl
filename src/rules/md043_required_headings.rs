@@ -397,13 +397,11 @@ impl Rule for MD043RequiredHeadings {
         self
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
-        let mut headings = crate::config::get_rule_config_value::<Vec<String>>(config, "MD043", "headings").unwrap_or_default();
-        // Strip leading '#' and spaces from the configured headings to match the format of extracted headings
-        headings = headings
-            .iter()
-            .map(|h| h.trim_start_matches(['#', ' ']).to_string())
-            .collect();
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let headings = crate::config::get_rule_config_value::<Vec<String>>(config, "MD043", "headings").unwrap_or_else(|| vec![]);
         Box::new(MD043RequiredHeadings::new(headings))
     }
 }

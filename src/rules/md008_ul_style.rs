@@ -43,10 +43,8 @@ impl Default for MD008ULStyle {
 }
 
 impl MD008ULStyle {
-    pub fn new(style: char) -> Self {
-        Self {
-            style_mode: StyleMode::Specific(style.to_string()),
-        }
+    pub fn new(style_mode: StyleMode) -> Self {
+        Self { style_mode }
     }
 
     /// Create a new instance with specific style mode
@@ -365,6 +363,22 @@ impl Rule for MD008ULStyle {
         };
         map.insert("style".to_string(), toml::Value::String(style_str));
         Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD008", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        let style_mode = match style.as_str() {
+            "*" => StyleMode::Specific("*".to_string()),
+            "-" => StyleMode::Specific("-".to_string()),
+            "+" => StyleMode::Specific("+".to_string()),
+            "consistent" => StyleMode::Consistent,
+            _ => StyleMode::Consistent, // Default to Consistent if invalid
+        };
+        Box::new(MD008ULStyle::new(style_mode))
     }
 }
 

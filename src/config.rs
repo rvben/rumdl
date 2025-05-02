@@ -34,7 +34,12 @@ lazy_static! {
 
 /// Normalizes configuration keys (rule names, option names) to lowercase kebab-case.
 pub fn normalize_key(key: &str) -> String {
-    key.replace('_', "-").to_ascii_lowercase()
+    // If the key looks like a rule name (e.g., MD013), uppercase it
+    if key.len() == 5 && key.to_ascii_lowercase().starts_with("md") && key[2..].chars().all(|c| c.is_ascii_digit()) {
+        key.to_ascii_uppercase()
+    } else {
+        key.replace('_', "-").to_ascii_lowercase()
+    }
 }
 
 /// Represents a rule-specific configuration
@@ -210,7 +215,7 @@ pub fn get_rule_config_value<T: serde::de::DeserializeOwned>(
     key: &str,
 ) -> Option<T> {
     let norm_key = normalize_key(key);
-    let norm_rule_name = normalize_key(rule_name);
+    let norm_rule_name = rule_name.to_ascii_uppercase(); // Use uppercase for lookup
     config
         .rules
         .get(&norm_rule_name)
@@ -293,10 +298,10 @@ respect-gitignore = true
         let config: Config = sourced.into(); // Convert to plain config for assertions
 
         // Check global settings
-        assert_eq!(config.global.disable, vec!["md033".to_string()]);
+        assert_eq!(config.global.disable, vec!["MD033".to_string()]);
         assert_eq!(
             config.global.enable,
-            vec!["md001".to_string(), "md004".to_string()]
+            vec!["MD001".to_string(), "MD004".to_string()]
         );
         assert_eq!(config.global.include, vec!["docs/*.md".to_string()]);
         assert_eq!(config.global.exclude, vec!["node_modules".to_string()]);
@@ -343,11 +348,11 @@ line-length = 222
         fs::write(&config_path, config_content).unwrap();
         let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
         // DEBUG: Print all rule keys and their value keys
-        // eprintln!("[DEBUG] All rules loaded: {:?}", sourced.rules.keys().collect::<Vec<_>>());
+        eprintln!("[DEBUG] All rules loaded: {:?}", sourced.rules.keys().collect::<Vec<_>>());
         for (rule, cfg) in &sourced.rules {
-            // eprintln!("[DEBUG] Rule '{}' value keys: {:?}", rule, cfg.values.keys().collect::<Vec<_>>());
+            eprintln!("[DEBUG] Rule '{}' value keys: {:?}", rule, cfg.values.keys().collect::<Vec<_>>());
         }
-        let rule_cfg = sourced.rules.get("md013").expect("md013 rule config should exist");
+        let rule_cfg = sourced.rules.get("MD013").expect("MD013 rule config should exist");
         // Both keys should be normalized to 'line-length', with the last one winning
         let keys: Vec<_> = rule_cfg.values.keys().cloned().collect();
         assert_eq!(keys, vec!["line-length"]);
@@ -359,6 +364,77 @@ line-length = 222
         let v2 = get_rule_config_value::<usize>(&config, "MD013", "line-length");
         assert_eq!(v1, Some(222));
         assert_eq!(v2, Some(222));
+    }
+
+    #[test]
+    fn test_md013_section_case_insensitivity() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[md013]
+line-length = 101
+
+[Md013]
+line-length = 102
+
+[MD013]
+line-length = 103
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
+        let config: Config = sourced.clone().into();
+        // Only the last section should win, and be present
+        let rule_cfg = sourced.rules.get("MD013").expect("MD013 rule config should exist");
+        let keys: Vec<_> = rule_cfg.values.keys().cloned().collect();
+        assert_eq!(keys, vec!["line-length"]);
+        let val = &rule_cfg.values["line-length"].value;
+        assert_eq!(val.as_integer(), Some(103));
+        let v = get_rule_config_value::<usize>(&config, "MD013", "line-length");
+        assert_eq!(v, Some(103));
+    }
+
+    #[test]
+    fn test_md013_key_snake_and_kebab_case() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[MD013]
+line_length = 201
+line-length = 202
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
+        let config: Config = sourced.clone().into();
+        let rule_cfg = sourced.rules.get("MD013").expect("MD013 rule config should exist");
+        let keys: Vec<_> = rule_cfg.values.keys().cloned().collect();
+        assert_eq!(keys, vec!["line-length"]);
+        let val = &rule_cfg.values["line-length"].value;
+        assert_eq!(val.as_integer(), Some(202));
+        let v1 = get_rule_config_value::<usize>(&config, "MD013", "line_length");
+        let v2 = get_rule_config_value::<usize>(&config, "MD013", "line-length");
+        assert_eq!(v1, Some(202));
+        assert_eq!(v2, Some(202));
+    }
+
+    #[test]
+    fn test_unknown_rule_section_is_ignored() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[MD999]
+foo = 1
+bar = 2
+[MD013]
+line-length = 303
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
+        let config: Config = sourced.clone().into();
+        // MD999 should not be present
+        assert!(!sourced.rules.contains_key("MD999"));
+        // MD013 should be present and correct
+        let v = get_rule_config_value::<usize>(&config, "MD013", "line-length");
+        assert_eq!(v, Some(303));
     }
 }
 
@@ -536,19 +612,12 @@ impl SourcedConfig {
 
         // Merge rule configs
         for (rule_name, rule_fragment) in fragment.rules {
-            let is_md013_merge = rule_name == "md013";
-            if is_md013_merge { eprintln!("[DEBUG MERGE] Merging key '{}' for MD013", rule_name); }
-            let rule_entry = self.rules.entry(rule_name).or_default();
+            let norm_rule_name = rule_name.to_ascii_uppercase(); // Normalize to uppercase for case-insensitivity
+            let rule_entry = self.rules.entry(norm_rule_name).or_default();
             for (key, sourced_value_fragment) in rule_fragment.values {
-                if is_md013_merge { eprintln!("[DEBUG MERGE] Merging key '{}' for MD013", key); }
-                // Ensure the entry exists, defaulting its source to Default if created.
-                // The source will be updated by merge_override if the fragment has higher precedence.
                 let sv_entry = rule_entry.values.entry(key.clone())
                     .or_insert_with(|| SourcedValue::new(sourced_value_fragment.value.clone(), ConfigSource::Default));
-                
-                // Extract the file path from the fragment's override list (if available)
                 let file_from_fragment = sourced_value_fragment.overrides.first().and_then(|o| o.file.clone());
-
                 sv_entry.merge_override(
                     sourced_value_fragment.value,       // Use the value from the fragment
                     sourced_value_fragment.source,      // Use the source from the fragment
@@ -670,17 +739,14 @@ impl From<SourcedConfig> for Config {
     fn from(sourced: SourcedConfig) -> Self {
         let mut rules = BTreeMap::new();
         for (rule_name, sourced_rule_cfg) in sourced.rules {
-            // Ensure the rule_name used as the key is normalized
-            let normalized_rule_name = normalize_key(&rule_name); 
+            // Normalize rule name to uppercase for case-insensitive lookup
+            let normalized_rule_name = rule_name.to_ascii_uppercase();
             let mut values = BTreeMap::new();
             for (key, sourced_val) in sourced_rule_cfg.values {
-                // Use the final override value
-                values.insert(key, sourced_val.value); // Key here should already be normalized
+                values.insert(key, sourced_val.value);
             }
-            rules.insert(normalized_rule_name, RuleConfig { values }); // Insert using normalized name
+            rules.insert(normalized_rule_name, RuleConfig { values });
         }
-
-        // Convert SourcedGlobalConfig to GlobalConfig
         let global = GlobalConfig {
             enable: sourced.global.enable.value,
             disable: sourced.global.disable.value,
@@ -688,7 +754,6 @@ impl From<SourcedConfig> for Config {
             include: sourced.global.include.value,
             respect_gitignore: sourced.global.respect_gitignore.value,
         };
-
         Config {
             global,
             rules,
@@ -835,112 +900,163 @@ fn toml_value_type_matches(expected: &toml::Value, actual: &toml::Value) -> bool
 /// Parses pyproject.toml content and extracts the [tool.rumdl] section if present.
 fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfigFragment>, ConfigError> {
     let doc: toml::Value = toml::from_str(content).map_err(|e| {
-        // toml::de::Error does not expose line/col, so just include filename
         ConfigError::ParseError(format!("{}: Failed to parse TOML: {}", path, e))
     })?;
-    match doc.get("tool").and_then(|t| t.get("rumdl")) {
-        Some(rumdl_config) => {
-            let mut fragment = SourcedConfigFragment::default();
-            let source = ConfigSource::PyprojectToml;
-            let file = Some(path.to_string());
+    let mut fragment = SourcedConfigFragment::default();
+    let source = ConfigSource::PyprojectToml;
+    let file = Some(path.to_string());
 
-            if let Some(rumdl_table) = rumdl_config.as_table() {
-                // --- Extract global options --- 
-                if let Some(enable) = rumdl_table.get("enable") {
-                    if let Ok(values) = Vec::<String>::deserialize(enable.clone()) {
-                        // Normalize rule names in the list
-                        let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
-                        fragment.global.enable.push_override(normalized_values, source, file.clone(), None);
-                    }
+    // 1. Handle [tool.rumdl] as before
+    if let Some(rumdl_config) = doc.get("tool").and_then(|t| t.get("rumdl")) {
+        if let Some(rumdl_table) = rumdl_config.as_table() {
+            // --- Extract global options --- 
+            if let Some(enable) = rumdl_table.get("enable") {
+                if let Ok(values) = Vec::<String>::deserialize(enable.clone()) {
+                    // Normalize rule names in the list
+                    let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
+                    fragment.global.enable.push_override(normalized_values, source, file.clone(), None);
                 }
-                if let Some(disable) = rumdl_table.get("disable") {
-                    if let Ok(values) = Vec::<String>::deserialize(disable.clone()) {
-                        // Re-enable normalization 
-                        let normalized_values: Vec<String> = values.into_iter().map(|s| normalize_key(&s)).collect();
-                        fragment.global.disable.push_override(normalized_values, source, file.clone(), None);
-                    }
+            }
+            if let Some(disable) = rumdl_table.get("disable") {
+                if let Ok(values) = Vec::<String>::deserialize(disable.clone()) {
+                    // Re-enable normalization 
+                    let normalized_values: Vec<String> = values.into_iter().map(|s| normalize_key(&s)).collect();
+                    fragment.global.disable.push_override(normalized_values, source, file.clone(), None);
                 }
-                if let Some(include) = rumdl_table.get("include") {
-                    if let Ok(values) = Vec::<String>::deserialize(include.clone()) {
-                        fragment.global.include.push_override(values, source, file.clone(), None);
-                    }
+            }
+            if let Some(include) = rumdl_table.get("include") {
+                if let Ok(values) = Vec::<String>::deserialize(include.clone()) {
+                    fragment.global.include.push_override(values, source, file.clone(), None);
                 }
-                if let Some(exclude) = rumdl_table.get("exclude") {
-                    if let Ok(values) = Vec::<String>::deserialize(exclude.clone()) {
-                        fragment.global.exclude.push_override(values, source, file.clone(), None);
-                    }
+            }
+            if let Some(exclude) = rumdl_table.get("exclude") {
+                if let Ok(values) = Vec::<String>::deserialize(exclude.clone()) {
+                    fragment.global.exclude.push_override(values, source, file.clone(), None);
                 }
-                if let Some(respect_gitignore) = rumdl_table
-                    .get("respect-gitignore")
-                    .or_else(|| rumdl_table.get("respect_gitignore"))
-                {
-                    if let Ok(value) = bool::deserialize(respect_gitignore.clone()) {
-                        fragment.global.respect_gitignore.push_override(value, source, file.clone(), None);
-                    }
+            }
+            if let Some(respect_gitignore) = rumdl_table
+                .get("respect-gitignore")
+                .or_else(|| rumdl_table.get("respect_gitignore"))
+            {
+                if let Ok(value) = bool::deserialize(respect_gitignore.clone()) {
+                    fragment.global.respect_gitignore.push_override(value, source, file.clone(), None);
                 }
+            }
 
-                // --- Re-introduce special line-length handling --- 
-                let mut found_line_length_val: Option<toml::Value> = None;
-                for key in ["line-length", "line_length"].iter() {
-                    if let Some(val) = rumdl_table.get(*key) {
-                         // Ensure the value is actually an integer before cloning
-                        if val.is_integer() {
-                             found_line_length_val = Some(val.clone());
-                    break;
-                        } else {
-                            // Optional: Warn about wrong type for line-length?
-                        }
-                    }
-                }
-                if let Some(line_length_val) = found_line_length_val {
-                    let norm_md013_key = normalize_key("MD013"); // Normalize to "md013"
-                    let rule_entry = fragment.rules.entry(norm_md013_key).or_default();
-                    let norm_line_length_key = normalize_key("line-length"); // Ensure "line-length"
-                    let sv = rule_entry.values.entry(norm_line_length_key)
-                        .or_insert_with(|| SourcedValue::new(line_length_val.clone(), ConfigSource::Default));
-                    sv.push_override(line_length_val, source, file.clone(), None);
-                }
-
-                // --- Extract rule-specific configurations --- 
-                for (key, value) in rumdl_table {
-                    let norm_rule_key = normalize_key(key);
-                    
-                    // Skip keys already handled as global or special cases
-                    if [
-                        "enable", "disable", "include", "exclude", 
-                        "respect_gitignore", "respect-gitignore", // Added kebab-case here too
-                        "line_length", "line-length",
-                    ].contains(&norm_rule_key.as_str()) {
-                        continue;
-                    }
-
-                    // Explicitly check if the key looks like a rule name (e.g., starts with 'md')
-                    // AND if the value is actually a TOML table before processing as rule config.
-                    // This prevents misinterpreting other top-level keys under [tool.rumdl]
-                    if norm_rule_key.starts_with("md") && value.is_table() {
-                        if let Some(rule_config_table) = value.as_table() {
-                            // Get the entry for this rule (e.g., "md013")
-                            let rule_entry = fragment.rules.entry(norm_rule_key.clone()).or_default();
-                            for (rk, rv) in rule_config_table {
-                                let norm_rk = normalize_key(rk); // Normalize the config key itself
-                                
-                                let toml_val = rv.clone(); 
-                                
-                                let sv = rule_entry.values.entry(norm_rk.clone())
-                                    .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
-                                sv.push_override(toml_val, source, file.clone(), None);
-                            }
-                        }
+            // --- Re-introduce special line-length handling --- 
+            let mut found_line_length_val: Option<toml::Value> = None;
+            for key in ["line-length", "line_length"].iter() {
+                if let Some(val) = rumdl_table.get(*key) {
+                     // Ensure the value is actually an integer before cloning
+                    if val.is_integer() {
+                         found_line_length_val = Some(val.clone());
+                break;
                     } else {
-                        // Key is not a global/special key, doesn't start with 'md', or isn't a table.
-                        // TODO: Track unknown keys/sections if necessary for validation later.
-                        // eprintln!("[DEBUG parse_pyproject] Skipping key '{}' as it's not a recognized rule table.", key);
+                        // Optional: Warn about wrong type for line-length?
                     }
                 }
             }
-            Ok(Some(fragment))
+            if let Some(line_length_val) = found_line_length_val {
+                let norm_md013_key = normalize_key("MD013"); // Normalize to "md013"
+                let rule_entry = fragment.rules.entry(norm_md013_key).or_default();
+                let norm_line_length_key = normalize_key("line-length"); // Ensure "line-length"
+                let sv = rule_entry.values.entry(norm_line_length_key)
+                    .or_insert_with(|| SourcedValue::new(line_length_val.clone(), ConfigSource::Default));
+                sv.push_override(line_length_val, source, file.clone(), None);
+            }
+
+            // --- Extract rule-specific configurations --- 
+            for (key, value) in rumdl_table {
+                let norm_rule_key = normalize_key(key);
+                
+                // Skip keys already handled as global or special cases
+                if [
+                    "enable", "disable", "include", "exclude", 
+                    "respect_gitignore", "respect-gitignore", // Added kebab-case here too
+                    "line_length", "line-length",
+                ].contains(&norm_rule_key.as_str()) {
+                    continue;
+                }
+
+                // Explicitly check if the key looks like a rule name (e.g., starts with 'md')
+                // AND if the value is actually a TOML table before processing as rule config.
+                // This prevents misinterpreting other top-level keys under [tool.rumdl]
+                let norm_rule_key_upper = norm_rule_key.to_ascii_uppercase();
+                if norm_rule_key_upper.len() == 5 && norm_rule_key_upper.starts_with("MD") && norm_rule_key_upper[2..].chars().all(|c| c.is_ascii_digit()) && value.is_table() {
+                    if let Some(rule_config_table) = value.as_table() {
+                        // Get the entry for this rule (e.g., "md013")
+                        let rule_entry = fragment.rules.entry(norm_rule_key_upper).or_default();
+                        for (rk, rv) in rule_config_table {
+                            let norm_rk = normalize_key(rk); // Normalize the config key itself
+                            
+                            let toml_val = rv.clone(); 
+                            
+                            let sv = rule_entry.values.entry(norm_rk.clone())
+                                .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
+                            sv.push_override(toml_val, source, file.clone(), None);
+                        }
+                    }
+                } else {
+                    // Key is not a global/special key, doesn't start with 'md', or isn't a table.
+                    // TODO: Track unknown keys/sections if necessary for validation later.
+                    // eprintln!("[DEBUG parse_pyproject] Skipping key '{}' as it's not a recognized rule table.", key);
+                }
+            }
         }
-        None => Ok(None), // No [tool.rumdl] section
+    }
+
+    // 2. Handle [tool.rumdl.MDxxx] sections as rule-specific config (nested under [tool])
+    if let Some(tool_table) = doc.get("tool").and_then(|t| t.as_table()) {
+        for (key, value) in tool_table.iter() {
+            if let Some(rule_name) = key.strip_prefix("rumdl.") {
+                let norm_rule_name = normalize_key(rule_name);
+                if norm_rule_name.len() == 5 && norm_rule_name.to_ascii_uppercase().starts_with("MD") && norm_rule_name[2..].chars().all(|c| c.is_ascii_digit()) {
+                    if let Some(rule_table) = value.as_table() {
+                        let rule_entry = fragment.rules.entry(norm_rule_name.to_ascii_uppercase()).or_default();
+                        for (rk, rv) in rule_table {
+                            let norm_rk = normalize_key(rk);
+                            let toml_val = rv.clone();
+                            let sv = rule_entry.values.entry(norm_rk.clone())
+                                .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
+                            sv.push_override(toml_val, source, file.clone(), None);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Handle [tool.rumdl.MDxxx] sections as top-level keys (e.g., [tool.rumdl.MD007])
+    if let Some(doc_table) = doc.as_table() {
+        for (key, value) in doc_table.iter() {
+            if let Some(rule_name) = key.strip_prefix("tool.rumdl.") {
+                let norm_rule_name = normalize_key(rule_name);
+                if norm_rule_name.len() == 5 && norm_rule_name.to_ascii_uppercase().starts_with("MD") && norm_rule_name[2..].chars().all(|c| c.is_ascii_digit()) {
+                    if let Some(rule_table) = value.as_table() {
+                        let rule_entry = fragment.rules.entry(norm_rule_name.to_ascii_uppercase()).or_default();
+                        for (rk, rv) in rule_table {
+                            let norm_rk = normalize_key(rk);
+                            let toml_val = rv.clone();
+                            let sv = rule_entry.values.entry(norm_rk.clone())
+                                .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
+                            sv.push_override(toml_val, source, file.clone(), None);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Only return Some(fragment) if any config was found
+    let has_any = !fragment.global.enable.value.is_empty()
+        || !fragment.global.disable.value.is_empty()
+        || !fragment.global.include.value.is_empty()
+        || !fragment.global.exclude.value.is_empty()
+        || !fragment.rules.is_empty();
+    if has_any {
+        Ok(Some(fragment))
+    } else {
+        Ok(None)
     }
 }
 
@@ -954,9 +1070,9 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
     let file = Some(path.to_string());
 
     // Define known rules before the loop
-    let all_rules = rules::all_rules();
+    let all_rules = rules::all_rules(&Config::default());
     let registry = RuleRegistry::from_rules(&all_rules);
-    let known_rule_names = registry.rule_names();
+    let known_rule_names: BTreeSet<String> = registry.rule_names().into_iter().map(|s| s.to_ascii_uppercase()).collect();
 
     // Handle [global] section
     if let Some(global_item) = doc.get("global") {
@@ -1017,25 +1133,14 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
 
     // Rule-specific: all other top-level tables
     for (key, item) in doc.iter() {
-        let norm_rule_name = normalize_key(key);
-        
-        // Skip the global section as it's handled above
-        if norm_rule_name == "global" { 
-                            continue;
-                        }
-        
-        // Process any other top-level item if it's a table. 
-        // This ensures even unknown/empty rule sections are added to the map 
-        // so validation can catch them later.
+        let norm_rule_name = key.to_ascii_uppercase();
+        if !known_rule_names.contains(&norm_rule_name) {
+            continue;
+        }
         if let Some(tbl) = item.as_table() {
-            // Ensure an entry exists for this section name (rule name) in the fragment
             let rule_entry = fragment.rules.entry(norm_rule_name.clone()).or_default();
-            
-            // Now, iterate through the keys *within* this rule's table
             for (rk, rv_item) in tbl.iter() {
                 let norm_rk = normalize_key(rk);
-
-                // Try to convert the toml_edit value to a standard toml value
                 let maybe_toml_val: Option<toml::Value> = 
                     match rv_item.as_value() {
                         Some(toml_edit::Value::String(formatted)) => Some(toml::Value::String(formatted.value().clone())),
@@ -1044,44 +1149,38 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                         Some(toml_edit::Value::Boolean(formatted)) => Some(toml::Value::Boolean(*formatted.value())),
                         Some(toml_edit::Value::Datetime(formatted)) => Some(toml::Value::Datetime(formatted.value().clone().into())),
                         Some(toml_edit::Value::Array(_)) => {
-                             eprintln!(
+                            eprintln!(
                                 "[WARN] Skipping array value for key '{}.{}' in {}. Array conversion not yet fully implemented in parser.",
                                 norm_rule_name, norm_rk, path
                             );
                             None 
                         }
                         Some(toml_edit::Value::InlineTable(_)) => {
-                              eprintln!(
+                            eprintln!(
                                 "[WARN] Skipping inline table value for key '{}.{}' in {}. Table conversion not yet fully implemented in parser.",
                                 norm_rule_name, norm_rk, path
                             );
                             None
                         }
                         None => { 
-                             eprintln!(
+                            eprintln!(
                                 "[WARN] Skipping non-value item for key '{}.{}' in {}. Expected simple value.",
                                 norm_rule_name, norm_rk, path
                             );
                             None
                         }
                     };
-                
-                // If conversion succeeded, add the value to the rule's config
                 if let Some(toml_val) = maybe_toml_val {
                     let sv = rule_entry.values.entry(norm_rk.clone())
                         .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
                     sv.push_override(toml_val, source, file.clone(), None);
-                } else {
-                    // Warning already printed inside the match arm
                 }
             }
         } else if item.is_value() {
-            // Handle case where a top-level key is a value, not a table (likely an error)
             eprintln!(
                 "[WARN] Ignoring top-level value key in {}: '{}'. Expected a table like [{}].", 
                 path, key, key
             );
-            // Optionally track these as unknown global/root keys if needed for stricter validation
         }
     }
 

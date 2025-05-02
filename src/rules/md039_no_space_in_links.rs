@@ -250,6 +250,13 @@ impl Rule for MD039NoSpaceInLinks {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD039NoSpaceInLinks::default())
+    }
 }
 
 #[cfg(test)]

@@ -133,8 +133,11 @@ impl Rule for MD042NoEmptyLinks {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule> {
-        Box::new(MD042NoEmptyLinks::new())
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(MD042NoEmptyLinks)
     }
 }
 

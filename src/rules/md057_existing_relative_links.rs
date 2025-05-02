@@ -342,6 +342,17 @@ impl Rule for MD057ExistingRelativeLinks {
         map.insert("skip_media_files".to_string(), toml::Value::Boolean(true));
         Some(("MD057".to_string(), toml::Value::Table(map)))
     }
+
+        fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let skip_media_files = crate::config::get_rule_config_value::<bool>(config, "MD057", "skip_media_files").unwrap_or(true);
+        Box::new(MD057ExistingRelativeLinks {
+            base_path: RefCell::new(None),
+            skip_media_files,
+        })
+    }
 }
 
 impl DocumentStructureExtensions for MD057ExistingRelativeLinks {

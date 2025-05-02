@@ -99,7 +99,7 @@ pub use md049_emphasis_style::MD049EmphasisStyle;
 pub use md050_strong_style::MD050StrongStyle;
 pub use md051_link_fragments::MD051LinkFragments;
 pub use md052_reference_links_images::MD052ReferenceLinkImages;
-pub use md053_link_image_reference_definitions::MD053LinkImageReferenceDefinitions;
+pub use md053_link_image_reference_definitions::{DefinitionStyle, MD053LinkImageReferenceDefinitions};
 pub use md054_link_image_style::MD054LinkImageStyle;
 pub use md055_table_pipe_style::MD055TablePipeStyle;
 pub use md056_table_column_count::MD056TableColumnCount;
@@ -141,64 +141,74 @@ use crate::rules::code_fence_utils::CodeFenceStyle;
 use crate::rules::strong_style::StrongStyle;
 
 /// Returns all rule instances for config validation and CLI
-pub fn all_rules() -> Vec<Box<dyn Rule>> {
+pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
+    // Restore the rule! macro
+    macro_rules! rule {
+        ($ctor:ident) => {
+            // Remove println!
+            $ctor::from_config(config)
+        };
+    }
     vec![
-        Box::new(MD001HeadingIncrement),
-        Box::new(MD002FirstHeadingH1::default()),
-        Box::new(MD003HeadingStyle::default()),
-        Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
-        Box::new(MD005ListIndent),
-        Box::new(MD006StartBullets),
-        Box::new(MD007ULIndent::default()),
-        Box::new(MD008ULStyle::default()),
-        Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD010NoHardTabs::default()),
-        Box::new(MD011NoReversedLinks {}),
-        Box::new(MD012NoMultipleBlanks::default()),
-        Box::new(MD013LineLength::default()),
-        Box::new(MD015NoMissingSpaceAfterListMarker::default()),
-        Box::new(MD016NoMultipleSpaceAfterListMarker::default()),
-        Box::new(MD018NoMissingSpaceAtx {}),
-        Box::new(MD019NoMultipleSpaceAtx {}),
-        Box::new(MD020NoMissingSpaceClosedAtx {}),
-        Box::new(MD021NoMultipleSpaceClosedAtx {}),
-        Box::new(MD022BlanksAroundHeadings::default()),
-        Box::new(MD023HeadingStartLeft {}),
-        Box::new(MD024NoDuplicateHeading::default()),
-        Box::new(MD025SingleTitle::default()),
-        Box::new(MD026NoTrailingPunctuation::default()),
-        Box::new(MD027MultipleSpacesBlockquote {}),
-        Box::new(MD028NoBlanksBlockquote {}),
-        Box::new(MD029OrderedListPrefix::default()),
-        Box::new(MD030ListMarkerSpace::default()),
-        Box::new(MD031BlanksAroundFences {}),
-        Box::new(MD032BlanksAroundLists {}),
-        Box::new(MD033NoInlineHtml::default()),
-        Box::new(MD034NoBareUrls {}),
-        Box::new(MD035HRStyle::default()),
-        Box::new(MD036NoEmphasisAsHeading {}),
-        Box::new(MD037NoSpaceInEmphasis),
-        Box::new(MD038NoSpaceInCode::default()),
-        Box::new(MD039NoSpaceInLinks),
-        Box::new(MD040FencedCodeLanguage {}),
-        Box::new(MD041FirstLineHeading::default()),
-        Box::new(MD042NoEmptyLinks::new()),
-        Box::new(MD043RequiredHeadings::new(Vec::new())),
-        Box::new(MD044ProperNames::new(Vec::new(), true)),
-        Box::new(MD045NoAltText::new()),
-        Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
-        Box::new(MD047SingleTrailingNewline),
-        Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
-        Box::new(MD049EmphasisStyle::default()),
-        Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
-        Box::new(MD051LinkFragments),
-        Box::new(MD052ReferenceLinkImages),
-        Box::new(MD053LinkImageReferenceDefinitions::new(Vec::new())),
-        Box::new(MD054LinkImageStyle::default()),
-        Box::new(MD055TablePipeStyle::default()),
-        Box::new(MD056TableColumnCount),
-        Box::new(MD057ExistingRelativeLinks::default()),
-        Box::new(MD058BlanksAroundTables),
+        // Use rule! macro for all rules
+        rule!(MD001HeadingIncrement),
+        rule!(MD002FirstHeadingH1),
+        rule!(MD003HeadingStyle),
+        rule!(MD004UnorderedListStyle),
+        rule!(MD005ListIndent),
+        rule!(MD006StartBullets),
+        rule!(MD007ULIndent),
+        rule!(MD008ULStyle),
+        rule!(MD009TrailingSpaces),
+        rule!(MD010NoHardTabs),
+        rule!(MD011NoReversedLinks),
+        rule!(MD012NoMultipleBlanks),
+        rule!(MD013LineLength),
+        rule!(MD014CommandsShowOutput),
+        rule!(MD015NoMissingSpaceAfterListMarker),
+        rule!(MD016NoMultipleSpaceAfterListMarker),
+        // Removed MD017
+        rule!(MD018NoMissingSpaceAtx),
+        rule!(MD019NoMultipleSpaceAtx),
+        rule!(MD020NoMissingSpaceClosedAtx),
+        rule!(MD021NoMultipleSpaceClosedAtx),
+        rule!(MD022BlanksAroundHeadings),
+        rule!(MD023HeadingStartLeft),
+        rule!(MD024NoDuplicateHeading),
+        rule!(MD025SingleTitle),
+        rule!(MD026NoTrailingPunctuation),
+        rule!(MD027MultipleSpacesBlockquote),
+        rule!(MD028NoBlanksBlockquote),
+        rule!(MD029OrderedListPrefix),
+        rule!(MD030ListMarkerSpace),
+        rule!(MD031BlanksAroundFences),
+        rule!(MD032BlanksAroundLists),
+        rule!(MD033NoInlineHtml),
+        rule!(MD034NoBareUrls),
+        rule!(MD035HRStyle),
+        rule!(MD036NoEmphasisAsHeading),
+        rule!(MD037NoSpaceInEmphasis),
+        rule!(MD038NoSpaceInCode),
+        rule!(MD039NoSpaceInLinks),
+        rule!(MD040FencedCodeLanguage),
+        rule!(MD041FirstLineHeading),
+        rule!(MD042NoEmptyLinks),
+        rule!(MD043RequiredHeadings),
+        rule!(MD044ProperNames),
+        rule!(MD045NoAltText),
+        rule!(MD046CodeBlockStyle),
+        rule!(MD047SingleTrailingNewline),
+        rule!(MD048CodeFenceStyle),
+        rule!(MD049EmphasisStyle),
+        rule!(MD050StrongStyle),
+        rule!(MD051LinkFragments),
+        rule!(MD052ReferenceLinkImages),
+        rule!(MD053LinkImageReferenceDefinitions),
+        rule!(MD054LinkImageStyle),
+        rule!(MD055TablePipeStyle),
+        rule!(MD056TableColumnCount),
+        rule!(MD057ExistingRelativeLinks),
+        rule!(MD058BlanksAroundTables),
     ]
 }
 

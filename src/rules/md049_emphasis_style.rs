@@ -330,6 +330,21 @@ impl Rule for MD049EmphasisStyle {
         map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD049", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        let style = match style.as_str() {
+            "asterisk" => EmphasisStyle::Asterisk,
+            "underscore" => EmphasisStyle::Underscore,
+            "consistent" => EmphasisStyle::Consistent,
+            _ => EmphasisStyle::Consistent,
+        };
+        Box::new(MD049EmphasisStyle::new(style))
+    }
 }
 
 #[cfg(test)]

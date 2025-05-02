@@ -555,6 +555,21 @@ impl Rule for MD046CodeBlockStyle {
         map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD046", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        let style = match style.as_str() {
+            "fenced" => CodeBlockStyle::Fenced,
+            "indented" => CodeBlockStyle::Indented,
+            "consistent" => CodeBlockStyle::Consistent,
+            _ => CodeBlockStyle::Consistent,
+        };
+        Box::new(MD046CodeBlockStyle::new(style))
+    }
 }
 
 impl DocumentStructureExtensions for MD046CodeBlockStyle {
