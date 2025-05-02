@@ -154,6 +154,10 @@ impl Rule for MD054LinkImageStyle {
             if REFERENCE_DEF_RE.is_match(line) {
                 continue;
             }
+            // Skip HTML comments
+            if line.trim_start().starts_with("<!--") {
+                continue;
+            }
             let mut idx = 0;
             let line_chars: Vec<char> = line.chars().collect();
             while idx < line_chars.len() {
@@ -324,21 +328,13 @@ impl Rule for MD054LinkImageStyle {
     where
         Self: Sized,
     {
-        let link_style_str = crate::config::get_rule_config_value::<String>(config, "MD054", "link_style").unwrap_or_else(|| "inline".to_string()).to_lowercase();
-        let image_style_str = crate::config::get_rule_config_value::<String>(config, "MD054", "image_style").unwrap_or_else(|| "inline".to_string()).to_lowercase();
-
-        // Determine boolean flags based on configured styles
-        // This logic might need adjustment based on the exact intended behavior
-        let autolink = link_style_str == "autolink";
-        let collapsed = link_style_str == "collapsed";
-        let full = link_style_str == "full";
-        let inline = link_style_str == "inline";
-        let shortcut = link_style_str == "shortcut";
-        let url_inline = link_style_str == "url_inline"; // Assuming this maps to a specific config
-
-        // Note: This doesn't handle image_style_str. The ::new() signature seems primarily link-focused.
-        // If image style affects these flags, the logic or ::new() needs refinement.
-
+        // Read all style booleans from config, defaulting to true if not set
+        let autolink = crate::config::get_rule_config_value::<bool>(config, "MD054", "autolink").unwrap_or(true);
+        let collapsed = crate::config::get_rule_config_value::<bool>(config, "MD054", "collapsed").unwrap_or(true);
+        let full = crate::config::get_rule_config_value::<bool>(config, "MD054", "full").unwrap_or(true);
+        let inline = crate::config::get_rule_config_value::<bool>(config, "MD054", "inline").unwrap_or(true);
+        let shortcut = crate::config::get_rule_config_value::<bool>(config, "MD054", "shortcut").unwrap_or(true);
+        let url_inline = crate::config::get_rule_config_value::<bool>(config, "MD054", "url_inline").unwrap_or(true);
         Box::new(MD054LinkImageStyle::new(autolink, collapsed, full, inline, shortcut, url_inline))
     }
 }

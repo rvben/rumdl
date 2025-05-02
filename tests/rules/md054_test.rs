@@ -294,3 +294,49 @@ Link [full][ref] followed by text.
     assert_eq!(result[0].line, 4);
     assert!(result[0].message.contains("shortcut"));
 }
+
+#[test]
+fn test_html_comments_are_ignored() {
+    let rule = MD054LinkImageStyle::new(false, false, false, false, false, false); // Disallow all styles
+    let content = r#"
+<!-- This is a comment with an autolink: <https://example.com> -->
+<!-- Unicode autolink: <https://example.com/汉字> -->
+<!-- [inline link](https://example.com) -->
+<!-- [Unicode café link](https://example.com/café) -->
+"#;
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 0, "Links in HTML comments should not be flagged");
+}
+
+#[test]
+fn test_autolink_unicode_in_and_outside_comments() {
+    let rule = MD054LinkImageStyle::new(false, true, true, true, true, true); // Disallow autolink
+    let content = r#"
+This is an autolink: <https://example.com/汉字>
+<!-- This is a comment with an autolink: <https://example.com/汉字> -->
+"#;
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 1, "Only autolink outside comment should be flagged");
+    assert_eq!(result[0].line, 2);
+    assert_eq!(result[0].message, "Link/image style 'autolink' is not consistent with document");
+}
+
+#[test]
+fn test_mixed_styles_in_and_outside_comments() {
+    let rule = MD054LinkImageStyle::new(false, false, true, true, false, false); // Only full and inline allowed
+    let content = r#"
+[inline link](https://example.com)
+[full ref][ref]
+[shortcut]
+<https://example.com>
+<!-- [shortcut] and <https://example.com> in comment should not be flagged -->
+<!-- [shortcut] <https://example.com> -->
+
+[ref]: https://example.com
+[shortcut]: https://example.com
+"#;
+    let result = rule.check(content).unwrap();
+    assert_eq!(result.len(), 2, "Only shortcut and autolink outside comments should be flagged");
+    assert!(result.iter().any(|w| w.message.contains("shortcut")));
+    assert!(result.iter().any(|w| w.message.contains("autolink")));
+}
