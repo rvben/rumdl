@@ -170,8 +170,8 @@ fn test_lists_in_blockquotes() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
-        0,
-        "Current implementation doesn't detect inconsistent list markers in blockquotes"
+        1,
+        "Should detect inconsistent list markers in blockquotes (AST-based, spec-compliant)"
     );
 
     // We can't test fix behavior if the rule doesn't detect issues

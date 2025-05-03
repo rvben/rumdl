@@ -5,6 +5,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
 use crate::lint_context::LintContext;
+use markdown::mdast::{Node, List, ListItem, Blockquote, Paragraph};
 
 lazy_static! {
     // Updated regex to handle blockquote markers at the beginning of lines
@@ -119,6 +120,96 @@ impl MD008ULStyle {
             }
         }
     }
+
+    /// AST-based traversal: collect all unordered list items, grouped by blockquote context
+    fn collect_unordered_list_items<'a>(
+        node: &'a Node,
+        blockquote_depth: usize,
+        items: &mut Vec<(usize, &'a ListItem, char, usize, usize)>,
+        ctx: &LintContext,
+    ) {
+        match node {
+            Node::Blockquote(Blockquote { children, .. }) => {
+                for child in children {
+                    Self::collect_unordered_list_items(child, blockquote_depth + 1, items, ctx);
+                }
+            }
+            Node::List(List { children, ordered: false, .. }) => {
+                for item in children {
+                    if let Node::ListItem(li) = item {
+                        // Find the marker and line number
+                        if let Some((marker, line, col)) = Self::get_list_marker_info(li, ctx) {
+                            items.push((blockquote_depth, li, marker, line, col));
+                        }
+                        // Recurse into nested lists
+                        for child in &li.children {
+                            Self::collect_unordered_list_items(child, blockquote_depth, items, ctx);
+                        }
+                    }
+                }
+            }
+            Node::List(List { children, ordered: true, .. }) => {
+                // Skip ordered lists
+                for item in children {
+                    if let Node::ListItem(li) = item {
+                        for child in &li.children {
+                            Self::collect_unordered_list_items(child, blockquote_depth, items, ctx);
+                        }
+                    }
+                }
+            }
+            Node::Root(root) => {
+                for child in &root.children {
+                    Self::collect_unordered_list_items(child, blockquote_depth, items, ctx);
+                }
+            }
+            _ => {
+                // Recurse into children if any
+                if let Some(children) = node.children() {
+                    for child in children {
+                        Self::collect_unordered_list_items(child, blockquote_depth, items, ctx);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Extract the marker character, line, and column for a ListItem
+    fn get_list_marker_info<'a>(li: &'a ListItem, ctx: &LintContext) -> Option<(char, usize, usize)> {
+        // Try to find the marker in the source text
+        if let Some(pos) = li.position.as_ref() {
+            let start = pos.start.offset;
+            let (line, col) = ctx.offset_to_line_col(start);
+            // Get the line from the source
+            let line_str = ctx.content.lines().nth(line - 1)?;
+            // Find the first non-whitespace character
+            let marker = line_str.chars().find(|c| *c == '*' || *c == '-' || *c == '+')?;
+            Some((marker, line, col))
+        } else {
+            None
+        }
+    }
+
+    /// AST-based: get all unordered list items grouped by blockquote depth
+    fn group_items_by_blockquote<'a>(
+        ctx: &'a LintContext,
+    ) -> std::collections::HashMap<usize, Vec<(char, usize, usize)>> {
+        let mut items = Vec::new();
+        Self::collect_unordered_list_items(&ctx.ast, 0, &mut items, ctx);
+        let mut groups: std::collections::HashMap<usize, Vec<(char, usize, usize)>> = std::collections::HashMap::new();
+        for (depth, _li, marker, line, col) in items {
+            groups.entry(depth).or_default().push((marker, line, col));
+        }
+        groups
+    }
+
+    /// AST-based: get the expected style for a group
+    fn get_expected_style_for_group(&self, group: &[(char, usize, usize)]) -> char {
+        match &self.style_mode {
+            StyleMode::Specific(style) => style.chars().next().unwrap_or('*'),
+            StyleMode::Consistent => group.first().map(|(m, _, _)| *m).unwrap_or('*'),
+        }
+    }
 }
 
 impl Rule for MD008ULStyle {
@@ -131,79 +222,35 @@ impl Rule for MD008ULStyle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        // Fast path - if content is empty or doesn't contain any list marker characters, return empty result
-        if content.is_empty() || !Self::contains_potential_list_items(content) {
+        // Fast path
+        if ctx.content.is_empty() || !Self::contains_potential_list_items(ctx.content) {
             return Ok(Vec::new());
         }
-
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
-
-        // Precompute code blocks
-        let code_blocks = Self::precompute_code_blocks(content);
-
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Get the target style based on mode
-        let expected_style = self.get_style_from_mode(content);
-
-        let mut in_blockquote = false;
-
-        for (i, line) in lines.iter().enumerate() {
-            // Skip code blocks
-            if code_blocks.get(i).unwrap_or(&false) == &true {
-                continue;
-            }
-
-            let trimmed = line.trim_start();
-            // Track blockquote state
-            if trimmed.starts_with('>') {
-                in_blockquote = true;
-            } else if !trimmed.is_empty() {
-                in_blockquote = false;
-            }
-
-            if let Some((indent, marker, _content_len)) = Self::parse_list_item(line) {
-                // Skip if in blockquote since those are handled separately
-                if in_blockquote {
-                    continue;
-                }
-
-                if marker.to_string() != expected_style {
-                    let _trimmed_line = line.trim_start();
-                    // For regular list items, just use indentation
-                    let line_start = " ".repeat(indent);
-
-                    // Find the list marker position and content after it
-                    let list_marker_pos = line.find(marker).unwrap_or(0);
-                    let content_after_marker = if list_marker_pos + 1 < line.len() {
-                        &line[list_marker_pos + 1..]
-                    } else {
-                        ""
-                    };
-
+        let groups = Self::group_items_by_blockquote(ctx);
+        for (blockquote_depth, group) in groups {
+            let expected = self.get_expected_style_for_group(&group);
+            for (marker, line, col) in group {
+                let expected_char = expected;
+                if marker != expected_char {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: indent + 1,
+                        line,
+                        column: col,
                         message: format!(
                             "Unordered list item marker '{}' should be '{}'",
-                            marker, expected_style
+                            marker, expected_char
                         ),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: format!(
-                                "{}{}{}",
-                                line_start, expected_style, content_after_marker
-                            ),
+                            range: line_index.line_col_to_byte_range(line, col),
+                            replacement: format!("{}", expected_char),
                         }),
                     });
                 }
             }
         }
-
         Ok(warnings)
     }
 
@@ -253,7 +300,8 @@ impl Rule for MD008ULStyle {
                     continue;
                 }
 
-                if marker.to_string() != expected_style {
+                let expected_char = expected_style.chars().next().unwrap_or('*');
+                if marker != expected_char {
                     let _trimmed_line = line.trim_start();
                     // For regular list items, just use indentation
                     let line_start = " ".repeat(indent);
@@ -272,14 +320,14 @@ impl Rule for MD008ULStyle {
                         column: indent + 1,
                         message: format!(
                             "Unordered list item marker '{}' should be '{}'",
-                            marker, expected_style
+                            marker, expected_char
                         ),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range(line_num, 1),
                             replacement: format!(
                                 "{}{}{}",
-                                line_start, expected_style, content_after_marker
+                                line_start, expected_char, content_after_marker
                             ),
                         }),
                     });
@@ -291,56 +339,40 @@ impl Rule for MD008ULStyle {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        // Fast path - if content is empty or doesn't contain any list marker characters, return content as-is
-        if content.is_empty() || !Self::contains_potential_list_items(content) {
-            return Ok(content.to_string());
+        if ctx.content.is_empty() || !Self::contains_potential_list_items(ctx.content) {
+            return Ok(ctx.content.to_string());
         }
-
-        let warnings = self.check(ctx)?;
-
-        if warnings.is_empty() {
-            return Ok(content.to_string());
-        }
-
-        let mut result = String::new();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Create a map of line numbers with fixes
-        let mut line_fixes: std::collections::HashMap<usize, String> =
-            std::collections::HashMap::new();
-        for warning in &warnings {
-            if let Some(fix) = &warning.fix {
-                line_fixes.insert(warning.line, fix.replacement.clone());
+        let mut lines: Vec<String> = ctx.content.lines().map(|l| l.to_string()).collect();
+        let groups = Self::group_items_by_blockquote(ctx);
+        for (_blockquote_depth, group) in &groups {
+            let expected = self.get_expected_style_for_group(group);
+            for (marker, line, col) in group {
+                let expected_char = expected;
+                if *marker != expected_char {
+                    // Replace the marker at the correct position in the line
+                    if let Some(line_str) = lines.get_mut(line - 1) {
+                        let mut chars: Vec<char> = line_str.chars().collect();
+                        // Find the marker position
+                        let mut idx = 0;
+                        while idx < chars.len() && (chars[idx] == ' ' || chars[idx] == '\t') {
+                            idx += 1;
+                        }
+                        if idx < chars.len() && (chars[idx] == '*' || chars[idx] == '-' || chars[idx] == '+') {
+                            chars[idx] = expected_char;
+                            *line_str = chars.into_iter().collect();
+                        }
+                    }
+                }
             }
         }
-
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
-            if let Some(fixed_line) = line_fixes.get(&line_num) {
-                result.push_str(fixed_line);
-            } else {
-                result.push_str(line);
-            }
-
-            // Add newline for all lines except the last one
-            if i < lines.len() - 1 {
-                result.push('\n');
-            }
-        }
-
-        // Preserve ALL trailing newlines
-        // Count trailing newlines in the original content
-        let trailing_newlines_count = content.chars().rev().take_while(|&c| c == '\n').count();
-
-        // Ensure result has the same number of trailing newlines
+        // Reconstruct the content
+        let mut result = lines.join("\n");
+        // Preserve trailing newlines
+        let trailing_newlines_count = ctx.content.chars().rev().take_while(|&c| c == '\n').count();
         let result_trailing_newlines = result.chars().rev().take_while(|&c| c == '\n').count();
-
-        // Add any missing newlines
         if trailing_newlines_count > result_trailing_newlines {
             result.push_str(&"\n".repeat(trailing_newlines_count - result_trailing_newlines));
         }
-
         Ok(result)
     }
 
