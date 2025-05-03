@@ -38,7 +38,7 @@ fn test_md024_different_levels() {
     let content = "# Heading\n## Heading\n### Heading\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 2);
 }
 
 #[test]
@@ -47,16 +47,7 @@ fn test_md024_different_levels_with_allow_different_nesting() {
     let content = "# Heading\n## Heading\n### Heading\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-
-    // Since we're converting all headings to lowercase with the same content,
-    // we should expect 2 warnings (one for each duplicate heading)
-    assert_eq!(
-        result.len(),
-        2,
-        "Expected 2 warnings for duplicated headings with allow_different_nesting=true"
-    );
-    assert_eq!(result[0].line, 2);
-    assert_eq!(result[1].line, 3);
+    assert_eq!(result.len(), 0, "Expected 0 warnings for duplicated headings with allow_different_nesting=true");
 }
 
 #[test]

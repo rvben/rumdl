@@ -7,6 +7,7 @@ use toml;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
 use std::collections::{HashMap, HashSet};
+use crate::utils::document_structure::DocumentStructure;
 
 #[derive(Clone, Debug, Default)]
 pub struct MD024NoDuplicateHeading {
@@ -34,150 +35,130 @@ impl Rule for MD024NoDuplicateHeading {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
-
+        let structure = DocumentStructure::new(content);
+        let lines: Vec<&str> = content.lines().collect();
         let mut warnings = Vec::new();
-
-        let _seen_headings: HashSet<String> = HashSet::new();
+        let mut seen_headings: HashSet<String> = HashSet::new();
         let mut seen_headings_per_level: HashMap<u32, HashSet<String>> = HashMap::new();
-
-        for (line_num, line) in content.lines().enumerate() {
-            if HeadingUtils::is_in_code_block(content, line_num + 1) {
+        for (i, &line_num) in structure.heading_lines.iter().enumerate() {
+            // Skip headings in front matter
+            if structure.is_in_front_matter(line_num) {
                 continue;
             }
-            if let Some(heading) = HeadingUtils::parse_heading(content, line_num + 1) {
-                let indentation = HeadingUtils::get_indentation(line);
-                let text = heading.text.clone();
-                let heading_key = text.trim();
-                if heading_key.is_empty() {
-                    continue; // Ignore empty headings
-                }
-                if self.siblings_only {
-                    // Handle siblings_only logic here
-                } else if self.allow_different_nesting {
-                    let seen = seen_headings_per_level.entry(0).or_default();
-                    if seen.contains(heading_key) {
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num + 1,
-                            column: indentation + 1,
-                            message: "Multiple headings with the same content".to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: _line_index
-                                    .line_col_to_byte_range(line_num + 1, indentation + 1),
-                                replacement: format!(
-                                    "{}{} {} ({})",
-                                    " ".repeat(indentation),
-                                    "#".repeat(heading.level.try_into().unwrap()),
-                                    heading.text,
-                                    seen.iter().filter(|&h| h == heading_key).count() + 1
-                                ),
-                            }),
-                        });
-                    } else {
-                        seen.insert(heading_key.to_string());
-                    }
+            let level = *structure.heading_levels.get(i).unwrap_or(&1) as u32;
+            let region = structure.heading_regions.get(i).copied().unwrap_or((line_num, line_num));
+            let line_idx = region.0 - 1; // 0-based
+            let line = lines.get(line_idx).unwrap_or(&"");
+            let indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            let text = line.trim().trim_start_matches('#').trim().trim_end_matches('#').trim();
+            if text.is_empty() {
+                continue; // Ignore empty headings
+            }
+            let heading_key = text.to_string();
+            if self.siblings_only {
+                // TODO: Implement siblings_only logic if needed
+            } else if self.allow_different_nesting {
+                // Only flag duplicates at the same level
+                let seen = seen_headings_per_level.entry(level).or_default();
+                if seen.contains(&heading_key) {
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        message: format!("Duplicate heading: '{}'.", text),
+                        line: line_num,
+                        column: indentation.len() + 1,
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
                 } else {
-                    let seen = seen_headings_per_level.entry(heading.level).or_default();
-                    if seen.contains(heading_key) {
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num + 1,
-                            column: indentation + 1,
-                            message: "Multiple headings with the same content at the same level"
-                                .to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: _line_index
-                                    .line_col_to_byte_range(line_num + 1, indentation + 1),
-                                replacement: format!(
-                                    "{}{} {} ({})",
-                                    " ".repeat(indentation),
-                                    "#".repeat(heading.level.try_into().unwrap()),
-                                    heading.text,
-                                    seen.iter().filter(|&h| h == heading_key).count() + 1
-                                ),
-                            }),
-                        });
-                    } else {
-                        seen.insert(heading_key.to_string());
-                    }
+                    seen.insert(heading_key.clone());
+                }
+            } else {
+                // Flag all duplicates, regardless of level
+                if seen_headings.contains(&heading_key) {
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        message: format!("Duplicate heading: '{}'.", text),
+                        line: line_num,
+                        column: indentation.len() + 1,
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
+                } else {
+                    seen_headings.insert(heading_key.clone());
                 }
             }
         }
-
         Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        // For default config, fix is a no-op
         if !self.allow_different_nesting && !self.siblings_only {
             return Ok(content.to_string());
         }
-        let _line_index = LineIndex::new(content.to_string());
+        let structure = DocumentStructure::new(content);
+        let lines: Vec<&str> = content.lines().collect();
         let mut result = String::new();
-        let _seen_headings: HashSet<String> = HashSet::new();
+        let mut seen_headings: HashSet<String> = HashSet::new();
         let mut seen_headings_per_level: HashMap<u32, HashSet<String>> = HashMap::new();
-        for (line_num, line) in content.lines().enumerate() {
-            if HeadingUtils::is_in_code_block(content, line_num + 1) {
-                result.push_str(line);
-                result.push('\n');
+        for (i, &line_num) in structure.heading_lines.iter().enumerate() {
+            if structure.is_in_front_matter(line_num) {
                 continue;
             }
-            if let Some(heading) = HeadingUtils::parse_heading(content, line_num + 1) {
-                let indentation = HeadingUtils::get_indentation(line);
-                let text = heading.text.clone();
-                let heading_key = text.trim();
-                if heading_key.is_empty() {
+            let level = *structure.heading_levels.get(i).unwrap_or(&1) as u32;
+            let region = structure.heading_regions.get(i).copied().unwrap_or((line_num, line_num));
+            let line_idx = region.0 - 1; // 0-based
+            let line = lines.get(line_idx).unwrap_or(&"");
+            let indentation = line.len() - line.trim_start().len();
+            let text = if region.0 == region.1 {
+                let mut t = line.trim_start().trim_start_matches('#').trim_end();
+                if t.ends_with('#') {
+                    t = t.trim_end_matches('#').trim_end();
+                }
+                t.trim()
+            } else {
+                line.trim()
+            };
+            if text.is_empty() {
+                continue;
+            }
+            let heading_key = text.to_string();
+            if self.siblings_only {
+                // TODO: Implement siblings_only logic if needed
+            } else if self.allow_different_nesting {
+                // Only flag duplicates at the same level
+                let seen = seen_headings_per_level.entry(level).or_default();
+                if seen.contains(&heading_key) {
+                    result.push_str(&format!(
+                        "{}{} {} (dup)\n",
+                        " ".repeat(indentation),
+                        "#".repeat(level as usize),
+                        text
+                    ));
+                } else {
+                    seen.insert(heading_key.clone());
                     result.push_str(line);
                     result.push('\n');
-                    continue;
-                }
-                if self.siblings_only {
-                    // Handle siblings_only logic here
-                } else if self.allow_different_nesting {
-                    let seen = seen_headings_per_level.entry(0).or_default();
-                    if seen.contains(heading_key) {
-                        result.push_str(&format!(
-                            "{}{} {} ({})\n",
-                            " ".repeat(indentation),
-                            "#".repeat(heading.level.try_into().unwrap()),
-                            heading.text,
-                            seen.iter().filter(|&h| h == heading_key).count() + 1
-                        ));
-                    } else {
-                        seen.insert(heading_key.to_string());
-                        result.push_str(line);
-                        result.push('\n');
-                    }
-                } else {
-                    let seen = seen_headings_per_level.entry(heading.level).or_default();
-                    if seen.contains(heading_key) {
-                        result.push_str(&format!(
-                            "{}{} {} ({})\n",
-                            " ".repeat(indentation),
-                            "#".repeat(heading.level.try_into().unwrap()),
-                            heading.text,
-                            seen.iter().filter(|&h| h == heading_key).count() + 1
-                        ));
-                    } else {
-                        seen.insert(heading_key.to_string());
-                        result.push_str(line);
-                        result.push('\n');
-                    }
                 }
             } else {
-                result.push_str(line);
-                result.push('\n');
+                // Flag all duplicates, regardless of level
+                if seen_headings.contains(&heading_key) {
+                    result.push_str(&format!(
+                        "{}{} {} (dup)\n",
+                        " ".repeat(indentation),
+                        "#".repeat(level as usize),
+                        text
+                    ));
+                } else {
+                    seen_headings.insert(heading_key.clone());
+                    result.push_str(line);
+                    result.push('\n');
+                }
             }
         }
-
-        if !content.ends_with('\n') {
+        if !content.ends_with('\n') && result.ends_with('\n') {
             result.pop();
         }
-
         Ok(result)
     }
 
