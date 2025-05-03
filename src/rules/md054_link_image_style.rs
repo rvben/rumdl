@@ -303,9 +303,8 @@ impl Rule for MD054LinkImageStyle {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // Automatic fixing for link styles is complex and could break content
-        // For now, we'll return the original content with a message
-        Ok(ctx.content.to_string())
+        // Automatic fixing for link styles is not supported and could break content
+        Err(LintError::FixFailed("MD054 does not support automatic fixing of link/image style consistency.".to_string()))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

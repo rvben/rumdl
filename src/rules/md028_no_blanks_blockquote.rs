@@ -10,11 +10,6 @@ use crate::utils::range_utils::LineIndex;
 pub struct MD028NoBlanksBlockquote;
 
 impl MD028NoBlanksBlockquote {
-    /// Checks if a line is completely empty (just whitespace)
-    fn is_completely_empty_line(line: &str) -> bool {
-        line.trim().is_empty()
-    }
-
     /// Generates the replacement for a blank blockquote line
     fn get_replacement(indent: &str, level: usize) -> String {
         let mut result = indent.to_string();
@@ -43,19 +38,13 @@ impl Rule for MD028NoBlanksBlockquote {
         let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
         let lines: Vec<&str> = ctx.content.lines().collect();
-        let mut in_blockquote = false;
         for (i, &line) in lines.iter().enumerate() {
-            if Self::is_completely_empty_line(line) {
-                in_blockquote = false;
-                continue;
-            }
             if BlockquoteUtils::is_blockquote(line) {
                 let level = BlockquoteUtils::get_nesting_level(line);
-                if !in_blockquote {
-                    in_blockquote = true;
-                }
-                if BlockquoteUtils::is_empty_blockquote(line) {
-                    let indent = BlockquoteUtils::extract_indentation(line);
+                let indent = BlockquoteUtils::extract_indentation(line);
+                // Canonical blank blockquote line: marker(s) + single space, no content
+                let expected = Self::get_replacement(&indent, level);
+                if BlockquoteUtils::is_empty_blockquote(line) && line != expected {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message: "Blank line inside blockquote".to_string(),
@@ -64,12 +53,10 @@ impl Rule for MD028NoBlanksBlockquote {
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: Self::get_replacement(&indent, level),
+                            replacement: expected,
                         }),
                     });
                 }
-            } else {
-                in_blockquote = false;
             }
         }
         Ok(warnings)
@@ -113,26 +100,13 @@ impl Rule for MD028NoBlanksBlockquote {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let lines: Vec<&str> = ctx.content.lines().collect();
         let mut result = Vec::with_capacity(lines.len());
-        let mut in_blockquote = false;
-        for line in lines {
-            if Self::is_completely_empty_line(line) {
-                in_blockquote = false;
-                result.push(line.to_string());
-                continue;
-            }
-            if BlockquoteUtils::is_blockquote(line) {
+        for (_i, line) in lines.iter().enumerate() {
+            if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::is_empty_blockquote(line) {
                 let level = BlockquoteUtils::get_nesting_level(line);
-                if !in_blockquote {
-                    in_blockquote = true;
-                }
-                if BlockquoteUtils::is_empty_blockquote(line) {
-                    let indent = BlockquoteUtils::extract_indentation(line);
-                    result.push(Self::get_replacement(&indent, level));
-                } else {
-                    result.push(line.to_string());
-                }
+                let indent = BlockquoteUtils::extract_indentation(line);
+                let replacement = Self::get_replacement(&indent, level);
+                result.push(replacement);
             } else {
-                in_blockquote = false;
                 result.push(line.to_string());
             }
         }
