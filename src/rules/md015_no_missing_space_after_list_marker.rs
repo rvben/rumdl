@@ -1,20 +1,21 @@
 /// Rule MD015: No missing space after list marker
 ///
 /// See [docs/md015.md](../../docs/md015.md) for full documentation, configuration, and examples.
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::LineIndex;
+///
+/// NOTE: The AST is not used for detection/fixing in this rule because the CommonMark parser only recognizes list items that already have a space after the marker. Lines missing the space are not parsed as lists in the AST, so regex/line-based logic is required to detect and fix these violations.
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::HashSet;
 use toml;
+use crate::rules::code_block_utils::CodeBlockUtils;
 
 lazy_static! {
-    // Simplified HR patterns - more efficient
+    // Horizontal rule pattern
     static ref HR_PATTERN: Regex = Regex::new(r"^\s*[-*_]{3,}\s*$").unwrap();
-    // Single pattern for quick list check - more specific to avoid false positives
-    static ref QUICK_LIST_CHECK: Regex = Regex::new(r"(?:^|\n)\s*(?:[-*+]|\d+[.)])\S").unwrap();
-    // Optimized list item regex with better performance characteristics
+    // List item pattern: matches lines that start with optional indentation, a list marker, and no space after
     static ref LIST_ITEM_RE: Regex = Regex::new(r"^(\s*)([-*+]|\d+[.)])(\S.*)").unwrap();
+    // Fix pattern: matches lines that start with optional indentation, a list marker, optional spaces, and the rest
+    static ref FIX_LIST_ITEM_RE: Regex = Regex::new(r"^(\s*)([-*+]|\d+[.)])(\s*)(.*)$").unwrap();
 }
 
 #[derive(Debug, Clone)]
@@ -39,85 +40,87 @@ impl MD015NoMissingSpaceAfterListMarker {
         Self { require_space }
     }
 
-    /// Check if a line is a horizontal rule - optimized to use a single regex
+    /// Check if a line is a horizontal rule
     #[inline(always)]
     fn is_horizontal_rule(line: &str) -> bool {
         HR_PATTERN.is_match(line)
     }
 
-    /// Check if line contains a list marker without space
+    /// Check if a line is a list item missing a space after the marker
     #[inline(always)]
     fn is_list_item_without_space(line: &str) -> bool {
         if line.is_empty() || line.trim().is_empty() {
             return false;
         }
-
-        if LIST_ITEM_RE.captures(line).is_some() {
-            // Match found, now check if there's no space after the marker
-            return true;
-        }
-
-        false
+        LIST_ITEM_RE.captures(line).is_some()
     }
 
-    /// Fix a list item without space for MD015 rule
-    #[inline(always)]
+    /// Fix a single list item line by ensuring a single space after the marker
     fn fix_list_item(line: &str) -> String {
-        if let Some(caps) = LIST_ITEM_RE.captures(line) {
-            format!("{}{} {}", &caps[1], &caps[2], &caps[3])
+        if let Some(caps) = FIX_LIST_ITEM_RE.captures(line) {
+            let indent = &caps[1];
+            let marker = &caps[2];
+            let content = &caps[4];
+            format!("{}{} {}", indent, marker, content)
         } else {
             line.to_string()
         }
     }
 
-    /// Pre-compute which lines are in code blocks or front matter for better performance
-    #[inline]
-    fn get_special_lines(&self, content: &str) -> (HashSet<usize>, HashSet<usize>) {
-        let lines: Vec<&str> = content.lines().collect();
-        let mut code_block_lines = HashSet::with_capacity(lines.len() / 4);
-        let mut front_matter_lines = HashSet::with_capacity(10); // Usually small
-
-        let mut in_code_block = false;
-        let mut code_fence = String::new();
-        let mut in_front_matter = false;
-
+    /// Main check logic: flag all lines that look like list items but are missing a space after the marker
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        if !self.require_space {
+            return Ok(vec![]);
+        }
+        let mut warnings = Vec::new();
+        let lines: Vec<&str> = ctx.content.lines().collect();
+        let code_block_lines = CodeBlockUtils::identify_code_block_lines(ctx.content);
         for (i, line) in lines.iter().enumerate() {
-            // Track front matter
-            if i == 0 && line.trim() == "---" {
-                in_front_matter = true;
-                front_matter_lines.insert(i);
-                continue;
+            if code_block_lines.get(i).copied().unwrap_or(false) {
+                continue; // skip code blocks
             }
-
-            if in_front_matter {
-                front_matter_lines.insert(i);
-                if line.trim() == "---" {
-                    in_front_matter = false;
-                }
-                continue;
+            if Self::is_horizontal_rule(line) {
+                continue; // skip horizontal rules
             }
-
-            // Track code blocks more efficiently
-            let trimmed = line.trim();
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                if !in_code_block {
-                    in_code_block = true;
-                    code_fence = if trimmed.starts_with("```") {
-                        "```".to_string()
-                    } else {
-                        "~~~".to_string()
-                    };
-                } else if trimmed.starts_with(&code_fence) {
-                    in_code_block = false;
-                }
-            }
-
-            if in_code_block {
-                code_block_lines.insert(i);
+            if let Some(caps) = LIST_ITEM_RE.captures(line) {
+                let marker = &caps[2];
+                let message = if marker == "*" || marker == "-" || marker == "+" {
+                    "Missing space after unordered list marker"
+                } else {
+                    "Missing space after ordered list marker"
+                };
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    severity: Severity::Warning,
+                    line: i + 1,
+                    column: 1,
+                    message: message.to_string(),
+                    fix: None,
+                });
             }
         }
+        Ok(warnings)
+    }
 
-        (code_block_lines, front_matter_lines)
+    /// Main fix logic: insert a single space after the marker for all lines that look like list items but are missing it
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        if !self.require_space {
+            return Ok(ctx.content.to_string());
+        }
+        let mut lines: Vec<String> = ctx.content.lines().map(|s| s.to_string()).collect();
+        let code_block_lines = CodeBlockUtils::identify_code_block_lines(ctx.content);
+        for (i, line_str) in lines.iter_mut().enumerate() {
+            if code_block_lines.get(i).copied().unwrap_or(false) {
+                continue; // skip code blocks
+            }
+            if Self::is_horizontal_rule(line_str) {
+                continue; // skip horizontal rules
+            }
+            if LIST_ITEM_RE.captures(line_str).is_some() {
+                *line_str = Self::fix_list_item(line_str);
+            }
+        }
+        Ok(lines.join("\n"))
     }
 }
 
@@ -131,92 +134,11 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        let _timer = crate::profiling::ScopedTimer::new("MD015_check");
-
-        // Quick returns for common cases
-        if content.is_empty() || !self.require_space {
-            return Ok(Vec::new());
-        }
-
-        // Early return if no list markers found
-        if !content.contains('-')
-            && !content.contains('*')
-            && !content.contains('+')
-            && !content.contains(|c: char| c.is_ascii_digit())
-        {
-            return Ok(Vec::new());
-        }
-
-        // Quick check for potential list items without spaces
-        if !QUICK_LIST_CHECK.is_match(content) {
-            return Ok(Vec::new());
-        }
-
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Pre-compute special lines efficiently
-        let (code_block_lines, front_matter_lines) = self.get_special_lines(content);
-
-        // Pre-allocate warnings with estimated capacity
-        let estimated_warnings = content.lines().count() / 10; // Rough estimate: 10% of lines might be warnings
-        warnings.reserve(estimated_warnings);
-
-        for (line_num, line) in lines.iter().enumerate() {
-            // Fast checks using HashSet lookups
-            if code_block_lines.contains(&line_num) || front_matter_lines.contains(&line_num) {
-                continue;
-            }
-
-            // Skip if this is a horizontal rule
-            if Self::is_horizontal_rule(line) {
-                continue;
-            }
-
-            // Use our optimized check for list items without space
-            if Self::is_list_item_without_space(line) {
-                let is_unordered = line.trim_start().starts_with(['*', '+', '-']);
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    severity: Severity::Warning,
-                    line: line_num + 1,
-                    column: 1,
-                    message: if is_unordered {
-                        "Missing space after unordered list marker".to_string()
-                    } else {
-                        "Missing space after ordered list marker".to_string()
-                    },
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num + 1, 1),
-                        replacement: Self::fix_list_item(line),
-                    }),
-                });
-            }
-        }
-
-        Ok(warnings)
+        self.check(ctx)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let mut result = String::with_capacity(content.len() + 100);
-        let lines: Vec<&str> = content.lines().collect();
-        let (code_block_lines, front_matter_lines) = self.get_special_lines(content);
-        for (line_num, line) in lines.iter().enumerate() {
-            if code_block_lines.contains(&line_num) || front_matter_lines.contains(&line_num) {
-                result.push_str(line);
-            } else if Self::is_list_item_without_space(line) {
-                result.push_str(&Self::fix_list_item(line));
-            } else {
-                result.push_str(line);
-            }
-            if line_num < lines.len() - 1 {
-                result.push('\n');
-            }
-        }
-        Ok(result)
+        self.fix(ctx)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

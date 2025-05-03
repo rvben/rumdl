@@ -173,7 +173,13 @@ impl CodeBlockUtils {
                 in_code_block[i] = true;
             } else if !in_code_block[i] {
                 // Check for indented code blocks only if not already marked
-                in_code_block[i] = line.starts_with("    ") || INDENTED_CODE_BLOCK.is_match(line);
+                // Do not mark as code block if the line is a list item
+                lazy_static! {
+                    static ref LIST_ITEM_RE: Regex = Regex::new(r"^(\s*)([*+-]|\d+[.)])(\s*)(.*)$").unwrap();
+                }
+                if (line.starts_with("    ") || INDENTED_CODE_BLOCK.is_match(line)) && !LIST_ITEM_RE.is_match(line) {
+                    in_code_block[i] = true;
+                }
             }
         }
 
