@@ -162,12 +162,14 @@ impl Rule for MD049EmphasisStyle {
         "Emphasis style should be consistent"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let structure = DocumentStructure::new(content);
-        self.check_with_structure(content, &structure)
+        self.check_with_structure(ctx, &structure)
     }
 
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
         let mut warnings = Vec::new();
 
         let target_style = self.get_target_style(content, structure);
@@ -244,7 +246,8 @@ impl Rule for MD049EmphasisStyle {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let doc_structure = DocumentStructure::new(content);
 
         let target_style = self.get_target_style(content, &doc_structure);

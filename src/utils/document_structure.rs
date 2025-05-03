@@ -1037,7 +1037,7 @@ pub trait DocumentStructureExtensions {
     }
 
     /// Check if content contains elements relevant to this rule
-    fn has_relevant_elements(&self, _content: &str, _doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         // Default implementation returns true - rules should override this
         true
     }

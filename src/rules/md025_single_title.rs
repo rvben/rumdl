@@ -75,12 +75,14 @@ impl Rule for MD025SingleTitle {
         "Multiple top-level headings in the same document"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let structure = DocumentStructure::new(content);
-        self.check_with_structure(content, &structure)
+        self.check_with_structure(ctx, &structure)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let lines: Vec<&str> = content.lines().collect();
         let ends_with_newline = content.ends_with('\n');
         let structure = DocumentStructure::new(content);
@@ -130,13 +132,13 @@ impl Rule for MD025SingleTitle {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
         // Early return if no headings
         if structure.heading_lines.is_empty() {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
 
         // Check for front matter title if configured
@@ -144,7 +146,7 @@ impl Rule for MD025SingleTitle {
         if !self.front_matter_title.is_empty() && structure.has_front_matter {
             if let Some((start, end)) = structure.front_matter_range {
                 // Extract front matter content
-                let front_matter_content: String = content
+                let front_matter_content: String = ctx.content
                     .lines()
                     .skip(start - 1) // Convert from 1-indexed to 0-indexed
                     .take(end - start + 1)
@@ -160,7 +162,7 @@ impl Rule for MD025SingleTitle {
         }
 
         // Find all ATX level-1 headings not in code blocks or indented 4+ spaces
-        let lines: Vec<&str> = content.lines().collect();
+        let lines: Vec<&str> = ctx.content.lines().collect();
         let mut target_level_headings = Vec::new();
         for (i, &_line_num) in structure.heading_lines.iter().enumerate() {
             if i < structure.heading_levels.len() && structure.heading_levels[i] == self.level {
@@ -236,8 +238,8 @@ impl Rule for MD025SingleTitle {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || !content.contains('#')
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || !ctx.content.contains('#')
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -265,7 +267,7 @@ impl Rule for MD025SingleTitle {
 }
 
 impl DocumentStructureExtensions for MD025SingleTitle {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         // This rule is only relevant if there are headings
         !doc_structure.heading_lines.is_empty()
     }
@@ -282,20 +284,20 @@ mod tests {
         // Test with only one level-1 heading
         let content = "# Title\n\n## Section 1\n\n## Section 2";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let result = rule.check_with_structure(&crate::lint_context::LintContext::new(content), &structure).unwrap();
         assert!(result.is_empty());
 
         // Test with multiple level-1 headings
         let content = "# Title 1\n\n## Section 1\n\n# Title 2\n\n## Section 2";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let result = rule.check_with_structure(&crate::lint_context::LintContext::new(content), &structure).unwrap();
         assert_eq!(result.len(), 1); // Should flag the second level-1 heading
         assert_eq!(result[0].line, 5);
 
         // Test with front matter title and a level-1 heading
         let content = "---\ntitle: Document Title\n---\n\n# Main Heading\n\n## Section 1";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let result = rule.check_with_structure(&crate::lint_context::LintContext::new(content), &structure).unwrap();
         assert!(
             result.is_empty(),
             "Should not flag a single title after front matter"

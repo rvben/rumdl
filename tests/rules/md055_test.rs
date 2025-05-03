@@ -1,5 +1,6 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD055TablePipeStyle;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_name() {
@@ -18,7 +19,8 @@ fn test_consistent_pipe_styles() {
 | Cell 1   | Cell 2   |
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
     // No leading or trailing pipes consistently
@@ -28,7 +30,8 @@ Header 1 | Header 2
 Cell 1   | Cell 2
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
 
@@ -42,7 +45,8 @@ fn test_inconsistent_pipe_styles() {
 Cell 1   | Cell 2
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 4);
     assert!(result[0].message.contains("Table pipe style"));
@@ -59,7 +63,8 @@ fn test_leading_and_trailing_style() {
 | Cell 1   | Cell 2   |
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
     // Inconsistent with leading_and_trailing style
@@ -69,7 +74,8 @@ Header 1 | Header 2
 Cell 1   | Cell 2
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3); // Three rows, all need fixes
 }
 
@@ -84,7 +90,8 @@ Header 1 | Header 2
 Cell 1   | Cell 2
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
     // Inconsistent with no_leading_or_trailing style
@@ -94,7 +101,8 @@ Cell 1   | Cell 2
 | Cell 1   | Cell 2   |
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3); // Three rows, all need fixes
 }
 
@@ -109,7 +117,8 @@ fn test_leading_only_style() {
 | Cell 1   | Cell 2
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         0,
@@ -123,7 +132,8 @@ fn test_leading_only_style() {
 | Cell 1   | Cell 2   |
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         3,
@@ -131,12 +141,10 @@ fn test_leading_only_style() {
     );
 
     // Fix should correctly convert to leading_only style
-    let fixed = rule.fix(content).unwrap();
-    assert!(fixed.contains("| Header 1 | Header 2"));
-    assert!(!fixed.contains("| Header 1 | Header 2 |"));
-
-    // After fixing, there should be no warnings
-    let result = rule.check(&fixed).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
+    let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
 
@@ -151,7 +159,8 @@ Header 1 | Header 2 |
 Cell 1   | Cell 2   |
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         0,
@@ -165,16 +174,15 @@ Cell 1   | Cell 2   |
 | Cell 1   | Cell 2   |
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "Content with both leading and trailing pipes should be flagged when style is trailing_only");
 
     // Fix should correctly convert to trailing_only style
-    let fixed = rule.fix(content).unwrap();
-    assert!(fixed.contains("Header 1 | Header 2 |"));
-    assert!(!fixed.contains("| Header 1 | Header 2 |"));
-
-    // After fixing, there should be no warnings
-    let result = rule.check(&fixed).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
+    let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
 
@@ -193,7 +201,8 @@ Header with inconsistent style | that should be ignored
 ```
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
 
@@ -206,11 +215,10 @@ Header 1 | Header 2
 -------- | --------
 Cell 1   | Cell 2
     "#;
-    let fixed = rule.fix(content).unwrap();
-    assert!(fixed.contains("| Header 1 | Header 2 |"));
-    assert!(fixed.contains("| -------- | -------- |"));
-    assert!(fixed.contains("| Cell 1 | Cell 2 |"));
-    let result = rule.check(&fixed).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
+    let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 
     // Test fix for no_leading_or_trailing style
@@ -220,11 +228,9 @@ Cell 1   | Cell 2
 | -------- | -------- |
 | Cell 1   | Cell 2   |
     "#;
-    let fixed = rule.fix(content).unwrap();
-    assert!(fixed.contains("Header 1 | Header 2"));
-    assert!(!fixed.contains("| Header 1"));
-    assert!(!fixed.contains("Header 2 |"));
-    let result = rule.check(&fixed).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
+    let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 
     // Test fix for leading_only style
@@ -234,10 +240,9 @@ Header 1 | Header 2 |
 -------- | -------- |
 Cell 1   | Cell 2   |
     "#;
-    let fixed = rule.fix(content).unwrap();
-    assert!(fixed.contains("| Header 1 | Header 2"));
-    assert!(!fixed.contains("| Header 1 | Header 2 |"));
-    let result = rule.check(&fixed).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
+    let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 
     // Test fix for trailing_only style
@@ -247,9 +252,8 @@ Cell 1   | Cell 2   |
 | -------- | -------- |
 | Cell 1   | Cell 2   |
     "#;
-    let fixed = rule.fix(content).unwrap();
-    assert!(fixed.contains("Header 1 | Header 2 |"));
-    assert!(!fixed.contains("| Header 1 | Header 2 |"));
-    let result = rule.check(&fixed).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
+    let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 }

@@ -1,11 +1,13 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD047SingleTrailingNewline;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_file_end_newline() {
     let rule = MD047SingleTrailingNewline;
     let content = "Some text\nMore text\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -13,7 +15,8 @@ fn test_valid_file_end_newline() {
 fn test_missing_file_end_newline() {
     let rule = MD047SingleTrailingNewline;
     let content = "Some text\nMore text";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
 }
 
@@ -21,7 +24,8 @@ fn test_missing_file_end_newline() {
 fn test_multiple_file_end_newlines() {
     let rule = MD047SingleTrailingNewline;
     let content = "Some text\nMore text\n\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
 }
 
@@ -29,6 +33,7 @@ fn test_multiple_file_end_newlines() {
 fn test_fix_file_end_newline() {
     let rule = MD047SingleTrailingNewline;
     let content = "Some text\nMore text";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "Some text\nMore text\n");
 }

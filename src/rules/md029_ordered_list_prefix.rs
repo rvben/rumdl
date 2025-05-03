@@ -6,6 +6,7 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref ORDERED_LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)\d+\.\s").unwrap();
@@ -71,7 +72,8 @@ impl Rule for MD029OrderedListPrefix {
         "Ordered list marker value"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let mut warnings = Vec::new();
         let mut in_code_block = false;
         let mut indent_stack: Vec<(usize, usize)> = Vec::new(); // (indent, index)
@@ -153,7 +155,8 @@ impl Rule for MD029OrderedListPrefix {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let mut result = String::new();
         let mut in_code_block = false;
         let mut indent_stack: Vec<(usize, usize)> = Vec::new(); // (indent, index)
@@ -221,7 +224,9 @@ impl Rule for MD029OrderedListPrefix {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &crate::utils::document_structure::DocumentStructure) -> LintResult {
+        let content = ctx.content;
+
         // Early return if no lists
         if structure.list_lines.is_empty() {
             return Ok(Vec::new());
@@ -294,7 +299,8 @@ impl Rule for MD029OrderedListPrefix {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty()
             || !content.contains('1')
             || (!content.contains("1.") && !content.contains("2.") && !content.contains("0."))
@@ -320,7 +326,8 @@ impl Rule for MD029OrderedListPrefix {
 }
 
 impl DocumentStructureExtensions for MD029OrderedListPrefix {
-    fn has_relevant_elements(&self, content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+        let content = ctx.content;
         // This rule is only relevant if there are list items AND they might be ordered lists
         !doc_structure.list_lines.is_empty()
             && (content.contains("1.") || content.contains("2.") || content.contains("0."))
@@ -388,6 +395,8 @@ impl MD029OrderedListPrefix {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
+    use crate::utils::document_structure::DocumentStructure;
 
     #[test]
     fn test_with_document_structure() {
@@ -397,27 +406,31 @@ mod tests {
         // Test with correctly ordered list
         let content = "1. First item\n2. Second item\n3. Third item";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty());
 
         // Test with incorrectly ordered list
         let content = "1. First item\n3. Third item\n5. Fifth item";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 3 and 5
 
         // Test with one-one style
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOne);
         let content = "1. First item\n2. Second item\n3. Third item";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 2 and 3
 
         // Test with ordered0 style
         let rule = MD029OrderedListPrefix::new(ListStyle::Ordered0);
         let content = "0. First item\n1. Second item\n2. Third item";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty());
     }
 }

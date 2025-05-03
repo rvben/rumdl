@@ -141,9 +141,10 @@ impl MD034NoBareUrls {
     // Uses DocumentStructure for code block and code span detection in check_with_structure.
     pub fn check_with_structure(
         &self,
-        content: &str,
+        ctx: &crate::lint_context::LintContext,
         structure: &crate::utils::document_structure::DocumentStructure,
     ) -> LintResult {
+        let content = ctx.content;
         if self.should_skip(content) {
             return Ok(vec![]);
         }
@@ -169,13 +170,15 @@ impl Rule for MD034NoBareUrls {
         "Bare URL used"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // Use DocumentStructure for all code block and code span logic
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
-        self.check_with_structure(content, &structure)
+        self.check_with_structure(ctx, &structure)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Fast path - if content doesn't contain URL schemes, return content as-is
         if self.should_skip(content) {
             return Ok(content.to_string());
@@ -261,8 +264,8 @@ impl Rule for MD034NoBareUrls {
     }
 
     /// Check if this rule should be skipped based on content
-    fn should_skip(&self, content: &str) -> bool {
-        !regex_cache::contains_url(content)
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        !regex_cache::contains_url(ctx.content)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

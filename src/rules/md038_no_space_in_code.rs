@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{CodeSpan, DocumentStructure, DocumentStructureExtensions};
+use crate::lint_context::LintContext;
 
 /// Rule MD038: No space inside code span markers
 ///
@@ -82,7 +83,8 @@ impl Rule for MD038NoSpaceInCode {
         RuleCategory::Other
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         if !self.enabled {
             return Ok(vec![]);
         }
@@ -95,15 +97,15 @@ impl Rule for MD038NoSpaceInCode {
             return Ok(vec![]);
         }
 
-        self.check_with_structure(content, &structure)
+        self.check_with_structure(ctx, &structure)
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
         let mut warnings = Vec::new();
 
         // Get lines for position mapping
-        let lines: Vec<&str> = content.lines().collect();
+        let lines: Vec<&str> = ctx.content.lines().collect();
 
         // Process code spans directly from document structure
         for code_span in &structure.code_spans {
@@ -134,13 +136,14 @@ impl Rule for MD038NoSpaceInCode {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         if !self.enabled {
             return Ok(content.to_string());
         }
 
         // Get warnings to identify what needs to be fixed
-        let warnings = self.check(content)?;
+        let warnings = self.check(ctx)?;
         if warnings.is_empty() {
             return Ok(content.to_string());
         }
@@ -213,8 +216,8 @@ impl Rule for MD038NoSpaceInCode {
     }
 
     /// Check if content is likely to have code spans
-    fn should_skip(&self, content: &str) -> bool {
-        !content.contains('`')
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        !ctx.content.contains('`')
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -230,7 +233,7 @@ impl Rule for MD038NoSpaceInCode {
 }
 
 impl DocumentStructureExtensions for MD038NoSpaceInCode {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         !doc_structure.code_spans.is_empty()
     }
 }
@@ -242,8 +245,6 @@ mod tests {
     #[test]
     fn test_md038_valid() {
         let rule = MD038NoSpaceInCode::new();
-
-        // Valid code spans - no spaces inside
         let valid_cases = vec![
             "This is `code` in a sentence.",
             "This is a `longer code span` in a sentence.",
@@ -255,9 +256,9 @@ mod tests {
             "Code span with `symbols: !@#$%^&*()`",
             "Empty code span `` is technically valid",
         ];
-
         for case in valid_cases {
-            let result = rule.check(case).unwrap();
+            let ctx = LintContext::new(case);
+            let result = rule.check(&ctx).unwrap();
             assert!(
                 result.is_empty(),
                 "Valid case should not have warnings: {}",
@@ -269,17 +270,15 @@ mod tests {
     #[test]
     fn test_md038_invalid() {
         let rule = MD038NoSpaceInCode::new();
-
-        // Invalid code spans - spaces inside backticks
         let invalid_cases = vec![
             "This is ` code` with leading space.",
             "This is `code ` with trailing space.",
             "This is ` code ` with both leading and trailing space.",
             "Multiple ` code ` spans with `spaces ` in one line.",
         ];
-
         for case in invalid_cases {
-            let result = rule.check(case).unwrap();
+            let ctx = LintContext::new(case);
+            let result = rule.check(&ctx).unwrap();
             assert!(
                 !result.is_empty(),
                 "Invalid case should have warnings: {}",
@@ -291,8 +290,6 @@ mod tests {
     #[test]
     fn test_md038_fix() {
         let rule = MD038NoSpaceInCode::new();
-
-        // Test cases with their expected fixed versions
         let test_cases = vec![
             (
                 "This is ` code` with leading space.",
@@ -311,9 +308,9 @@ mod tests {
                 "Multiple `code` and `spans` to fix.",
             ),
         ];
-
         for (input, expected) in test_cases {
-            let result = rule.fix(input).unwrap();
+            let ctx = LintContext::new(input);
+            let result = rule.fix(&ctx).unwrap();
             assert_eq!(
                 result, expected,
                 "Fix did not produce expected output for: {}",
@@ -325,11 +322,9 @@ mod tests {
     #[test]
     fn test_check_invalid_leading_space() {
         let rule = MD038NoSpaceInCode::new();
-
-        // Test specific case with leading space
         let input = "This has a ` leading space` in code";
-        let result = rule.check(input).unwrap();
-
+        let ctx = LintContext::new(input);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
         assert!(result[0].fix.is_some());

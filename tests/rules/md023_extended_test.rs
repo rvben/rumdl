@@ -1,5 +1,6 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD023HeadingStartLeft;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_complex_mixed_headings() {
@@ -23,7 +24,8 @@ Setext heading
    # Indented closed ATX heading #
 "#;
 
-    let result = rule.check(content);
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
 
@@ -38,7 +40,8 @@ Setext heading
     assert_eq!(warnings[4].line, 15); // "   # Indented closed ATX heading #"
 
     // Verify the fix
-    let fixed = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(!fixed.contains("  ## Indented"));
     assert!(!fixed.contains("   ####"));
     assert!(!fixed.contains("  Another setext"));
@@ -66,7 +69,8 @@ author: Test Author
 Content after front matter
 "#;
 
-    let result = rule.check(content);
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
 
@@ -75,7 +79,8 @@ Content after front matter
     assert_eq!(warnings[0].line, 8);
 
     // Verify the fix preserves front matter
-    let fixed = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("---\ntitle:"));
     assert!(fixed.contains("---\n\n# Valid"));
     assert!(fixed.contains("## Indented heading"));
@@ -103,7 +108,8 @@ fn test_code_blocks_with_headings() {
    ### Another indented heading
 "#;
 
-    let result = rule.check(content);
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
 
@@ -113,7 +119,8 @@ fn test_code_blocks_with_headings() {
     assert_eq!(warnings[1].line, 14); // "   ### Another indented heading"
 
     // Verify the fix preserves code blocks
-    let fixed = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("```markdown\n# This is a heading"));
     assert!(fixed.contains("  ## This is an indented heading in a code block"));
     assert!(fixed.contains("```\n\n## This is an indented")); // Fixed with no indentation
@@ -138,7 +145,8 @@ fn test_nested_headings_with_mixed_styles() {
 #### Regular SubSubSubheading
 "#;
 
-    let result = rule.check(content);
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
 
@@ -148,7 +156,8 @@ fn test_nested_headings_with_mixed_styles() {
     assert_eq!(warnings[1].line, 7); // "  Indented Setext SubSubheading"
 
     // Also check fix
-    let fixed = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("### Indented ATX Subheading")); // Fixed with no indentation
     assert!(fixed.contains("Indented Setext SubSubheading")); // Fixed with no indentation
     assert!(fixed.contains("----------------------------")); // Fixed underline with no indentation
@@ -168,7 +177,8 @@ fn test_heading_with_special_characters() {
    ### Indented heading with [link](https://example.com)
 "#;
 
-    let result = rule.check(content);
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
 
@@ -178,7 +188,8 @@ fn test_heading_with_special_characters() {
     assert_eq!(warnings[1].line, 5); // "   ### Indented heading with [link](https://example.com)"
 
     // Verify the fix preserves special characters
-    let fixed = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("## Indented heading with **bold** and `code`"));
     assert!(fixed.contains("### Indented heading with [link](https://example.com)"));
     assert!(!fixed.contains("  ## Indented"));
@@ -197,7 +208,8 @@ fn test_empty_indented_headings() {
    ### 
 "#;
 
-    let result = rule.check(content);
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
 
@@ -207,7 +219,8 @@ fn test_empty_indented_headings() {
     assert_eq!(warnings[1].line, 5); // "   ### "
 
     // Verify the fix works for empty headings
-    let fixed = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("##"));
     assert!(fixed.contains("###"));
     assert!(!fixed.contains("  ##"));
@@ -230,7 +243,8 @@ fn test_multiple_indentation_levels() {
     ## Heading with 4 spaces
 "#;
 
-    let result = rule.check(content);
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
 
@@ -242,7 +256,8 @@ fn test_multiple_indentation_levels() {
     assert_eq!(warnings[3].line, 9); // "    ## Heading with 4 spaces"
 
     // Verify the fix works for different indentation levels
-    let fixed = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed.matches("## Heading with").count(), 4);
     assert!(!fixed.contains(" ## Heading"));
     assert!(!fixed.contains("  ## Heading"));

@@ -288,7 +288,8 @@ impl Rule for MD052ReferenceLinkImages {
         "Reference links and images should use a reference that exists"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let mut warnings = Vec::new();
         let references = self.extract_references(content);
 
@@ -306,7 +307,8 @@ impl Rule for MD052ReferenceLinkImages {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // No automatic fix available for undefined references
         Ok(content.to_string())
     }

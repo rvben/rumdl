@@ -119,7 +119,8 @@ impl Rule for MD013LineLength {
         "Line length should not be excessive"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let mut warnings = Vec::new();
         let structure = DocumentStructure::new(content);
         let lines: Vec<&str> = content.lines().collect();
@@ -174,7 +175,8 @@ impl Rule for MD013LineLength {
         Ok(warnings) // Restore Ok() wrapper
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Line wrapping requires manual intervention as it needs to consider:
         // - Markdown syntax
         // - Word boundaries

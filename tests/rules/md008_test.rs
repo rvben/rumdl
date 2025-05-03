@@ -1,23 +1,27 @@
 use rumdl::rule::Rule;
 use rumdl::rules::md008_ul_style::StyleMode;
 use rumdl::MD008ULStyle;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_list_style() {
     let rule = MD008ULStyle::default(); // Uses consistent mode by default
                                         // Testing that consistent markers are valid
     let content = "* Item 1\n  * Item 2\n    * Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 
     // Testing dash style markers
     let content = "- Item 1\n  - Item 2\n    - Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 
     // Testing plus style markers
     let content = "+ Item 1\n  + Item 2\n    + Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -26,17 +30,20 @@ fn test_invalid_list_style() {
     let rule = MD008ULStyle::default(); // Uses consistent mode by default
                                         // First marker is asterisk, so others should be asterisks too
     let content = "* Item 1\n  + Item 2\n    - Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
 
     // First marker is dash, so others should be dashes too
     let content = "- Item 1\n  + Item 2\n    * Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
 
     // First marker is plus, so others should be pluses too
     let content = "+ Item 1\n  - Item 2\n    * Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
 }
 
@@ -45,7 +52,8 @@ fn test_mixed_list_style() {
     let rule = MD008ULStyle::default(); // Uses consistent mode by default
                                         // First marker is asterisk, so all should be asterisks
     let content = "* Item 1\n  * Item 2\n    + Item 3\n      - Item 4";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
 }
 
@@ -54,19 +62,22 @@ fn test_fix_list_style() {
     let rule = MD008ULStyle::default(); // Uses consistent mode by default
                                         // First marker is asterisk, so all should be fixed to asterisks
     let content = "* Item 1\n  + Item 2\n    - Item 3";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     let expected = "* Item 1\n  * Item 2\n    * Item 3";
     assert_eq!(result, expected);
 
     // First marker is dash, so all should be fixed to dashes
     let content = "- Item 1\n  + Item 2\n    * Item 3";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     let expected = "- Item 1\n  - Item 2\n    - Item 3";
     assert_eq!(result, expected);
 
     // First marker is plus, so all should be fixed to pluses
     let content = "+ Item 1\n  - Item 2\n    * Item 3";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     let expected = "+ Item 1\n  + Item 2\n    + Item 3";
     assert_eq!(result, expected);
 }
@@ -76,7 +87,8 @@ fn test_code_block_skipping() {
     let rule = MD008ULStyle::default(); // Uses consistent mode by default
     let content =
         "* Item 1\n\n```\n* Not a real list item\n+ Also not a real item\n```\n\n* Item 2";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -88,10 +100,11 @@ fn test_explicitly_configured_style() {
     // Use StyleMode::Specific to enforce the '-' style
     let rule = MD008ULStyle::new(StyleMode::Specific("-".to_string()));
     let content = "* Item 1\n  * Item 2\n    * Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     let expected = "- Item 1\n  - Item 2\n    - Item 3";
     assert_eq!(fixed, expected);
 
@@ -100,7 +113,8 @@ fn test_explicitly_configured_style() {
     // Recreate with ::new
     let rule_star = MD008ULStyle::new(StyleMode::Specific("*".to_string()));
     let content_dash = "- Item 1\n  - Item 2\n    - Item 3";
-    let result_star = rule_star.check(content_dash).unwrap();
+    let ctx_dash = LintContext::new(content_dash);
+    let result_star = rule_star.check(&ctx_dash).unwrap();
     assert_eq!(result_star.len(), 3);
 
     // Explicitly test with StyleMode::Consistent
@@ -108,7 +122,8 @@ fn test_explicitly_configured_style() {
     // Recreate with ::new
     let rule_consistent = MD008ULStyle::new(StyleMode::Consistent);
     let content_consistent = "- Item 1\n  - Item 2\n    - Item 3";
-    let result_consistent = rule_consistent.check(content_consistent).unwrap();
+    let ctx_consistent = LintContext::new(content_consistent);
+    let result_consistent = rule_consistent.check(&ctx_consistent).unwrap();
     assert!(result_consistent.is_empty());
 }
 
@@ -116,10 +131,11 @@ fn test_explicitly_configured_style() {
 fn test_empty_content() {
     let rule = MD008ULStyle::default();
     let content = "";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Empty content should have no warnings");
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "", "Empty content should remain empty after fix");
 }
 
@@ -129,7 +145,8 @@ fn test_lists_with_blank_lines() {
 
     // List with blank lines between items, should still enforce consistency
     let content = "* Item 1\n\n* Item 2\n\n- Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         1,
@@ -137,7 +154,7 @@ fn test_lists_with_blank_lines() {
     );
 
     // Fix should preserve blank lines
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     let expected = "* Item 1\n\n* Item 2\n\n* Item 3";
     assert_eq!(fixed, expected);
 }
@@ -149,7 +166,8 @@ fn test_lists_in_blockquotes() {
     // Lists inside blockquotes should be checked, but the current implementation
     // doesn't detect list markers in blockquotes
     let content = "> * Item 1\n> * Item 2\n> - Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         0,
@@ -166,7 +184,8 @@ fn test_lists_with_html_comments() {
 
     // HTML comments should not affect list checking
     let content = "* Item 1\n<!-- * This is a comment -->\n* Item 2\n- Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         1,
@@ -174,7 +193,7 @@ fn test_lists_with_html_comments() {
     );
 
     // Fix should preserve HTML comments
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     let expected = "* Item 1\n<!-- * This is a comment -->\n* Item 2\n* Item 3";
     assert_eq!(fixed, expected);
 }
@@ -186,7 +205,8 @@ fn test_complex_nested_lists() {
     // Complex nesting with inconsistent markers
     let content =
         "* Top level 1\n  - Nested 1.1\n    + Deep nested 1.1.1\n* Top level 2\n  * Nested 2.1";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         2,
@@ -194,7 +214,7 @@ fn test_complex_nested_lists() {
     );
 
     // Fix should handle all levels
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     let expected =
         "* Top level 1\n  * Nested 1.1\n    * Deep nested 1.1.1\n* Top level 2\n  * Nested 2.1";
     assert_eq!(fixed, expected);
@@ -206,7 +226,8 @@ fn test_with_front_matter() {
 
     // Front matter should be ignored
     let content = "---\ntitle: Test Document\n---\n\n* Item 1\n* Item 2\n- Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         1,
@@ -214,7 +235,7 @@ fn test_with_front_matter() {
     );
 
     // Fix should preserve front matter
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     let expected = "---\ntitle: Test Document\n---\n\n* Item 1\n* Item 2\n* Item 3";
     assert_eq!(fixed, expected);
 }
@@ -225,7 +246,8 @@ fn test_mixed_ordered_unordered_lists() {
 
     // Ordered and unordered lists together
     let content = "* Unordered 1\n* Unordered 2\n1. Ordered 1\n2. Ordered 2\n- Unordered 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         1,
@@ -233,7 +255,7 @@ fn test_mixed_ordered_unordered_lists() {
     );
 
     // Fix should only change unordered list markers
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     let expected = "* Unordered 1\n* Unordered 2\n1. Ordered 1\n2. Ordered 2\n* Unordered 3";
     assert_eq!(fixed, expected);
 }
@@ -244,7 +266,8 @@ fn test_indentation_variations() {
 
     // Varied indentation with inconsistent markers
     let content = "* Item 1\n    - Item with extra indentation\n  * Item with normal indentation";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         1,
@@ -252,7 +275,7 @@ fn test_indentation_variations() {
     );
 
     // Fix should preserve original indentation
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     let expected = "* Item 1\n    * Item with extra indentation\n  * Item with normal indentation";
     assert_eq!(fixed, expected);
 }
@@ -263,7 +286,8 @@ fn test_list_markers_at_edge_of_line() {
 
     // Test with markers at the very start of lines and with strange spacing
     let content = "*Item with no space\n* Normal item\n-No space again";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     // This depends on whether the implementation considers "*Item" as a list item
     // Most implementations would not, but we should check the expected behavior
     let expected_warnings = 0; // Assuming "*Item" is not considered a list item
@@ -280,10 +304,11 @@ fn test_trailing_newlines() {
 
     // Test with multiple trailing newlines
     let content = "* Item 1\n* Item 2\n- Item 3\n\n\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect one inconsistent marker");
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
 
     // The fixed content should preserve all trailing newlines
     assert_eq!(

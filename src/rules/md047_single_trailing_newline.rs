@@ -18,7 +18,8 @@ impl Rule for MD047SingleTrailingNewline {
         "Files should end with a single newline character"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
@@ -67,7 +68,8 @@ impl Rule for MD047SingleTrailingNewline {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Empty content remains empty
         if content.is_empty() {
             return Ok(content.to_string());
@@ -106,80 +108,56 @@ impl Rule for MD047SingleTrailingNewline {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
 
     #[test]
-    fn test_empty_content() {
-        let rule = MD047SingleTrailingNewline;
+    fn test_valid_trailing_newline() {
+        let rule = MD047SingleTrailingNewline::default();
+        let content = "Line 1\nLine 2\n";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_missing_trailing_newline() {
+        let rule = MD047SingleTrailingNewline::default();
+        let content = "Line 1\nLine 2";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line 1\nLine 2\n");
+    }
+
+    #[test]
+    fn test_multiple_trailing_newlines() {
+        let rule = MD047SingleTrailingNewline::default();
+        let content = "Line 1\nLine 2\n\n\n";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line 1\nLine 2\n");
+    }
+
+    #[test]
+    fn test_blank_file() {
+        let rule = MD047SingleTrailingNewline::default();
         let content = "";
-        let result = rule.check(content).unwrap();
-        assert!(
-            result.is_empty(),
-            "Empty content should not trigger warnings"
-        );
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
     }
 
     #[test]
-    fn test_single_newline() {
-        let rule = MD047SingleTrailingNewline;
-        let content = "# Test\n";
-        let result = rule.check(content).unwrap();
-        assert!(
-            result.is_empty(),
-            "Content with single trailing newline should not trigger warnings"
-        );
-    }
-
-    #[test]
-    fn test_missing_newline() {
-        let rule = MD047SingleTrailingNewline;
-        let content = "# Test";
-        let result = rule.check(content).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "Content without trailing newline should trigger a warning"
-        );
-
-        let fixed = rule.fix(content).unwrap();
-        assert_eq!(
-            fixed, "# Test\n",
-            "Fixed content should have a trailing newline"
-        );
-    }
-
-    #[test]
-    fn test_multiple_newlines() {
-        let rule = MD047SingleTrailingNewline;
-        let content = "# Test\n\n";
-        let result = rule.check(content).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "Content with multiple trailing newlines should trigger a warning"
-        );
-
-        let fixed = rule.fix(content).unwrap();
-        assert_eq!(
-            fixed, "# Test\n",
-            "Fixed content should have exactly one trailing newline"
-        );
-    }
-
-    #[test]
-    fn test_only_whitespace() {
-        let rule = MD047SingleTrailingNewline;
-        let content = "  \n\n";
-        let result = rule.check(content).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "Content with only whitespace and multiple newlines should trigger a warning"
-        );
-
-        let fixed = rule.fix(content).unwrap();
-        assert_eq!(
-            fixed, "  \n",
-            "Fixed content should have exactly one trailing newline"
-        );
+    fn test_file_with_only_newlines() {
+        let rule = MD047SingleTrailingNewline::default();
+        let content = "\n\n\n";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "\n");
     }
 }

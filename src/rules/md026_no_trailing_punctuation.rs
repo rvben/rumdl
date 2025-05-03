@@ -202,9 +202,10 @@ impl MD026NoTrailingPunctuation {
 
     fn check_with_structure(
         &self,
-        content: &str,
+        ctx: &crate::lint_context::LintContext,
         structure: &crate::utils::document_structure::DocumentStructure,
     ) -> LintResult {
+        let content = ctx.content;
         if content.is_empty() {
             return Ok(Vec::new());
         }
@@ -309,12 +310,14 @@ impl Rule for MD026NoTrailingPunctuation {
         "Trailing punctuation in heading"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
-        self.check_with_structure(content, &structure)
+        self.check_with_structure(ctx, &structure)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Parse the document structure to get heading info
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
 

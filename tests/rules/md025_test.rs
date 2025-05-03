@@ -1,11 +1,13 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD025SingleTitle;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_md025_valid() {
     let rule = MD025SingleTitle::default();
     let content = "# Title\n## Heading 2\n### Heading 3\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -13,7 +15,8 @@ fn test_md025_valid() {
 fn test_md025_invalid() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n# Title 2\n## Heading\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
 }
@@ -22,7 +25,8 @@ fn test_md025_invalid() {
 fn test_md025_no_title() {
     let rule = MD025SingleTitle::default();
     let content = "## Heading 2\n### Heading 3\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -30,7 +34,8 @@ fn test_md025_no_title() {
 fn test_md025_with_front_matter() {
     let rule = MD025SingleTitle::default();
     let content = "---\ntitle: Document Title\n---\n# Title\n## Heading 2\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
         "Should not flag a single title after front matter"
@@ -41,7 +46,8 @@ fn test_md025_with_front_matter() {
 fn test_md025_multiple_with_front_matter() {
     let rule = MD025SingleTitle::default();
     let content = "---\ntitle: Document Title\n---\n# Title 1\n## Heading 2\n# Title 2\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 6);
 }
@@ -50,7 +56,8 @@ fn test_md025_multiple_with_front_matter() {
 fn test_md025_with_code_blocks() {
     let rule = MD025SingleTitle::default();
     let content = "# Title\n\n```markdown\n# This is not a real title\n```\n\n## Heading\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should ignore titles in code blocks");
 }
 
@@ -58,7 +65,8 @@ fn test_md025_with_code_blocks() {
 fn test_md025_with_custom_level() {
     let rule = MD025SingleTitle::new(2, "");
     let content = "# Heading 1\n## Heading 2.1\n## Heading 2.2\n### Heading 3\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
 }
@@ -67,7 +75,8 @@ fn test_md025_with_custom_level() {
 fn test_md025_indented_headings() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n\n  # Title 2\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
 }
@@ -76,7 +85,8 @@ fn test_md025_indented_headings() {
 fn test_md025_with_multiple_violations() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n\n# Title 2\n\n# Title 3\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 3);
     assert_eq!(result[1].line, 5);
@@ -86,7 +96,8 @@ fn test_md025_with_multiple_violations() {
 fn test_md025_empty_document() {
     let rule = MD025SingleTitle::default();
     let content = "";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -94,7 +105,8 @@ fn test_md025_empty_document() {
 fn test_md025_closing_hashes() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1 #\n\n# Title 2 #\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
 }
@@ -105,7 +117,8 @@ fn test_md025_setext_headings() {
     // Setext headings (using === or ---) aren't detected by this rule
     // since it only looks for # style headings
     let content = "Title 1\n=======\n\nTitle 2\n=======\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -121,8 +134,9 @@ fn test_md025_performance() {
         content.push_str(&format!("## Heading {}\n\nSome text here.\n\n", i));
     }
 
+    let ctx = LintContext::new(&content);
     let start = std::time::Instant::now();
-    let result = rule.check(&content).unwrap();
+    let result = rule.check(&ctx).unwrap();
     let duration = start.elapsed();
 
     assert!(result.is_empty());
@@ -136,7 +150,8 @@ fn test_md025_performance() {
 fn test_md025_fix() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n# Title 2\n## Heading\n";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "# Title 1\n## Title 2\n## Heading\n");
 }
 
@@ -144,7 +159,8 @@ fn test_md025_fix() {
 fn test_md025_fix_multiple() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n# Title 2\n# Title 3\n## Heading\n";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "# Title 1\n## Title 2\n## Title 3\n## Heading\n");
 }
 
@@ -154,17 +170,19 @@ fn test_md025_fix_with_indentation() {
     // In Markdown, content indented with 4+ spaces is considered a code block
     // so the heavily indented heading is not processed as a heading
     let content = "# Title 1\n  # Title 2\n    # Title 3\n";
-    let fixed = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
 
     // Expected behavior: verify the title is fixed properly
-    assert!(fixed.contains("# Title 1"));
-    assert!(fixed.contains("Title 2"));
-    assert!(fixed.contains("Title 3"));
+    assert!(fixed_ctx.content.contains("# Title 1"));
+    assert!(fixed_ctx.content.contains("Title 2"));
+    assert!(fixed_ctx.content.contains("Title 3"));
 
     // Ensure there are no duplicate H1 headings (the issue this rule checks for)
-    let check_result = rule.check(&fixed).unwrap();
+    let result = rule.check(&fixed_ctx).unwrap();
     assert!(
-        check_result.is_empty(),
+        result.is_empty(),
         "Fixed content should have no warnings"
     );
 }

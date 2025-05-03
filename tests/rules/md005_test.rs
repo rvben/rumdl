@@ -1,5 +1,6 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD005ListIndent;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_unordered_list() {
@@ -10,7 +11,8 @@ fn test_valid_unordered_list() {
   * Nested 1
   * Nested 2
 * Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -23,7 +25,8 @@ fn test_valid_ordered_list() {
   1. Nested 1
   2. Nested 2
 3. Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -34,9 +37,10 @@ fn test_invalid_unordered_indent() {
 * Item 1
  * Item 2
    * Nested 1";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Nested 1");
 }
 
@@ -47,9 +51,10 @@ fn test_invalid_ordered_indent() {
 1. Item 1
  2. Item 2
     1. Nested 1";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "1. Item 1\n  2. Item 2\n    1. Nested 1");
 }
 
@@ -61,7 +66,8 @@ fn test_mixed_list_types() {
   1. Nested ordered
   * Nested unordered
 * Item 2";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -72,9 +78,10 @@ fn test_multiple_levels() {
 * Level 1
    * Level 2
       * Level 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
         "\
@@ -93,7 +100,8 @@ fn test_empty_lines() {
   * Nested 1
 
 * Item 2";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -104,7 +112,8 @@ fn test_no_lists() {
 Just some text
 More text
 Even more text";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -119,7 +128,8 @@ fn test_complex_nesting() {
     1. Ordered 3
     2. Still 3
 * Back to 1";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -134,8 +144,9 @@ fn test_invalid_complex_nesting() {
       1. Ordered 3
      2. Still 3
 * Back to 1";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "* Level 1\n  * Level 2\n    * Level 3\n  * Back to 2\n      1. Ordered 3\n    2. Still 3\n* Back to 1");
 }

@@ -220,7 +220,8 @@ impl Rule for MD055TablePipeStyle {
         "Table pipe style should be consistent"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
@@ -340,7 +341,8 @@ impl Rule for MD055TablePipeStyle {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let lines: Vec<&str> = content.lines().collect();
         let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
@@ -471,7 +473,8 @@ mod tests {
         let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
 
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
-        let result = rule.fix(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.fix(&ctx).unwrap();
 
         // With the fixed implementation, the delimiter row should have pipes removed
         let expected = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1 | Data 2 | Data 3";
@@ -479,7 +482,7 @@ mod tests {
         assert_eq!(result, expected);
 
         // Test that the check method actually reports the delimiter row as an issue
-        let warnings = rule.check(content).unwrap();
+        let warnings = rule.check(&ctx).unwrap();
         let delimiter_warning = &warnings[1]; // Second warning should be for delimiter row
         assert_eq!(delimiter_warning.line, 2);
         assert_eq!(
@@ -491,7 +494,8 @@ mod tests {
         let rule = MD055TablePipeStyle::new("leading_and_trailing");
 
         let content = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1   | Data 2   | Data 3";
-        let result = rule.fix(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.fix(&ctx).unwrap();
 
         // Output the actual result for debugging
         println!(
@@ -511,7 +515,8 @@ mod tests {
         let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
 
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
-        let warnings = rule.check(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
 
         // Should have 3 warnings - header row, delimiter row, and data row
         assert_eq!(warnings.len(), 3);
@@ -531,8 +536,8 @@ mod tests {
         let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
 
         let content = "# Table Example\n\nHere's a table with leading and trailing pipes:\n\n| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |\n| Data 4   | Data 5   | Data 6   |\n\nMore content after the table.";
-
-        let result = rule.fix(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.fix(&ctx).unwrap();
 
         // The table should be fixed, with delimiter row pipes properly removed
         let expected = "# Table Example\n\nHere's a table with leading and trailing pipes:\n\nHeader 1 | Header 2 | Header 3\n----------|----------|----------\nData 1 | Data 2 | Data 3\nData 4 | Data 5 | Data 6\n\nMore content after the table.";
@@ -540,7 +545,7 @@ mod tests {
         assert_eq!(result, expected);
 
         // Ensure we get warnings for all table rows
-        let warnings = rule.check(content).unwrap();
+        let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 4); // All four table rows should have warnings
 
         // The line numbers should match the correct positions in the original content
@@ -556,7 +561,8 @@ mod tests {
         let rule = MD055TablePipeStyle::new("leading_or_trailing"); // Invalid style
 
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
-        let result = rule.fix(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.fix(&ctx).unwrap();
 
         // Output the actual result for debugging
         println!(
@@ -572,14 +578,15 @@ mod tests {
 
         // Now check a content that needs actual modification
         let content = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1   | Data 2   | Data 3";
-        let result = rule.fix(content).unwrap();
+        let ctx2 = crate::lint_context::LintContext::new(content);
+        let result = rule.fix(&ctx2).unwrap();
 
         // Should add pipes to match the default "leading_and_trailing" style
         let expected = "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
         assert_eq!(result, expected);
 
         // Check that warning messages also work with the fallback style
-        let warnings = rule.check(content).unwrap();
+        let warnings = rule.check(&ctx2).unwrap();
 
         // Since content doesn't have leading/trailing pipes but defaults to "leading_and_trailing",
         // there should be warnings for all rows

@@ -39,34 +39,23 @@ impl Rule for MD028NoBlanksBlockquote {
         "Blank line inside blockquote"
     }
 
-    fn check(&self, content: &str) -> LintResult {
-        let line_index = LineIndex::new(content.to_string());
-
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
-
-        let lines: Vec<&str> = content.lines().collect();
-
+        let lines: Vec<&str> = ctx.content.lines().collect();
         let mut in_blockquote = false;
-
         for (i, &line) in lines.iter().enumerate() {
             if Self::is_completely_empty_line(line) {
-                // A completely empty line separates blockquotes
                 in_blockquote = false;
                 continue;
             }
-
             if BlockquoteUtils::is_blockquote(line) {
                 let level = BlockquoteUtils::get_nesting_level(line);
-
                 if !in_blockquote {
-                    // Start of a new blockquote
                     in_blockquote = true;
                 }
-
-                // Check if this is an empty blockquote line
                 if BlockquoteUtils::is_empty_blockquote(line) {
                     let indent = BlockquoteUtils::extract_indentation(line);
-
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message: "Blank line inside blockquote".to_string(),
@@ -80,44 +69,30 @@ impl Rule for MD028NoBlanksBlockquote {
                     });
                 }
             } else {
-                // Non-blockquote line
                 in_blockquote = false;
             }
         }
-
         Ok(warnings)
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        // Early return if there are no blockquotes
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
         if structure.blockquotes.is_empty() {
             return Ok(Vec::new());
         }
-
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Process each blockquote region
+        let lines: Vec<&str> = ctx.content.lines().collect();
         for blockquote in &structure.blockquotes {
-            // Check for blank lines within this blockquote
             for line_num in blockquote.start_line..=blockquote.end_line {
-                // Skip if out of bounds
                 if line_num == 0 || line_num > lines.len() {
                     continue;
                 }
-
-                let line_idx = line_num - 1; // Convert to 0-indexed
+                let line_idx = line_num - 1;
                 let line = lines[line_idx];
-
-                // Check if this is an empty blockquote line
-                if BlockquoteUtils::is_blockquote(line)
-                    && BlockquoteUtils::is_empty_blockquote(line)
-                {
+                if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::is_empty_blockquote(line) {
                     let level = BlockquoteUtils::get_nesting_level(line);
                     let indent = BlockquoteUtils::extract_indentation(line);
-
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message: "Blank line inside blockquote".to_string(),
@@ -132,52 +107,36 @@ impl Rule for MD028NoBlanksBlockquote {
                 }
             }
         }
-
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _line_index = LineIndex::new(content.to_string());
-
-        let lines: Vec<&str> = content.lines().collect();
-
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let lines: Vec<&str> = ctx.content.lines().collect();
         let mut result = Vec::with_capacity(lines.len());
-
         let mut in_blockquote = false;
-
         for line in lines {
             if Self::is_completely_empty_line(line) {
-                // Add empty lines as-is
                 in_blockquote = false;
                 result.push(line.to_string());
                 continue;
             }
-
             if BlockquoteUtils::is_blockquote(line) {
                 let level = BlockquoteUtils::get_nesting_level(line);
-
                 if !in_blockquote {
-                    // Start of a new blockquote
                     in_blockquote = true;
                 }
-
-                // Handle empty blockquote lines
                 if BlockquoteUtils::is_empty_blockquote(line) {
                     let indent = BlockquoteUtils::extract_indentation(line);
                     result.push(Self::get_replacement(&indent, level));
                 } else {
-                    // Add the line as is
                     result.push(line.to_string());
                 }
             } else {
-                // Non-blockquote line
                 in_blockquote = false;
                 result.push(line.to_string());
             }
         }
-
-        // Preserve trailing newline if original content had one
-        Ok(result.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
+        Ok(result.join("\n") + if ctx.content.ends_with('\n') { "\n" } else { "" })
     }
 
     /// Get the category of this rule for selective processing
@@ -186,8 +145,8 @@ impl Rule for MD028NoBlanksBlockquote {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        !content.contains('>')
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        !ctx.content.contains('>')
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -203,8 +162,7 @@ impl Rule for MD028NoBlanksBlockquote {
 }
 
 impl DocumentStructureExtensions for MD028NoBlanksBlockquote {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
-        // Only run if the document has blockquotes
+    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         !doc_structure.blockquotes.is_empty()
     }
 }

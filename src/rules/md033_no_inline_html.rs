@@ -10,6 +10,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
 use toml;
+use crate::lint_context::LintContext;
 
 lazy_static! {
     // Refined regex patterns with better performance characteristics
@@ -84,22 +85,23 @@ impl Rule for MD033NoInlineHtml {
         "Inline HTML is not allowed"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let structure = DocumentStructure::new(content);
-        self.check_with_structure(content, &structure)
+        self.check_with_structure(ctx, &structure)
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
         // Restore early exit check (without structure.has_html)
-        if content.is_empty() || !content.contains('<') || !HTML_TAG_QUICK_CHECK.is_match(content) {
+        if ctx.content.is_empty() || !ctx.content.contains('<') || !HTML_TAG_QUICK_CHECK.is_match(ctx.content) {
             return Ok(Vec::new());
         }
 
         let mut warnings = Vec::new();
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(ctx.content.to_string());
 
-        for (i, line) in content.lines().enumerate() {
+        for (i, line) in ctx.content.lines().enumerate() {
             let line_num = i + 1;
 
             // Restore initial skip: only skip empty or code block lines
@@ -171,9 +173,10 @@ impl Rule for MD033NoInlineHtml {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Use check() to get warnings with fix ranges and replacements (escaping)
-        let warnings = self.check(content)?;
+        let warnings = self.check(ctx)?;
         if warnings.is_empty() {
             return Ok(content.to_string());
         }
@@ -220,8 +223,8 @@ impl Rule for MD033NoInlineHtml {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || !content.contains('<') || !HTML_TAG_QUICK_CHECK.is_match(content)
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || !ctx.content.contains('<') || !HTML_TAG_QUICK_CHECK.is_match(ctx.content)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -253,22 +256,25 @@ impl Rule for MD033NoInlineHtml {
 }
 
 impl DocumentStructureExtensions for MD033NoInlineHtml {
-    fn has_relevant_elements(&self, content: &str, _doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, _doc_structure: &DocumentStructure) -> bool {
         // Rule is only relevant if content contains potential HTML tags
-        content.contains('<') && content.contains('>')
+        ctx.content.contains('<') && ctx.content.contains('>')
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
+    use crate::utils::document_structure::DocumentStructure;
     use crate::rule::Rule;
 
     #[test]
     fn test_md033_basic_html() {
         let rule = MD033NoInlineHtml::default();
         let content = "<div>Some content</div>";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].message, "Found inline HTML tag: <div>");
         assert_eq!(result[1].message, "Found inline HTML tag: </div>");
@@ -278,7 +284,8 @@ mod tests {
     fn test_md033_case_insensitive() {
         let rule = MD033NoInlineHtml::default();
         let content = "<DiV>Some <B>content</B></dIv>";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 4);
         assert_eq!(result[0].message, "Found inline HTML tag: <DiV>");
         assert_eq!(result[1].message, "Found inline HTML tag: <B>");
@@ -290,13 +297,15 @@ mod tests {
     fn test_md033_allowed_tags() {
         let rule = MD033NoInlineHtml::with_allowed(vec!["div".to_string(), "br".to_string()]);
         let content = "<div>Allowed</div><p>Not allowed</p><br/>";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].message, "Found inline HTML tag: <p>");
         assert_eq!(result[1].message, "Found inline HTML tag: </p>");
         // Test case-insensitivity of allowed tags
         let content2 = "<DIV>Allowed</DIV><P>Not allowed</P><BR/>";
-        let result2 = rule.check(content2).unwrap();
+        let ctx2 = LintContext::new(content2);
+        let result2 = rule.check(&ctx2).unwrap();
         assert_eq!(result2.len(), 2);
         assert_eq!(result2[0].message, "Found inline HTML tag: <P>");
         assert_eq!(result2[1].message, "Found inline HTML tag: </P>");
@@ -306,7 +315,8 @@ mod tests {
     fn test_md033_html_comments() {
         let rule = MD033NoInlineHtml::default();
         let content = "<!-- This is a comment --> <p>Not a comment</p>";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].message, "Found inline HTML tag: <p>");
     }
@@ -315,14 +325,16 @@ mod tests {
     fn test_md033_tags_in_links() {
         let rule = MD033NoInlineHtml::default();
         let content = "[Link](http://example.com/<div>)"; // Simplistic case for the improved check
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
             "Tags within link destinations should be skipped"
         );
 
         let content2 = "[Link <a>text</a>](url)";
-        let result2 = rule.check(content2).unwrap();
+        let ctx2 = LintContext::new(content2);
+        let result2 = rule.check(&ctx2).unwrap();
         // TODO: Currently, the structure.links check might incorrectly skip tags in link text
         // Asserting current behavior (0 warnings) until DocumentStructure is refined.
         assert_eq!(
@@ -339,7 +351,8 @@ mod tests {
     fn test_md033_fix_escaping() {
         let rule = MD033NoInlineHtml::default();
         let content = "Text with <div> and <br/> tags.";
-        let fixed_content = rule.fix(content).unwrap();
+        let ctx = LintContext::new(content);
+        let fixed_content = rule.fix(&ctx).unwrap();
         assert_eq!(fixed_content, "Text with  and  tags.");
     }
 
@@ -347,7 +360,8 @@ mod tests {
     fn test_md033_in_code_blocks() {
         let rule = MD033NoInlineHtml::default();
         let content = "```html\n<div>Code</div>\n```\n<div>Not code</div>";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 4); // Should only flag the one outside the code block
         assert_eq!(result[1].line, 4);
@@ -357,7 +371,8 @@ mod tests {
     fn test_md033_in_code_spans() {
         let rule = MD033NoInlineHtml::default();
         let content = "Text with `<p>in code</p>` span. <br/> Not in span.";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
             1,

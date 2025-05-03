@@ -5,6 +5,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
+use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref CLOSED_ATX_NO_SPACE_PATTERN: Regex =
@@ -103,12 +104,14 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
         "No space inside hashes on closed ATX style heading"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let structure = DocumentStructure::new(content);
-        self.check_with_structure(content, &structure)
+        self.check_with_structure(ctx, &structure)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         if content.is_empty() {
             return Ok(String::new());
         }
@@ -135,14 +138,14 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
         // Early return if no headings
         if structure.heading_lines.is_empty() {
             return Ok(Vec::new());
         }
 
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines: Vec<&str> = ctx.content.lines().collect();
 
         // Process only heading lines using structure.heading_lines
         for &line_num in &structure.heading_lines {
@@ -173,7 +176,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
 
                 let indentation = captures.get(1).unwrap();
                 let opening_hashes = captures.get(2).unwrap();
-                let line_range = self.get_line_byte_range(content, line_num);
+                let line_range = self.get_line_byte_range(ctx.content, line_num);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
@@ -201,8 +204,8 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || !content.contains('#')
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || !ctx.content.contains('#')
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -218,7 +221,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
 }
 
 impl DocumentStructureExtensions for MD020NoMissingSpaceClosedAtx {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         // This rule is only relevant if there are headings
         !doc_structure.heading_lines.is_empty()
     }
@@ -235,13 +238,13 @@ mod tests {
         // Test with correct spacing
         let content = "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let result = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
         assert!(result.is_empty());
 
         // Test with missing spaces
         let content = "# Heading 1#\n## Heading 2 ##\n### Heading 3###";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let result = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
         assert_eq!(result.len(), 2); // Should flag the two headings with missing spaces
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 3);

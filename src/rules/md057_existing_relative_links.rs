@@ -268,14 +268,15 @@ impl Rule for MD057ExistingRelativeLinks {
         RuleCategory::Link
     }
 
-    fn should_skip(&self, content: &str) -> bool {
-        // Skip if content contains no links at all
-        content.is_empty() || (!content.contains("[") || !content.contains("]("))
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
+        content.is_empty() || !content.contains('[')
     }
 
     /// Optimized implementation using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        if self.should_skip(content) {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
+        if self.should_skip(ctx) {
             return Ok(Vec::new());
         }
 
@@ -317,20 +318,17 @@ impl Rule for MD057ExistingRelativeLinks {
         Ok(warnings)
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // If document structure is available, use the optimized version
         let structure = DocumentStructure::new(content);
-        self.check_with_structure(content, &structure)
+        self.check_with_structure(ctx, &structure)
 
         // The code below is now unreachable because we always use the document structure
     }
 
-    fn fix(&self, _content: &str) -> Result<String, LintError> {
-        // No automatic fix is provided for this rule
-        // as creating missing files is beyond the scope of a linter
-        Err(LintError::FixFailed(
-            "Cannot automatically fix missing files".to_string(),
-        ))
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        Ok(ctx.content.to_string())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -343,7 +341,7 @@ impl Rule for MD057ExistingRelativeLinks {
         Some(("MD057".to_string(), toml::Value::Table(map)))
     }
 
-        fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
@@ -356,9 +354,8 @@ impl Rule for MD057ExistingRelativeLinks {
 }
 
 impl DocumentStructureExtensions for MD057ExistingRelativeLinks {
-    fn has_relevant_elements(&self, content: &str, _doc_structure: &DocumentStructure) -> bool {
-        // Rule only applies to content with potential links
-        !content.is_empty() && content.contains("[") && content.contains("](")
+    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, _doc_structure: &DocumentStructure) -> bool {
+        true
     }
 }
 
@@ -439,7 +436,8 @@ mod tests {
         let rule = MD057ExistingRelativeLinks::new();
         let content = "[Link](missing.md)";
 
-        let result = rule.check(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
             "Should have no warnings without base path"
@@ -476,7 +474,8 @@ mod tests {
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
         // Test the rule
-        let result = rule.check(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
 
         // Should have one warning for the missing.md link but not for the media file
         assert_eq!(result.len(), 1);
@@ -484,7 +483,7 @@ mod tests {
 
         // Test with document structure
         let structure = DocumentStructure::new(content);
-        let result_with_structure = rule.check_with_structure(content, &structure).unwrap();
+        let result_with_structure = rule.check_with_structure(&ctx, &structure).unwrap();
 
         // Results should be the same
         assert_eq!(result.len(), result_with_structure.len());
@@ -516,7 +515,8 @@ mod tests {
         // Test with default settings
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
-        let result = rule.check(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
 
         // Should have one warning for missing.md
         assert_eq!(result.len(), 1, "Should have exactly one warning");
@@ -545,7 +545,8 @@ mod tests {
         // Test with skip_media_files = true (default)
         let rule_skip_media = MD057ExistingRelativeLinks::new().with_path(base_path);
 
-        let result_skip = rule_skip_media.check(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result_skip = rule_skip_media.check(&ctx).unwrap();
 
         // Should have no warnings when media files are skipped
         assert_eq!(
@@ -559,7 +560,8 @@ mod tests {
             .with_path(base_path)
             .with_skip_media_files(false);
 
-        let result_all = rule_check_all.check(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result_all = rule_check_all.check(&ctx).unwrap();
 
         // Should warn about the missing media file
         assert_eq!(
@@ -588,7 +590,8 @@ mod tests {
             "This is a [link](nonexistent.md) and `[not a link](not-checked.md)` in code.";
         let structure = DocumentStructure::new(content);
 
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
 
         // Should only find the real link, not the one in code
         assert_eq!(result.len(), 1, "Should only flag the real link");
@@ -617,7 +620,8 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
         // Test the rule
-        let result = rule.check(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
 
         // Should only have warning for the normal link, not for links in code spans
         assert_eq!(result.len(), 1, "Should have exactly one warning");

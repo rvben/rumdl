@@ -5,6 +5,7 @@ use crate::utils::document_structure::document_structure_from_str;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
+use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)\s").unwrap();
@@ -159,12 +160,14 @@ impl Rule for MD032BlanksAroundLists {
         "Lists should be surrounded by blank lines"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let structure = document_structure_from_str(content);
-        self.check_with_structure(content, &structure)
+        self.check_with_structure(ctx, &structure)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Early returns for common cases
         if content.is_empty() {
             return Ok(String::new());
@@ -246,9 +249,9 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     /// Optimized check using document structure - Block-based approach
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines: Vec<&str> = ctx.content.lines().collect();
         let num_lines = lines.len();
 
         let mut current_list_start: Option<usize> = None;
@@ -337,9 +340,9 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        content.is_empty()
-            || !content.contains([
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty()
+            || !ctx.content.contains([
                 '-', '*', '+', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
             ])
     }
@@ -362,7 +365,7 @@ impl Rule for MD032BlanksAroundLists {
 }
 
 impl DocumentStructureExtensions for MD032BlanksAroundLists {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         !doc_structure.list_lines.is_empty()
     }
 }
@@ -370,6 +373,7 @@ impl DocumentStructureExtensions for MD032BlanksAroundLists {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
     use crate::utils::document_structure::document_structure_from_str;
 
     #[test]
@@ -379,25 +383,29 @@ mod tests {
         // Test case 1: List without blank lines
         let content = "Paragraph\n- Item 1\n- Item 2\nAnother paragraph";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(warnings.len(), 2); // Should warn about missing blank lines before and after
 
         // Test case 2: Lists with proper blank lines
         let content = "Paragraph\n\n- Item 1\n- Item 2\n\nAnother paragraph";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(warnings.len(), 0); // No warnings
 
         // Test case 3: List at beginning of document
         let content = "- Item 1\n- Item 2\n\nParagraph";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(warnings.len(), 0); // No warnings for missing blank line before
 
         // Test case 4: List at end of document
         let content = "Paragraph\n\n- Item 1\n- Item 2";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(warnings.len(), 0); // No warnings for missing blank line after
     }
 }

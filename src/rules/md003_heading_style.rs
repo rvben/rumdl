@@ -10,6 +10,8 @@ use crate::utils::markdown_elements::{ElementQuality, ElementType, MarkdownEleme
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
+use crate::lint_context::LintContext;
+use std::str::FromStr;
 
 lazy_static! {
     static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
@@ -147,7 +149,8 @@ impl Rule for MD003HeadingStyle {
         "Heading style"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // Early return for empty content
         if content.is_empty() {
             return Ok(Vec::new());
@@ -222,7 +225,8 @@ impl Rule for MD003HeadingStyle {
         Ok(result)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Early return for empty content
         if content.is_empty() {
             return Ok(String::new());
@@ -366,7 +370,8 @@ impl Rule for MD003HeadingStyle {
         Ok(fixed_content)
     }
 
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
         // Early return for empty content or no headings
         if content.is_empty() || structure.heading_lines.is_empty() {
             return Ok(Vec::new());
@@ -460,7 +465,8 @@ impl Rule for MD003HeadingStyle {
         RuleCategory::Heading
     }
 
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty() || !QUICK_HEADING_CHECK.is_match(content)
     }
 
@@ -470,19 +476,7 @@ impl Rule for MD003HeadingStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert(
-            "style".to_string(),
-            toml::Value::String(
-                (match self.style {
-                    HeadingStyle::Atx => "atx",
-                    HeadingStyle::AtxClosed => "atx_closed",
-                    HeadingStyle::Setext1 => "setext",
-                    HeadingStyle::Setext2 => "setext",
-                    HeadingStyle::Consistent => "consistent",
-                })
-                .to_string(),
-            ),
-        );
+        map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -491,14 +485,8 @@ impl Rule for MD003HeadingStyle {
         Self: Sized,
     {
         let style = crate::config::get_rule_config_value::<String>(config, "MD003", "style")
-            .unwrap_or_else(|| "consistent".to_string());
-        let style = match style.as_str() {
-            "atx" => HeadingStyle::Atx,
-            "atx_closed" => HeadingStyle::AtxClosed,
-            "setext" => HeadingStyle::Setext1, // Assume Setext1 for configuration
-            "consistent" => HeadingStyle::Consistent,
-            _ => HeadingStyle::Consistent,
-        };
+            .and_then(|s| HeadingStyle::from_str(&s).ok())
+            .unwrap_or(HeadingStyle::Consistent);
         Box::new(MD003HeadingStyle::new(style))
     }
 }
@@ -506,12 +494,14 @@ impl Rule for MD003HeadingStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
 
     #[test]
     fn test_atx_heading_style() {
         let rule = MD003HeadingStyle::default();
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
 
@@ -519,7 +509,8 @@ mod tests {
     fn test_setext_heading_style() {
         let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
         let content = "Heading 1\n=========\n\nHeading 2\n---------";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
 
@@ -541,14 +532,15 @@ mod tests {
         );
 
         // Make test more resilient - print details if warnings are found
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             result.is_empty(),
             "No warnings expected for content with front matter, found: {:?}",
             result
         );
         // Also check the direct check method
-        let result = rule.check(content).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
             "No warnings expected for content with front matter, found: {:?}",
@@ -561,7 +553,8 @@ mod tests {
         // Default rule uses Atx which serves as our "consistent" mode
         let rule = MD003HeadingStyle::default();
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
 
@@ -571,7 +564,8 @@ mod tests {
         let rule = MD003HeadingStyle::new(HeadingStyle::Consistent);
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
 
         // Make test more resilient
         assert!(
@@ -584,7 +578,8 @@ mod tests {
         let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
         let content = "# Heading 1 #\nHeading 2\n-----\n### Heading 3";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             !result.is_empty(),
             "Should have warnings for inconsistent heading styles"
@@ -594,7 +589,8 @@ mod tests {
         let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
         let content = "Heading 1\n=========\nHeading 2\n---------\n### Heading 3";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         // The level 3 heading can't be setext, so it's valid as ATX
         assert!(
             result.is_empty(),

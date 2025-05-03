@@ -1,11 +1,13 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD014CommandsShowOutput;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_command() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```bash\n$ ls -l\nfile1 file2\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -13,7 +15,8 @@ fn test_valid_command() {
 fn test_invalid_command() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```bash\n$ ls -l\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 1);
     assert_eq!(result[0].column, 1);
@@ -23,7 +26,8 @@ fn test_invalid_command() {
 fn test_multiple_commands() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```bash\n$ ls -l\nfile1 file2\n$ pwd\n/home\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -31,7 +35,8 @@ fn test_multiple_commands() {
 fn test_fix_command() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```bash\n$ ls -l\n```";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "```bash\nls -l\n```");
 }
 
@@ -39,7 +44,8 @@ fn test_fix_command() {
 fn test_no_output_commands() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```bash\n$ cd /home\n$ mkdir test\n$ touch file.txt\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty()); // These commands don't require output
 }
 
@@ -47,7 +53,8 @@ fn test_no_output_commands() {
 fn test_mixed_commands() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```bash\n$ cd /home\n$ ls -l\nfile1 file2\n$ touch test.txt\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -55,7 +62,8 @@ fn test_mixed_commands() {
 fn test_shell_prompt_variations() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```console\n$ ls -l\nfile1 file2\n> pwd\n/home\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -63,7 +71,8 @@ fn test_shell_prompt_variations() {
 fn test_non_shell_code_blocks() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```python\n$ print('hello')\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty()); // Should ignore non-shell code blocks
 }
 
@@ -71,7 +80,8 @@ fn test_non_shell_code_blocks() {
 fn test_shell_language_variations() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```sh\n$ ls -l\nfile1 file2\n```\n```shell\n$ pwd\n/home\n```\n```console\n$ echo hello\nworld\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -79,7 +89,8 @@ fn test_shell_language_variations() {
 fn test_disabled_output_check() {
     let rule = MD014CommandsShowOutput::with_show_output(false);
     let content = "```bash\n$ ls -l\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty()); // Should not check for output when disabled
 }
 
@@ -87,7 +98,8 @@ fn test_disabled_output_check() {
 fn test_comments_in_commands() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```bash\n$ ls -l  # List files\nfile1 file2\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -95,7 +107,8 @@ fn test_comments_in_commands() {
 fn test_indented_commands() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```bash\n    $ ls -l\n    file1 file2\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -103,7 +116,8 @@ fn test_indented_commands() {
 fn test_fix_multiple_commands() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```bash\n$ ls -l\n$ pwd\n$ echo hello\n```";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "```bash\nls -l\npwd\necho hello\n```");
 }
 
@@ -111,6 +125,7 @@ fn test_fix_multiple_commands() {
 fn test_fix_indented_commands() {
     let rule = MD014CommandsShowOutput::new();
     let content = "```bash\n    $ ls -l\n    $ pwd\n```";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "```bash\n    ls -l\n    pwd\n```");
 }

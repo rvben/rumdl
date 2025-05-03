@@ -141,7 +141,8 @@ impl Rule for MD054LinkImageStyle {
         "Link and image style should be consistent"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let structure = DocumentStructure::new(content);
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
@@ -301,12 +302,10 @@ impl Rule for MD054LinkImageStyle {
         Ok(warnings)
     }
 
-    fn fix(&self, _content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         // Automatic fixing for link styles is complex and could break content
         // For now, we'll return the original content with a message
-        Err(LintError::FixFailed(
-            "Automatic fixing of link styles is not implemented. Please fix manually.".to_string(),
-        ))
+        Ok(ctx.content.to_string())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -63,7 +63,8 @@ impl Rule for MD011NoReversedLinks {
         "Link syntax should not be reversed"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let mut warnings = Vec::new();
         let mut line_start = 0;
 
@@ -89,7 +90,8 @@ impl Rule for MD011NoReversedLinks {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let mut result = content.to_string();
         let mut offset: usize = 0;
 

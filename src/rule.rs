@@ -8,6 +8,7 @@ use dyn_clone::DynClone;
 
 // Import document structure
 use crate::utils::document_structure::DocumentStructure;
+use crate::lint_context::LintContext;
 
 // Macro to implement box_clone for Rule implementors
 #[macro_export]
@@ -78,17 +79,17 @@ pub enum RuleCategory {
 pub trait Rule: DynClone {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
-    fn check(&self, content: &str) -> LintResult;
-    fn fix(&self, content: &str) -> Result<String, LintError>;
+    fn check(&self, ctx: &LintContext) -> LintResult;
+    fn fix(&self, ctx: &LintContext) -> Result<String, LintError>;
 
     /// Enhanced check method using document structure
     /// By default, calls the regular check method if not overridden
-    fn check_with_structure(&self, content: &str, _structure: &DocumentStructure) -> LintResult {
-        self.check(content)
+    fn check_with_structure(&self, ctx: &LintContext, _structure: &DocumentStructure) -> LintResult {
+        self.check(ctx)
     }
 
     /// Check if this rule should quickly skip processing based on content
-    fn should_skip(&self, _content: &str) -> bool {
+    fn should_skip(&self, _ctx: &LintContext) -> bool {
         false
     }
 
@@ -219,7 +220,7 @@ pub fn is_rule_disabled_by_comment(content: &str, rule_name: &str) -> bool {
 pub trait MaybeDocumentStructure {
     fn check_with_structure_opt(
         &self,
-        content: &str,
+        ctx: &LintContext,
         structure: &crate::utils::document_structure::DocumentStructure,
     ) -> Option<LintResult>;
 }
@@ -230,17 +231,17 @@ where
 {
     fn check_with_structure_opt(
         &self,
-        content: &str,
+        ctx: &LintContext,
         structure: &crate::utils::document_structure::DocumentStructure,
     ) -> Option<LintResult> {
-        Some(self.check_with_structure(content, structure))
+        Some(self.check_with_structure(ctx, structure))
     }
 }
 
 impl MaybeDocumentStructure for dyn Rule {
     fn check_with_structure_opt(
         &self,
-        _content: &str,
+        _ctx: &LintContext,
         _structure: &crate::utils::document_structure::DocumentStructure,
     ) -> Option<LintResult> {
         None

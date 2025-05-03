@@ -1,5 +1,6 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD058BlanksAroundTables;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_name() {
@@ -22,7 +23,8 @@ Some text before the table.
 Some text after the table.
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
 
@@ -39,7 +41,8 @@ Some text before the table.
 Some text after the table.
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
     assert_eq!(result[0].message, "Missing blank line before table");
@@ -58,7 +61,8 @@ Some text before the table.
 Some text after the table.
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 6);
     assert_eq!(result[0].message, "Missing blank line after table");
@@ -76,7 +80,8 @@ Some text before the table.
 Some text after the table.
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert!(result
         .iter()
@@ -106,7 +111,8 @@ Some text between tables.
 Some text after tables.
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
     // Missing blank lines for second table
@@ -124,7 +130,8 @@ Some text between tables.
 Some text after tables.
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
 }
 
@@ -148,7 +155,8 @@ Some text.
 More text.
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
 
@@ -164,7 +172,8 @@ fn test_table_at_document_start() {
 Some text after the table.
     "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
 
@@ -180,7 +189,8 @@ Some text before the table.
 | -------- | -------- |
 | Cell 1.1 | Cell 1.2 |"#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
 
@@ -194,7 +204,8 @@ fn test_fix_missing_blank_lines() {
 | Cell 1   | Cell 2   |
 Text after."#;
 
-    let result = rule.fix(content).unwrap();
-    assert!(result.contains("Text before.\n\n| Header"));
-    assert!(result.contains("Cell 2   |\n\nText after"));
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(fixed.contains("Text before.\n\n| Header"));
+    assert!(fixed.contains("Cell 2   |\n\nText after"));
 }

@@ -34,7 +34,8 @@ impl Rule for MD031BlanksAroundFences {
         "Fenced code blocks should be surrounded by blank lines"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
@@ -92,7 +93,8 @@ impl Rule for MD031BlanksAroundFences {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
         let lines: Vec<&str> = content.lines().collect();
@@ -146,15 +148,16 @@ impl Rule for MD031BlanksAroundFences {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        // Skip if the content is empty or doesn't contain any code fence markers
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty() || (!content.contains("```") && !content.contains("~~~"))
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
         // Early return if no code blocks
-        if !self.has_relevant_elements(content, structure) {
+        if !self.has_relevant_elements(ctx, structure) {
             return Ok(Vec::new());
         }
 
@@ -218,7 +221,7 @@ impl Rule for MD031BlanksAroundFences {
 }
 
 impl DocumentStructureExtensions for MD031BlanksAroundFences {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         !doc_structure.fenced_code_block_starts.is_empty()
             || !doc_structure.fenced_code_block_ends.is_empty()
     }
@@ -227,6 +230,7 @@ impl DocumentStructureExtensions for MD031BlanksAroundFences {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
     use crate::utils::document_structure::document_structure_from_str;
 
     #[test]
@@ -236,7 +240,8 @@ mod tests {
         // Test with properly formatted code blocks
         let content = "# Test Code Blocks\n\n```rust\nfn main() {}\n```\n\nSome text here.";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             warnings.is_empty(),
             "Expected no warnings for properly formatted code blocks"
@@ -245,7 +250,8 @@ mod tests {
         // Test with missing blank line before
         let content = "# Test Code Blocks\n```rust\nfn main() {}\n```\n\nSome text here.";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(
             warnings.len(),
             1,
@@ -260,7 +266,8 @@ mod tests {
         // Test with missing blank line after
         let content = "# Test Code Blocks\n\n```rust\nfn main() {}\n```\nSome text here.";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(
             warnings.len(),
             1,
@@ -275,7 +282,8 @@ mod tests {
         // Test with missing blank lines both before and after
         let content = "# Test Code Blocks\n```rust\nfn main() {}\n```\nSome text here.";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(
             warnings.len(),
             2,

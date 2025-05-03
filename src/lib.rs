@@ -38,8 +38,8 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
         // Try to use the optimized path
         let result = rule
             .as_maybe_document_structure()
-            .and_then(|ext| ext.check_with_structure_opt(content, &structure))
-            .unwrap_or_else(|| rule.check(content));
+            .and_then(|ext| ext.check_with_structure_opt(&lint_ctx, &structure))
+            .unwrap_or_else(|| rule.check(&lint_ctx));
 
         match result {
             Ok(rule_warnings) => {

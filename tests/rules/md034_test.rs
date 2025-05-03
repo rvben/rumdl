@@ -1,11 +1,13 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD034NoBareUrls;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_urls() {
     let rule = MD034NoBareUrls;
     let content = "[Link](https://example.com)\n<https://example.com>";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -13,9 +15,11 @@ fn test_valid_urls() {
 fn test_bare_urls() {
     let rule = MD034NoBareUrls;
     let content = "Visit https://example.com for more info";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "Visit <https://example.com> for more info");
 }
 
@@ -23,9 +27,11 @@ fn test_bare_urls() {
 fn test_multiple_urls() {
     let rule = MD034NoBareUrls;
     let content = "Visit https://example.com and http://another.com";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "Visit <https://example.com> and <http://another.com>"
@@ -36,9 +42,11 @@ fn test_multiple_urls() {
 fn test_urls_in_code_block() {
     let rule = MD034NoBareUrls;
     let content = "```\nhttps://example.com\n```\nhttps://outside.com";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "```\nhttps://example.com\n```\n<https://outside.com>"
@@ -49,9 +57,11 @@ fn test_urls_in_code_block() {
 fn test_urls_in_inline_code() {
     let rule = MD034NoBareUrls;
     let content = "`https://example.com`\nhttps://outside.com";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "`https://example.com`\n<https://outside.com>");
 }
 
@@ -59,9 +69,11 @@ fn test_urls_in_inline_code() {
 fn test_urls_in_markdown_links() {
     let rule = MD034NoBareUrls;
     let content = "[Example](https://example.com)\nhttps://bare.com";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "[Example](https://example.com)\n<https://bare.com>");
 }
 
@@ -69,9 +81,11 @@ fn test_urls_in_markdown_links() {
 fn test_ftp_urls() {
     let rule = MD034NoBareUrls;
     let content = "Download from ftp://example.com/file";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "Download from <ftp://example.com/file>");
 }
 
@@ -79,9 +93,11 @@ fn test_ftp_urls() {
 fn test_complex_urls() {
     let rule = MD034NoBareUrls;
     let content = "Visit https://example.com/path?param=value#fragment";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "Visit <https://example.com/path?param=value#fragment>"
@@ -92,9 +108,11 @@ fn test_complex_urls() {
 fn test_multiple_protocols() {
     let rule = MD034NoBareUrls;
     let content = "http://example.com\nhttps://secure.com\nftp://files.com";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "<http://example.com>\n<https://secure.com>\n<ftp://files.com>"
@@ -105,9 +123,11 @@ fn test_multiple_protocols() {
 fn test_mixed_content() {
     let rule = MD034NoBareUrls;
     let content = "# Heading\nVisit https://example.com\n> Quote with https://another.com";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "# Heading\nVisit <https://example.com>\n> Quote with <https://another.com>"
@@ -118,7 +138,8 @@ fn test_mixed_content() {
 fn test_not_urls() {
     let rule = MD034NoBareUrls;
     let content = "Text with example.com and just://something";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -191,12 +212,13 @@ fn test_performance_md034() {
 
     // Measure performance of check method
     let start = Instant::now();
-    let result = rule.check(&content).unwrap();
+    let ctx = LintContext::new(&content);
+    let result = rule.check(&ctx).unwrap();
     let check_duration = start.elapsed();
 
     // Measure performance of fix method
     let start = Instant::now();
-    let fixed = rule.fix(&content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     let fix_duration = start.elapsed();
 
     println!(

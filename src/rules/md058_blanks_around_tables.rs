@@ -128,7 +128,8 @@ impl Rule for MD058BlanksAroundTables {
         "Tables should be surrounded by blank lines"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
@@ -173,10 +174,11 @@ impl Rule for MD058BlanksAroundTables {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
-        let mut warnings = self.check(content)?;
+        let mut warnings = self.check(ctx)?;
         if warnings.is_empty() {
             return Ok(content.to_string());
         }

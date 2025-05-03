@@ -1,5 +1,7 @@
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::str::FromStr;
+use std::fmt;
 
 lazy_static! {
     // Optimized regex patterns with more efficient non-capturing groups
@@ -28,6 +30,33 @@ pub enum HeadingStyle {
     Setext2, // Heading
     // -------
     Consistent, // For maintaining consistency with the first found header style
+}
+
+impl fmt::Display for HeadingStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            HeadingStyle::Atx => "atx",
+            HeadingStyle::AtxClosed => "atx_closed",
+            HeadingStyle::Setext1 => "setext1",
+            HeadingStyle::Setext2 => "setext2",
+            HeadingStyle::Consistent => "consistent",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl FromStr for HeadingStyle {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "atx" => Ok(HeadingStyle::Atx),
+            "atx_closed" => Ok(HeadingStyle::AtxClosed),
+            "setext1" | "setext" => Ok(HeadingStyle::Setext1),
+            "setext2" => Ok(HeadingStyle::Setext2),
+            "consistent" => Ok(HeadingStyle::Consistent),
+            _ => Err(()),
+        }
+    }
 }
 
 /// Represents a heading in a Markdown document

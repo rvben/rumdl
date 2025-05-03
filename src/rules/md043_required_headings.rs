@@ -2,6 +2,7 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severi
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
+use crate::lint_context::LintContext;
 
 lazy_static! {
     // Pattern for ATX headings
@@ -142,7 +143,8 @@ impl Rule for MD043RequiredHeadings {
         "Required heading structure"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let mut warnings = Vec::new();
         let actual_headings = self.extract_headings(content);
 
@@ -171,7 +173,8 @@ impl Rule for MD043RequiredHeadings {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // If no required headings are specified, return content as is
         if self.headings.is_empty() {
             return Ok(content.to_string());
@@ -191,7 +194,7 @@ impl Rule for MD043RequiredHeadings {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
         let mut warnings = Vec::new();
 
         // If no required headings are specified, the rule is disabled
@@ -200,7 +203,7 @@ impl Rule for MD043RequiredHeadings {
         }
 
         // Extract actual headings using document structure
-        let lines: Vec<&str> = content.lines().collect();
+        let lines: Vec<&str> = ctx.content.lines().collect();
         let mut actual_headings = Vec::new();
 
         // Detect code blocks
@@ -340,14 +343,14 @@ impl Rule for MD043RequiredHeadings {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if no heading requirements or content is empty
-        if self.headings.is_empty() || content.is_empty() {
+        if self.headings.is_empty() || ctx.content.is_empty() {
             return true;
         }
 
         // We need to properly detect headings in the content
-        let lines: Vec<&str> = content.lines().collect();
+        let lines: Vec<&str> = ctx.content.lines().collect();
         let mut has_heading = false;
         let mut in_code_block = false;
         let mut code_fence_char = None;
@@ -407,7 +410,7 @@ impl Rule for MD043RequiredHeadings {
 }
 
 impl DocumentStructureExtensions for MD043RequiredHeadings {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         !doc_structure.heading_lines.is_empty() || !self.headings.is_empty()
     }
 }
@@ -459,7 +462,7 @@ mod tests {
         let content =
             "# Introduction\n\nContent\n\n# Method\n\nMore content\n\n# Results\n\nFinal content";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let warnings = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
         assert!(
             warnings.is_empty(),
             "Expected no warnings for matching headings"
@@ -468,7 +471,7 @@ mod tests {
         // Test with mismatched headings
         let content = "# Introduction\n\nContent\n\n# Results\n\nSkipped method";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let warnings = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
         assert!(
             !warnings.is_empty(),
             "Expected warnings for mismatched headings"
@@ -477,7 +480,7 @@ mod tests {
         // Test with no headings but requirements exist
         let content = "No headings here, just plain text";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let warnings = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
         assert!(
             !warnings.is_empty(),
             "Expected warnings when headings are missing"
@@ -486,7 +489,7 @@ mod tests {
         // Test with setext headings
         let content = "Introduction\n===========\n\nContent\n\nMethod\n------\n\nMore content\n\nResults\n=======\n\nFinal content";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let warnings = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
         assert!(
             warnings.is_empty(),
             "Expected no warnings for matching setext headings"
@@ -502,7 +505,7 @@ mod tests {
         // Test 1: Content with '#' character in normal text (not a heading)
         let content = "This paragraph contains a # character but is not a heading";
         assert!(
-            rule.should_skip(content),
+            rule.should_skip(&LintContext::new(content)),
             "Should skip content with # in normal text"
         );
 
@@ -510,35 +513,35 @@ mod tests {
         let content =
             "Regular paragraph\n\n```markdown\n# This is not a real heading\n```\n\nMore text";
         assert!(
-            rule.should_skip(content),
+            rule.should_skip(&LintContext::new(content)),
             "Should skip content with heading-like syntax in code blocks"
         );
 
         // Test 3: Content with list items using '-' character
         let content = "Some text\n\n- List item 1\n- List item 2\n\nMore text";
         assert!(
-            rule.should_skip(content),
+            rule.should_skip(&LintContext::new(content)),
             "Should skip content with list items using dash"
         );
 
         // Test 4: Content with horizontal rule that uses '---'
         let content = "Some text\n\n---\n\nMore text below the horizontal rule";
         assert!(
-            rule.should_skip(content),
+            rule.should_skip(&LintContext::new(content)),
             "Should skip content with horizontal rule"
         );
 
         // Test 5: Content with equals sign in normal text
         let content = "This is a normal paragraph with equals sign x = y + z";
         assert!(
-            rule.should_skip(content),
+            rule.should_skip(&LintContext::new(content)),
             "Should skip content with equals sign in normal text"
         );
 
         // Test 6: Content with dash/minus in normal text
         let content = "This is a normal paragraph with minus sign x - y = z";
         assert!(
-            rule.should_skip(content),
+            rule.should_skip(&LintContext::new(content)),
             "Should skip content with minus sign in normal text"
         );
     }
@@ -552,28 +555,28 @@ mod tests {
         // Test 1: Content with ATX heading
         let content = "# This is a heading\n\nAnd some content";
         assert!(
-            !rule.should_skip(content),
+            !rule.should_skip(&LintContext::new(content)),
             "Should not skip content with ATX heading"
         );
 
         // Test 2: Content with Setext heading (equals sign)
         let content = "This is a heading\n================\n\nAnd some content";
         assert!(
-            !rule.should_skip(content),
+            !rule.should_skip(&LintContext::new(content)),
             "Should not skip content with Setext heading (=)"
         );
 
         // Test 3: Content with Setext heading (dash)
         let content = "This is a subheading\n------------------\n\nAnd some content";
         assert!(
-            !rule.should_skip(content),
+            !rule.should_skip(&LintContext::new(content)),
             "Should not skip content with Setext heading (-)"
         );
 
         // Test 4: Content with ATX heading with closing hashes
         let content = "## This is a heading ##\n\nAnd some content";
         assert!(
-            !rule.should_skip(content),
+            !rule.should_skip(&LintContext::new(content)),
             "Should not skip content with ATX heading with closing hashes"
         );
     }

@@ -138,7 +138,8 @@ impl Rule for MD046CodeBlockStyle {
         "Code blocks should use a consistent style"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         if content.is_empty() {
             return Ok(Vec::new());
         }
@@ -247,7 +248,8 @@ impl Rule for MD046CodeBlockStyle {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         if content.is_empty() {
             return Ok(String::new());
         }
@@ -373,24 +375,24 @@ impl Rule for MD046CodeBlockStyle {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or unlikely to contain code blocks
-        content.is_empty()
-            || (!content.contains("```") && !content.contains("~~~") && !content.contains("    "))
+        ctx.content.is_empty()
+            || (!ctx.content.contains("```") && !ctx.content.contains("~~~") && !ctx.content.contains("    "))
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        if content.is_empty() {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        if ctx.content.is_empty() {
             return Ok(Vec::new());
         }
 
-        if !self.has_relevant_elements(content, structure) {
+        if !self.has_relevant_elements(ctx, structure) {
             return Ok(Vec::new());
         }
 
         // Skip README.md files - they often contain a mix of styles for documentation purposes
-        if content.contains("# rumdl") && content.contains("## Quick Start") {
+        if ctx.content.contains("# rumdl") && ctx.content.contains("## Quick Start") {
             return Ok(Vec::new());
         }
 
@@ -401,7 +403,7 @@ impl Rule for MD046CodeBlockStyle {
 
         // Analyze code blocks in the content to determine what types are present
         // If all blocks are fenced and target style is fenced, or all blocks are indented and target style is indented, return empty
-        let lines: Vec<&str> = content.lines().collect();
+        let lines: Vec<&str> = ctx.content.lines().collect();
         let mut all_fenced = true;
 
         for block in &structure.code_blocks {
@@ -424,7 +426,7 @@ impl Rule for MD046CodeBlockStyle {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
 
         // Determine the target style from the detected style in the document
@@ -573,7 +575,7 @@ impl Rule for MD046CodeBlockStyle {
 }
 
 impl DocumentStructureExtensions for MD046CodeBlockStyle {
-    fn has_relevant_elements(&self, content: &str, structure: &DocumentStructure) -> bool {
-        !content.is_empty() && !structure.code_blocks.is_empty()
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> bool {
+        !ctx.content.is_empty() && !structure.code_blocks.is_empty()
     }
 }

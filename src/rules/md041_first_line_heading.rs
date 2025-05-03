@@ -49,7 +49,8 @@ impl Rule for MD041FirstLineHeading {
         "First line in file should be a top level heading"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let mut warnings = Vec::new();
         if content.trim().is_empty() {
             return Ok(warnings);
@@ -106,7 +107,8 @@ impl Rule for MD041FirstLineHeading {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let content =
             crate::rules::front_matter_utils::FrontMatterUtils::fix_malformed_front_matter(content);
         if content.trim().is_empty() || self.has_front_matter_title(&content) {

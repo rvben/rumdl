@@ -3,6 +3,7 @@ use rumdl::rules::MD057ExistingRelativeLinks;
 use std::fs::File;
 use std::io::Write;
 use tempfile::tempdir;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_missing_links() {
@@ -29,7 +30,8 @@ fn test_missing_links() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
 
     // Should have one warning for the missing link
     assert_eq!(result.len(), 1, "Expected 1 warning, got {}", result.len());
@@ -60,7 +62,8 @@ fn test_external_links() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
 
     // Should have no warnings for external links
     assert_eq!(result.len(), 0, "Expected 0 warnings, got {}", result.len());
@@ -87,7 +90,8 @@ fn test_code_blocks() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
 
     // Should only have one warning for the link outside the code block
     assert_eq!(result.len(), 1, "Expected 1 warning, got {}", result.len());
@@ -128,7 +132,8 @@ fn test_disabled_rule() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
 
     // Should have two warnings even with disable comment
     assert_eq!(result.len(), 2, "Expected 2 warnings, got {}", result.len());
@@ -172,7 +177,8 @@ fn test_complex_paths() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
 
     // Should have warnings for missing links but not for valid links
     assert_eq!(result.len(), 3, "Expected 3 warnings, got {}", result.len());
@@ -211,7 +217,8 @@ fn test_no_base_path() {
     let rule = MD057ExistingRelativeLinks::new();
 
     // Test the rule
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
 
     // Should have no warnings when no base path is set
     assert_eq!(
@@ -259,7 +266,8 @@ More content.
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
 
     // Should have three warnings including fragment links
     assert_eq!(
@@ -300,7 +308,8 @@ fn test_combined_links() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
 
     // Should only have one warning for the missing file link with fragment
     assert_eq!(

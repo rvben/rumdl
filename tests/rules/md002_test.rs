@@ -1,12 +1,14 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD002FirstHeadingH1;
 use rumdl::utils::document_structure::DocumentStructure;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_custom_level() {
     let rule = MD002FirstHeadingH1::new(2);
     let content = "## Heading\n### Subheading";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -14,7 +16,8 @@ fn test_custom_level() {
 fn test_invalid_first_heading() {
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading\n### Subheading";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 1);
 }
@@ -23,7 +26,8 @@ fn test_invalid_first_heading() {
 fn test_no_headings() {
     let rule = MD002FirstHeadingH1::default();
     let content = "This is a paragraph\nAnother paragraph";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -31,7 +35,8 @@ fn test_no_headings() {
 fn test_only_one_heading() {
     let rule = MD002FirstHeadingH1::default();
     let content = "# Heading";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -39,10 +44,11 @@ fn test_only_one_heading() {
 fn test_closed_atx_heading() {
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading ##\n### Subheading ###";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "# Heading #\n### Subheading ###");
 }
 
@@ -50,7 +56,8 @@ fn test_closed_atx_heading() {
 fn test_fix_first_heading() {
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading\n### Subheading";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "# Heading\n### Subheading");
 }
 
@@ -58,7 +65,8 @@ fn test_fix_first_heading() {
 fn test_fix_closed_atx_heading() {
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading ##\n### Subheading ###";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "# Heading #\n### Subheading ###");
 }
 
@@ -66,7 +74,8 @@ fn test_fix_closed_atx_heading() {
 fn test_mixed_heading_styles() {
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading\n### Subheading ###\n#### Another heading";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(
         result,
         "# Heading\n### Subheading ###\n#### Another heading"
@@ -78,7 +87,8 @@ fn test_indented_first_heading() {
     let rule = MD002FirstHeadingH1::default();
     let content = "  ## Heading\n# Subheading";
     println!("Input: '{}'", content.replace("\n", "\\n"));
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     println!("Output: '{}'", result.replace("\n", "\\n"));
     println!(
         "Expected: '{}' (len {})",
@@ -118,11 +128,12 @@ fn test_setext_heading() {
         "[test_setext_heading] heading_levels: {:?}",
         structure.heading_levels
     );
-    let result = rule.check_with_structure(content, &structure).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check_with_structure(&ctx, &structure).unwrap();
     println!("[test_setext_heading] result: {:?}", result);
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Heading\n=======\n\n### Subheading");
 }
 
@@ -130,10 +141,11 @@ fn test_setext_heading() {
 fn test_with_front_matter() {
     let rule = MD002FirstHeadingH1::default();
     let content = "---\ntitle: Test\n---\n## Heading\n### Subheading";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 4);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "---\ntitle: Test\n---\n# Heading\n### Subheading");
 }
 
@@ -150,11 +162,12 @@ fn test_setext_with_front_matter() {
         "[test_setext_with_front_matter] heading_levels: {:?}",
         structure.heading_levels
     );
-    let result = rule.check_with_structure(content, &structure).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check_with_structure(&ctx, &structure).unwrap();
     println!("[test_setext_with_front_matter] result: {:?}", result);
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 5);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
         "---\ntitle: Test\n---\n\nHeading\n=======\n\n### Subheading"

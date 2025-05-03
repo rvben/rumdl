@@ -1,6 +1,7 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD029OrderedListPrefix;
 use rumdl::utils::range_utils::LineIndex;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_md029_valid() {
@@ -10,7 +11,8 @@ fn test_md029_valid() {
 1. Item 2
 1. Item 3"#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -22,7 +24,8 @@ fn test_md029_ordered_any_valid() {
 2. Item 2
 3. Item 3"#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -34,11 +37,12 @@ fn test_md029_ordered_any_invalid() {
 1. Item 2
 1. Item 3"#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
 
     // Check that it fixes to 1, 2, 3
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "1. Item 1\n2. Item 2\n3. Item 3");
 }
 
@@ -49,7 +53,8 @@ fn test_md029_nested() {
    1. Nested first
    1. Nested second
 1. Second item"#;
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -59,7 +64,8 @@ fn test_md029_fix() {
     let content = r#"1. First item
 3. Second item
 5. Third item"#;
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "1. First item\n2. Second item\n3. Third item");
 }
 
@@ -68,6 +74,7 @@ fn test_line_index() {
     let content = r#"1. First item
 2. Second item
 3. Third item"#;
+    let ctx = LintContext::new(content);
     let index = LineIndex::new(content.to_string());
 
     // The byte range should be calculated based on the actual content
@@ -92,14 +99,15 @@ more code
 final code
 ```"#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
         "List items with code blocks between them should maintain sequence"
     );
 
     // Test that it doesn't generate false positives
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed, content,
         "Content should remain unchanged as it's already correct"
@@ -125,7 +133,8 @@ fn test_md029_nested_with_code_blocks() {
    ```
 3. Third step"#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     println!("Warnings: {:?}", result);
     assert!(
         result.is_empty(),
@@ -133,7 +142,7 @@ fn test_md029_nested_with_code_blocks() {
     );
 
     // Test that it doesn't generate false positives
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed, content,
         "Content should remain unchanged as it's already correct"

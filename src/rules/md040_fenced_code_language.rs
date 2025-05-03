@@ -21,7 +21,8 @@ impl Rule for MD040FencedCodeLanguage {
         "Fenced code blocks should have a language specified"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
@@ -75,7 +76,8 @@ impl Rule for MD040FencedCodeLanguage {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
         // Early return if no code blocks
         if !structure.has_code_blocks {
             return Ok(vec![]);
@@ -128,7 +130,8 @@ impl Rule for MD040FencedCodeLanguage {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
         let mut result = String::new();
@@ -197,7 +200,8 @@ impl Rule for MD040FencedCodeLanguage {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty() || (!content.contains("```") && !content.contains("~~~"))
     }
 
@@ -214,7 +218,8 @@ impl Rule for MD040FencedCodeLanguage {
 }
 
 impl DocumentStructureExtensions for MD040FencedCodeLanguage {
-    fn has_relevant_elements(&self, content: &str, _doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+        let content = ctx.content;
         // Rule is only relevant if content contains code fences
         content.contains("```") || content.contains("~~~")
     }

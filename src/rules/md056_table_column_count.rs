@@ -194,7 +194,8 @@ impl Rule for MD056TableColumnCount {
         "Table column count should be consistent"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         let tables = self.identify_tables(&lines);
@@ -240,8 +241,9 @@ impl Rule for MD056TableColumnCount {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
-        let warnings = self.check(content)?;
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
+        let warnings = self.check(ctx)?;
         if warnings.is_empty() {
             return Ok(content.to_string());
         }

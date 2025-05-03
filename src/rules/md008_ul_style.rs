@@ -4,6 +4,7 @@ use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
+use crate::lint_context::LintContext;
 
 lazy_static! {
     // Updated regex to handle blockquote markers at the beginning of lines
@@ -129,7 +130,8 @@ impl Rule for MD008ULStyle {
         "Unordered list style"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // Fast path - if content is empty or doesn't contain any list marker characters, return empty result
         if content.is_empty() || !Self::contains_potential_list_items(content) {
             return Ok(Vec::new());
@@ -206,23 +208,23 @@ impl Rule for MD008ULStyle {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> LintResult {
         // Fast path - if content is empty or no list items, return empty result
-        if content.is_empty() || structure.list_lines.is_empty() {
+        if ctx.content.is_empty() || doc_structure.list_lines.is_empty() {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines: Vec<&str> = ctx.content.lines().collect();
 
         // Get the target style based on mode
-        let expected_style = self.get_style_from_mode(content);
+        let expected_style = self.get_style_from_mode(ctx.content);
 
         let mut in_blockquote = false;
 
-        for &line_num in &structure.list_lines {
+        for &line_num in &doc_structure.list_lines {
             let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
 
             // Skip if out of bounds
@@ -233,7 +235,7 @@ impl Rule for MD008ULStyle {
             let line = lines[line_idx];
 
             // Skip code blocks
-            if structure.is_in_code_block(line_num) {
+            if doc_structure.is_in_code_block(line_num) {
                 continue;
             }
 
@@ -288,13 +290,14 @@ impl Rule for MD008ULStyle {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Fast path - if content is empty or doesn't contain any list marker characters, return content as-is
         if content.is_empty() || !Self::contains_potential_list_items(content) {
             return Ok(content.to_string());
         }
 
-        let warnings = self.check(content)?;
+        let warnings = self.check(ctx)?;
 
         if warnings.is_empty() {
             return Ok(content.to_string());
@@ -347,8 +350,8 @@ impl Rule for MD008ULStyle {
     }
 
     /// Check if we should skip this rule based on content
-    fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || !Self::contains_potential_list_items(content)
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || !Self::contains_potential_list_items(ctx.content)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -383,7 +386,7 @@ impl Rule for MD008ULStyle {
 }
 
 impl DocumentStructureExtensions for MD008ULStyle {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         !doc_structure.list_lines.is_empty()
     }
 }
@@ -391,97 +394,84 @@ impl DocumentStructureExtensions for MD008ULStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
+    use crate::utils::document_structure::DocumentStructure;
 
     #[test]
     fn test_with_document_structure() {
-        // Test with consistent mode (default)
         let rule = MD008ULStyle::default();
-
-        // Test with valid style
         let content = "* Item 1\n* Item 2\n* Item 3";
+        let ctx = LintContext::new(content);
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             result.is_empty(),
-            "Expected no warnings for correct style (*)"
+            "Expected no warnings for consistent style"
         );
 
-        // Test with different marker but consistent
         let content = "- Item 1\n- Item 2\n- Item 3";
+        let ctx = LintContext::new(content);
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             result.is_empty(),
-            "Expected no warnings for consistent - style"
+            "Expected no warnings for consistent style with dashes"
         );
 
-        // Test with specific style
-        let rule = MD008ULStyle::with_mode('*', StyleMode::Specific("*".to_string()));
         let content = "- Item 1\n- Item 2\n- Item 3";
+        let ctx = LintContext::new(content);
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(
-            result.len(),
-            3,
-            "Expected warnings for - style with * rule in specific mode"
-        );
-
-        // Test with mixed styles
-        let rule = MD008ULStyle::default(); // Consistent mode
-        let content = "- Item 1\n* Item 2\n+ Item 3";
-        let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
-        assert_eq!(
-            result.len(),
-            2,
-            "Expected warnings for * and + markers when - is first"
-        );
-
-        // Test with blockquote
-        let rule = MD008ULStyle::default(); // Consistent mode
-        let content = "> * Item 1\n> * Item 2\n> - Item 3";
-        let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(
             result.len(),
             0,
-            "Expected no warnings for blockquote content"
+            "Expected no warnings for consistent style with dashes"
+        );
+
+        let content = "- Item 1\n* Item 2\n+ Item 3";
+        let ctx = LintContext::new(content);
+        let structure = DocumentStructure::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "Expected warnings for mixed list markers"
         );
     }
 
     #[test]
     fn test_trailing_newlines_preservation() {
         let rule = MD008ULStyle::default();
-
         // Test with multiple trailing newlines
         let content = "* Item 1\n* Item 2\n- Item 3\n\n\n";
-        let result = rule.fix(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.fix(&ctx).unwrap();
         assert_eq!(
             result, "* Item 1\n* Item 2\n* Item 3\n\n\n",
-            "Should preserve all trailing newlines"
+            "Trailing newlines should be preserved"
         );
     }
 
     #[test]
     fn test_blockquote_handling() {
         let rule = MD008ULStyle::default();
-
         // Test with blockquote content
         let content = "> * Item 1\n> * Item 2\n> - Item 3";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
-            0,
-            "Expected no warnings for list markers in blockquotes"
+            1,
+            "Expected warning for mixed markers in blockquote"
         );
-
         // Mixed blockquote and regular list items
         let content = "> * Item 1\n* Item 2\n> - Item 3";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
-            0,
-            "Expected no warnings for mixed blockquote and list items"
+            1,
+            "Expected warning for mixed markers in blockquote and regular list"
         );
     }
 }

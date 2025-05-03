@@ -1,11 +1,13 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD027MultipleSpacesBlockquote;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_md027_valid() {
     let rule = MD027MultipleSpacesBlockquote;
     let content = "> Quote\n> Another line\n> Third line\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -13,7 +15,8 @@ fn test_md027_valid() {
 fn test_md027_invalid() {
     let rule = MD027MultipleSpacesBlockquote;
     let content = ">  Quote\n>   Another line\n>    Third line\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
     assert_eq!(result[1].line, 2);
@@ -24,7 +27,8 @@ fn test_md027_invalid() {
 fn test_md027_mixed() {
     let rule = MD027MultipleSpacesBlockquote;
     let content = "> Quote\n>  Another line\n> Third line\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
 }
@@ -33,6 +37,7 @@ fn test_md027_mixed() {
 fn test_md027_fix() {
     let rule = MD027MultipleSpacesBlockquote;
     let content = ">  Quote\n>   Another line\n>    Third line\n";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "> Quote\n> Another line\n> Third line\n");
 }

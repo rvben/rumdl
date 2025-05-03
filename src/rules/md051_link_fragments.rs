@@ -181,7 +181,8 @@ impl Rule for MD051LinkFragments {
         "Link fragments should exist"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let structure = DocumentStructure::new(content);
         let mut warnings = Vec::new();
         let headings = self.extract_headings(content);
@@ -249,7 +250,8 @@ impl Rule for MD051LinkFragments {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // No automatic fix for missing fragments, just return content as-is
         Ok(content.to_string())
     }

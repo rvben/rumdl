@@ -54,6 +54,7 @@ use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
+use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref UNORDERED_LIST_REGEX: FancyRegex =
@@ -103,7 +104,8 @@ impl Rule for MD004UnorderedListStyle {
         "Use consistent style for unordered list markers"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let mut warnings = Vec::new();
         let mut in_code_block = false;
         let mut in_front_matter = false;
@@ -175,7 +177,8 @@ impl Rule for MD004UnorderedListStyle {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let mut in_code_block = false;
         let mut in_front_matter = false;
         let mut first_marker: Option<String> = None;
@@ -285,9 +288,9 @@ impl Rule for MD004UnorderedListStyle {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty()
-            || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -296,13 +299,12 @@ impl Rule for MD004UnorderedListStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        let style_str = match self.style {
+        map.insert("style".to_string(), toml::Value::String(match self.style {
             UnorderedListStyle::Asterisk => "asterisk",
             UnorderedListStyle::Plus => "plus",
             UnorderedListStyle::Dash => "dash",
             UnorderedListStyle::Consistent => "consistent",
-        };
-        map.insert("style".to_string(), toml::Value::String(style_str.to_string()));
+        }.to_string()));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -311,35 +313,36 @@ impl Rule for MD004UnorderedListStyle {
         Self: Sized,
     {
         let style = crate::config::get_rule_config_value::<String>(config, "MD004", "style")
-            .unwrap_or_else(|| "consistent".to_string());
-        let style = match style.as_str() {
-            "dash" => UnorderedListStyle::Dash,
-            "asterisk" => UnorderedListStyle::Asterisk,
-            "plus" => UnorderedListStyle::Plus,
-            "consistent" => UnorderedListStyle::Consistent,
-            _ => UnorderedListStyle::Consistent,
-        };
+            .map(|s| match s.as_str() {
+                "asterisk" => UnorderedListStyle::Asterisk,
+                "plus" => UnorderedListStyle::Plus,
+                "dash" => UnorderedListStyle::Dash,
+                _ => UnorderedListStyle::Consistent,
+            })
+            .unwrap_or(UnorderedListStyle::Consistent);
         Box::new(MD004UnorderedListStyle::new(style))
     }
 }
 
-impl DocumentStructureExtensions for MD004UnorderedListStyle {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
-        // Rule is only relevant if there are list items
-        !doc_structure.list_lines.is_empty()
+impl crate::utils::document_structure::DocumentStructureExtensions for MD004UnorderedListStyle {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+        let content = ctx.content;
+        !content.is_empty() && !doc_structure.list_lines.is_empty()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
 
     #[test]
     fn test_with_document_structure() {
         let content = "* Item 1\n- Item 2\n+ Item 3";
         let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
         let structure = DocumentStructure::new(content);
-        let warnings = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(warnings.len(), 2, "Expected 2 warnings for inconsistent markers");
     }
 }

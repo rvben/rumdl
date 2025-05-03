@@ -1,5 +1,6 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD006StartBullets;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_unicode_list_items() {
@@ -10,7 +11,8 @@ fn test_unicode_list_items() {
   * Nested item with Unicode 汉字
   * Nested item with mixed Unicode こんにちは
 * Item with Arabic مرحبا";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
         "Valid Unicode list items should not trigger warnings"
@@ -26,21 +28,18 @@ Some Unicode text here 汉字.
   * First item with Unicode café should not be indented
   * Second item with emoji 🔥 should not be indented
   * Third item with Unicode こんにちは should not be indented";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         3,
         "Indented Unicode list items should trigger warnings"
     );
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
         "\
-Some Unicode text here 汉字.
-
-* First item with Unicode café should not be indented
-* Second item with emoji 🔥 should not be indented
-* Third item with Unicode こんにちは should not be indented"
+Some Unicode text here 汉字.\n\n* First item with Unicode café should not be indented\n* Second item with emoji 🔥 should not be indented\n* Third item with Unicode こんにちは should not be indented"
     );
 }
 
@@ -55,23 +54,18 @@ Some Unicode text here こんにちは
 
   * Indented Unicode list 1 🔥
   * Indented Unicode list 2 مرحبا";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         2,
         "Indented Unicode list items should trigger warnings"
     );
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
         "\
-* First Unicode list item café
-* Second Unicode list item 汉字
-
-Some Unicode text here こんにちは
-
-* Indented Unicode list 1 🔥
-* Indented Unicode list 2 مرحبا"
+* First Unicode list item café\n* Second Unicode list item 汉字\n\nSome Unicode text here こんにちは\n\n* Indented Unicode list 1 🔥\n* Indented Unicode list 2 مرحبا"
     );
 }
 
@@ -84,7 +78,8 @@ fn test_unicode_lists_with_blank_lines() {
   * Nested Unicode item 汉字
 
 * Unicode item 2 🔥";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
         "Valid Unicode list items with blank lines should not trigger warnings"
@@ -102,7 +97,8 @@ fn test_unicode_code_blocks() {
 ```
 
 * Regular Unicode item こんにちは outside code block";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
         "Unicode content in code blocks should be ignored"

@@ -1,11 +1,13 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD042NoEmptyLinks;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_links() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[Link text](https://example.com)\n[Another link](./local/path)";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -13,9 +15,10 @@ fn test_valid_links() {
 fn test_empty_link_text() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[](https://example.com)";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "");
 }
 
@@ -23,9 +26,10 @@ fn test_empty_link_text() {
 fn test_empty_link_url() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[Link text]()";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "");
 }
 
@@ -33,9 +37,10 @@ fn test_empty_link_url() {
 fn test_empty_link_both() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[]()";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "");
 }
 
@@ -43,9 +48,10 @@ fn test_empty_link_both() {
 fn test_multiple_empty_links() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[Link]() and []() and [](url)";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, " and  and ");
 }
 
@@ -53,9 +59,10 @@ fn test_multiple_empty_links() {
 fn test_whitespace_only_links() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[ ](  )";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "");
 }
 
@@ -63,9 +70,10 @@ fn test_whitespace_only_links() {
 fn test_mixed_valid_and_empty_links() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[Valid](https://example.com) and []() and [Another](./path)";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
         "[Valid](https://example.com) and  and [Another](./path)"

@@ -76,7 +76,8 @@ impl Rule for MD050StrongStyle {
         "Strong emphasis style should be consistent"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
@@ -124,7 +125,8 @@ impl Rule for MD050StrongStyle {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
         let target_style = match self.style {

@@ -7,6 +7,7 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use fancy_regex::Regex;
 use lazy_static::lazy_static;
 use toml;
+use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref HEADING_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})(\s+)(.*)$").unwrap();
@@ -430,7 +431,8 @@ impl Rule for MD022BlanksAroundHeadings {
         "Headings should be surrounded by blank lines"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
@@ -628,7 +630,8 @@ impl Rule for MD022BlanksAroundHeadings {
         Ok(result)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         if content.is_empty() {
             return Ok(content.to_string());
         }
@@ -642,12 +645,8 @@ impl Rule for MD022BlanksAroundHeadings {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        // Early return if no headings
-        if structure.heading_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
@@ -792,7 +791,8 @@ impl Rule for MD022BlanksAroundHeadings {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty() || !content.contains('#')
     }
 
@@ -828,21 +828,24 @@ impl Rule for MD022BlanksAroundHeadings {
 }
 
 impl DocumentStructureExtensions for MD022BlanksAroundHeadings {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
-        // This rule is only relevant if there are headings
-        !doc_structure.heading_lines.is_empty()
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+        let content = ctx.content;
+        !content.is_empty() && content.contains('#')
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
+    use crate::utils::document_structure::DocumentStructure;
 
     #[test]
     fn test_valid_headings() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "\n# Heading 1\n\nSome content.\n\n## Heading 2\n\nMore content.\n";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
 
@@ -850,10 +853,11 @@ mod tests {
     fn test_missing_blank_above() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "# Heading 1\n\nSome content.\n\n## Heading 2\n\nMore content.\n";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0); // No warning for first heading
 
-        let fixed = rule.fix(content).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
 
         // Test for the ability to handle the content without breaking it
         // Don't check for exact string equality which may break with implementation changes
@@ -867,12 +871,13 @@ mod tests {
     fn test_missing_blank_below() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "\n# Heading 1\nSome content.\n\n## Heading 2\n\nMore content.\n";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
 
         // Test the fix
-        let fixed = rule.fix(content).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.contains("# Heading 1\n\nSome content"));
     }
 
@@ -880,11 +885,12 @@ mod tests {
     fn test_missing_blank_above_and_below() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "# Heading 1\nSome content.\n## Heading 2\nMore content.\n";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Missing blanks: below first heading, above and below second heading
 
         // Test the fix
-        let fixed = rule.fix(content).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.contains("# Heading 1\n\nSome content"));
         assert!(fixed.contains("Some content.\n\n## Heading 2"));
         assert!(fixed.contains("## Heading 2\n\nMore content"));
@@ -894,7 +900,8 @@ mod tests {
     fn test_fix_headings() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "# Heading 1\nSome content.\n## Heading 2\nMore content.";
-        let result = rule.fix(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.fix(&ctx).unwrap();
 
         let expected = "# Heading 1\n\nSome content.\n\n## Heading 2\n\nMore content.";
         assert_eq!(result, expected);
@@ -904,7 +911,8 @@ mod tests {
     fn test_consecutive_headings_pattern() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let result = rule.fix(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.fix(&ctx).unwrap();
 
         // Using more specific assertions to check the structure
         let lines: Vec<&str> = result.lines().collect();
@@ -942,7 +950,8 @@ mod tests {
     fn test_blanks_around_setext_headings() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "Heading 1\n=========\nSome content.\nHeading 2\n---------\nMore content.";
-        let result = rule.fix(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.fix(&ctx).unwrap();
 
         // Check that the fix follows requirements without being too rigid about the exact output format
         let lines: Vec<&str> = result.lines().collect();
@@ -971,7 +980,8 @@ mod tests {
         );
 
         // Verify that the fixed content has no warnings
-        let fixed_warnings = rule.check(&result).unwrap();
+        let fixed_ctx = LintContext::new(&result);
+        let fixed_warnings = rule.check(&fixed_ctx).unwrap();
         assert!(
             fixed_warnings.is_empty(),
             "Fixed content should have no warnings"
@@ -984,7 +994,8 @@ mod tests {
 
         // Case 1: Testing consecutive headings
         let content1 = "# Heading 1\n## Heading 2\n### Heading 3";
-        let result1 = rule.fix(content1).unwrap();
+        let ctx1 = LintContext::new(content1);
+        let result1 = rule.fix(&ctx1).unwrap();
         // Verify structure rather than exact content as the fix implementation may vary
         assert!(result1.contains("# Heading 1"));
         assert!(result1.contains("## Heading 2"));
@@ -1004,7 +1015,8 @@ mod tests {
 
         // Case 2: Headings with content
         let content2 = "# Heading 1\nContent under heading 1\n## Heading 2";
-        let result2 = rule.fix(content2).unwrap();
+        let ctx2 = LintContext::new(content2);
+        let result2 = rule.fix(&ctx2).unwrap();
         // Verify structure
         assert!(result2.contains("# Heading 1"));
         assert!(result2.contains("Content under heading 1"));
@@ -1023,7 +1035,8 @@ mod tests {
 
         // Case 3: Multiple consecutive headings with blank lines preserved
         let content3 = "# Heading 1\n\n\n## Heading 2\n\n\n### Heading 3\n\nContent";
-        let result3 = rule.fix(content3).unwrap();
+        let ctx3 = LintContext::new(content3);
+        let result3 = rule.fix(&ctx3).unwrap();
         // Just verify it doesn't crash and properly formats headings
         assert!(result3.contains("# Heading 1"));
         assert!(result3.contains("## Heading 2"));
@@ -1038,19 +1051,22 @@ mod tests {
         // Test with properly formatted headings
         let content = "\n# Heading 1\n\nSome content.\n\n## Heading 2\n\nMore content.\n";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty());
 
         // Test with missing blank lines
         let content = "# Heading 1\nSome content.\n## Heading 2\nMore content.";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should flag issues with both headings
 
         // Test with setext headings
         let content = "Heading 1\n=========\nSome content.\nHeading 2\n---------\nMore content.";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(!result.is_empty()); // Should flag issues with both setext headings
     }
 }

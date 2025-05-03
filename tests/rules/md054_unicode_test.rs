@@ -1,5 +1,6 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD054LinkImageStyle;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_unicode_edge_cases() {
@@ -14,7 +15,8 @@ fn test_unicode_edge_cases() {
 [🔥🌟✨Unicode link with lots of emojis 🌈⭐💫🌠](https://example.com/emoji)
 "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         0,
@@ -31,7 +33,8 @@ This text is intentionally very long to test edge cases with string length handl
 ](https://example.com/long-unicode)
 "#;
 
-    let result = rule.check(content_long).unwrap();
+    let ctx = LintContext::new(content_long);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         0,
@@ -53,7 +56,8 @@ And a full reference: [Unicode 汉字][unicode-ref]
 
     // Test with a restricted style configuration
     let rule_restricted = MD054LinkImageStyle::new(true, false, true, true, true, true);
-    let result = rule_restricted.check(content_mixed).unwrap();
+    let ctx = LintContext::new(content_mixed);
+    let result = rule_restricted.check(&ctx).unwrap();
     assert!(
         !result.is_empty(),
         "Restricted styles with Unicode should generate warnings"
@@ -64,7 +68,8 @@ And a full reference: [Unicode 汉字][unicode-ref]
 Text before [Unicode link at exact چmulti-byteڇ character boundary](https://example.com)
 "#;
 
-    let result = rule.check(content_boundaries).unwrap();
+    let ctx = LintContext::new(content_boundaries);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         0,
@@ -87,7 +92,8 @@ fn test_unicode_images() {
 [ref]: https://example.com/unicode/ñáéíóú.png
 "#;
 
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         0,
@@ -104,7 +110,8 @@ fn test_unicode_images() {
 [unicode-ref]: https://example.com/汉字.png
 "#;
 
-    let result = rule_restricted.check(content_mixed).unwrap();
+    let ctx = LintContext::new(content_mixed);
+    let result = rule_restricted.check(&ctx).unwrap();
     assert!(
         !result.is_empty(),
         "Restricted styles with Unicode images should generate warnings"
@@ -117,6 +124,7 @@ fn test_shortcut_link() {
 
     // Test for multi-byte character after shortcut link
     let shortcut_lnk = "[https://www.example.com]例";
-    let result = rule.check(shortcut_lnk).unwrap();
+    let ctx = LintContext::new(shortcut_lnk);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }

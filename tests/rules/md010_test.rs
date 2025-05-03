@@ -1,11 +1,13 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD010NoHardTabs;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_no_hard_tabs() {
     let rule = MD010NoHardTabs::default();
     let content = "This line is fine\n    Indented with spaces";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -13,7 +15,8 @@ fn test_no_hard_tabs() {
 fn test_leading_hard_tabs() {
     let rule = MD010NoHardTabs::default();
     let content = "\tIndented line\n\t\tDouble indented";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
     assert_eq!(
@@ -31,7 +34,8 @@ fn test_leading_hard_tabs() {
 fn test_alignment_tabs() {
     let rule = MD010NoHardTabs::default();
     let content = "Text with\ttab for alignment";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 1);
     assert_eq!(
@@ -44,7 +48,8 @@ fn test_alignment_tabs() {
 fn test_empty_line_tabs() {
     let rule = MD010NoHardTabs::default();
     let content = "Normal line\n\t\t\n\tMore text";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 2);
     assert_eq!(result[0].message, "Empty line contains hard tabs");
@@ -54,7 +59,8 @@ fn test_empty_line_tabs() {
 fn test_code_blocks_allowed() {
     let rule = MD010NoHardTabs::new(4, false);
     let content = "Normal line\n```\n\tCode with tab\n\tMore code\n```\nNormal\tline";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Only the tab outside code block is flagged
     assert_eq!(result[0].line, 6);
 }
@@ -63,7 +69,8 @@ fn test_code_blocks_allowed() {
 fn test_code_blocks_not_allowed() {
     let rule = MD010NoHardTabs::default(); // code_blocks = true
     let content = "Normal line\n```\n\tCode with tab\n\tMore code\n```\nNormal\tline";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3); // All tabs are flagged
 }
 
@@ -71,7 +78,8 @@ fn test_code_blocks_not_allowed() {
 fn test_fix_with_code_blocks() {
     let rule = MD010NoHardTabs::new(2, false); // 2 spaces per tab, preserve code blocks
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
-    let fixed = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
         "  Indented line\n```\n\tCode\n```\n    Double indented"
@@ -82,7 +90,8 @@ fn test_fix_with_code_blocks() {
 fn test_fix_without_code_blocks() {
     let rule = MD010NoHardTabs::new(2, true); // 2 spaces per tab, fix code blocks
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
-    let fixed = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
         "  Indented line\n```\n  Code\n```\n    Double indented"
@@ -93,7 +102,8 @@ fn test_fix_without_code_blocks() {
 fn test_mixed_indentation() {
     let rule = MD010NoHardTabs::default();
     let content = "    Spaces\n\tTab\n  \tMixed";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 2);
     assert_eq!(result[1].line, 3);
@@ -105,7 +115,8 @@ fn test_html_comments_with_tabs() {
 
     // Single line HTML comment with tabs
     let content = "<!-- This comment has a \t tab -->\nNormal line";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         0,
@@ -114,7 +125,8 @@ fn test_html_comments_with_tabs() {
 
     // Multi-line HTML comment with tabs
     let content = "<!-- Start of comment\nUser: \t\tuser\nPassword:\tpass\n-->\nNormal\tline";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         1,
@@ -123,7 +135,7 @@ fn test_html_comments_with_tabs() {
     assert_eq!(result[0].line, 5);
 
     // Test fix for content with HTML comments
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed, "<!-- Start of comment\nUser: \t\tuser\nPassword:\tpass\n-->\nNormal    line",
         "Should preserve tabs in HTML comments but fix tabs in normal text"

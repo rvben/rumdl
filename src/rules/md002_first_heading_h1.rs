@@ -5,6 +5,7 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
+use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref HEADING_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})\s+(.+?)(?:\s+#*)?$").unwrap();
@@ -194,7 +195,8 @@ impl Rule for MD002FirstHeadingH1 {
         "First heading should be top level"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // Early return for empty content
         if content.is_empty() {
             return Ok(vec![]);
@@ -204,11 +206,12 @@ impl Rule for MD002FirstHeadingH1 {
         if structure.heading_lines.is_empty() {
             return Ok(vec![]);
         }
-        self.check_with_structure(content, &structure)
+        self.check_with_structure(ctx, &structure)
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
         let mut result = Vec::new();
         if structure.heading_lines.is_empty() {
             return Ok(result);
@@ -244,7 +247,8 @@ impl Rule for MD002FirstHeadingH1 {
         Ok(result)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let structure = DocumentStructure::new(content);
         if structure.heading_lines.is_empty() {
             return Ok(content.to_string());
@@ -316,7 +320,8 @@ impl Rule for MD002FirstHeadingH1 {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty()
             || (!content.contains('#') && !content.contains('=') && !content.contains('-'))
     }
@@ -340,10 +345,10 @@ impl Rule for MD002FirstHeadingH1 {
     }
 }
 
-impl DocumentStructureExtensions for MD002FirstHeadingH1 {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
-        // Rule is only relevant if there are headings
-        !doc_structure.heading_lines.is_empty()
+impl crate::utils::document_structure::DocumentStructureExtensions for MD002FirstHeadingH1 {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+        let content = ctx.content;
+        !content.is_empty() && !doc_structure.heading_lines.is_empty()
     }
 }
 
@@ -358,13 +363,15 @@ mod tests {
         // Test with correct heading level
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty());
 
         // Test with incorrect heading level
         let content = "## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
     }

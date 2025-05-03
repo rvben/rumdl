@@ -9,6 +9,7 @@ use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
+use crate::lint_context::LintContext;
 
 #[derive(Debug, Clone)]
 pub struct MD007ULIndent {
@@ -82,7 +83,8 @@ impl Rule for MD007ULIndent {
         "Unordered list indentation"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         if !content.contains('*') && !content.contains('-') && !content.contains('+') {
             return Ok(Vec::new());
         }
@@ -138,12 +140,13 @@ impl Rule for MD007ULIndent {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, _structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> LintResult {
         // Simply call the normal check method since we aren't using the structure yet
-        self.check(content)
+        self.check(ctx)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         if !content.contains('*') && !content.contains('-') && !content.contains('+') {
             return Ok(content.to_string());
         }
@@ -187,9 +190,9 @@ impl Rule for MD007ULIndent {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        content.is_empty()
-            || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty()
+            || (!ctx.content.contains('*') && !ctx.content.contains('-') && !ctx.content.contains('+'))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -212,7 +215,7 @@ impl Rule for MD007ULIndent {
 }
 
 impl DocumentStructureExtensions for MD007ULIndent {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         // Use the document structure to check if there are any unordered list elements
         !doc_structure.list_lines.is_empty()
     }
@@ -221,6 +224,7 @@ impl DocumentStructureExtensions for MD007ULIndent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
 
     #[test]
     fn test_with_document_structure() {
@@ -230,7 +234,8 @@ mod tests {
         // Test with valid indentation
         let content = "* Item 1\n  * Nested item 1\n  * Nested item 2";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             result.is_empty(),
             "Expected no warnings for correct indentation"
@@ -239,14 +244,16 @@ mod tests {
         // Test with invalid indentation
         let content = "* Item 1\n * Nested item 1\n * Nested item 2";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(result.len(), 2, "Expected warnings for 1-space indentation");
 
         // Test with custom indentation
         let rule = MD007ULIndent::new(4);
         let content = "* Item 1\n * Nested item 1";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(
             result.len(),
             1,

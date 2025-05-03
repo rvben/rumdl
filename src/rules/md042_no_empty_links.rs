@@ -33,7 +33,8 @@ impl Rule for MD042NoEmptyLinks {
         "No empty links"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
@@ -68,7 +69,8 @@ impl Rule for MD042NoEmptyLinks {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
         // Early return if there are no links
         if structure.links.is_empty() {
             return Ok(Vec::new());
@@ -97,7 +99,8 @@ impl Rule for MD042NoEmptyLinks {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
         lazy_static! {
@@ -124,9 +127,9 @@ impl Rule for MD042NoEmptyLinks {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        // Skip if there are no links in the content
-        !content.contains('[')
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
+        content.is_empty() || !content.contains('[')
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -142,8 +145,7 @@ impl Rule for MD042NoEmptyLinks {
 }
 
 impl DocumentStructureExtensions for MD042NoEmptyLinks {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
-        // Only run if the document has links
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         !doc_structure.links.is_empty()
     }
 }

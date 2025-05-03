@@ -1,11 +1,13 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD012NoMultipleBlanks;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_md012_valid() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\nLine 2\n\nLine 3\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -13,7 +15,8 @@ fn test_md012_valid() {
 fn test_md012_invalid() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 2);
     assert_eq!(
@@ -31,7 +34,8 @@ fn test_md012_invalid() {
 fn test_md012_start_end() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "\n\nLine 1\nLine 2\n\n\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 1);
     assert_eq!(
@@ -49,7 +53,8 @@ fn test_md012_start_end() {
 fn test_md012_code_blocks() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\n```\n\n\nCode\n\n\n```\nLine 2\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty()); // Multiple blank lines in code blocks are allowed
 }
 
@@ -57,7 +62,8 @@ fn test_md012_code_blocks() {
 fn test_md012_front_matter() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "---\ntitle: Test\n\n\ndescription: Test\n---\n\nContent\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty()); // Multiple blank lines in front matter are allowed
 }
 
@@ -65,7 +71,8 @@ fn test_md012_front_matter() {
 fn test_md012_custom_maximum() {
     let rule = MD012NoMultipleBlanks::new(2);
     let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Only the second group (3 blanks) is invalid
     assert_eq!(result[0].line, 5);
 }
@@ -74,7 +81,8 @@ fn test_md012_custom_maximum() {
 fn test_md012_fix() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3\n";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "Line 1\n\nLine 2\n\nLine 3\n");
 }
 
@@ -82,7 +90,8 @@ fn test_md012_fix() {
 fn test_md012_fix_with_code_blocks() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\n\n```\n\n\nCode\n\n\n```\nLine 2\n\n\n";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "Line 1\n\n```\n\n\nCode\n\n\n```\nLine 2\n\n");
 }
 
@@ -90,7 +99,8 @@ fn test_md012_fix_with_code_blocks() {
 fn test_md012_fix_with_front_matter() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "---\ntitle: Test\n\n\ndescription: Test\n---\n\n\n\nContent\n";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(
         result,
         "---\ntitle: Test\n\n\ndescription: Test\n---\n\nContent\n"
@@ -101,7 +111,8 @@ fn test_md012_fix_with_front_matter() {
 fn test_md012_whitespace_lines() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n  \n \t \nLine 2\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
 }

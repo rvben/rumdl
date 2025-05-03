@@ -5,6 +5,7 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
+use crate::lint_context::LintContext;
 
 /// Rule MD006: Consider starting bulleted lists at the leftmost column
 ///
@@ -78,7 +79,8 @@ impl Rule for MD006StartBullets {
         "Consider starting bulleted lists at the beginning of the line"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
@@ -144,10 +146,11 @@ impl Rule for MD006StartBullets {
         Ok(result)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
-        let warnings = self.check(content)?;
+        let warnings = self.check(ctx)?;
         if warnings.is_empty() {
             return Ok(content.to_string());
         }
@@ -199,8 +202,9 @@ impl Rule for MD006StartBullets {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        if structure.list_lines.is_empty() {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
+        if doc_structure.list_lines.is_empty() {
             return Ok(Vec::new());
         }
         if !content.contains('*') && !content.contains('-') && !content.contains('+') {
@@ -210,13 +214,13 @@ impl Rule for MD006StartBullets {
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         let mut valid_bullet_lines = vec![false; lines.len()];
-        for &line_num in &structure.list_lines {
+        for &line_num in &doc_structure.list_lines {
             let line_idx = line_num - 1;
             if line_idx >= lines.len() {
                 continue;
             }
             let line = lines[line_idx];
-            if structure.is_in_code_block(line_num) {
+            if doc_structure.is_in_code_block(line_num) {
                 continue;
             }
             if let Some(indent) = Self::is_bullet_list_item(line) {
@@ -277,7 +281,8 @@ impl Rule for MD006StartBullets {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty()
             || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
@@ -299,7 +304,7 @@ impl Rule for MD006StartBullets {
 }
 
 impl DocumentStructureExtensions for MD006StartBullets {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         // This rule is only relevant if there are list items
         !doc_structure.list_lines.is_empty()
     }
@@ -316,8 +321,9 @@ mod tests {
         // Test with properly formatted lists
         let content_valid = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
         let structure_valid = DocumentStructure::new(content_valid);
+        let ctx_valid = LintContext::new(content_valid);
         let result_valid = rule
-            .check_with_structure(content_valid, &structure_valid)
+            .check_with_structure(&ctx_valid, &structure_valid)
             .unwrap();
         assert!(
             result_valid.is_empty(),
@@ -328,8 +334,9 @@ mod tests {
         // Test with improperly indented list - adjust expectations based on actual implementation
         let content_invalid = "  * Item 1\n  * Item 2\n    * Nested item";
         let structure = DocumentStructure::new(content_invalid);
+        let ctx_invalid = LintContext::new(content_invalid);
         let result = rule
-            .check_with_structure(content_invalid, &structure)
+            .check_with_structure(&ctx_invalid, &structure)
             .unwrap();
 
         // If no warnings are generated, the test should be updated to match implementation behavior
@@ -346,7 +353,10 @@ mod tests {
         // Test with mixed indentation - standard nesting is VALID
         let content = "* Item 1\n  * Item 2 (standard nesting is valid)";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule
+            .check_with_structure(&ctx, &structure)
+            .unwrap();
         // Assert that standard nesting does NOT generate warnings
         assert!(
             result.is_empty(),

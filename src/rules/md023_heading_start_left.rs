@@ -5,6 +5,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::markdown_elements::{ElementType, MarkdownElements};
 use crate::utils::range_utils::LineIndex;
+use crate::lint_context::LintContext;
 
 #[derive(Clone)]
 pub struct MD023HeadingStartLeft;
@@ -18,7 +19,8 @@ impl Rule for MD023HeadingStartLeft {
         "Headings must start at the beginning of the line"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // Early return for empty content
         if content.is_empty() {
             return Ok(vec![]);
@@ -147,7 +149,8 @@ impl Rule for MD023HeadingStartLeft {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let mut fixed_lines = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         let mut i = 0;
@@ -246,15 +249,15 @@ impl Rule for MD023HeadingStartLeft {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
         // Early return if no headings
         if structure.heading_lines.is_empty() {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines: Vec<&str> = ctx.content.lines().collect();
 
         // Process only heading lines using structure.heading_lines
         for &line_num in &structure.heading_lines {
@@ -390,8 +393,8 @@ impl Rule for MD023HeadingStartLeft {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || !content.contains('#')
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || !ctx.content.contains('#')
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -407,7 +410,7 @@ impl Rule for MD023HeadingStartLeft {
 }
 
 impl DocumentStructureExtensions for MD023HeadingStartLeft {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         // This rule is only relevant if there are headings
         !doc_structure.heading_lines.is_empty()
     }
@@ -416,6 +419,8 @@ impl DocumentStructureExtensions for MD023HeadingStartLeft {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
+    use crate::utils::document_structure::DocumentStructure;
 
     #[test]
     fn test_with_document_structure() {
@@ -424,13 +429,15 @@ mod tests {
         // Test with properly aligned headings
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty());
 
         // Test with indented headings
         let content = "  # Heading 1\n ## Heading 2\n   ### Heading 3";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(result.len(), 3); // Should flag all three indented headings
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 2);
@@ -439,7 +446,8 @@ mod tests {
         // Test with setext headings
         let content = "Heading 1\n=========\n  Heading 2\n  ---------";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should flag the indented heading and underline
         assert_eq!(result[0].line, 3);
         assert_eq!(result[1].line, 4);

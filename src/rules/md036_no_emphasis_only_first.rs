@@ -124,7 +124,8 @@ impl Rule for MD036NoEmphasisAsHeading {
         "Emphasis should not be used instead of a heading"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // Fast path for empty content or content without emphasis markers
         if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
             return Ok(Vec::new());
@@ -157,7 +158,8 @@ impl Rule for MD036NoEmphasisAsHeading {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Fast path for empty content or content without emphasis markers
         if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
             return Ok(content.to_string());

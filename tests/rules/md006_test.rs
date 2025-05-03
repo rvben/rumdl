@@ -1,5 +1,6 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD006StartBullets;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_unordered_list() {
@@ -10,7 +11,8 @@ fn test_valid_unordered_list() {
   * Nested item
   * Another nested item
 * Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -22,7 +24,8 @@ fn test_valid_nested_list() {
   * Item 2
     * Deeply nested item
   * Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
         "Valid nested lists should not generate warnings, found: {:?}",
@@ -39,9 +42,10 @@ Some text here.
   * First item should not be indented
   * Second item should not be indented
   * Third item should not be indented";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
         "\
@@ -64,7 +68,8 @@ fn test_mixed_list_styles() {
 - Another item
   - Nested item
 - Final item";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -79,9 +84,10 @@ Some text here
 
   * Indented list 1
   * Indented list 2";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
         "\
@@ -104,7 +110,8 @@ fn test_empty_lines() {
   * Nested item
 
 * Item 2";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -115,7 +122,8 @@ fn test_no_lists() {
 Just some text
 More text
 Even more text";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -129,6 +137,7 @@ fn test_code_blocks_ignored() {
 ```
 
 * Regular item outside code block";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }

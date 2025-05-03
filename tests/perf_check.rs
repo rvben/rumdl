@@ -2,6 +2,7 @@ use rumdl::{
     rule::Rule, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD053LinkImageReferenceDefinitions,
 };
 use std::time::Instant;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_optimized_rules_performance() {
@@ -30,10 +31,11 @@ fn test_optimized_rules_performance() {
 
     println!("Generated test content of {} bytes", content.len());
 
+    let ctx = LintContext::new(&content);
     // Test MD033 (HTML rule)
     let html_rule = MD033NoInlineHtml::default();
     let start = Instant::now();
-    let html_warnings = html_rule.check(&content).unwrap();
+    let html_warnings = html_rule.check(&ctx).unwrap();
     let html_duration = start.elapsed();
     println!(
         "MD033 Rule check took: {:?}, found: {} issues",
@@ -44,7 +46,7 @@ fn test_optimized_rules_performance() {
     // Test MD037 (emphasis rule)
     let emphasis_rule = MD037NoSpaceInEmphasis;
     let start = Instant::now();
-    let emphasis_warnings = emphasis_rule.check(&content).unwrap();
+    let emphasis_warnings = emphasis_rule.check(&ctx).unwrap();
     let emphasis_duration = start.elapsed();
     println!(
         "MD037 Rule check took: {:?}, found: {} issues",
@@ -55,7 +57,7 @@ fn test_optimized_rules_performance() {
     // Test MD053 with caching (first run)
     let start_time = Instant::now();
     let reference_rule = MD053LinkImageReferenceDefinitions::default();
-    let ref_warnings = reference_rule.check(&content).unwrap();
+    let ref_warnings = reference_rule.check(&ctx).unwrap();
     let ref_duration = start_time.elapsed();
     println!(
         "MD053 Rule first check (cold cache) took: {:?}, found: {} issues",
@@ -65,7 +67,7 @@ fn test_optimized_rules_performance() {
 
     // Test MD053 with caching (second run - should be faster)
     let start = Instant::now();
-    let ref_warnings_cached = reference_rule.check(&content).unwrap();
+    let ref_warnings_cached = reference_rule.check(&ctx).unwrap();
     let ref_cached_duration = start.elapsed();
     println!(
         "MD053 Rule second check (warm cache) took: {:?}, found: {} issues",

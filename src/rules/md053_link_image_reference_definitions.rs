@@ -301,7 +301,8 @@ impl Rule for MD053LinkImageReferenceDefinitions {
     /// Check the content for unused link/image reference definitions.
     ///
     /// This implementation uses caching for improved performance on large documents.
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // Compute DocumentStructure once
         let doc_structure = DocumentStructure::new(content);
 
@@ -336,7 +337,8 @@ impl Rule for MD053LinkImageReferenceDefinitions {
     /// 1. Using cached definitions to avoid re-parsing the document
     /// 2. Preserving document structure while removing unused references
     /// 3. Cleaning up any formatting issues created by the removals
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Compute DocumentStructure once
         let doc_structure = DocumentStructure::new(content);
 

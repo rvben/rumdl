@@ -2,6 +2,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
+use crate::lint_context::LintContext;
 
 /// Rule MD039: No space inside link text
 ///
@@ -137,35 +138,26 @@ impl Rule for MD039NoSpaceInLinks {
         RuleCategory::Link
     }
 
-    fn should_skip(&self, content: &str) -> bool {
-        // Skip empty content or content without links
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty() || !self.has_links(content)
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
-        // Fast path - skip if no links
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
         if structure.links.is_empty() {
             return Ok(Vec::new());
         }
-
         let mut warnings = Vec::new();
         let line_index = LineIndex::new(content.to_string());
-
-        // Process all links from the document structure
         for link in &structure.links {
             if let Some(fixed_text) = self.check_link_text(&link.text) {
-                // Calculate the position for fixing
                 let start_col = link.start_col;
                 let line_num = link.line;
-
-                // Calculate the byte position for the start of the link
                 let start_pos = line_index.line_col_to_byte_range(line_num, start_col).start;
-
-                // Create fixed version of the entire link
                 let original = format!("[{}]({})", link.text, link.url);
                 let fixed = format!("[{}]({})", fixed_text, link.url);
-
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: line_num,
@@ -179,12 +171,12 @@ impl Rule for MD039NoSpaceInLinks {
                 });
             }
         }
-
         Ok(warnings)
     }
 
-    fn check(&self, content: &str) -> LintResult {
-        if self.should_skip(content) {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
+        if self.should_skip(ctx) {
             return Ok(Vec::new());
         }
 
@@ -216,8 +208,9 @@ impl Rule for MD039NoSpaceInLinks {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
-        if self.should_skip(content) {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
+        if self.should_skip(ctx) {
             return Ok(content.to_string());
         }
 
@@ -259,6 +252,12 @@ impl Rule for MD039NoSpaceInLinks {
     }
 }
 
+impl crate::utils::document_structure::DocumentStructureExtensions for MD039NoSpaceInLinks {
+    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+        !doc_structure.links.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,7 +266,8 @@ mod tests {
     fn test_valid_links() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[link](url) and [another link](url) here";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
 
@@ -275,9 +275,10 @@ mod tests {
     fn test_spaces_both_ends() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[ link ](url) and [ another link ](url) here";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
-        let fixed = rule.fix(content).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[link](url) and [another link](url) here");
     }
 
@@ -285,9 +286,10 @@ mod tests {
     fn test_space_at_start() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[ link](url) and [ another link](url) here";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
-        let fixed = rule.fix(content).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[link](url) and [another link](url) here");
     }
 
@@ -295,29 +297,38 @@ mod tests {
     fn test_space_at_end() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[link ](url) and [another link ](url) here";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
-        let fixed = rule.fix(content).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[link](url) and [another link](url) here");
     }
 
     #[test]
     fn test_link_in_code_block() {
         let rule = MD039NoSpaceInLinks::new();
-        let content = "```\n[ link ](url)\n```\n[ link ](url)";
-        let result = rule.check(content).unwrap();
+        let content = "```
+[ link ](url)
+```
+[ link ](url)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        let fixed = rule.fix(content).unwrap();
-        assert_eq!(fixed, "```\n[ link ](url)\n```\n[link](url)");
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "```
+[ link ](url)
+```
+[link](url)");
     }
 
     #[test]
     fn test_multiple_links() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[ link ](url) and [ another ](url) in one line";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
-        let fixed = rule.fix(content).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[link](url) and [another](url) in one line");
     }
 
@@ -325,9 +336,10 @@ mod tests {
     fn test_link_with_internal_spaces() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[this is link](url) and [ this is also link ](url)";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        let fixed = rule.fix(content).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[this is link](url) and [this is also link](url)");
     }
 
@@ -335,9 +347,10 @@ mod tests {
     fn test_link_with_punctuation() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[ link! ](url) and [ link? ](url) here";
-        let result = rule.check(content).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
-        let fixed = rule.fix(content).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[link!](url) and [link?](url) here");
     }
 }

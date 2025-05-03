@@ -11,6 +11,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use toml;
+use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref LIST_MARKER_REGEX: Regex = Regex::new(r"^\d+[.)]").unwrap();
@@ -105,7 +106,8 @@ impl Rule for MD005ListIndent {
         "List indentation should be consistent"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // Early returns for common cases
         if content.is_empty() {
             return Ok(Vec::new());
@@ -386,7 +388,8 @@ impl Rule for MD005ListIndent {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Early returns for common cases
         if content.is_empty() {
             return Ok(String::new());
@@ -402,7 +405,7 @@ impl Rule for MD005ListIndent {
         }
 
         // Get warnings from the check method
-        let warnings = self.check(content)?;
+        let warnings = self.check(ctx)?;
 
         if warnings.is_empty() {
             return Ok(content.to_string());
@@ -445,13 +448,14 @@ impl Rule for MD005ListIndent {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty()
-            || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
         // Early return if no lists
         if structure.list_lines.is_empty() {
             return Ok(Vec::new());
@@ -740,7 +744,7 @@ impl Rule for MD005ListIndent {
         None
     }
 
-        fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
@@ -748,10 +752,10 @@ impl Rule for MD005ListIndent {
     }
 }
 
-impl DocumentStructureExtensions for MD005ListIndent {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
-        // This rule is only relevant if there are list items
-        !doc_structure.list_lines.is_empty()
+impl crate::utils::document_structure::DocumentStructureExtensions for MD005ListIndent {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+        let content = ctx.content;
+        !content.is_empty() && !doc_structure.list_lines.is_empty()
     }
 }
 
@@ -768,19 +772,22 @@ mod tests {
         // Test with consistent list indentation
         let content = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty());
 
         // Test with inconsistent list indentation
         let content = "* Item 1\n* Item 2\n * Nested item\n  * Another nested item";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(!result.is_empty()); // Should have at least one warning
 
         // Test with different level indentation issues
         let content = "* Item 1\n  * Nested item\n * Another nested item with wrong indent";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(!result.is_empty()); // Should have at least one warning
     }
 }

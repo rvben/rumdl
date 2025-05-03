@@ -130,7 +130,8 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
         "List markers must be followed by a space"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let _timer = crate::profiling::ScopedTimer::new("MD015_check");
 
         // Quick returns for common cases
@@ -198,60 +199,23 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
-        let _timer = crate::profiling::ScopedTimer::new("MD015_fix");
-
-        // Quick returns for common cases
-        if content.is_empty() || !self.require_space {
-            return Ok(content.to_string());
-        }
-
-        // Early return if no list markers found
-        if !content.contains('-')
-            && !content.contains('*')
-            && !content.contains('+')
-            && !content.contains(|c: char| c.is_ascii_digit())
-        {
-            return Ok(content.to_string());
-        }
-
-        // Quick check for potential list items without spaces
-        if !QUICK_LIST_CHECK.is_match(content) {
-            return Ok(content.to_string());
-        }
-
-        // Pre-compute special lines efficiently
-        let (code_block_lines, front_matter_lines) = self.get_special_lines(content);
-
-        // Process the content more efficiently
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
+        let mut result = String::with_capacity(content.len() + 100);
         let lines: Vec<&str> = content.lines().collect();
-        let mut result = String::with_capacity(content.len() + 100); // Pre-allocate with extra space
-
-        for (i, line) in lines.iter().enumerate() {
-            // Fast checks using HashSet lookups
-            if code_block_lines.contains(&i)
-                || front_matter_lines.contains(&i)
-                || Self::is_horizontal_rule(line)
-            {
+        let (code_block_lines, front_matter_lines) = self.get_special_lines(content);
+        for (line_num, line) in lines.iter().enumerate() {
+            if code_block_lines.contains(&line_num) || front_matter_lines.contains(&line_num) {
                 result.push_str(line);
-            }
-            // Skip if this is a horizontal rule
-            else if Self::is_list_item_without_space(line) {
+            } else if Self::is_list_item_without_space(line) {
                 result.push_str(&Self::fix_list_item(line));
             } else {
                 result.push_str(line);
             }
-
-            if i < lines.len() - 1 {
+            if line_num < lines.len() - 1 {
                 result.push('\n');
             }
         }
-
-        // Remove trailing newline if original didn't have one
-        if !content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
-        }
-
         Ok(result)
     }
 

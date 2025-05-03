@@ -1,11 +1,13 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD001HeadingIncrement;
+use rumdl::lint_context::LintContext;
 
 #[test]
 pub fn test_md001_unicode_valid() {
     let rule = MD001HeadingIncrement;
     let content = "# Heading with café\n## Heading with 汉字\n### Heading with emoji 🔥\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
         "Valid Unicode headings with proper increment should not trigger warnings"
@@ -16,7 +18,8 @@ pub fn test_md001_unicode_valid() {
 pub fn test_md001_unicode_invalid() {
     let rule = MD001HeadingIncrement;
     let content = "# Heading with café\n### Heading with 汉字\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         1,
@@ -33,7 +36,8 @@ pub fn test_md001_unicode_invalid() {
 pub fn test_md001_unicode_fix() {
     let rule = MD001HeadingIncrement;
     let content = "# Café heading\n### 汉字 heading\n";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(
         result, "# Café heading\n## 汉字 heading\n",
         "Fix should properly handle Unicode characters"
@@ -44,7 +48,8 @@ pub fn test_md001_unicode_fix() {
 pub fn test_md001_unicode_multiple_violations() {
     let rule = MD001HeadingIncrement;
     let content = "# café\n### 汉字\n##### 🔥\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         2,
@@ -58,7 +63,8 @@ pub fn test_md001_unicode_multiple_violations() {
 pub fn test_md001_unicode_atx_and_setext() {
     let rule = MD001HeadingIncrement;
     let content = "# Heading café\nHeading 汉字\n---------\n### Heading 🔥\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
         "Valid Unicode headings with mixed styles should not trigger warnings"
@@ -69,21 +75,24 @@ pub fn test_md001_unicode_atx_and_setext() {
 pub fn test_md001_unicode_complex() {
     let rule = MD001HeadingIncrement;
     let content = "# 汉字 café 🔥\n## مرحبا こんにちは\n### Mixed Unicode: ñáéíóú привет שלום\n";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
         "Valid Unicode headings with complex characters should not trigger warnings"
     );
 
     let invalid_content = "# 汉字 café 🔥\n### مرحبا こんにちは\n";
-    let result = rule.check(invalid_content).unwrap();
+    let ctx = LintContext::new(invalid_content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
         1,
         "Skipped heading level with complex Unicode should trigger warning"
     );
 
-    let fixed = rule.fix(invalid_content).unwrap();
+    let ctx = LintContext::new(invalid_content);
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed, "# 汉字 café 🔥\n## مرحبا こんにちは\n",
         "Fix should properly handle complex Unicode characters"

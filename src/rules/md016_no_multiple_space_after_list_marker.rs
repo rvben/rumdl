@@ -33,12 +33,12 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
         "List markers should not be followed by multiple spaces"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // Skip processing if allowing multiple spaces
         if self.allow_multiple_spaces {
             return Ok(Vec::new());
         }
-
         // Fast path - check if content has any list markers
         if !content.contains('*')
             && !content.contains('-')
@@ -48,13 +48,10 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
         {
             return Ok(Vec::new());
         }
-
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-
         // Get cached document elements - this provides efficient access to lists and code blocks
         let element_cache = ElementCache::new(content);
-
         // Process each list item from the cache
         for list_item in element_cache.get_list_items() {
             // Skip list items inside code blocks
@@ -73,7 +70,6 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
                         "Multiple spaces after ordered list marker".to_string()
                     }
                 };
-
                 // Generate the fixed line with exactly one space after marker
                 let indentation = &list_item.indent_str;
                 let fixed_line = if list_item.content.is_empty() {
@@ -81,7 +77,6 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
                 } else {
                     format!("{}{} {}", indentation, list_item.marker, list_item.content)
                 };
-
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     severity: Severity::Warning,
@@ -95,11 +90,11 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
                 });
             }
         }
-
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         // Skip processing if allowing multiple spaces
         if self.allow_multiple_spaces {
             return Ok(content.to_string());
@@ -172,26 +167,29 @@ mod tests {
 
         // Valid test cases
         let content1 = "- Item with one space\n* Another item with one space\n+ A third item";
-        let warnings1 = rule.check(content1).unwrap();
+        let ctx1 = crate::lint_context::LintContext::new(content1);
+        let warnings1 = rule.check(&ctx1).unwrap();
         assert_eq!(warnings1.len(), 0);
 
         // Invalid test cases
         let content2 =
             "-  Item with two spaces\n*   Another item with three spaces\n+    Four spaces";
-        let warnings2 = rule.check(content2).unwrap();
+        let ctx2 = crate::lint_context::LintContext::new(content2);
+        let warnings2 = rule.check(&ctx2).unwrap();
         assert_eq!(warnings2.len(), 3);
 
         // Mixed case
         let content3 = "- Valid item\n-  Invalid item\n```
 -  Ignored in code block\n```";
-        let warnings3 = rule.check(content3).unwrap();
+        let ctx3 = crate::lint_context::LintContext::new(content3);
+        let warnings3 = rule.check(&ctx3).unwrap();
         // Now both the second and fourth lines are detected as list items, but the fourth is in a code block and should not be flagged
         assert_eq!(warnings3.len(), 1);
 
         // Test with allow_multiple_spaces = true
         let rule_allowing_spaces =
             MD016NoMultipleSpaceAfterListMarker::with_allow_multiple_spaces(true);
-        let warnings4 = rule_allowing_spaces.check(content2).unwrap();
+        let warnings4 = rule_allowing_spaces.check(&ctx2).unwrap();
         assert_eq!(warnings4.len(), 0);
     }
 
@@ -203,8 +201,8 @@ mod tests {
         let content =
             "-  Item with two spaces\n*   Another item with three spaces\n+    Four spaces";
         let expected = "- Item with two spaces\n* Another item with three spaces\n+ Four spaces";
-
-        let fixed = rule.fix(content).unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, expected);
 
         // Test with code blocks
@@ -212,8 +210,8 @@ mod tests {
 -  Ignored in code block\n```";
         let expected2 = "- Valid item\n- Invalid item\n```
 -  Ignored in code block\n```";
-
-        let fixed2 = rule.fix(content2).unwrap();
+        let ctx2 = crate::lint_context::LintContext::new(content2);
+        let fixed2 = rule.fix(&ctx2).unwrap();
         assert_eq!(fixed2, expected2);
     }
 }

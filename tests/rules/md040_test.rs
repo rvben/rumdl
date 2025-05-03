@@ -1,11 +1,13 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD040FencedCodeLanguage;
+use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_code_blocks() {
     let rule = MD040FencedCodeLanguage;
     let content = "```rust\nfn main() {}\n```\n```python\nprint('hello')\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -13,9 +15,10 @@ fn test_valid_code_blocks() {
 fn test_missing_language() {
     let rule = MD040FencedCodeLanguage;
     let content = "```\nsome code\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "```text\nsome code\n```");
 }
 
@@ -23,9 +26,10 @@ fn test_missing_language() {
 fn test_multiple_code_blocks() {
     let rule = MD040FencedCodeLanguage;
     let content = "```rust\nfn main() {}\n```\n```\nsome code\n```\n```python\nprint('hello')\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
         "```rust\nfn main() {}\n```\n```text\nsome code\n```\n```python\nprint('hello')\n```"
@@ -36,9 +40,10 @@ fn test_multiple_code_blocks() {
 fn test_empty_code_block() {
     let rule = MD040FencedCodeLanguage;
     let content = "```\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "```text\n```");
 }
 
@@ -46,9 +51,10 @@ fn test_empty_code_block() {
 fn test_indented_code_block() {
     let rule = MD040FencedCodeLanguage;
     let content = "  ```\n  some code\n  ```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "```text\n  some code\n```");
 }
 
@@ -56,9 +62,10 @@ fn test_indented_code_block() {
 fn test_mixed_code_blocks() {
     let rule = MD040FencedCodeLanguage;
     let content = "```rust\nfn main() {}\n```\nSome text\n```\nmore code\n```\n```js\nconsole.log('hi');\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "```rust\nfn main() {}\n```\nSome text\n```text\nmore code\n```\n```js\nconsole.log('hi');\n```");
 }
 
@@ -66,8 +73,9 @@ fn test_mixed_code_blocks() {
 fn test_preserve_whitespace() {
     let rule = MD040FencedCodeLanguage;
     let content = "```   \nsome code\n```";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "```text\nsome code\n```");
 }

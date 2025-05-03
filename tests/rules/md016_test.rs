@@ -1,11 +1,51 @@
 use rumdl::rule::Rule;
 use rumdl::rules::MD016NoMultipleSpaceAfterListMarker;
+use rumdl::lint_context::LintContext;
+
+#[test]
+fn test_valid_list_items() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "- Item 1\n* Item 2\n+ Item 3\n1. Ordered item";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_invalid_list_items() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "-  Item 1\n*   Item 2\n+    Item 3\n1.  Ordered item";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 4);
+}
+
+#[test]
+fn test_fix_list_items() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = "-  Item 1\n*   Item 2\n+    Item 3\n1.  Ordered item";
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "- Item 1\n* Item 2\n+ Item 3\n1. Ordered item");
+}
+
+#[test]
+fn test_allow_multiple_spaces() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::with_allow_multiple_spaces(true);
+    let content = "-  Item 1\n*   Item 2\n+    Item 3\n1.  Ordered item";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty());
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content);
+}
 
 #[test]
 fn test_valid_unordered_list() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "* Item 1\n* Item 2\n* Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -13,7 +53,8 @@ fn test_valid_unordered_list() {
 fn test_valid_ordered_list() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "1. First\n2. Second\n3. Third";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -21,7 +62,8 @@ fn test_valid_ordered_list() {
 fn test_invalid_unordered_list() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "*  Item 1\n*   Item 2\n*    Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
     assert_eq!(result[0].column, 1);
@@ -35,7 +77,8 @@ fn test_invalid_unordered_list() {
 fn test_invalid_ordered_list() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "1.  First\n2.   Second\n3.    Third";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
     assert_eq!(result[0].column, 1);
@@ -49,7 +92,8 @@ fn test_invalid_ordered_list() {
 fn test_mixed_list_types() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "*  Item 1\n1.  First\n-  Item 2\n2.  Second";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4);
 }
 
@@ -57,7 +101,8 @@ fn test_mixed_list_types() {
 fn test_nested_lists() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "* Item 1\n  *  Nested 1\n  *   Nested 2\n* Item 2";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
 }
 
@@ -65,7 +110,8 @@ fn test_nested_lists() {
 fn test_code_block() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "```markdown\n*  Item 1\n*   Item 2\n```\n* Item 3";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -73,7 +119,8 @@ fn test_code_block() {
 fn test_fix_unordered_list() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "*  Item 1\n*   Item 2\n*    Item 3";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "* Item 1\n* Item 2\n* Item 3");
 }
 
@@ -81,7 +128,8 @@ fn test_fix_unordered_list() {
 fn test_fix_ordered_list() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "1.  First\n2.   Second\n3.    Third";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "1. First\n2. Second\n3. Third");
 }
 
@@ -89,7 +137,8 @@ fn test_fix_ordered_list() {
 fn test_fix_mixed_list_types() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "*  Item 1\n1.  First\n-  Item 2\n2.  Second";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "* Item 1\n1. First\n- Item 2\n2. Second");
 }
 
@@ -97,25 +146,19 @@ fn test_fix_mixed_list_types() {
 fn test_fix_nested_lists() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "* Item 1\n  *  Nested 1\n  *   Nested 2\n* Item 2";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2");
-}
-
-#[test]
-fn test_allow_multiple_spaces() {
-    let rule = MD016NoMultipleSpaceAfterListMarker::with_allow_multiple_spaces(true);
-    let content = "*  Item 1\n*   Item 2\n*    Item 3";
-    let result = rule.check(content).unwrap();
-    assert!(result.is_empty());
 }
 
 #[test]
 fn test_list_marker_variations() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "*  Item\n-   Item\n+    Item";
-    let result = rule.check(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "* Item\n- Item\n+ Item");
 }
 
@@ -123,7 +166,8 @@ fn test_list_marker_variations() {
 fn test_preserve_indentation() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "  *  Item 1\n    *   Item 2\n      *    Item 3";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     if result != "  * Item 1\n    * Item 2\n      * Item 3" {
         println!("[DEBUG] Actual result: {:?}", result);
     }
@@ -134,6 +178,7 @@ fn test_preserve_indentation() {
 fn test_preserve_code_blocks() {
     let rule = MD016NoMultipleSpaceAfterListMarker::new();
     let content = "* Item 1\n```\n*  Not a list\n```\n* Item 2";
-    let result = rule.fix(content).unwrap();
+    let ctx = LintContext::new(content);
+    let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "* Item 1\n```\n*  Not a list\n```\n* Item 2");
 }

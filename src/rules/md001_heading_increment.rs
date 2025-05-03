@@ -3,6 +3,7 @@ use crate::rules::heading_utils::HeadingUtils;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
 use crate::HeadingStyle;
+use crate::lint_context::LintContext;
 
 /// Rule MD001: Heading levels should only increment by one level at a time
 ///
@@ -69,7 +70,8 @@ impl Rule for MD001HeadingIncrement {
         "Heading levels should only increment by one level at a time"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         // Early return for empty content
         if content.is_empty() {
             return Ok(vec![]);
@@ -149,7 +151,8 @@ impl Rule for MD001HeadingIncrement {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+        let content = ctx.content;
         // Early return for empty content or if no headings exist
         if content.is_empty() || structure.heading_lines.is_empty() {
             return Ok(vec![]);
@@ -223,7 +226,8 @@ impl Rule for MD001HeadingIncrement {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let mut fixed_lines = Vec::new();
         let mut prev_level = 0;
         let lines: Vec<&str> = content.lines().collect();
@@ -253,26 +257,31 @@ impl Rule for MD001HeadingIncrement {
                     HeadingStyle::Atx
                 };
 
-                // Check if we need to fix the heading level
-                if level > prev_level + 1 {
-                    let fixed_level = prev_level + 1;
-                    let text = lines[start].trim_start_matches('#').trim();
-                    let replacement =
-                        HeadingUtils::convert_heading_style(text, fixed_level as u32, style);
-                    fixed_lines.push(format!("{}{}", " ".repeat(indentation), replacement));
-                    prev_level = fixed_level;
+                let heading_text: String;
+                if is_setext && start + 1 < lines.len() {
+                    let joined = lines[start..end].join(" ");
+                    heading_text = joined.trim().to_string();
                 } else {
-                    // No fix needed, keep original
-                    fixed_lines.extend(lines[start..=end].iter().map(|l| l.to_string()));
-                    prev_level = level;
+                    heading_text = lines[start].trim_start().trim_start_matches('#').trim().to_string();
                 }
 
-                i = end + 1;
+                let mut fixed_level = level;
+                if prev_level > 0 && level > prev_level + 1 {
+                    fixed_level = prev_level + 1;
+                }
+
+                let replacement = HeadingUtils::convert_heading_style(&heading_text, fixed_level as u32, style);
+                fixed_lines.push(format!("{}{}", " ".repeat(indentation), replacement));
+                if is_setext {
+                    // Add the underline for setext
+                    fixed_lines.push(lines[end].to_string());
+                    i = end;
+                }
+                prev_level = fixed_level;
             } else {
-                // Not a heading, keep as is
                 fixed_lines.push(lines[i].to_string());
-                i += 1;
             }
+            i += 1;
         }
 
         let mut result = fixed_lines.join("\n");
@@ -282,21 +291,20 @@ impl Rule for MD001HeadingIncrement {
         Ok(result)
     }
 
-    /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::Heading
     }
 
-    /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        content.is_empty() || !content.contains('#')
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
+        content.is_empty()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 
-        fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
@@ -304,10 +312,10 @@ impl Rule for MD001HeadingIncrement {
     }
 }
 
-impl DocumentStructureExtensions for MD001HeadingIncrement {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
-        // This rule is only relevant if there are at least two headings
-        doc_structure.heading_lines.len() >= 2
+impl crate::utils::document_structure::DocumentStructureExtensions for MD001HeadingIncrement {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+        let content = ctx.content;
+        !content.is_empty() && !doc_structure.heading_lines.is_empty()
     }
 }
 
@@ -322,13 +330,15 @@ mod tests {
         // Test with valid headings
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty());
 
         // Test with invalid headings
         let content = "# Heading 1\n### Heading 3\n#### Heading 4";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
     }

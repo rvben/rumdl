@@ -175,47 +175,32 @@ impl Rule for MD030ListMarkerSpace {
         "Spaces after list markers"
     }
 
-    fn check(&self, content: &str) -> LintResult {
-        // Early return for empty content
-        if content.is_empty() {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        if ctx.content.is_empty() {
             return Ok(Vec::new());
         }
-
-        // Skip if no list markers
-        if !content.contains('*')
-            && !content.contains('-')
-            && !content.contains('+')
-            && !content.contains(|c: char| c.is_ascii_digit())
+        if !ctx.content.contains('*')
+            && !ctx.content.contains('-')
+            && !ctx.content.contains('+')
+            && !ctx.content.contains(|c: char| c.is_ascii_digit())
         {
             return Ok(Vec::new());
         }
-
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
-
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Precompute list states
+        let lines: Vec<&str> = ctx.content.lines().collect();
         let (is_list_line, multi_line) = self.precompute_states(&lines);
-
         for (i, &line) in lines.iter().enumerate() {
             if !is_list_line[i] {
-                // Skip if not identified as a list item line by precompute
                 continue;
             }
-
-            // Re-check with updated regex to get space count (including 0)
             if let Some((list_type, _line_start_match, spaces)) = Self::is_list_item(line) {
                 let expected_spaces = self.get_expected_spaces(list_type, multi_line[i]);
-
-                // The check is now simply if the captured spaces count differs from expected
                 if spaces != expected_spaces {
-                    // Calculate column: indentation + marker length
-                    let marker_part = LIST_REGEX.captures(line).unwrap(); // Re-capture for precise groups
+                    let marker_part = LIST_REGEX.captures(line).unwrap();
                     let indentation_len = marker_part[1].len();
                     let marker_len = marker_part[2].len();
-                    let col = indentation_len + marker_len + 1; // Column is *after* the marker
-
+                    let col = indentation_len + marker_len + 1;
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: i + 1,
@@ -228,7 +213,6 @@ impl Rule for MD030ListMarkerSpace {
                         ),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            // Fix applies to the whole line for simplicity with regex replace
                             range: line_index.line_col_to_byte_range(i + 1, 1),
                             replacement: self.fix_line(line, list_type, multi_line[i]),
                         }),
@@ -236,57 +220,43 @@ impl Rule for MD030ListMarkerSpace {
                 }
             }
         }
-
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
-        // Early return for empty content
-        if content.is_empty() {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        if ctx.content.is_empty() {
             return Ok(String::new());
         }
-
-        // Skip if no list markers
-        if !content.contains('*')
-            && !content.contains('-')
-            && !content.contains('+')
-            && !content.contains(|c: char| c.is_ascii_digit())
+        if !ctx.content.contains('*')
+            && !ctx.content.contains('-')
+            && !ctx.content.contains('+')
+            && !ctx.content.contains(|c: char| c.is_ascii_digit())
         {
-            return Ok(content.to_string());
+            return Ok(ctx.content.to_string());
         }
-
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Precompute list states
+        let lines: Vec<&str> = ctx.content.lines().collect();
         let (is_list_line, multi_line) = self.precompute_states(&lines);
-
         let mut result_lines = Vec::with_capacity(lines.len());
-
         for (i, &line) in lines.iter().enumerate() {
             if is_list_line[i] {
-                // Check if it's a list item that needs fixing
                 if let Some((list_type, _line_start_match, spaces)) = Self::is_list_item(line) {
                     let expected_spaces = self.get_expected_spaces(list_type, multi_line[i]);
                     if spaces != expected_spaces {
                         result_lines.push(self.fix_line(line, list_type, multi_line[i]));
                     } else {
-                        result_lines.push(line.to_string()); // No fix needed
+                        result_lines.push(line.to_string());
                     }
                 } else {
-                    result_lines.push(line.to_string()); // Not matched by regex, don't change
+                    result_lines.push(line.to_string());
                 }
             } else {
-                result_lines.push(line.to_string()); // Not a list line
+                result_lines.push(line.to_string());
             }
         }
-
         let mut result = result_lines.join("\n");
-
-        // Preserve trailing newline if original content had one
-        if content.ends_with('\n') {
+        if ctx.content.ends_with('\n') {
             result.push('\n');
         }
-
         Ok(result)
     }
 
@@ -296,12 +266,12 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
-        content.is_empty()
-            || (!content.contains('*')
-                && !content.contains('-')
-                && !content.contains('+')
-                && !content.contains(|c: char| c.is_ascii_digit()))
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty()
+            || (!ctx.content.contains('*')
+                && !ctx.content.contains('-')
+                && !ctx.content.contains('+')
+                && !ctx.content.contains(|c: char| c.is_ascii_digit()))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -329,21 +299,17 @@ impl Rule for MD030ListMarkerSpace {
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
         let ul_single = crate::config::get_rule_config_value::<usize>(config, "MD030", "ul_single").unwrap_or(1);
-        let ol_single = crate::config::get_rule_config_value::<usize>(config, "MD030", "ol_single").unwrap_or(1);
         let ul_multi = crate::config::get_rule_config_value::<usize>(config, "MD030", "ul_multi").unwrap_or(1);
+        let ol_single = crate::config::get_rule_config_value::<usize>(config, "MD030", "ol_single").unwrap_or(1);
         let ol_multi = crate::config::get_rule_config_value::<usize>(config, "MD030", "ol_multi").unwrap_or(1);
-        Box::new(MD030ListMarkerSpace::new(ul_single, ol_single, ul_multi, ol_multi))
+        Box::new(MD030ListMarkerSpace::new(ul_single, ul_multi, ol_single, ol_multi))
     }
 }
 
 impl DocumentStructureExtensions for MD030ListMarkerSpace {
-    fn has_relevant_elements(&self, _content: &str, doc_structure: &DocumentStructure) -> bool {
-        // Rule is only relevant if there are list items
+    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         !doc_structure.list_lines.is_empty()
     }
 }
@@ -351,45 +317,42 @@ impl DocumentStructureExtensions for MD030ListMarkerSpace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
 
     #[test]
     fn test_with_document_structure() {
         let rule = MD030ListMarkerSpace::default();
-
-        // Test with correct spacing
         let content = "* Item 1\n* Item 2\n  * Nested item\n1. Ordered item";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             result.is_empty(),
             "Correctly spaced list markers should not generate warnings"
         );
-
-        // Test with incorrect spacing
         let content = "*  Item 1 (too many spaces)\n* Item 2\n1.   Ordered item (too many spaces)";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(
             result.len(),
             2,
             "Should have warnings for both items with incorrect spacing"
         );
-
-        // Test with multiline items
         let content = "* Item 1\n  continued on next line\n* Item 2";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             result.is_empty(),
             "Default spacing for single and multiline is 1"
         );
-
-        // Test with custom spacing settings
         let custom_rule = MD030ListMarkerSpace::new(1, 2, 1, 2);
         let content = "* Item 1\n  continued on next line\n*  Item 2 with 2 spaces";
         let structure = DocumentStructure::new(content);
+        let ctx = LintContext::new(content);
         let result = custom_rule
-            .check_with_structure(content, &structure)
+            .check_with_structure(&ctx, &structure)
             .unwrap();
         assert_eq!(
             result.len(),

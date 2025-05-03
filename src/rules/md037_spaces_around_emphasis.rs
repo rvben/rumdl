@@ -166,7 +166,8 @@ impl Rule for MD037NoSpaceInEmphasis {
         "Spaces inside emphasis markers"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         let _timer = crate::profiling::ScopedTimer::new("MD037_check");
 
         // Early return if the content is empty or has no emphasis characters
@@ -202,8 +203,10 @@ impl Rule for MD037NoSpaceInEmphasis {
     }
 
     /// Enhanced function to check for spaces inside emphasis markers
-    fn check_with_structure(&self, content: &str, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
         let _timer = crate::profiling::ScopedTimer::new("MD037_check_with_structure");
+
+        let content = ctx.content;
 
         // Early return if the content is empty or has no emphasis characters
         if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
@@ -287,11 +290,12 @@ impl Rule for MD037NoSpaceInEmphasis {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let _timer = crate::profiling::ScopedTimer::new("MD037_fix");
 
         // First check for issues and get all warnings with fixes
-        let warnings = match self.check(content) {
+        let warnings = match self.check(ctx) {
             Ok(warnings) => warnings,
             Err(e) => return Err(e),
         };
@@ -348,7 +352,8 @@ impl Rule for MD037NoSpaceInEmphasis {
     }
 
     /// Check if this rule should be skipped
-    fn should_skip(&self, content: &str) -> bool {
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        let content = ctx.content;
         content.is_empty() || (!content.contains('*') && !content.contains('_'))
     }
 
@@ -365,7 +370,8 @@ impl Rule for MD037NoSpaceInEmphasis {
 }
 
 impl DocumentStructureExtensions for MD037NoSpaceInEmphasis {
-    fn has_relevant_elements(&self, content: &str, _doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, _doc_structure: &DocumentStructure) -> bool {
+        let content = ctx.content;
         !content.is_empty() && (content.contains('*') || content.contains('_'))
     }
 }
@@ -691,6 +697,8 @@ impl MD037NoSpaceInEmphasis {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
+    use crate::utils::document_structure::DocumentStructure;
 
     #[test]
     fn test_with_document_structure() {
@@ -699,7 +707,8 @@ mod tests {
         // Test with no spaces inside emphasis
         let content = "This is *correct* emphasis and **strong emphasis**";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
 
         // Update expectation to match actual implementation behavior
         if result.is_empty() {
@@ -718,7 +727,8 @@ mod tests {
         // Test with spaces inside emphasis
         let content = "This is * text with spaces * and ** text with spaces **";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
 
         // The implementation might detect these incorrectly - be flexible about the count
         assert!(
@@ -731,7 +741,8 @@ mod tests {
         // Test with code blocks
         let content = "This is *correct* emphasis\n```\n* incorrect * in code block\n```\nOutside block with * spaces in emphasis *";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(content, &structure).unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
 
         // Be flexible about the exact count, but ensure the code block content is skipped
         assert!(

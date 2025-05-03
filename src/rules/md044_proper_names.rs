@@ -231,7 +231,8 @@ impl Rule for MD044ProperNames {
         "Proper names should have the correct capitalization"
     }
 
-    fn check(&self, content: &str) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
         if content.is_empty() || self.names.is_empty() {
             return Ok(Vec::new());
         }
@@ -263,7 +264,8 @@ impl Rule for MD044ProperNames {
         Ok(warnings)
     }
 
-    fn fix(&self, content: &str) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         if content.is_empty() || self.names.is_empty() {
             return Ok(content.to_string());
         }

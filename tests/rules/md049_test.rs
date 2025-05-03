@@ -6,7 +6,8 @@ use rumdl::MD049EmphasisStyle;
 fn test_consistent_asterisks() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
     let content = "# Test\n\nThis is *emphasized* and this is also *emphasized*";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -14,7 +15,8 @@ fn test_consistent_asterisks() {
 fn test_consistent_underscores() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
     let content = "# Test\n\nThis is _emphasized_ and this is also _emphasized_";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -22,10 +24,11 @@ fn test_consistent_underscores() {
 fn test_mixed_emphasis_prefer_asterisks() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
     let content = "# Mixed emphasis\n\nThis is *asterisk* and this is _underscore_";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     // Use contains for more flexible assertion
     assert!(fixed.contains("This is *asterisk* and this is *underscore*"));
 }
@@ -34,10 +37,11 @@ fn test_mixed_emphasis_prefer_asterisks() {
 fn test_mixed_emphasis_prefer_underscores() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
     let content = "# Mixed emphasis\n\nThis is *asterisk* and this is _underscore_";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     // Use contains for more flexible assertion
     assert!(fixed.contains("This is _asterisk_ and this is _underscore_"));
 }
@@ -46,10 +50,11 @@ fn test_mixed_emphasis_prefer_underscores() {
 fn test_consistent_style_first_asterisk() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
     let content = "# Mixed emphasis\n\nThis is *asterisk* and this is _underscore_";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     // Use contains for more flexible assertion
     assert!(fixed.contains("This is *asterisk* and this is *underscore*"));
 }
@@ -58,10 +63,11 @@ fn test_consistent_style_first_asterisk() {
 fn test_consistent_style_first_underscore() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
     let content = "# Mixed emphasis\n\nThis is _underscore_ and this is *asterisk*";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     // Use contains for more flexible assertion
     assert!(fixed.contains("This is _underscore_ and this is _asterisk_"));
 }
@@ -70,7 +76,8 @@ fn test_consistent_style_first_underscore() {
 fn test_empty_content() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
     let content = "";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -78,7 +85,8 @@ fn test_empty_content() {
 fn test_no_emphasis() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
     let content = "# Just a heading\n\nSome regular text\n\n> A blockquote";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -86,7 +94,8 @@ fn test_no_emphasis() {
 fn test_ignore_strong_emphasis() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
     let content = "# Test\n\nThis is *emphasis* and this is **strong**";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
 
@@ -96,12 +105,13 @@ fn test_urls_with_underscores() {
 
     // Test URL with underscores
     let content = "Here is a [link](https://example.com/page_with_underscores)";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
         "URLs with underscores should not be flagged as emphasis"
     );
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed, content,
         "URLs with underscores should not be modified"
@@ -109,9 +119,10 @@ fn test_urls_with_underscores() {
 
     // Test complex content with URLs and real emphasis
     let content = "Check out this _emphasis_ and visit [our site](https://example.com/docs/user_guide/page_name)";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Only the real emphasis should be detected");
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     // Use contains for more flexible assertion
     assert!(
         fixed.contains("Check out this *emphasis* and visit [our site]"),
@@ -120,9 +131,10 @@ fn test_urls_with_underscores() {
 
     // Test with multiple URLs and emphasis
     let content = "Visit these links:\n- [Link 1](https://example.com/some_path)\n- [Link 2](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)\nAnd remember to _check_ the documentation.";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Only the real emphasis should be detected");
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(
         fixed.contains("https://example.com/some_path"),
         "URL should remain unchanged"
@@ -145,10 +157,11 @@ fn test_inline_code_with_underscores() {
 
     // Test inline code with underscores
     let content = "Use the `function_name()` in your code and _emphasize_ important parts.";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect one emphasis to fix");
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(
         fixed.contains("`function_name()`"),
         "Inline code should not be modified"
@@ -165,10 +178,11 @@ fn test_multiple_backticks() {
 
     // Test double backticks
     let content = "Use ``code with `backtick` inside`` and _emphasis_.";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect one emphasis to fix");
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(
         fixed.contains("``code with `backtick` inside``"),
         "Double backtick code should not be modified"
@@ -180,10 +194,11 @@ fn test_multiple_backticks() {
 
     // Test triple backticks
     let content = "Use ```code with `backticks` and ``more`` inside``` and _emphasis_.";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect one emphasis to fix");
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(
         fixed.contains("```code with `backticks` and ``more`` inside```"),
         "Triple backtick code should not be modified"
@@ -200,10 +215,11 @@ fn test_code_blocks() {
 
     // Test code blocks with emphasis-like content
     let content = "Before _emphasis_\n```\nSome _code_ here\n```\nAfter _emphasis_";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(
         fixed.contains("Before *emphasis*"),
         "Emphasis before code block should be fixed"
@@ -219,10 +235,11 @@ fn test_code_blocks() {
 
     // Test with tildes
     let content = "Before _emphasis_\n~~~\nSome _code_ here\n~~~\nAfter _emphasis_";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(
         fixed.contains("Before *emphasis*"),
         "Emphasis before code block should be fixed"
@@ -243,10 +260,11 @@ fn test_environment_variables() {
 
     // Test environment variables in backticks
     let content = "Set `GITLAB_URL` and `CI_PROJECT_ID` variables and _note_ the values.";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect one emphasis to fix");
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(
         fixed.contains("`GITLAB_URL`"),
         "Environment variable should not be modified"
@@ -267,10 +285,11 @@ fn test_nested_code_and_emphasis() {
 
     // Test complex nesting
     let content = "1. First step with _emphasis_\n   ```bash\n   echo \"some _code_\"\n   ```\n2. Second step with _emphasis_";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(
         fixed.contains("First step with *emphasis*"),
         "First emphasis should be fixed"
@@ -287,10 +306,11 @@ fn test_nested_code_and_emphasis() {
     // Test with indented code and emphasis
     let content =
         "1. First step with _emphasis_\n    ```\n    some _code_\n    ```\n   And _more_ text";
-    let result = rule.check(content).unwrap();
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
 
-    let fixed = rule.fix(content).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
     assert!(
         fixed.contains("First step with *emphasis*"),
         "First emphasis should be fixed"

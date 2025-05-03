@@ -27,6 +27,7 @@ use serde::de::Error as SerdeDeError;
 use rumdl::config::Config;
 use rumdl::rules::DefinitionStyle;
 use rumdl::rules::MD058BlanksAroundTables;
+use rumdl::lint_context::LintContext;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -1275,7 +1276,8 @@ fn process_file(
                 .iter()
                 .any(|w| w.rule_name == Some(rule.name()) && w.fix.is_some())
             {
-                match rule.fix(&content) {
+                let ctx = LintContext::new(&content);
+                match rule.fix(&ctx) {
                     Ok(fixed_content) => {
                         if fixed_content != content {
                             content = fixed_content;
