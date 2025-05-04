@@ -14,6 +14,9 @@ lazy_static! {
     // Patterns for lists with multiple spaces
     static ref UNORDERED_LIST_MULTIPLE_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)([*+-])(\s{2,})").unwrap();
     static ref ORDERED_LIST_MULTIPLE_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)(\d+\.)(\s{2,})").unwrap();
+
+    // Regex to capture list markers and the spaces *after* them
+    pub static ref LIST_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)(\s*)").unwrap();
 }
 
 /// Enum representing different types of list markers
@@ -306,6 +309,59 @@ impl ListUtils {
         // Return the original line if no pattern matched
         line.to_string()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListType {
+    Unordered,
+    Ordered,
+}
+
+/// Returns (ListType, matched string, number of spaces after marker) if the line is a list item
+pub fn is_list_item(line: &str) -> Option<(ListType, String, usize)> {
+    let trimmed_line = line.trim();
+    if trimmed_line.is_empty() {
+        return None;
+    }
+    // Horizontal rule check (--- or ***)
+    if trimmed_line.chars().all(|c| c == '-' || c == ' ')
+        && trimmed_line.chars().filter(|&c| c == '-').count() >= 3
+    {
+        return None;
+    }
+    if trimmed_line.chars().all(|c| c == '*' || c == ' ')
+        && trimmed_line.chars().filter(|&c| c == '*').count() >= 3
+    {
+        return None;
+    }
+    if let Some(cap) = LIST_REGEX.captures(line) {
+        let marker = &cap[2];
+        let spaces = cap[3].len();
+        let list_type = if marker.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+            ListType::Ordered
+        } else {
+            ListType::Unordered
+        };
+        return Some((list_type, cap[0].to_string(), spaces));
+    }
+    None
+}
+
+/// Returns true if the list item at lines[current_idx] is a multi-line item
+pub fn is_multi_line_item(lines: &[&str], current_idx: usize) -> bool {
+    if current_idx >= lines.len() - 1 {
+        return false;
+    }
+    let next_line = lines[current_idx + 1].trim();
+    if next_line.is_empty() {
+        return false;
+    }
+    if is_list_item(next_line).is_some() {
+        return false;
+    }
+    let curr_indent = lines[current_idx].chars().take_while(|c| c.is_whitespace()).count();
+    let next_indent = lines[current_idx + 1].chars().take_while(|c| c.is_whitespace()).count();
+    next_indent > curr_indent
 }
 
 #[cfg(test)]

@@ -6,10 +6,27 @@ use crate::utils::element_cache::ElementCache;
 use crate::utils::element_cache::ListMarkerType;
 use crate::utils::range_utils::LineIndex;
 use toml;
+use crate::rules::list_utils::{is_list_item, is_multi_line_item, ListType};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct MD016NoMultipleSpaceAfterListMarker {
     pub allow_multiple_spaces: bool,
+    pub ul_single: usize,
+    pub ul_multi: usize,
+    pub ol_single: usize,
+    pub ol_multi: usize,
+}
+
+impl Default for MD016NoMultipleSpaceAfterListMarker {
+    fn default() -> Self {
+        Self {
+            allow_multiple_spaces: false,
+            ul_single: 1,
+            ul_multi: 1,
+            ol_single: 1,
+            ol_multi: 1,
+        }
+    }
 }
 
 impl MD016NoMultipleSpaceAfterListMarker {
@@ -20,6 +37,26 @@ impl MD016NoMultipleSpaceAfterListMarker {
     pub fn with_allow_multiple_spaces(allow_multiple_spaces: bool) -> Self {
         Self {
             allow_multiple_spaces,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_config(allow_multiple_spaces: bool, ul_single: usize, ul_multi: usize, ol_single: usize, ol_multi: usize) -> Self {
+        Self {
+            allow_multiple_spaces,
+            ul_single,
+            ul_multi,
+            ol_single,
+            ol_multi,
+        }
+    }
+
+    pub fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
+        match (list_type, is_multi) {
+            (ListType::Unordered, false) => self.ul_single,
+            (ListType::Unordered, true) => self.ul_multi,
+            (ListType::Ordered, false) => self.ol_single,
+            (ListType::Ordered, true) => self.ol_multi,
         }
     }
 }
@@ -35,11 +72,9 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        // Skip processing if allowing multiple spaces
         if self.allow_multiple_spaces {
             return Ok(Vec::new());
         }
-        // Fast path - check if content has any list markers
         if !content.contains('*')
             && !content.contains('-')
             && !content.contains('+')
@@ -50,44 +85,73 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
         }
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        // Get cached document elements - this provides efficient access to lists and code blocks
         let element_cache = ElementCache::new(content);
-        // Process each list item from the cache
-        for list_item in element_cache.get_list_items() {
-            // Skip list items inside code blocks
-            if element_cache.is_in_code_block(list_item.line_number) {
-                continue;
-            }
-            // Check if this list item has multiple spaces after marker
-            if list_item.spaces_after_marker > 1 {
-                // Create a warning with fix
-                let line_num = list_item.line_number;
-                let message = match list_item.marker_type {
-                    ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus => {
-                        "Multiple spaces after unordered list marker".to_string()
+        let lines: Vec<&str> = content.lines().collect();
+        let total_lines = lines.len();
+        for (i, &line) in lines.iter().enumerate() {
+            let line_num = i + 1;
+            if let Some(list_item) = element_cache.get_list_item(line_num) {
+                let in_code_block = element_cache.is_in_code_block(line_num);
+                if in_code_block {
+                    continue;
+                }
+                if let Some((list_type, _matched, _spaces)) = is_list_item(line) {
+                    let is_multi = is_multi_line_item(&lines, i);
+                    let allowed = self.get_expected_spaces(list_type, is_multi);
+                    // Count spaces after marker
+                    let marker_end = list_item.indent_str.len() + list_item.marker.len();
+                    let after_marker = &line[marker_end..];
+                    let spaces = after_marker.chars().take_while(|c| c.is_whitespace()).count();
+                    // Only flag multi-line items with more than allowed spaces
+                    if is_multi {
+                        if spaces > allowed {
+                            let msg = if list_item.marker.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                                "Multiple spaces after ordered list marker"
+                            } else {
+                                "Multiple spaces after unordered list marker"
+                            };
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                severity: Severity::Warning,
+                                line: line_num,
+                                column: list_item.indent_str.len() + list_item.marker.len() + 1,
+                                message: msg.to_string(),
+                                fix: Some(Fix {
+                                    range: line_index.line_col_to_byte_range(line_num, 1),
+                                    replacement: if list_item.content.is_empty() {
+                                        format!("{}{}", list_item.indent_str, list_item.marker)
+                                    } else {
+                                        format!("{}{}{}{}", list_item.indent_str, list_item.marker, " ".repeat(allowed), list_item.content)
+                                    },
+                                }),
+                            });
+                        }
+                    } else {
+                        // For single-line items, only flag if config is > 1 and spaces > allowed
+                        if allowed > 1 && spaces > allowed {
+                            let msg = if list_item.marker.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                                "Multiple spaces after ordered list marker"
+                            } else {
+                                "Multiple spaces after unordered list marker"
+                            };
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                severity: Severity::Warning,
+                                line: line_num,
+                                column: list_item.indent_str.len() + list_item.marker.len() + 1,
+                                message: msg.to_string(),
+                                fix: Some(Fix {
+                                    range: line_index.line_col_to_byte_range(line_num, 1),
+                                    replacement: if list_item.content.is_empty() {
+                                        format!("{}{}", list_item.indent_str, list_item.marker)
+                                    } else {
+                                        format!("{}{}{}{}", list_item.indent_str, list_item.marker, " ".repeat(allowed), list_item.content)
+                                    },
+                                }),
+                            });
+                        }
                     }
-                    ListMarkerType::Ordered => {
-                        "Multiple spaces after ordered list marker".to_string()
-                    }
-                };
-                // Generate the fixed line with exactly one space after marker
-                let indentation = &list_item.indent_str;
-                let fixed_line = if list_item.content.is_empty() {
-                    format!("{}{}", indentation, list_item.marker)
-                } else {
-                    format!("{}{} {}", indentation, list_item.marker, list_item.content)
-                };
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    severity: Severity::Warning,
-                    line: line_num,
-                    column: list_item.indentation + 1,
-                    message,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num, 1),
-                        replacement: fixed_line,
-                    }),
-                });
+                }
             }
         }
         Ok(warnings)
@@ -145,15 +209,34 @@ impl Rule for MD016NoMultipleSpaceAfterListMarker {
             "allow_multiple_spaces".to_string(),
             toml::Value::Boolean(self.allow_multiple_spaces),
         );
+        map.insert(
+            "ul_single".to_string(),
+            toml::Value::Integer(self.ul_single as i64),
+        );
+        map.insert(
+            "ul_multi".to_string(),
+            toml::Value::Integer(self.ul_multi as i64),
+        );
+        map.insert(
+            "ol_single".to_string(),
+            toml::Value::Integer(self.ol_single as i64),
+        );
+        map.insert(
+            "ol_multi".to_string(),
+            toml::Value::Integer(self.ol_multi as i64),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
         let allow_multiple_spaces = crate::config::get_rule_config_value::<bool>(config, "MD016", "allow_multiple_spaces").unwrap_or(false);
-        Box::new(MD016NoMultipleSpaceAfterListMarker::with_allow_multiple_spaces(allow_multiple_spaces))
+        let ul_single = crate::config::get_rule_config_value::<usize>(config, "MD030", "ul-single").unwrap_or(1);
+        let ul_multi  = crate::config::get_rule_config_value::<usize>(config, "MD030", "ul-multi").unwrap_or(1);
+        let ol_single = crate::config::get_rule_config_value::<usize>(config, "MD030", "ol-single").unwrap_or(1);
+        let ol_multi  = crate::config::get_rule_config_value::<usize>(config, "MD030", "ol-multi").unwrap_or(1);
+        Box::new(MD016NoMultipleSpaceAfterListMarker::with_config(
+            allow_multiple_spaces, ul_single, ul_multi, ol_single, ol_multi
+        ))
     }
 }
 
@@ -213,5 +296,76 @@ mod tests {
         let ctx2 = crate::lint_context::LintContext::new(content2);
         let fixed2 = rule.fix(&ctx2).unwrap();
         assert_eq!(fixed2, expected2);
+    }
+
+    #[test]
+    fn test_md016_multi_line_and_single_line_behavior() {
+        // Config: ul_single=1, ul_multi=3, ol_single=1, ol_multi=2
+        let rule = MD016NoMultipleSpaceAfterListMarker::with_config(false, 1, 3, 1, 2);
+
+        // Single-line unordered, 1 space (allowed)
+        let content = "- one\n- two";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0, "No warning for single-line unordered with 1 space");
+
+        // Single-line unordered, 3 spaces (should NOT warn, only multi-line matters)
+        let content = "-   one\n-   two";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0, "No warning for single-line unordered with 3 spaces");
+
+        // Multi-line unordered, 4 spaces (should warn, allowed is 3)
+        let content = "-   one\n    continued";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Warn for multi-line unordered with 3+ spaces");
+
+        // Multi-line unordered, 3 spaces (allowed)
+        let content = "-   one\n    continued";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Warn for multi-line unordered with 3+ spaces");
+
+        // Single-line ordered, 2 spaces (should NOT warn, only multi-line matters)
+        let content = "1.  one\n2.  two";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0, "No warning for single-line ordered with 2 spaces");
+
+        // Multi-line ordered, 3 spaces (should warn, allowed is 2)
+        let content = "1.  one\n   continued";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Warn for multi-line ordered with 3+ spaces");
+
+        // Multi-line ordered, 2 spaces (allowed)
+        let content = "1.  one\n   continued";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Warn for multi-line ordered with 2+ spaces");
+
+        // Config: ul_single=2, ul_multi=3, ol_single=2, ol_multi=2
+        let rule = MD016NoMultipleSpaceAfterListMarker::with_config(false, 2, 3, 2, 2);
+        // Single-line unordered, 3 spaces (should warn, allowed is 2)
+        let content = "-   one";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Warn for single-line unordered with more than allowed");
+        // Single-line ordered, 3 spaces (should warn, allowed is 2)
+        let content = "1.   one";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Warn for single-line ordered with more than allowed");
+        // Single-line unordered, 2 spaces (allowed)
+        let content = "-  one";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0, "No warning for single-line unordered with allowed spaces");
+        // Multi-line unordered, 4 spaces (should warn, allowed is 3)
+        let content = "-    one\n     continued";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Warn for multi-line unordered with more than allowed");
     }
 }

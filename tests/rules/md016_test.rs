@@ -182,3 +182,75 @@ fn test_preserve_code_blocks() {
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "* Item 1\n```\n*  Not a list\n```\n* Item 2");
 }
+
+#[test]
+fn test_readme_md016() {
+    let rule = MD016NoMultipleSpaceAfterListMarker::default();
+    let content = r#"# A title
+
+Single ol:
+
+1. one
+1. two
+1. three
+
+Single ul:
+
+- one
+- two
+- three
+
+Unordered nested list:
+
+-   one
+    wrapped
+-   two
+    -   three
+        wrapped
+    -   four
+-   five
+    - six
+    - seven
+
+Ordered nested list:
+
+1.  one
+    wrapped
+1.  two
+    1.  three
+        wrapped
+    1.  four
+1.  five
+    1. six
+    1. seven
+
+Mixed nested lists A:
+
+1.  one
+    wrapped
+1.  two
+    -   three
+        wrapped
+    -   four
+1.  five
+
+Mixed nested lists A:
+
+-   one
+    wrapped
+-   two
+    1.  three
+        wrapped
+    1.  four
+-   five
+"#;
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    // We expect warnings for lines with more than one space after the marker
+    assert!(!result.is_empty(), "Should flag lines with more than one space after list marker");
+    // Check that the fix produces the expected output (all list markers have only one space)
+    let fixed = rule.fix(&ctx).unwrap();
+    // Spot check a few lines
+    assert!(fixed.contains("- one\n    wrapped"), "Unordered list should have only one space");
+    assert!(fixed.contains("1. one\n    wrapped"), "Ordered list should have only one space");
+}

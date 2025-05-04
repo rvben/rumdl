@@ -499,12 +499,6 @@ impl<T: Clone> SourcedValue<T> {
         }
 
         if source_precedence(new_source) >= source_precedence(self.source) {
-            /* eprintln!(
-                "[DEBUG merge_override] Applying override. Key: ?? File: {:?}. Old Source: {:?}, New Source: {:?}", 
-                new_file.as_deref().unwrap_or("None"), 
-                self.source, 
-                new_source
-            ); */
             self.value = new_value.clone();
             self.source = new_source;
             self.overrides.push(ConfigOverride {
@@ -1187,105 +1181,11 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
     Ok(fragment)
 }
 
-/// Loads and converts a markdownlint config file (.json only for now) into a SourcedConfigFragment.
+/// Loads and converts a markdownlint config file (.json or .yaml) into a SourcedConfigFragment.
 fn load_from_markdownlint(path: &str) -> Result<SourcedConfigFragment, ConfigError> {
-    eprintln!("[DEBUG: entered load_from_markdownlint for {}]", path);
-    let content = fs::read_to_string(path).map_err(|e| ConfigError::IoError { source: e, path: path.to_string() })?;
-    let json_data: JsonValue = serde_json::from_str(&content)
-        .map_err(|e| {
-            let line = e.line();
-            let col = e.column();
-            ConfigError::ParseError(format!("{}:{}:{}: Failed to parse JSON: {}", path, line, col, e))
-        })?;
-
-    let mut fragment = SourcedConfigFragment::default();
-    let source = ConfigSource::Markdownlint;
-    let file = Some(path.to_string());
-
-    if let JsonValue::Object(top_level_map) = json_data {
-        for (rule_key_raw, rule_value) in top_level_map {
-            // Attempt to map markdownlint key first, otherwise normalize the raw key
-            let norm_rule_name = MARKDOWNLINT_KEY_MAP.get(rule_key_raw.as_str())
-                .map(|&s| s.to_string()) // Convert mapped &str to String
-                .unwrap_or_else(|| normalize_key(&rule_key_raw)); // Fallback to direct normalization
-            let norm_rule_name = norm_rule_name.to_ascii_uppercase(); // Always store as uppercase (e.g., "MD046")
-
-            // Skip global section (markdownlint json usually doesn't have one)
-            if norm_rule_name == "GLOBAL" {
-                eprintln!("[WARN] Skipping unsupported global key '{}' in JSON config {}", rule_key_raw, path);
-                continue;
-            }
-
-            // Process as rule-specific config
-            if let JsonValue::Object(rule_config_map) = rule_value {
-                let rule_entry = fragment.rules.entry(norm_rule_name.clone()).or_default();
-
-                for (config_key, config_value_json) in rule_config_map {
-                    let norm_config_key = normalize_key(&config_key); // Normalize style -> style
-
-                    // Convert serde_json::Value to toml::Value
-                    let maybe_toml_val = json_to_toml_value(config_value_json);
-
-                    if let Some(toml_val) = maybe_toml_val {
-                         let sv = rule_entry.values.entry(norm_config_key.clone())
-                            .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
-                        // Add debug print here
-                        eprintln!(
-                            "[DEBUG MARKDOWNLINT LOAD] Pushing override for {}.{}. Source: {:?}, File: {:?}", 
-                            norm_rule_name, norm_config_key, source, file.as_deref()
-                        );
-                        sv.push_override(toml_val, source, file.clone(), None); // Use push_override
-                    } else {
-                        eprintln!(
-                            "[WARN] Skipping unsupported value type for key '{}.{}' in JSON config {}",
-                            rule_key_raw, config_key, path // Use raw key for warning
-                        );
-                    }
-                }
-            } else {
-                 // Handle cases where a top-level key might be a direct value (like line-length in some formats)
-                 // Check if the mapped/normalized key corresponds to a rule that accepts this direct value.
-                 // This part is tricky and depends on schema knowledge.
-                 // For now, just warn if it wasn't an object.
-                eprintln!(
-                    "[WARN] Expected a JSON object for rule key '{}' in {}, found different type (value: {}).",
-                    rule_key_raw, path, rule_value
-                );
-            }
-        }
-    } else {
-        return Err(ConfigError::ParseError(format!("Expected top-level JSON object in {}", path)));
-    }
-
-    Ok(fragment)
-}
-
-// Helper function to convert serde_json::Value to toml::Value
-fn json_to_toml_value(json_val: JsonValue) -> Option<toml::Value> {
-    match json_val {
-        JsonValue::Null => None, // TOML doesn't have a direct null equivalent, skip
-        JsonValue::Bool(b) => Some(toml::Value::Boolean(b)),
-        JsonValue::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Some(toml::Value::Integer(i))
-            } else if let Some(f) = n.as_f64() {
-                Some(toml::Value::Float(f))
-            } else {
-                None // Should not happen with standard numbers
-            }
-        }
-        JsonValue::String(s) => Some(toml::Value::String(s)),
-        JsonValue::Array(arr) => {
-            let was_originally_empty = arr.is_empty(); // Check before consuming
-            let toml_arr: Vec<toml::Value> = arr.into_iter().filter_map(json_to_toml_value).collect();
-            // Only return Some if the array wasn't originally empty or didn't become empty due to incompatible types
-            if !toml_arr.is_empty() || was_originally_empty { // Use the stored boolean
-                 Some(toml::Value::Array(toml_arr))
-            } else {
-                None // Contained only unsupported types
-            }
-        }
-        JsonValue::Object(_) => None, // Do not support nested tables within rule config values directly
-    }
+    // Use the unified loader from markdownlint_config.rs
+    let ml_config = crate::markdownlint_config::load_markdownlint_config(path)
+        .map_err(|e| ConfigError::ParseError(format!("{}: {}", path, e)))?;
+    Ok(ml_config.map_to_sourced_rumdl_config_fragment(Some(path)))
 }
 

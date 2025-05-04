@@ -6,6 +6,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
 use crate::lint_context::LintContext;
+use markdown::mdast::{Node, List, ListItem, Blockquote};
 
 /// Rule MD006: Consider starting bulleted lists at the leftmost column
 ///
@@ -81,68 +82,67 @@ impl Rule for MD006StartBullets {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
         let mut result = Vec::new();
+        let ast = match markdown::to_mdast(content, &markdown::ParseOptions::gfm()) {
+            Ok(Node::Root(root)) => root,
+            _ => return Ok(result),
+        };
         let lines: Vec<&str> = content.lines().collect();
-        let mut in_code_block = false;
-        let mut valid_bullet_lines = vec![false; lines.len()];
-        for (line_idx, line) in lines.iter().enumerate() {
-            if CODE_FENCE_PATTERN.is_match(line) {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if in_code_block {
-                continue;
-            }
-            if let Some(indent) = Self::is_bullet_list_item(line) {
-                let mut is_valid = false; // Assume invalid initially
-                if indent == 0 {
-                    is_valid = true; // Top-level is always valid
-                } else {
-                    match Self::find_relevant_previous_bullet(&lines, line_idx) {
-                        Some((prev_idx, prev_indent)) => {
-                            match prev_indent.cmp(&indent) {
-                                std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
-                                    // Valid nesting or sibling if previous item was valid
-                                    is_valid = valid_bullet_lines[prev_idx];
-                                }
-                                std::cmp::Ordering::Greater => {
-                                    // remains invalid
+        // Walk the AST
+        fn walk(node: &Node, depth: usize, in_blockquote: bool, lines: &[&str], result: &mut Vec<LintWarning>) {
+            match node {
+                Node::List(List { ordered: false, children, .. }) => {
+                    for item in children {
+                        walk(item, depth + 1, in_blockquote, lines, result);
+                    }
+                }
+                Node::List(List { ordered: true, children, .. }) => {
+                    for item in children {
+                        walk(item, depth + 1, in_blockquote, lines, result);
+                    }
+                }
+                Node::ListItem(ListItem { position, children, .. }) => {
+                    if depth == 1 && !in_blockquote {
+                        if let Some(pos) = position {
+                            let line_idx = pos.start.line.saturating_sub(1);
+                            if let Some(line) = lines.get(line_idx) {
+                                if let Some(cap) = BULLET_PATTERN.captures(line) {
+                                    let indent = cap[1].len();
+                                    if indent > 0 {
+                                        result.push(LintWarning {
+                                            rule_name: Some("MD006"),
+                                            severity: Severity::Warning,
+                                            line: line_idx + 1,
+                                            column: 1,
+                                            message: "Consider starting bulleted lists at the beginning of the line".to_string(),
+                                            fix: Some(Fix {
+                                                range: 0..indent,
+                                                replacement: "".to_string(),
+                                            }),
+                                        });
+                                    }
                                 }
                             }
                         }
-                        None => {
-                            // Indented item with no previous bullet remains invalid
-                        }
+                    }
+                    for child in children {
+                        walk(child, depth, in_blockquote, lines, result);
                     }
                 }
-                valid_bullet_lines[line_idx] = is_valid;
-
-                if !is_valid {
-                    let fixed_line = line.trim_start();
-                    let needs_blank_line = line_idx > 0
-                        && !Self::is_blank_line(lines[line_idx - 1])
-                        && Self::is_bullet_list_item(lines[line_idx - 1]).is_none();
-                    let replacement = if needs_blank_line {
-                        format!("\n{}", fixed_line)
-                    } else {
-                        fixed_line.to_string()
-                    };
-                    result.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        severity: Severity::Warning,
-                        line: line_idx + 1,
-                        column: 1,
-                        message: "Consider starting bulleted lists at the beginning of the line"
-                            .to_string(),
-                        fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(line_idx + 1, 1),
-                            replacement,
-                        }),
-                    });
+                Node::Blockquote(Blockquote { children, .. }) => {
+                    for child in children {
+                        walk(child, depth, true, lines, result);
+                    }
                 }
+                Node::Root(root) => {
+                    for child in &root.children {
+                        walk(child, 0, false, lines, result);
+                    }
+                }
+                _ => {}
             }
         }
+        walk(&Node::Root(ast), 0, false, &lines, &mut result);
         Ok(result)
     }
 

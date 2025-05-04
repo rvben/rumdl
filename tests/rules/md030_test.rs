@@ -120,3 +120,78 @@ fn test_preserve_indentation() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "  * Item\n    - Another\n      + Third");
 }
+
+#[test]
+fn test_readme_md030_config() {
+    let rule = MD030ListMarkerSpace::new(1, 3, 1, 2);
+    let content = r#"# A title
+
+Single ol:
+
+1. one
+1. two
+1. three
+
+Single ul:
+
+- one
+- two
+- three
+
+Unordered nested list:
+
+-   one
+    wrapped
+-   two
+    -   three
+        wrapped
+    -   four
+-   five
+    - six
+    - seven
+
+Ordered nested list:
+
+1.  one
+    wrapped
+1.  two
+    1.  three
+        wrapped
+    1.  four
+1.  five
+    1. six
+    1. seven
+
+Mixed nested lists A:
+
+1.  one
+    wrapped
+1.  two
+    -   three
+        wrapped
+    -   four
+1.  five
+
+Mixed nested lists A:
+
+-   one
+    wrapped
+-   two
+    1.  three
+        wrapped
+    1.  four
+-   five
+"#;
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    // We expect warnings for lines with more than the configured spaces after the marker
+    assert!(!result.is_empty(), "Should flag lines with too many spaces after list marker");
+    // Check that the fix produces the expected output (all list markers have correct spaces)
+    let fixed = rule.fix(&ctx).unwrap();
+    // All unordered multi-line items should have 3 spaces, single-line 1; ordered multi-line 2, single-line 1
+    // Spot check a few lines
+    assert!(fixed.contains("-   one\n    wrapped"), "Unordered multi-line should have 3 spaces");
+    assert!(fixed.contains("1.  one\n    wrapped"), "Ordered multi-line should have 2 spaces");
+    assert!(fixed.contains("- one"), "Unordered single-line should have 1 space");
+    assert!(fixed.contains("1. one"), "Ordered single-line should have 1 space");
+}
