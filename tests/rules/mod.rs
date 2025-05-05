@@ -13,8 +13,6 @@ mod md012_test;
 mod md013_test;
 mod md014_test;
 mod md015_test;
-mod md016_test;
-// mod md017_test;
 mod md018_test;
 mod md019_test;
 mod md020_test;

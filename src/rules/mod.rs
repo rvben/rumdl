@@ -111,9 +111,6 @@ pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
 mod md015_no_missing_space_after_list_marker;
 pub use md015_no_missing_space_after_list_marker::MD015NoMissingSpaceAfterListMarker;
 
-mod md016_no_multiple_space_after_list_marker;
-pub use md016_no_multiple_space_after_list_marker::MD016NoMultipleSpaceAfterListMarker;
-
 mod md018_no_missing_space_atx;
 pub use md018_no_missing_space_atx::MD018NoMissingSpaceAtx;
 
@@ -159,7 +156,6 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
         ("MD013", MD013LineLength::from_config),
         ("MD014", MD014CommandsShowOutput::from_config),
         ("MD015", MD015NoMissingSpaceAfterListMarker::from_config),
-        ("MD016", MD016NoMultipleSpaceAfterListMarker::from_config),
         ("MD018", MD018NoMissingSpaceAtx::from_config),
         ("MD019", MD019NoMultipleSpaceAtx::from_config),
         ("MD020", MD020NoMissingSpaceClosedAtx::from_config),

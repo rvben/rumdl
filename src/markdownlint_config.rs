@@ -51,7 +51,6 @@ fn markdownlint_to_rumdl_rule_key(key: &str) -> Option<&'static str> {
         "MD013" | "LINE-LENGTH" => Some("MD013"),
         "MD014" | "COMMANDS-SHOW-OUTPUT" => Some("MD014"),
         "MD015" | "NO-MISSING-SPACE-AFTER-LIST-MARKER" => Some("MD015"),
-        "MD016" | "NO-MULTIPLE-SPACE-AFTER-LIST-MARKER" => Some("MD016"),
         "MD018" | "NO-MISSING-SPACE-ATX" => Some("MD018"),
         "MD019" | "NO-MULTIPLE-SPACE-ATX" => Some("MD019"),
         "MD020" | "NO-MISSING-SPACE-CLOSED-ATX" => Some("MD020"),
