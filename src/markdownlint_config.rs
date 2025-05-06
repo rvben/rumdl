@@ -28,7 +28,7 @@ pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String
     };
     if let Err(ref err) = parse_result {
         eprintln!("\x1b[31mError: Failed to parse configuration file '{}':\n  {}\n\nPlease ensure your JSON is valid. All keys and string values must be double-quoted.\x1b[0m", path, err);
-        std::process::exit(2);
+        std::process::exit(1);
     }
     parse_result
 }

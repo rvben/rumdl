@@ -175,19 +175,19 @@ impl Rule for MD006StartBullets {
         let mut i = 0;
         while i < lines.len() {
             if let Some(replacement) = line_replacements.get(&i) {
-                // Check if this replacement includes a blank line
-                if let Some(stripped) = replacement.strip_prefix('\n') {
-                    // Add a blank line
+                let prev_line_is_blank = i > 0 && Self::is_blank_line(lines[i - 1]);
+                let prev_line_is_list = i > 0 && Self::is_bullet_list_item(lines[i - 1]).is_some();
+                // Only insert a blank line if previous line is not blank and not a list
+                if !prev_line_is_blank && !prev_line_is_list && i > 0 {
                     fixed_lines.push(String::new());
-                    // Then add the actual content (without the leading newline)
-                    fixed_lines.push(stripped.to_string());
-                } else {
-                    fixed_lines.push(replacement.clone());
                 }
+                // The replacement is the fixed line (unindented list item)
+                // Use the original line, trimmed of leading whitespace
+                let fixed_line = lines[i].trim_start();
+                fixed_lines.push(fixed_line.to_string());
             } else {
                 fixed_lines.push(lines[i].to_string());
             }
-
             i += 1;
         }
 
