@@ -5,7 +5,6 @@ use crate::utils::document_structure::document_structure_from_str;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)\s").unwrap();
@@ -249,7 +248,11 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     /// Optimized check using document structure - Block-based approach
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = ctx.content.lines().collect();
         let num_lines = lines.len();
@@ -365,7 +368,11 @@ impl Rule for MD032BlanksAroundLists {
 }
 
 impl DocumentStructureExtensions for MD032BlanksAroundLists {
-    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         !doc_structure.list_lines.is_empty()
     }
 }

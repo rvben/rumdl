@@ -241,7 +241,8 @@ impl Rule for MD012NoMultipleBlanks {
     where
         Self: Sized,
     {
-        let maximum = crate::config::get_rule_config_value::<usize>(config, "MD012", "maximum").unwrap_or(1);
+        let maximum =
+            crate::config::get_rule_config_value::<usize>(config, "MD012", "maximum").unwrap_or(1);
         Box::new(MD012NoMultipleBlanks::new(maximum))
     }
 }

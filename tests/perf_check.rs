@@ -1,8 +1,8 @@
+use rumdl::lint_context::LintContext;
 use rumdl::{
     rule::Rule, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD053LinkImageReferenceDefinitions,
 };
 use std::time::Instant;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_optimized_rules_performance() {

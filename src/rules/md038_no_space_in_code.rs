@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{CodeSpan, DocumentStructure, DocumentStructureExtensions};
-use crate::lint_context::LintContext;
 
 /// Rule MD038: No space inside code span markers
 ///
@@ -101,7 +100,11 @@ impl Rule for MD038NoSpaceInCode {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         let mut warnings = Vec::new();
 
         // Get lines for position mapping
@@ -233,7 +236,11 @@ impl Rule for MD038NoSpaceInCode {
 }
 
 impl DocumentStructureExtensions for MD038NoSpaceInCode {
-    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         !doc_structure.code_spans.is_empty()
     }
 }
@@ -257,7 +264,7 @@ mod tests {
             "Empty code span `` is technically valid",
         ];
         for case in valid_cases {
-            let ctx = LintContext::new(case);
+            let ctx = crate::lint_context::LintContext::new(case);
             let result = rule.check(&ctx).unwrap();
             assert!(
                 result.is_empty(),
@@ -277,7 +284,7 @@ mod tests {
             "Multiple ` code ` spans with `spaces ` in one line.",
         ];
         for case in invalid_cases {
-            let ctx = LintContext::new(case);
+            let ctx = crate::lint_context::LintContext::new(case);
             let result = rule.check(&ctx).unwrap();
             assert!(
                 !result.is_empty(),
@@ -309,7 +316,7 @@ mod tests {
             ),
         ];
         for (input, expected) in test_cases {
-            let ctx = LintContext::new(input);
+            let ctx = crate::lint_context::LintContext::new(input);
             let result = rule.fix(&ctx).unwrap();
             assert_eq!(
                 result, expected,
@@ -323,7 +330,7 @@ mod tests {
     fn test_check_invalid_leading_space() {
         let rule = MD038NoSpaceInCode::new();
         let input = "This has a ` leading space` in code";
-        let ctx = LintContext::new(input);
+        let ctx = crate::lint_context::LintContext::new(input);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);

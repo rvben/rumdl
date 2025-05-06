@@ -1,4 +1,4 @@
-use markdown::{to_mdast, mdast::Node, ParseOptions};
+use markdown::{mdast::Node, to_mdast, ParseOptions};
 
 pub struct LintContext<'a> {
     pub content: &'a str,
@@ -9,7 +9,10 @@ pub struct LintContext<'a> {
 impl<'a> LintContext<'a> {
     pub fn new(content: &'a str) -> Self {
         let ast = to_mdast(content, &ParseOptions::gfm()).unwrap_or_else(|_| {
-            Node::Root(markdown::mdast::Root { children: vec![], position: None })
+            Node::Root(markdown::mdast::Root {
+                children: vec![],
+                position: None,
+            })
         });
         let mut line_offsets = vec![0];
         for (i, c) in content.char_indices() {
@@ -17,7 +20,11 @@ impl<'a> LintContext<'a> {
                 line_offsets.push(i + 1);
             }
         }
-        Self { content, ast, line_offsets }
+        Self {
+            content,
+            ast,
+            line_offsets,
+        }
     }
 
     /// Map a byte offset to (line, column)
@@ -25,7 +32,11 @@ impl<'a> LintContext<'a> {
         match self.line_offsets.binary_search(&offset) {
             Ok(line) => (line + 1, 1),
             Err(line) => {
-                let line_start = self.line_offsets.get(line.wrapping_sub(1)).copied().unwrap_or(0);
+                let line_start = self
+                    .line_offsets
+                    .get(line.wrapping_sub(1))
+                    .copied()
+                    .unwrap_or(0);
                 (line, offset - line_start + 1)
             }
         }
@@ -35,7 +46,7 @@ impl<'a> LintContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use markdown::mdast::{Node, Root, Heading, Text};
+    use markdown::mdast::{Heading, Node};
 
     #[test]
     fn test_empty_content() {
@@ -95,4 +106,4 @@ mod tests {
         assert_eq!(ctx.offset_to_line_col(4), (3, 1)); // 'c'
         assert_eq!(ctx.offset_to_line_col(5), (3, 2)); // after 'c'
     }
-} 
+}

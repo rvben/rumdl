@@ -1,6 +1,6 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD030ListMarkerSpace;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_single_line_lists() {
@@ -54,7 +54,10 @@ fn test_fix_ordered_list() {
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
     if fixed != "1.  First\n2.   Second\n3.    Third" {
-        eprintln!("[DEBUG] test_fix_ordered_list: actual=\n{:?}\nexpected=\n{:?}", fixed, "1.  First\n2.   Second\n3.    Third");
+        eprintln!(
+            "[DEBUG] test_fix_ordered_list: actual=\n{:?}\nexpected=\n{:?}",
+            fixed, "1.  First\n2.   Second\n3.    Third"
+        );
     }
     assert_eq!(fixed, "1.  First\n2.   Second\n3.    Third");
 }
@@ -79,7 +82,10 @@ fn test_mixed_list_types() {
     assert!(result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
     if fixed != "*  Unordered\n1.  Ordered\n-   Mixed\n2.   Types" {
-        eprintln!("[DEBUG] test_mixed_list_types: actual=\n{:?}\nexpected=\n{:?}", fixed, "*  Unordered\n1.  Ordered\n-   Mixed\n2.   Types");
+        eprintln!(
+            "[DEBUG] test_mixed_list_types: actual=\n{:?}\nexpected=\n{:?}",
+            fixed, "*  Unordered\n1.  Ordered\n-   Mixed\n2.   Types"
+        );
     }
     assert_eq!(fixed, "*  Unordered\n1.  Ordered\n-   Mixed\n2.   Types");
 }
@@ -93,7 +99,10 @@ fn test_nested_lists() {
     assert!(result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
     if fixed != "* First\n  *  Nested\n    *   More nested" {
-        eprintln!("[DEBUG] test_nested_lists: actual=\n{:?}\nexpected=\n{:?}", fixed, "* First\n  *  Nested\n    *   More nested");
+        eprintln!(
+            "[DEBUG] test_nested_lists: actual=\n{:?}\nexpected=\n{:?}",
+            fixed, "* First\n  *  Nested\n    *   More nested"
+        );
     }
     assert_eq!(fixed, "* First\n  *  Nested\n    *   More nested");
 }
@@ -115,7 +124,10 @@ fn test_multi_line_items() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "* Single line\n*  Multi line\n  continued here\n* Another single");
+    assert_eq!(
+        fixed,
+        "* Single line\n*  Multi line\n  continued here\n* Another single"
+    );
 }
 
 #[test]
@@ -125,7 +137,10 @@ fn test_preserve_indentation() {
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
     if fixed != "  *  Item\n    -   Another\n      +    Third" {
-        eprintln!("[DEBUG] test_preserve_indentation: actual=\n{:?}\nexpected=\n{:?}", fixed, "  *  Item\n    -   Another\n      +    Third");
+        eprintln!(
+            "[DEBUG] test_preserve_indentation: actual=\n{:?}\nexpected=\n{:?}",
+            fixed, "  *  Item\n    -   Another\n      +    Third"
+        );
     }
     assert_eq!(fixed, "  *  Item\n    -   Another\n      +    Third");
 }
@@ -193,8 +208,14 @@ Mixed nested lists A:
 "#;
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "Should not flag lines with too many spaces after list marker");
+    assert!(
+        result.is_empty(),
+        "Should not flag lines with too many spaces after list marker"
+    );
     let fixed = rule.fix(&ctx).unwrap();
     let expected = "# A title\n\nSingle ol:\n\n1. one\n1. two\n1.   three\n\nSingle ul:\n\n- one\n- two\n-   three\n\nUnordered nested list:\n\n-   one\n    wrapped\n-   two\n    -   three\n        wrapped\n    -   four\n-   five\n    - six\n    -   seven\n\nOrdered nested list:\n\n1.   one\n    wrapped\n1.   two\n    1.   three\n        wrapped\n    1.  four\n1.   five\n    1. six\n    1.   seven\n\nMixed nested lists A:\n\n1.   one\n    wrapped\n1.   two\n    -   three\n        wrapped\n    -   four\n1.   five\n\nMixed nested lists A:\n\n-   one\n    wrapped\n-   two\n    1.   three\n        wrapped\n    1.  four\n-   five";
-    assert_eq!(fixed, expected, "Fixed output should match the correct, spec-compliant Markdown");
+    assert_eq!(
+        fixed, expected,
+        "Fixed output should match the correct, spec-compliant Markdown"
+    );
 }

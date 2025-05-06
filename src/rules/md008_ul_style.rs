@@ -1,11 +1,11 @@
+use crate::lint_context::LintContext;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
+use markdown::mdast::{Blockquote, List, ListItem, Node};
 use regex::Regex;
 use toml;
-use crate::lint_context::LintContext;
-use markdown::mdast::{Node, List, ListItem, Blockquote, Paragraph};
 
 lazy_static! {
     // Updated regex to handle blockquote markers at the beginning of lines
@@ -77,22 +77,6 @@ impl MD008ULStyle {
         })
     }
 
-    /// Precompute code blocks for faster checking
-    fn precompute_code_blocks(content: &str) -> Vec<bool> {
-        let lines: Vec<&str> = content.lines().collect();
-        let mut in_code_block = false;
-        let mut code_blocks = vec![false; lines.len()];
-
-        for (i, line) in lines.iter().enumerate() {
-            if CODE_BLOCK_MARKER.is_match(line.trim_start()) {
-                in_code_block = !in_code_block;
-            }
-            code_blocks[i] = in_code_block;
-        }
-
-        code_blocks
-    }
-
     /// Check if content contains any list items (for fast skipping)
     #[inline]
     fn contains_potential_list_items(content: &str) -> bool {
@@ -126,48 +110,66 @@ impl MD008ULStyle {
         node: &'a Node,
         blockquote_depth: usize,
         items: &mut Vec<(usize, &'a ListItem, char, usize, usize)>,
-        ctx: &LintContext,
+        _ctx: &LintContext,
     ) {
         match node {
             Node::Blockquote(Blockquote { children, .. }) => {
                 for child in children {
-                    Self::collect_unordered_list_items(child, blockquote_depth + 1, items, ctx);
+                    Self::collect_unordered_list_items(child, blockquote_depth + 1, items, _ctx);
                 }
             }
-            Node::List(List { children, ordered: false, .. }) => {
+            Node::List(List {
+                children,
+                ordered: false,
+                ..
+            }) => {
                 for item in children {
                     if let Node::ListItem(li) = item {
                         // Find the marker and line number
-                        if let Some((marker, line, col)) = Self::get_list_marker_info(li, ctx) {
+                        if let Some((marker, line, col)) = Self::get_list_marker_info(li, _ctx) {
                             items.push((blockquote_depth, li, marker, line, col));
                         }
                         // Recurse into nested lists
                         for child in &li.children {
-                            Self::collect_unordered_list_items(child, blockquote_depth, items, ctx);
+                            Self::collect_unordered_list_items(
+                                child,
+                                blockquote_depth,
+                                items,
+                                _ctx,
+                            );
                         }
                     }
                 }
             }
-            Node::List(List { children, ordered: true, .. }) => {
+            Node::List(List {
+                children,
+                ordered: true,
+                ..
+            }) => {
                 // Skip ordered lists
                 for item in children {
                     if let Node::ListItem(li) = item {
                         for child in &li.children {
-                            Self::collect_unordered_list_items(child, blockquote_depth, items, ctx);
+                            Self::collect_unordered_list_items(
+                                child,
+                                blockquote_depth,
+                                items,
+                                _ctx,
+                            );
                         }
                     }
                 }
             }
             Node::Root(root) => {
                 for child in &root.children {
-                    Self::collect_unordered_list_items(child, blockquote_depth, items, ctx);
+                    Self::collect_unordered_list_items(child, blockquote_depth, items, _ctx);
                 }
             }
             _ => {
                 // Recurse into children if any
                 if let Some(children) = node.children() {
                     for child in children {
-                        Self::collect_unordered_list_items(child, blockquote_depth, items, ctx);
+                        Self::collect_unordered_list_items(child, blockquote_depth, items, _ctx);
                     }
                 }
             }
@@ -175,15 +177,17 @@ impl MD008ULStyle {
     }
 
     /// Extract the marker character, line, and column for a ListItem
-    fn get_list_marker_info<'a>(li: &'a ListItem, ctx: &LintContext) -> Option<(char, usize, usize)> {
+    fn get_list_marker_info(li: &ListItem, _ctx: &LintContext) -> Option<(char, usize, usize)> {
         // Try to find the marker in the source text
         if let Some(pos) = li.position.as_ref() {
             let start = pos.start.offset;
-            let (line, col) = ctx.offset_to_line_col(start);
+            let (line, col) = _ctx.offset_to_line_col(start);
             // Get the line from the source
-            let line_str = ctx.content.lines().nth(line - 1)?;
+            let line_str = _ctx.content.lines().nth(line - 1)?;
             // Find the first non-whitespace character
-            let marker = line_str.chars().find(|c| *c == '*' || *c == '-' || *c == '+')?;
+            let marker = line_str
+                .chars()
+                .find(|c| *c == '*' || *c == '-' || *c == '+')?;
             Some((marker, line, col))
         } else {
             None
@@ -191,12 +195,13 @@ impl MD008ULStyle {
     }
 
     /// AST-based: get all unordered list items grouped by blockquote depth
-    fn group_items_by_blockquote<'a>(
-        ctx: &'a LintContext,
+    fn group_items_by_blockquote(
+        ctx: &LintContext,
     ) -> std::collections::HashMap<usize, Vec<(char, usize, usize)>> {
         let mut items = Vec::new();
         Self::collect_unordered_list_items(&ctx.ast, 0, &mut items, ctx);
-        let mut groups: std::collections::HashMap<usize, Vec<(char, usize, usize)>> = std::collections::HashMap::new();
+        let mut groups: std::collections::HashMap<usize, Vec<(char, usize, usize)>> =
+            std::collections::HashMap::new();
         for (depth, _li, marker, line, col) in items {
             groups.entry(depth).or_default().push((marker, line, col));
         }
@@ -229,22 +234,22 @@ impl Rule for MD008ULStyle {
         let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
         let groups = Self::group_items_by_blockquote(ctx);
-        for (blockquote_depth, group) in groups {
+        for (_blockquote_depth, group) in groups {
             let expected = self.get_expected_style_for_group(&group);
-            for (marker, line, col) in group {
+            for (marker, line, _col) in group {
                 let expected_char = expected;
                 if marker != expected_char {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line,
-                        column: col,
+                        column: _col,
                         message: format!(
                             "Unordered list item marker '{}' should be '{}'",
                             marker, expected_char
                         ),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line, col),
+                            range: line_index.line_col_to_byte_range(line, _col),
                             replacement: format!("{}", expected_char),
                         }),
                     });
@@ -255,7 +260,11 @@ impl Rule for MD008ULStyle {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> LintResult {
         // Fast path - if content is empty or no list items, return empty result
         if ctx.content.is_empty() || doc_structure.list_lines.is_empty() {
             return Ok(Vec::new());
@@ -344,9 +353,9 @@ impl Rule for MD008ULStyle {
         }
         let mut lines: Vec<String> = ctx.content.lines().map(|l| l.to_string()).collect();
         let groups = Self::group_items_by_blockquote(ctx);
-        for (_blockquote_depth, group) in &groups {
+        for group in groups.values() {
             let expected = self.get_expected_style_for_group(group);
-            for (marker, line, col) in group {
+            for (marker, line, _col) in group {
                 let expected_char = expected;
                 if *marker != expected_char {
                     // Replace the marker at the correct position in the line
@@ -357,7 +366,9 @@ impl Rule for MD008ULStyle {
                         while idx < chars.len() && (chars[idx] == ' ' || chars[idx] == '\t') {
                             idx += 1;
                         }
-                        if idx < chars.len() && (chars[idx] == '*' || chars[idx] == '-' || chars[idx] == '+') {
+                        if idx < chars.len()
+                            && (chars[idx] == '*' || chars[idx] == '-' || chars[idx] == '+')
+                        {
                             chars[idx] = expected_char;
                             *line_str = chars.into_iter().collect();
                         }
@@ -418,7 +429,11 @@ impl Rule for MD008ULStyle {
 }
 
 impl DocumentStructureExtensions for MD008ULStyle {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         !doc_structure.list_lines.is_empty()
     }
 }
@@ -464,11 +479,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let structure = DocumentStructure::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert_eq!(
-            result.len(),
-            2,
-            "Expected warnings for mixed list markers"
-        );
+        assert_eq!(result.len(), 2, "Expected warnings for mixed list markers");
     }
 
     #[test]

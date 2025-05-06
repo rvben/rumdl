@@ -1,6 +1,6 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::{md004_unordered_list_style::UnorderedListStyle, MD004UnorderedListStyle};
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_check_consistent_valid() {
@@ -108,9 +108,15 @@ fn test_check_mixed_indentation() {
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let warnings = rule.check(&ctx).unwrap();
     // Expect 1 warning because the simple consistent logic flags the nested item
-    assert_eq!(warnings.len(), 1, "Should flag nested inconsistent marker with simple consistent logic");
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Should flag nested inconsistent marker with simple consistent logic"
+    );
     assert_eq!(warnings[0].line, 2);
-    assert!(warnings[0].message.contains("marker '-' does not match expected style '*'"));
+    assert!(warnings[0]
+        .message
+        .contains("marker '-' does not match expected style '*'"));
 }
 
 #[test]
@@ -137,7 +143,10 @@ fn test_fix_consistent_first_marker_plus() {
     let ctx = LintContext::new(content);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "+ Item 1\n+ Item 2\n+ Item 3\n", "Should fix to + style");
+    assert_eq!(
+        fixed, "+ Item 1\n+ Item 2\n+ Item 3\n",
+        "Should fix to + style"
+    );
 }
 
 #[test]
@@ -146,7 +155,10 @@ fn test_fix_consistent_first_marker_dash() {
     let ctx = LintContext::new(content);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "- Item 1\n- Item 2\n- Item 3\n", "Should fix to - style");
+    assert_eq!(
+        fixed, "- Item 1\n- Item 2\n- Item 3\n",
+        "Should fix to - style"
+    );
 }
 
 #[test]
@@ -208,7 +220,9 @@ fn test_md004_dash_style() {
 
 #[test]
 fn test_md004_deeply_nested() {
-    let ctx = LintContext::new("* Level 1\n  + Level 2\n    - Level 3\n      + Level 4\n  * Back to 2\n* Level 1\n");
+    let ctx = LintContext::new(
+        "* Level 1\n  + Level 2\n    - Level 3\n      + Level 4\n  * Back to 2\n* Level 1\n",
+    );
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let mut result = rule.check(&ctx).unwrap();
     result.sort_by_key(|w| w.line);
@@ -236,7 +250,9 @@ fn test_md004_deeply_nested() {
 
 #[test]
 fn test_md004_mixed_content() {
-    let ctx = LintContext::new("# Heading\n\n* Item 1\n  Some text\n  + Nested with text\n    More text\n* Item 2\n");
+    let ctx = LintContext::new(
+        "# Heading\n\n* Item 1\n  Some text\n  + Nested with text\n    More text\n* Item 2\n",
+    );
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&ctx).unwrap();
     // The most common marker is '*', so only the '+' is flagged
@@ -296,7 +312,9 @@ fn test_md004_blockquotes() {
 
 #[test]
 fn test_md004_list_continuations() {
-    let ctx = LintContext::new("* Item 1\n  Continuation 1\n  + Nested item\n    Continuation 2\n* Item 2\n");
+    let ctx = LintContext::new(
+        "* Item 1\n  Continuation 1\n  + Nested item\n    Continuation 2\n* Item 2\n",
+    );
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&ctx).unwrap();
     // All unordered list items must match the first marker ('*')
@@ -311,7 +329,9 @@ fn test_md004_list_continuations() {
 
 #[test]
 fn test_md004_mixed_ordered_unordered() {
-    let ctx = LintContext::new("1. Ordered item\n   * Unordered sub-item\n   + Another sub-item\n2. Ordered item\n");
+    let ctx = LintContext::new(
+        "1. Ordered item\n   * Unordered sub-item\n   + Another sub-item\n2. Ordered item\n",
+    );
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);

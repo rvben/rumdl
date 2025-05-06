@@ -1,9 +1,8 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingUtils;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::LineIndex;
 use crate::HeadingStyle;
-use crate::lint_context::LintContext;
 
 /// Rule MD001: Heading levels should only increment by one level at a time
 ///
@@ -151,7 +150,11 @@ impl Rule for MD001HeadingIncrement {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         let content = ctx.content;
         // Early return for empty content or if no headings exist
         if content.is_empty() || structure.heading_lines.is_empty() {
@@ -262,7 +265,11 @@ impl Rule for MD001HeadingIncrement {
                     let joined = lines[start..end].join(" ");
                     heading_text = joined.trim().to_string();
                 } else {
-                    heading_text = lines[start].trim_start().trim_start_matches('#').trim().to_string();
+                    heading_text = lines[start]
+                        .trim_start()
+                        .trim_start_matches('#')
+                        .trim()
+                        .to_string();
                 }
 
                 let mut fixed_level = level;
@@ -270,7 +277,8 @@ impl Rule for MD001HeadingIncrement {
                     fixed_level = prev_level + 1;
                 }
 
-                let replacement = HeadingUtils::convert_heading_style(&heading_text, fixed_level as u32, style);
+                let replacement =
+                    HeadingUtils::convert_heading_style(&heading_text, fixed_level as u32, style);
                 fixed_lines.push(format!("{}{}", " ".repeat(indentation), replacement));
                 if is_setext {
                     // Add the underline for setext
@@ -313,7 +321,11 @@ impl Rule for MD001HeadingIncrement {
 }
 
 impl crate::utils::document_structure::DocumentStructureExtensions for MD001HeadingIncrement {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         let content = ctx.content;
         !content.is_empty() && !doc_structure.heading_lines.is_empty()
     }
@@ -322,6 +334,7 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD001Head
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
 
     #[test]
     fn test_with_document_structure() {

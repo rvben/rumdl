@@ -1,13 +1,8 @@
-/// Rule MD024: No duplicate headings
-///
-/// See [docs/md024.md](../../docs/md024.md) for full documentation, configuration, and examples.
-use crate::utils::range_utils::LineIndex;
 use toml;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::heading_utils::HeadingUtils;
-use std::collections::{HashMap, HashSet};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Default)]
 pub struct MD024NoDuplicateHeading {
@@ -46,11 +41,23 @@ impl Rule for MD024NoDuplicateHeading {
                 continue;
             }
             let level = *structure.heading_levels.get(i).unwrap_or(&1) as u32;
-            let region = structure.heading_regions.get(i).copied().unwrap_or((line_num, line_num));
+            let region = structure
+                .heading_regions
+                .get(i)
+                .copied()
+                .unwrap_or((line_num, line_num));
             let line_idx = region.0 - 1; // 0-based
             let line = lines.get(line_idx).unwrap_or(&"");
-            let indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
-            let text = line.trim().trim_start_matches('#').trim().trim_end_matches('#').trim();
+            let indentation = line
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .collect::<String>();
+            let text = line
+                .trim()
+                .trim_start_matches('#')
+                .trim()
+                .trim_end_matches('#')
+                .trim();
             if text.is_empty() {
                 continue; // Ignore empty headings
             }
@@ -92,74 +99,8 @@ impl Rule for MD024NoDuplicateHeading {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        if !self.allow_different_nesting && !self.siblings_only {
-            return Ok(content.to_string());
-        }
-        let structure = DocumentStructure::new(content);
-        let lines: Vec<&str> = content.lines().collect();
-        let mut result = String::new();
-        let mut seen_headings: HashSet<String> = HashSet::new();
-        let mut seen_headings_per_level: HashMap<u32, HashSet<String>> = HashMap::new();
-        for (i, &line_num) in structure.heading_lines.iter().enumerate() {
-            if structure.is_in_front_matter(line_num) {
-                continue;
-            }
-            let level = *structure.heading_levels.get(i).unwrap_or(&1) as u32;
-            let region = structure.heading_regions.get(i).copied().unwrap_or((line_num, line_num));
-            let line_idx = region.0 - 1; // 0-based
-            let line = lines.get(line_idx).unwrap_or(&"");
-            let indentation = line.len() - line.trim_start().len();
-            let text = if region.0 == region.1 {
-                let mut t = line.trim_start().trim_start_matches('#').trim_end();
-                if t.ends_with('#') {
-                    t = t.trim_end_matches('#').trim_end();
-                }
-                t.trim()
-            } else {
-                line.trim()
-            };
-            if text.is_empty() {
-                continue;
-            }
-            let heading_key = text.to_string();
-            if self.siblings_only {
-                // TODO: Implement siblings_only logic if needed
-            } else if self.allow_different_nesting {
-                // Only flag duplicates at the same level
-                let seen = seen_headings_per_level.entry(level).or_default();
-                if seen.contains(&heading_key) {
-                    result.push_str(&format!(
-                        "{}{} {} (dup)\n",
-                        " ".repeat(indentation),
-                        "#".repeat(level as usize),
-                        text
-                    ));
-                } else {
-                    seen.insert(heading_key.clone());
-                    result.push_str(line);
-                    result.push('\n');
-                }
-            } else {
-                // Flag all duplicates, regardless of level
-                if seen_headings.contains(&heading_key) {
-                    result.push_str(&format!(
-                        "{}{} {} (dup)\n",
-                        " ".repeat(indentation),
-                        "#".repeat(level as usize),
-                        text
-                    ));
-                } else {
-                    seen_headings.insert(heading_key.clone());
-                    result.push_str(line);
-                    result.push('\n');
-                }
-            }
-        }
-        if !content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
-        }
-        Ok(result)
+        // MD024 does not support auto-fixing. Removing duplicate headings is not a safe or meaningful fix.
+        Ok(ctx.content.to_string())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -183,8 +124,18 @@ impl Rule for MD024NoDuplicateHeading {
     where
         Self: Sized,
     {
-        let allow_different_nesting = crate::config::get_rule_config_value::<bool>(config, "MD024", "allow_different_nesting").unwrap_or(false);
-        let siblings_only = crate::config::get_rule_config_value::<bool>(config, "MD024", "siblings_only").unwrap_or(false);
-        Box::new(MD024NoDuplicateHeading::new(allow_different_nesting, siblings_only))
+        let allow_different_nesting = crate::config::get_rule_config_value::<bool>(
+            config,
+            "MD024",
+            "allow_different_nesting",
+        )
+        .unwrap_or(false);
+        let siblings_only =
+            crate::config::get_rule_config_value::<bool>(config, "MD024", "siblings_only")
+                .unwrap_or(false);
+        Box::new(MD024NoDuplicateHeading::new(
+            allow_different_nesting,
+            siblings_only,
+        ))
     }
 }

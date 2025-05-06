@@ -5,7 +5,6 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref ATX_NO_SPACE_PATTERN: Regex = Regex::new(r"^(#+)([^#\s])").unwrap();
@@ -13,6 +12,12 @@ lazy_static! {
 
 #[derive(Clone)]
 pub struct MD018NoMissingSpaceAtx;
+
+impl Default for MD018NoMissingSpaceAtx {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MD018NoMissingSpaceAtx {
     pub fn new() -> Self {
@@ -101,14 +106,18 @@ impl Rule for MD018NoMissingSpaceAtx {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         // Early return if no headings
         if structure.heading_lines.is_empty() {
             return Ok(Vec::new());
         }
 
         let mut warnings = Vec::new();
-        let content = ctx.content;
+        let content = _ctx.content;
         let lines: Vec<&str> = content.lines().collect();
 
         // Process only heading lines using structure.heading_lines
@@ -171,7 +180,11 @@ impl Rule for MD018NoMissingSpaceAtx {
 }
 
 impl DocumentStructureExtensions for MD018NoMissingSpaceAtx {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         // This rule is only relevant if there are headings
         !doc_structure.heading_lines.is_empty()
     }
@@ -180,6 +193,7 @@ impl DocumentStructureExtensions for MD018NoMissingSpaceAtx {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
 
     #[test]
     fn test_with_document_structure() {
@@ -188,13 +202,17 @@ mod tests {
         // Test with correct space
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
+        let result = rule
+            .check_with_structure(&LintContext::new(content), &structure)
+            .unwrap();
         assert!(result.is_empty());
 
         // Test with missing space
         let content = "#Heading 1\n## Heading 2\n###Heading 3";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
+        let result = rule
+            .check_with_structure(&LintContext::new(content), &structure)
+            .unwrap();
         assert_eq!(result.len(), 2); // Should flag the two headings with missing spaces
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 3);

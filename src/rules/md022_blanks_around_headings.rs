@@ -7,7 +7,6 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use fancy_regex::Regex;
 use lazy_static::lazy_static;
 use toml;
-use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref HEADING_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})(\s+)(.*)$").unwrap();
@@ -645,7 +644,11 @@ impl Rule for MD022BlanksAroundHeadings {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _structure: &DocumentStructure,
+    ) -> LintResult {
         let content = ctx.content;
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
@@ -659,7 +662,7 @@ impl Rule for MD022BlanksAroundHeadings {
         let mut processed_headings = std::collections::HashSet::new();
 
         // Process only heading lines using structure.heading_lines
-        for &heading_line_num in &structure.heading_lines {
+        for &heading_line_num in &_structure.heading_lines {
             let heading_line = heading_line_num - 1; // Convert 1-indexed to 0-indexed
 
             // Skip if out of bounds
@@ -817,8 +820,12 @@ impl Rule for MD022BlanksAroundHeadings {
     where
         Self: Sized,
     {
-        let lines_above = crate::config::get_rule_config_value::<usize>(config, "MD022", "lines_above").unwrap_or(1);
-        let lines_below = crate::config::get_rule_config_value::<usize>(config, "MD022", "lines_below").unwrap_or(1);
+        let lines_above =
+            crate::config::get_rule_config_value::<usize>(config, "MD022", "lines_above")
+                .unwrap_or(1);
+        let lines_below =
+            crate::config::get_rule_config_value::<usize>(config, "MD022", "lines_below")
+                .unwrap_or(1);
         Box::new(MD022BlanksAroundHeadings {
             lines_above,
             lines_below,
@@ -828,7 +835,11 @@ impl Rule for MD022BlanksAroundHeadings {
 }
 
 impl DocumentStructureExtensions for MD022BlanksAroundHeadings {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _structure: &DocumentStructure,
+    ) -> bool {
         let content = ctx.content;
         !content.is_empty() && content.contains('#')
     }

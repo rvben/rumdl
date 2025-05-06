@@ -9,7 +9,6 @@ use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
-use crate::lint_context::LintContext;
 
 #[derive(Debug, Clone)]
 pub struct MD007ULIndent {
@@ -140,7 +139,11 @@ impl Rule for MD007ULIndent {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> LintResult {
         // Simply call the normal check method since we aren't using the structure yet
         self.check(ctx)
     }
@@ -192,7 +195,9 @@ impl Rule for MD007ULIndent {
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         ctx.content.is_empty()
-            || (!ctx.content.contains('*') && !ctx.content.contains('-') && !ctx.content.contains('+'))
+            || (!ctx.content.contains('*')
+                && !ctx.content.contains('-')
+                && !ctx.content.contains('+'))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -201,7 +206,10 @@ impl Rule for MD007ULIndent {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("indent".to_string(), toml::Value::Integer(self.indent as i64));
+        map.insert(
+            "indent".to_string(),
+            toml::Value::Integer(self.indent as i64),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -209,13 +217,18 @@ impl Rule for MD007ULIndent {
     where
         Self: Sized,
     {
-        let indent = crate::config::get_rule_config_value::<usize>(config, "MD007", "indent").unwrap_or(2);
+        let indent =
+            crate::config::get_rule_config_value::<usize>(config, "MD007", "indent").unwrap_or(2);
         Box::new(MD007ULIndent::new(indent))
     }
 }
 
 impl DocumentStructureExtensions for MD007ULIndent {
-    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         // Use the document structure to check if there are any unordered list elements
         !doc_structure.list_lines.is_empty()
     }

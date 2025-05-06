@@ -154,7 +154,11 @@ impl Rule for MD031BlanksAroundFences {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         let content = ctx.content;
         // Early return if no code blocks
         if !self.has_relevant_elements(ctx, structure) {
@@ -221,7 +225,11 @@ impl Rule for MD031BlanksAroundFences {
 }
 
 impl DocumentStructureExtensions for MD031BlanksAroundFences {
-    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         !doc_structure.fenced_code_block_starts.is_empty()
             || !doc_structure.fenced_code_block_ends.is_empty()
     }

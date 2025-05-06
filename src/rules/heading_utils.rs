@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::str::FromStr;
 use std::fmt;
+use std::str::FromStr;
 
 lazy_static! {
     // Optimized regex patterns with more efficient non-capturing groups

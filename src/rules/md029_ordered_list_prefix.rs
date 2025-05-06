@@ -6,7 +6,6 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref ORDERED_LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)\d+\.\s").unwrap();
@@ -17,10 +16,10 @@ lazy_static! {
 /// Represents the style for ordered lists
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum ListStyle {
-    One,        // Use '1.' for all items
-    OneOne,     // All ones (1. 1. 1.)
-    Ordered,    // Sequential (1. 2. 3.)
-    Ordered0,   // Zero-based (0. 1. 2.)
+    One,      // Use '1.' for all items
+    OneOne,   // All ones (1. 1. 1.)
+    Ordered,  // Sequential (1. 2. 3.)
+    Ordered0, // Zero-based (0. 1. 2.)
 }
 
 #[derive(Debug, Clone)]
@@ -224,7 +223,11 @@ impl Rule for MD029OrderedListPrefix {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &crate::utils::document_structure::DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &crate::utils::document_structure::DocumentStructure,
+    ) -> LintResult {
         let content = ctx.content;
 
         // Early return if no lists
@@ -314,7 +317,8 @@ impl Rule for MD029OrderedListPrefix {
     where
         Self: Sized,
     {
-        let style_str = crate::config::get_rule_config_value::<String>(config, "MD029", "style").unwrap_or_else(|| "ordered".to_string());
+        let style_str = crate::config::get_rule_config_value::<String>(config, "MD029", "style")
+            .unwrap_or_else(|| "ordered".to_string());
         let style = match style_str.as_str() {
             "one" => ListStyle::One,
             "one_one" => ListStyle::OneOne,
@@ -326,7 +330,11 @@ impl Rule for MD029OrderedListPrefix {
 }
 
 impl DocumentStructureExtensions for MD029OrderedListPrefix {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         let content = ctx.content;
         // This rule is only relevant if there are list items AND they might be ordered lists
         !doc_structure.list_lines.is_empty()
@@ -395,7 +403,7 @@ impl MD029OrderedListPrefix {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lint_context::LintContext;
+
     use crate::utils::document_structure::DocumentStructure;
 
     #[test]

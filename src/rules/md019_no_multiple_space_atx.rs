@@ -14,6 +14,12 @@ lazy_static! {
 #[derive(Clone)]
 pub struct MD019NoMultipleSpaceAtx;
 
+impl Default for MD019NoMultipleSpaceAtx {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MD019NoMultipleSpaceAtx {
     pub fn new() -> Self {
         Self
@@ -86,15 +92,19 @@ impl Rule for MD019NoMultipleSpaceAtx {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         // Early return if no headings
         if structure.heading_lines.is_empty() {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(_ctx.content.to_string());
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines: Vec<&str> = _ctx.content.lines().collect();
 
         // Process only heading lines using structure.heading_lines
         for &line_num in &structure.heading_lines {
@@ -159,7 +169,11 @@ impl Rule for MD019NoMultipleSpaceAtx {
 }
 
 impl DocumentStructureExtensions for MD019NoMultipleSpaceAtx {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         // This rule is only relevant if there are headings
         !doc_structure.heading_lines.is_empty()
     }

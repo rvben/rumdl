@@ -7,8 +7,6 @@ use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
-use crate::rules::front_matter_utils::FrontMatterUtils;
-use crate::rules::heading_utils::{get_heading_level, is_heading};
 
 lazy_static! {
     // Pattern for quick check if content has any headings at all
@@ -35,33 +33,6 @@ impl MD025SingleTitle {
         Self {
             level,
             front_matter_title: front_matter_title.to_string(),
-        }
-    }
-
-    fn find_first_h1(&self, content: &str) -> Option<(usize, String)> {
-        // Check front matter first
-        if let Some(fm_title) = FrontMatterUtils::get_front_matter_field_value(content, &self.front_matter_title) {
-            // Front matter title counts as the first H1, return line 0
-            Some((0, fm_title.to_string()))
-        } else {
-            // Check Markdown content if no front matter title found
-            let structure = DocumentStructure::new(content);
-            for (idx, &line_num) in structure.heading_lines.iter().enumerate() {
-                if idx < structure.heading_levels.len() && structure.heading_levels[idx] == self.level {
-                    // Correct line index for heading text
-                    let (content_line, _marker_line) = if idx < structure.heading_regions.len() {
-                         structure.heading_regions[idx]
-                    } else {
-                         (line_num, line_num) // Fallback
-                    };
-                    let lines: Vec<&str> = content.lines().collect();
-                    if content_line > 0 && content_line <= lines.len() {
-                         let text = lines[content_line - 1].trim_start_matches('#').trim();
-                         return Some((line_num, text.to_string()));
-                    }
-                }
-            }
-            None // No H1 found
         }
     }
 }
@@ -132,13 +103,18 @@ impl Rule for MD025SingleTitle {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         // Early return if no headings
         if structure.heading_lines.is_empty() {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let content = _ctx.content;
+        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
         // Check for front matter title if configured
@@ -146,7 +122,8 @@ impl Rule for MD025SingleTitle {
         if !self.front_matter_title.is_empty() && structure.has_front_matter {
             if let Some((start, end)) = structure.front_matter_range {
                 // Extract front matter content
-                let front_matter_content: String = ctx.content
+                let front_matter_content: String = _ctx
+                    .content
                     .lines()
                     .skip(start - 1) // Convert from 1-indexed to 0-indexed
                     .take(end - start + 1)
@@ -162,7 +139,7 @@ impl Rule for MD025SingleTitle {
         }
 
         // Find all ATX level-1 headings not in code blocks or indented 4+ spaces
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines: Vec<&str> = _ctx.content.lines().collect();
         let mut target_level_headings = Vec::new();
         for (i, &_line_num) in structure.heading_lines.iter().enumerate() {
             if i < structure.heading_levels.len() && structure.heading_levels[i] == self.level {
@@ -260,14 +237,21 @@ impl Rule for MD025SingleTitle {
     where
         Self: Sized,
     {
-        let level = crate::config::get_rule_config_value::<u32>(config, "MD025", "level").unwrap_or(1);
-        let front_matter_title = crate::config::get_rule_config_value::<String>(config, "MD025", "front_matter_title").unwrap_or_else(|| "title".to_string());
+        let level =
+            crate::config::get_rule_config_value::<u32>(config, "MD025", "level").unwrap_or(1);
+        let front_matter_title =
+            crate::config::get_rule_config_value::<String>(config, "MD025", "front_matter_title")
+                .unwrap_or_else(|| "title".to_string());
         Box::new(MD025SingleTitle::new(level as usize, &front_matter_title))
     }
 }
 
 impl DocumentStructureExtensions for MD025SingleTitle {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         // This rule is only relevant if there are headings
         !doc_structure.heading_lines.is_empty()
     }
@@ -284,20 +268,26 @@ mod tests {
         // Test with only one level-1 heading
         let content = "# Title\n\n## Section 1\n\n## Section 2";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(&crate::lint_context::LintContext::new(content), &structure).unwrap();
+        let result = rule
+            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
+            .unwrap();
         assert!(result.is_empty());
 
         // Test with multiple level-1 headings
         let content = "# Title 1\n\n## Section 1\n\n# Title 2\n\n## Section 2";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(&crate::lint_context::LintContext::new(content), &structure).unwrap();
+        let result = rule
+            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
+            .unwrap();
         assert_eq!(result.len(), 1); // Should flag the second level-1 heading
         assert_eq!(result[0].line, 5);
 
         // Test with front matter title and a level-1 heading
         let content = "---\ntitle: Document Title\n---\n\n# Main Heading\n\n## Section 1";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(&crate::lint_context::LintContext::new(content), &structure).unwrap();
+        let result = rule
+            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
+            .unwrap();
         assert!(
             result.is_empty(),
             "Should not flag a single title after front matter"

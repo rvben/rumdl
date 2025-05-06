@@ -378,11 +378,17 @@ impl Rule for MD046CodeBlockStyle {
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or unlikely to contain code blocks
         ctx.content.is_empty()
-            || (!ctx.content.contains("```") && !ctx.content.contains("~~~") && !ctx.content.contains("    "))
+            || (!ctx.content.contains("```")
+                && !ctx.content.contains("~~~")
+                && !ctx.content.contains("    "))
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         if ctx.content.is_empty() {
             return Ok(Vec::new());
         }
@@ -554,7 +560,10 @@ impl Rule for MD046CodeBlockStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
+        map.insert(
+            "style".to_string(),
+            toml::Value::String(self.style.to_string()),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -575,7 +584,11 @@ impl Rule for MD046CodeBlockStyle {
 }
 
 impl DocumentStructureExtensions for MD046CodeBlockStyle {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> bool {
         !ctx.content.is_empty() && !structure.code_blocks.is_empty()
     }
 }

@@ -4,7 +4,6 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
 use lazy_static::lazy_static;
 use regex::Regex;
-use toml;
 
 lazy_static! {
     static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"__[^_\\]+__").unwrap();
@@ -170,7 +169,10 @@ impl Rule for MD050StrongStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
+        map.insert(
+            "style".to_string(),
+            toml::Value::String(self.style.to_string()),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 

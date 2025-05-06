@@ -1,5 +1,5 @@
+use rumdl::config::{normalize_key, ConfigSource};
 use rumdl::markdownlint_config::MarkdownlintConfig;
-use rumdl::config::{ConfigSource, normalize_key};
 
 #[test]
 fn test_markdownlint_config_mapping() {
@@ -37,7 +37,8 @@ fn test_markdownlint_config_mapping() {
     }"#;
 
     // Parse as MarkdownlintConfig
-    let ml_config: MarkdownlintConfig = serde_json::from_str(config_str).expect("Failed to parse markdownlint config");
+    let ml_config: MarkdownlintConfig =
+        serde_json::from_str(config_str).expect("Failed to parse markdownlint config");
     let sourced = ml_config.map_to_sourced_rumdl_config(Some("test_markdownlint.json"));
     let rumdl_config: rumdl::config::Config = sourced.into();
 
@@ -61,7 +62,12 @@ fn test_markdownlint_config_mapping() {
     ];
 
     for (rumdl_key, ml_key) in &expected_rules {
-        assert!(rumdl_config.rules.contains_key(*rumdl_key), "Missing mapping for {} (from {})", rumdl_key, ml_key);
+        assert!(
+            rumdl_config.rules.contains_key(*rumdl_key),
+            "Missing mapping for {} (from {})",
+            rumdl_key,
+            ml_key
+        );
     }
 
     // MD046: code-block-style
@@ -77,7 +83,8 @@ fn test_markdownlint_config_mapping() {
     assert!(emphasis_style.as_str().unwrap() == "asterisk");
 
     // MD040: fenced-code-language
-    let fenced_code_langs = &rumdl_config.rules["MD040"].values[&normalize_key("allowed_languages")];
+    let fenced_code_langs =
+        &rumdl_config.rules["MD040"].values[&normalize_key("allowed_languages")];
     let langs = fenced_code_langs.as_array().unwrap();
     let expected_langs = ["bash", "html", "javascript", "json", "markdown", "text"];
     for (i, lang) in expected_langs.iter().enumerate() {
@@ -97,7 +104,8 @@ fn test_markdownlint_config_mapping() {
     // MD013: line-length
     let line_length_strict = &rumdl_config.rules["MD013"].values["strict"];
     assert!(line_length_strict.as_bool().unwrap());
-    let line_length_code_blocks = &rumdl_config.rules["MD013"].values[&normalize_key("code_blocks")];
+    let line_length_code_blocks =
+        &rumdl_config.rules["MD013"].values[&normalize_key("code_blocks")];
     assert!(!line_length_code_blocks.as_bool().unwrap());
 
     // MD054: link-image-style
@@ -109,7 +117,8 @@ fn test_markdownlint_config_mapping() {
     assert!(!link_image_url_inline.as_bool().unwrap());
 
     // MD024: no-duplicate-heading
-    let no_duplicate_heading_siblings = &rumdl_config.rules["MD024"].values[&normalize_key("siblings_only")];
+    let no_duplicate_heading_siblings =
+        &rumdl_config.rules["MD024"].values[&normalize_key("siblings_only")];
     assert!(no_duplicate_heading_siblings.as_bool().unwrap());
 
     // MD029: ol-prefix
@@ -117,7 +126,8 @@ fn test_markdownlint_config_mapping() {
     assert!(ol_prefix_style.as_str().unwrap() == "ordered");
 
     // MD044: proper-names
-    let proper_names_code_blocks = &rumdl_config.rules["MD044"].values[&normalize_key("code_blocks")];
+    let proper_names_code_blocks =
+        &rumdl_config.rules["MD044"].values[&normalize_key("code_blocks")];
     assert!(!proper_names_code_blocks.as_bool().unwrap());
     let proper_names_names = &rumdl_config.rules["MD044"].values[&normalize_key("names")];
     let expected_names = [
@@ -127,7 +137,7 @@ fn test_markdownlint_config_mapping() {
         "Markdown",
         "markdown-it",
         "markdownlint",
-        "Node.js"
+        "Node.js",
     ];
     let names = proper_names_names.as_array().unwrap();
     for (i, name) in expected_names.iter().enumerate() {
@@ -158,7 +168,8 @@ fn test_markdownlint_config_provenance() {
         "heading-style": { "style": "atx" }
     }"#;
     let fake_path = "test_markdownlint.json";
-    let ml_config = load_markdownlint_config_from_str(config_str).expect("Failed to parse markdownlint config");
+    let ml_config =
+        load_markdownlint_config_from_str(config_str).expect("Failed to parse markdownlint config");
     let sourced = ml_config.map_to_sourced_rumdl_config(Some(fake_path));
 
     // Check loaded_files
@@ -176,7 +187,10 @@ fn test_markdownlint_config_provenance() {
     assert!(ul_style.value.as_str().unwrap() == "dash");
 
     let heading_rule = sourced.rules.get("MD003").expect("MD003 missing");
-    let heading_style = heading_rule.values.get("style").expect("heading style missing");
+    let heading_style = heading_rule
+        .values
+        .get("style")
+        .expect("heading style missing");
     assert!(heading_style.source == ConfigSource::Markdownlint);
     assert!(heading_style.value.as_str().unwrap() == "atx");
 }
@@ -188,15 +202,24 @@ fn test_markdownlint_config_provenance_debug_output() {
         "ul-style": { "style": "dash" }
     }"#;
     let fake_path = "test_markdownlint.json";
-    let ml_config = load_markdownlint_config_from_str(config_str).expect("Failed to parse markdownlint config");
+    let ml_config =
+        load_markdownlint_config_from_str(config_str).expect("Failed to parse markdownlint config");
     let sourced = ml_config.map_to_sourced_rumdl_config(Some(fake_path));
 
     // No debug prints; just check presence for completeness
-    let _ = sourced.rules.get("MD004").and_then(|r| r.values.get("style"));
-    let _ = sourced.rules.get("MD046").and_then(|r| r.values.get("style"));
+    let _ = sourced
+        .rules
+        .get("MD004")
+        .and_then(|r| r.values.get("style"));
+    let _ = sourced
+        .rules
+        .get("MD046")
+        .and_then(|r| r.values.get("style"));
 }
 
 // Helper to parse from string for test
-fn load_markdownlint_config_from_str(s: &str) -> Result<rumdl::markdownlint_config::MarkdownlintConfig, String> {
+fn load_markdownlint_config_from_str(
+    s: &str,
+) -> Result<rumdl::markdownlint_config::MarkdownlintConfig, String> {
     serde_json::from_str(s).map_err(|e| format!("Failed to parse JSON: {}", e))
-} 
+}

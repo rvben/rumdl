@@ -359,8 +359,14 @@ pub fn is_multi_line_item(lines: &[&str], current_idx: usize) -> bool {
     if is_list_item(next_line).is_some() {
         return false;
     }
-    let curr_indent = lines[current_idx].chars().take_while(|c| c.is_whitespace()).count();
-    let next_indent = lines[current_idx + 1].chars().take_while(|c| c.is_whitespace()).count();
+    let curr_indent = lines[current_idx]
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .count();
+    let next_indent = lines[current_idx + 1]
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .count();
     next_indent > curr_indent
 }
 

@@ -35,7 +35,11 @@ fn test_markdownlint_config_cli_output_matches() {
         .output()
         .expect("Failed to run rumdl CLI");
 
-    assert!(output.status.success(), "CLI did not exit successfully: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "CLI did not exit successfully: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let toml_str = String::from_utf8_lossy(&output.stdout);
     println!("TOML output:\n{}", toml_str); // Print the actual output for debugging
@@ -79,7 +83,11 @@ line-length = 88
         .output()
         .expect("Failed to run rumdl CLI");
 
-    assert!(output.status.success(), "CLI did not exit successfully: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "CLI did not exit successfully: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let toml_str = String::from_utf8_lossy(&output.stdout);
     println!("TOML output:\n{}", toml_str); // For debugging
@@ -119,7 +127,11 @@ fn test_config_command_prints_source_markdownlint_json() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{}\n{}", stdout, stderr);
-    assert!(combined.contains("from markdownlint"), "Expected output to mention 'from markdownlint', got: {}", combined);
+    assert!(
+        combined.contains("from markdownlint"),
+        "Expected output to mention 'from markdownlint', got: {}",
+        combined
+    );
 
     // In the expected output, update the provenance for global config values to [from default]
     // Only rule-specific values set by markdownlint config should show [from markdownlint]
@@ -142,15 +154,33 @@ fn test_invalid_markdownlint_json_prints_helpful_error() {
     // Run the built rumdl CLI binary in the tempdir
     // Run 'config get' specifically to trigger the load
     let output = Command::new(rumdl_bin_path())
-        .args(&["config", "get", "global.exclude", "--config", config_path.to_str().unwrap()]) // Provide valid key argument
+        .args([
+            "config",
+            "get",
+            "global.exclude",
+            "--config",
+            config_path.to_str().unwrap(),
+        ]) // Provide valid key argument
         .current_dir(&dir)
         .output()
         .expect("Failed to run rumdl CLI");
 
     // Should exit with code 1 (config load/parse error)
-    assert_eq!(output.status.code(), Some(1), "Expected exit code 1 for parse error");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "Expected exit code 1 for parse error"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     // Accept any error message that contains 'Failed to parse JSON' and the filename
-    assert!(stderr.contains("Failed to parse JSON"), "Expected helpful parse error message, got: {}", stderr);
-    assert!(stderr.contains(config_path.to_str().unwrap()), "Error message should include the config filename, got: {}", stderr);
-} 
+    assert!(
+        stderr.contains("Failed to parse JSON"),
+        "Expected helpful parse error message, got: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains(config_path.to_str().unwrap()),
+        "Error message should include the config filename, got: {}",
+        stderr
+    );
+}

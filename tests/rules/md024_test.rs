@@ -1,6 +1,6 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD024NoDuplicateHeading;
-use rumdl::lint_context::LintContext;
 use std::io::Write;
 
 #[test]
@@ -24,12 +24,17 @@ fn test_duplicate_headings() {
 #[test]
 fn test_fix_duplicate_headings() {
     let rule = MD024NoDuplicateHeading::default();
-    let content = "# Heading\n## Heading\n### Heading";
+    // Input with duplicate headings
+    let content = "# Heading\n## Heading\n# Heading\n";
     let ctx = LintContext::new(content);
+    // There should be duplicate heading warnings before fixing
+    let before = rule.check(&ctx).unwrap();
+    assert!(!before.is_empty(), "Should detect duplicate headings before fix");
+
+    // Apply the fix
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
-    let result = rule.check(&fixed_ctx).unwrap();
-    assert!(fixed.contains("# Heading"));
+    // The fix should NOT change the content (MD024 does not support auto-fixing)
+    assert_eq!(fixed, content, "Fix should not modify the content for MD024");
 }
 
 #[test]
@@ -47,7 +52,11 @@ fn test_md024_different_levels_with_allow_different_nesting() {
     let content = "# Heading\n## Heading\n### Heading\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Expected 0 warnings for duplicated headings with allow_different_nesting=true");
+    assert_eq!(
+        result.len(),
+        0,
+        "Expected 0 warnings for duplicated headings with allow_different_nesting=true"
+    );
 }
 
 #[test]

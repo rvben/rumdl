@@ -153,9 +153,7 @@ line-length = 100
 
     assert!(success, "Command should succeed with custom line length");
     // Only fail if an actual MD013 warning line is present (not just in enabled rules)
-    let md013_warning_present = stdout
-        .lines()
-        .any(|line| line.contains(": MD013 "));
+    let md013_warning_present = stdout.lines().any(|line| line.contains(": MD013 "));
     assert!(
         !md013_warning_present,
         "MD013 rule warning should not be present"
@@ -205,16 +203,20 @@ line-length = 100
     fs::write(&kebab_test_file, test_file_content).unwrap();
 
     // Test snake_case config
-    let (snake_success, snake_stdout, snake_stderr) =
-        run_rumdl_command(&[snake_test_file.to_str().unwrap(), "--verbose"], snake_case_dir.path());
+    let (snake_success, snake_stdout, snake_stderr) = run_rumdl_command(
+        &[snake_test_file.to_str().unwrap(), "--verbose"],
+        snake_case_dir.path(),
+    );
 
     // Print output for debugging
     println!("STDOUT (snake_case):\n{}", snake_stdout);
     println!("STDERR (snake_case):\n{}", snake_stderr);
 
     // Test kebab-case config
-    let (kebab_success, kebab_stdout, kebab_stderr) =
-        run_rumdl_command(&[kebab_test_file.to_str().unwrap(), "--verbose"], kebab_case_dir.path());
+    let (kebab_success, kebab_stdout, kebab_stderr) = run_rumdl_command(
+        &[kebab_test_file.to_str().unwrap(), "--verbose"],
+        kebab_case_dir.path(),
+    );
 
     // Print output for debugging
     println!("STDOUT (kebab_case):\n{}", kebab_stdout);
@@ -231,12 +233,8 @@ line-length = 100
     );
 
     // Both should NOT emit MD013 warning, since the config disables it for the test file
-    let snake_md013_warning_present = snake_stdout
-        .lines()
-        .any(|line| line.contains(": MD013 "));
-    let kebab_md013_warning_present = kebab_stdout
-        .lines()
-        .any(|line| line.contains(": MD013 "));
+    let snake_md013_warning_present = snake_stdout.lines().any(|line| line.contains(": MD013 "));
+    let kebab_md013_warning_present = kebab_stdout.lines().any(|line| line.contains(": MD013 "));
     assert!(
         !snake_md013_warning_present,
         "MD013 rule warning should not be present with snake_case"

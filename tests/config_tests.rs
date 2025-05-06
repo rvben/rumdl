@@ -1,9 +1,8 @@
 use rumdl::config::Config; // Ensure Config is imported
+use rumdl::config::RuleRegistry;
 use rumdl::rules::*;
 use std::fs;
-use tempfile::tempdir; // For temporary directory // Add back env import
-use rumdl::config::{RuleRegistry};
-use rumdl::config::{SourcedConfig}; // Ensure SourcedConfig is imported
+use tempfile::tempdir; // For temporary directory // Add back env import // Ensure SourcedConfig is imported
 
 #[test]
 fn test_load_config_file() {
@@ -166,7 +165,8 @@ style = "asterisk"
 
     // Load the config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load(Some(config_path_str), None).expect("Failed to load sourced config");
+    let sourced_config = rumdl::config::SourcedConfig::load(Some(config_path_str), None)
+        .expect("Failed to load sourced config");
     // Convert to Config for rule application logic
     let config: Config = sourced_config.into();
 
@@ -245,7 +245,8 @@ style = "backtick"
 
     // Load the config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load(Some(config_path_str), None).expect("Failed to load sourced config");
+    let sourced_config = rumdl::config::SourcedConfig::load(Some(config_path_str), None)
+        .expect("Failed to load sourced config");
     // Convert to Config for rule verification
     let config: Config = sourced_config.into();
 
@@ -279,7 +280,10 @@ disable = ["MD013" # Missing closing bracket
     // Attempt to load the invalid config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
     let sourced_result = rumdl::config::SourcedConfig::load(Some(config_path_str), None);
-    assert!(sourced_result.is_err(), "Loading invalid config should fail");
+    assert!(
+        sourced_result.is_err(),
+        "Loading invalid config should fail"
+    );
 
     if let Err(err) = sourced_result {
         assert!(
@@ -352,7 +356,8 @@ fn test_config_validation_unknown_rule() {
     let config_path = temp_dir.path().join("unknown_rule.toml");
     let config_content = r#"[UNKNOWN_RULE]"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None).expect("config should load successfully"); // Use load
+    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None)
+        .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
     let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
@@ -366,7 +371,8 @@ fn test_config_validation_unknown_option() {
     let config_content = r#"[MD013]
 unknown_opt = true"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None).expect("config should load successfully"); // Use load
+    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None)
+        .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
     let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
@@ -381,7 +387,8 @@ fn test_config_validation_type_mismatch() {
     let config_content = r#"[MD013]
 line_length = "not a number""#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None).expect("config should load successfully"); // Use load
+    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None)
+        .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
     let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
@@ -396,14 +403,18 @@ fn test_config_validation_unknown_global_option() {
     let config_content = r#"[global]
 unknown_global = true"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None).expect("config should load successfully"); // Use load
+    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None)
+        .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
     let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
-    // It seems unknown global keys are not yet tracked properly. Adjust test or implementation.
-    // For now, let's expect 0 warnings related to global keys until tracking is implemented/fixed.
+                                                                                // It seems unknown global keys are not yet tracked properly. Adjust test or implementation.
+                                                                                // For now, let's expect 0 warnings related to global keys until tracking is implemented/fixed.
     let global_warnings = warnings.iter().filter(|w| w.rule.is_none()).count();
-    assert_eq!(global_warnings, 0, "Expected 0 unknown global option warnings (check implementation)");
+    assert_eq!(
+        global_warnings, 0,
+        "Expected 0 unknown global option warnings (check implementation)"
+    );
 }
 
 #[test]

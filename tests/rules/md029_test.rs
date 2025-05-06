@@ -1,7 +1,7 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD029OrderedListPrefix;
 use rumdl::utils::range_utils::LineIndex;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_md029_valid() {
@@ -74,7 +74,6 @@ fn test_line_index() {
     let content = r#"1. First item
 2. Second item
 3. Third item"#;
-    let ctx = LintContext::new(content);
     let index = LineIndex::new(content.to_string());
 
     // The byte range should be calculated based on the actual content

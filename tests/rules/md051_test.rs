@@ -1,10 +1,12 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD051LinkFragments;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_link_fragment() {
-    let ctx = LintContext::new("# Test Heading\n\nThis is a [link](somepath#test-heading) to the heading.");
+    let ctx = LintContext::new(
+        "# Test Heading\n\nThis is a [link](somepath#test-heading) to the heading.",
+    );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -12,7 +14,9 @@ fn test_valid_link_fragment() {
 
 #[test]
 fn test_invalid_link_fragment() {
-    let ctx = LintContext::new("# Test Heading\n\nThis is a [link](somepath#wrong-heading) to the heading.");
+    let ctx = LintContext::new(
+        "# Test Heading\n\nThis is a [link](somepath#wrong-heading) to the heading.",
+    );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -28,7 +32,9 @@ fn test_multiple_headings() {
 
 #[test]
 fn test_special_characters() {
-    let ctx = LintContext::new("# Test & Heading!\n\nThis is a [link](somepath#test-heading) to the heading.");
+    let ctx = LintContext::new(
+        "# Test & Heading!\n\nThis is a [link](somepath#test-heading) to the heading.",
+    );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -36,7 +42,9 @@ fn test_special_characters() {
 
 #[test]
 fn test_no_fragments() {
-    let ctx = LintContext::new("# Test Heading\n\nThis is a [link](https://example.com) without fragment.");
+    let ctx = LintContext::new(
+        "# Test Heading\n\nThis is a [link](https://example.com) without fragment.",
+    );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -52,7 +60,8 @@ fn test_empty_content() {
 
 #[test]
 fn test_multiple_invalid_fragments() {
-    let ctx = LintContext::new("# Test Heading\n\n[Link 1](somepath#wrong1)\n[Link 2](somepath#wrong2)");
+    let ctx =
+        LintContext::new("# Test Heading\n\n[Link 1](somepath#wrong1)\n[Link 2](somepath#wrong2)");
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
@@ -60,12 +69,14 @@ fn test_multiple_invalid_fragments() {
 
 #[test]
 fn test_case_sensitivity() {
-    let ctx = LintContext::new(r#"
+    let ctx = LintContext::new(
+        r#"
 # My Heading
 
 [Valid Link](#my-heading)
 [Valid Link Different Case](#MY-HEADING)
-"#);
+"#,
+    );
 
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx);
@@ -99,13 +110,15 @@ fn test_complex_heading_structures() {
 
 #[test]
 fn test_heading_id_generation() {
-    let ctx = LintContext::new(r#"
+    let ctx = LintContext::new(
+        r#"
 # Heading 1
 
 [Link with space](#heading-1)
 [Link with underscore](#heading-1)
 [Link with multiple hyphens](#heading-1)
-"#);
+"#,
+    );
 
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx);
@@ -119,7 +132,9 @@ fn test_heading_id_generation() {
 
 #[test]
 fn test_heading_to_fragment_edge_cases() {
-    let ctx = LintContext::new("# Heading\n\n# Heading\n\n[Link 1](somepath#heading)\n[Link 2](somepath#heading-1)");
+    let ctx = LintContext::new(
+        "# Heading\n\n# Heading\n\n[Link 1](somepath#heading)\n[Link 2](somepath#heading-1)",
+    );
     let rule = MD051LinkFragments::new();
 
     let result = rule.check(&ctx).unwrap();
@@ -131,7 +146,9 @@ fn test_heading_to_fragment_edge_cases() {
     assert_eq!(result.len(), 0);
 
     // Test mixed internal/external links
-    let ctx = LintContext::new("# Heading\n\n[Internal](somepath#heading)\n[External](https://example.com#heading)");
+    let ctx = LintContext::new(
+        "# Heading\n\n[Internal](somepath#heading)\n[External](https://example.com#heading)",
+    );
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -170,11 +187,13 @@ fn test_fragment_in_code_blocks() {
 
 #[test]
 fn test_fragment_with_complex_content() {
-    let ctx = LintContext::new(r#"
+    let ctx = LintContext::new(
+        r#"
 # Heading with **bold** and *italic*
 
 [Link to heading](#heading-with-bold-and-italic)
-"#);
+"#,
+    );
 
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx);
@@ -192,11 +211,13 @@ fn test_fragment_with_complex_content() {
 
 #[test]
 fn test_nested_formatting_in_fragments() {
-    let ctx = LintContext::new(r#"
+    let ctx = LintContext::new(
+        r#"
 # Heading with **bold *italic* text**
 
 [Link to heading](#heading-with-bold-italic-text)
-"#);
+"#,
+    );
 
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx);
@@ -213,11 +234,13 @@ fn test_nested_formatting_in_fragments() {
 
 #[test]
 fn test_multiple_formatting_styles() {
-    let ctx = LintContext::new(r#"
+    let ctx = LintContext::new(
+        r#"
 # Heading with _underscores_ and **asterisks** mixed
 
 [Link to heading](#heading-with-underscores-and-asterisks-mixed)
-"#);
+"#,
+    );
 
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx);
@@ -234,11 +257,13 @@ fn test_multiple_formatting_styles() {
 
 #[test]
 fn test_complex_nested_formatting() {
-    let ctx = LintContext::new(r#"
+    let ctx = LintContext::new(
+        r#"
 # **Bold** with *italic* and `code` and [link](https://example.com)
 
 [Link to heading](#bold-with-italic-and-code-and-link)
-"#);
+"#,
+    );
 
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx);
@@ -255,12 +280,14 @@ fn test_complex_nested_formatting() {
 
 #[test]
 fn test_formatting_edge_cases() {
-    let ctx = LintContext::new(r#"
+    let ctx = LintContext::new(
+        r#"
 # Heading with a**partial**bold and *italic with **nested** formatting*
 
 [Link to partial bold](#heading-with-apartialbolda-and-italic-with-nested-formatting)
 [Link to nested formatting](#heading-with-apartialbold-and-italic-with-nested-formatting)
-"#);
+"#,
+    );
 
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx);
@@ -358,7 +385,9 @@ fn test_inline_code_spans() {
     );
 
     // Test with a fragment link in inline code followed by a real invalid link
-    let ctx = LintContext::new("# Heading One\n\n`[Example](#missing-section)` and [Invalid Link](#section-two)");
+    let ctx = LintContext::new(
+        "# Heading One\n\n`[Example](#missing-section)` and [Invalid Link](#section-two)",
+    );
     let result = rule.check(&ctx).unwrap();
 
     // Only the real invalid link should be caught

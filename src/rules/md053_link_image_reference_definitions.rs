@@ -32,19 +32,6 @@ lazy_static! {
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum DefinitionStyle {
-    Consistent,
-    Alphabetical,
-    Length,
-}
-
-impl Default for DefinitionStyle {
-    fn default() -> Self {
-        DefinitionStyle::Consistent
-    }
-}
-
 /// Rule MD053: Link and image reference definitions should be used
 ///
 /// See [docs/md053.md](../../docs/md053.md) for full documentation, configuration, and examples.
@@ -98,14 +85,12 @@ impl Default for DefinitionStyle {
 /// the document's structure, including handling proper blank line formatting around
 /// the removed definitions.
 #[derive(Clone, Default)]
-pub struct MD053LinkImageReferenceDefinitions {
-    style: DefinitionStyle,
-}
+pub struct MD053LinkImageReferenceDefinitions {}
 
 impl MD053LinkImageReferenceDefinitions {
     /// Create a new instance of the MD053 rule
-    pub fn new(style: DefinitionStyle) -> Self {
-        Self { style }
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// Unescape a reference string by removing backslashes before special characters.
@@ -382,18 +367,10 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         self
     }
 
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let style = crate::config::get_rule_config_value::<String>(config, "MD053", "style")
-            .unwrap_or_else(|| "consistent".to_string());
-        let style = match style.as_str() {
-            "consistent" => DefinitionStyle::Consistent,
-            "alphabetical" => DefinitionStyle::Alphabetical,
-            "length" => DefinitionStyle::Length,
-            _ => DefinitionStyle::Consistent,
-        };
-        Box::new(MD053LinkImageReferenceDefinitions::new(style))
+        Box::new(MD053LinkImageReferenceDefinitions::new())
     }
 }

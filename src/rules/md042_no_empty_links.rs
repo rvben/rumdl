@@ -69,8 +69,12 @@ impl Rule for MD042NoEmptyLinks {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
-        let content = ctx.content;
+    fn check_with_structure(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
+        let content = _ctx.content;
         // Early return if there are no links
         if structure.links.is_empty() {
             return Ok(Vec::new());
@@ -145,7 +149,11 @@ impl Rule for MD042NoEmptyLinks {
 }
 
 impl DocumentStructureExtensions for MD042NoEmptyLinks {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         !doc_structure.links.is_empty()
     }
 }

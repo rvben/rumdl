@@ -6,16 +6,21 @@ use crate::utils::early_returns;
 use crate::utils::regex_cache;
 use lazy_static::lazy_static;
 use regex::Regex;
+use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
     // Simple pattern to quickly check if a line might contain a URL
     static ref URL_QUICK_CHECK: Regex = Regex::new(r#"(?:https?|ftp)://"#).unwrap();
 
-    // Comprehensive URL detection pattern
-    static ref URL_REGEX: Regex = Regex::new(r#"(?:https?|ftp)://(?:[^\s<>[\\]()\\\'\"]*[^\s<>[\\]()\"\\\'.,;:!?])"#).unwrap();
+    // Use fancy-regex for look-behind/look-ahead
+    static ref URL_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftp)://[^
+\s<>\[\]()\\'\"]+)(?![\w\]\)\>])"#).unwrap();
+    static ref URL_FIX_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftp)://[^
+\s<>\[\]()\\'\"]*[^
+\s<>\[\]()\\'\".,;:!?])(?![\w\]\)\>])"#).unwrap();
 
     // Pattern to match markdown link format - capture destination in Group 1
-    static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r#"(\[([^]]*)\])\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap();
+    static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r#"\[[^\]]*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap();
 
     // Pattern to match angle bracket link format
     static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r#"<((?:https?|ftp)://[^>]+)>"#).unwrap();
@@ -43,8 +48,13 @@ impl MD034NoBareUrls {
 
     #[inline]
     fn is_url_in_link(&self, line: &str, url_start: usize, url_end: usize) -> bool {
-        // Check angle bracket links first
-        for cap in ANGLE_LINK_PATTERN.captures_iter(line) {
+        // Quick check - if line doesn't contain any brackets, it can't be in a link
+        if !line.contains('[') && !line.contains('<') {
+            return false;
+        }
+
+        // Check angle bracket links first (simpler pattern)
+        if let Some(cap) = ANGLE_LINK_PATTERN.captures(line) {
             if let Some(m) = cap.get(0) {
                 if m.start() < url_start && m.end() > url_end {
                     return true;
@@ -53,39 +63,26 @@ impl MD034NoBareUrls {
         }
 
         // Check if the URL is part of an image definition ![alt](URL)
-        for cap in MARKDOWN_IMAGE_PATTERN.captures_iter(line) {
-            // Group 2 is the image src URL
-            if let Some(img_src_match) = cap.get(2) {
-                // Check if the bare URL range is fully contained within the image source URL range
-                if img_src_match.start() <= url_start && img_src_match.end() >= url_end {
-                    // Minimal check: if contained, assume it's part of the image src
-                    return true;
-                }
-            }
-        }
-
-        // Check standard markdown links [...] (URL)
-        for cap in MARKDOWN_LINK_PATTERN.captures_iter(line) {
-            let link_text_match = cap.get(2);
-            let link_dest_match = cap.get(3);
-
-            if let Some(dest_match) = link_dest_match {
-                // Check if the bare URL range is fully contained within the link destination range
-                if dest_match.start() <= url_start && dest_match.end() >= url_end {
-                    // Now, check if it's a badge link target (image link inside link text)
-                    if let Some(text_match) = link_text_match {
-                        let link_text = text_match.as_str();
-                        if IMAGE_ONLY_LINK_TEXT_PATTERN.is_match(link_text) {
-                            return true; // Badge link target
-                        }
+        if line.contains("![") {
+            for cap in MARKDOWN_IMAGE_PATTERN.captures_iter(line) {
+                if let Some(img_src_match) = cap.get(2) {
+                    if img_src_match.start() <= url_start && img_src_match.end() >= url_end {
+                        return true;
                     }
-                    // If not a badge, but contained within destination, it's a standard link target
+                }
+            }
+        }
+
+        // Check standard markdown links [...](URL)
+        for cap in MARKDOWN_LINK_PATTERN.captures_iter(line) {
+            if let Some(dest_match) = cap.get(1) {
+                if dest_match.start() <= url_start && dest_match.end() >= url_end {
                     return true;
                 }
             }
         }
 
-        false // If none of the above conditions met, it might be a bare URL
+        false
     }
 
     // Find all bare URLs in a line, using DocumentStructure for code span detection
@@ -98,41 +95,43 @@ impl MD034NoBareUrls {
         let mut warnings = Vec::new();
 
         // Fast path - check if line potentially contains a URL
-        if !line.contains("http://") && !line.contains("https://") && !line.contains("ftp://") {
+        if !URL_QUICK_CHECK.is_match(line) {
             return warnings;
         }
 
-        // ADDED: Skip lines that consist only of a badge link
+        // Skip lines that consist only of a badge link
         if BADGE_LINK_LINE.is_match(line) {
-            return warnings; // Skip the entire line
+            return warnings;
         }
 
-        for url_match in URL_REGEX.find_iter(line) {
-            let url_start = url_match.start();
-            let url_end = url_match.end();
-            let url = url_match.as_str();
+        for cap in URL_REGEX.captures_iter(line) {
+            if let Ok(cap) = cap {
+                let url = cap.get(1).unwrap();
+                let url_start = url.start();
+                let url_end = url.end();
 
-            // Skip if this URL is within a code span (using DocumentStructure)
-            if structure.is_in_code_span(line_idx + 1, url_start + 1) {
-                continue;
+                // Skip if this URL is within a code span (using DocumentStructure)
+                if structure.is_in_code_span(line_idx + 1, url_start + 1) {
+                    continue;
+                }
+
+                // Skip if URL is already in a link
+                if self.is_url_in_link(line, url_start, url_end) {
+                    continue;
+                }
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: line_idx + 1,
+                    column: url_start + 1,
+                    message: format!("Bare URL found: {}", url.as_str()),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: url_start..url_end,
+                        replacement: format!("<{}>", url.as_str()),
+                    }),
+                });
             }
-
-            // Skip if URL is already in a link
-            if self.is_url_in_link(line, url_start, url_end) {
-                continue;
-            }
-
-            warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: line_idx + 1,
-                column: url_start + 1,
-                message: format!("Bare URL found: {}", url),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: url_start..url_end,
-                    replacement: format!("<{}>", url),
-                }),
-            });
         }
 
         warnings
@@ -214,27 +213,29 @@ impl Rule for MD034NoBareUrls {
             let mut last_end = 0;
             let mut has_url = false;
 
-            for url_match in URL_REGEX.find_iter(line) {
-                let url_start = url_match.start();
-                let url_end = url_match.end();
-                let url = url_match.as_str();
+            for cap in URL_FIX_REGEX.captures_iter(line) {
+                if let Ok(cap) = cap {
+                    let url = cap.get(1).unwrap();
+                    let url_start = url.start();
+                    let url_end = url.end();
 
-                // Skip if URL is in a code span or already in a link
-                if structure.is_in_code_span(i + 1, url_start + 1)
-                    || self.is_url_in_link(line, url_start, url_end)
-                {
-                    continue;
+                    // Skip if URL is in a code span or already in a link
+                    if structure.is_in_code_span(i + 1, url_start + 1)
+                        || self.is_url_in_link(line, url_start, url_end)
+                    {
+                        continue;
+                    }
+
+                    has_url = true;
+
+                    // Add text before the URL
+                    result.push_str(&line[last_end..url_start]);
+
+                    // Add the URL with angle brackets
+                    result.push_str(&format!("<{}>", url.as_str()));
+
+                    last_end = url_end;
                 }
-
-                has_url = true;
-
-                // Add text before the URL
-                result.push_str(&line[last_end..url_start]);
-
-                // Add the URL with angle brackets
-                result.push_str(&format!("<{}>", url));
-
-                last_end = url_end;
             }
 
             // Add any remaining text

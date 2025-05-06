@@ -311,7 +311,7 @@ fn test_cli_options() {
     assert.code(1);
     assert!(default_output.contains("MD022"));
     assert!(default_output.contains("MD033")); // Should be present
-    // assert!(default_output.contains("MD030")); // *Bad item does NOT violate MD030 (not a valid list item)
+                                               // assert!(default_output.contains("MD030")); // *Bad item does NOT violate MD030 (not a valid list item)
 
     // Test with disabled rules (still using dummy config, disable via CLI)
     let mut disabled_cmd = Command::cargo_bin("rumdl").unwrap();

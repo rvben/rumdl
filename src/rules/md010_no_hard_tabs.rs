@@ -212,8 +212,12 @@ impl Rule for MD010NoHardTabs {
     where
         Self: Sized,
     {
-        let spaces_per_tab = crate::config::get_rule_config_value::<usize>(config, "MD010", "spaces_per_tab").unwrap_or(4);
-        let code_blocks = crate::config::get_rule_config_value::<bool>(config, "MD010", "code_blocks").unwrap_or(true);
+        let spaces_per_tab =
+            crate::config::get_rule_config_value::<usize>(config, "MD010", "spaces_per_tab")
+                .unwrap_or(4);
+        let code_blocks =
+            crate::config::get_rule_config_value::<bool>(config, "MD010", "code_blocks")
+                .unwrap_or(true);
         Box::new(MD010NoHardTabs::new(spaces_per_tab, code_blocks))
     }
 }

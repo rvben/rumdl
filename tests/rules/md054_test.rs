@@ -1,6 +1,6 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD054LinkImageStyle;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_name() {
@@ -324,7 +324,11 @@ fn test_html_comments_are_ignored() {
 "#;
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Links in HTML comments should not be flagged");
+    assert_eq!(
+        result.len(),
+        0,
+        "Links in HTML comments should not be flagged"
+    );
 }
 
 #[test]
@@ -336,9 +340,16 @@ This is an autolink: <https://example.com/汉字>
 "#;
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Only autolink outside comment should be flagged");
+    assert_eq!(
+        result.len(),
+        1,
+        "Only autolink outside comment should be flagged"
+    );
     assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].message, "Link/image style 'autolink' is not consistent with document");
+    assert_eq!(
+        result[0].message,
+        "Link/image style 'autolink' is not consistent with document"
+    );
 }
 
 #[test]
@@ -357,7 +368,11 @@ fn test_mixed_styles_in_and_outside_comments() {
 "#;
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2, "Only shortcut and autolink outside comments should be flagged");
+    assert_eq!(
+        result.len(),
+        2,
+        "Only shortcut and autolink outside comments should be flagged"
+    );
     assert!(result.iter().any(|w| w.message.contains("shortcut")));
     assert!(result.iter().any(|w| w.message.contains("autolink")));
 }

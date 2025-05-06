@@ -10,7 +10,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
 use toml;
-use crate::lint_context::LintContext;
 
 lazy_static! {
     // Refined regex patterns with better performance characteristics
@@ -92,9 +91,16 @@ impl Rule for MD033NoInlineHtml {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         // Restore early exit check (without structure.has_html)
-        if ctx.content.is_empty() || !ctx.content.contains('<') || !HTML_TAG_QUICK_CHECK.is_match(ctx.content) {
+        if ctx.content.is_empty()
+            || !ctx.content.contains('<')
+            || !HTML_TAG_QUICK_CHECK.is_match(ctx.content)
+        {
             return Ok(Vec::new());
         }
 
@@ -224,7 +230,9 @@ impl Rule for MD033NoInlineHtml {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || !ctx.content.contains('<') || !HTML_TAG_QUICK_CHECK.is_match(ctx.content)
+        ctx.content.is_empty()
+            || !ctx.content.contains('<')
+            || !HTML_TAG_QUICK_CHECK.is_match(ctx.content)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -247,8 +255,12 @@ impl Rule for MD033NoInlineHtml {
     where
         Self: Sized,
     {
-        let allowed_vec = crate::config::get_rule_config_value::<Vec<String>>(config, "MD033", "allowed_elements")
-            .unwrap_or_default();
+        let allowed_vec = crate::config::get_rule_config_value::<Vec<String>>(
+            config,
+            "MD033",
+            "allowed_elements",
+        )
+        .unwrap_or_default();
         // Convert Vec to HashSet for the struct field
         let allowed: HashSet<String> = allowed_vec.into_iter().map(|s| s.to_lowercase()).collect();
         Box::new(MD033NoInlineHtml { allowed })
@@ -256,7 +268,11 @@ impl Rule for MD033NoInlineHtml {
 }
 
 impl DocumentStructureExtensions for MD033NoInlineHtml {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, _doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> bool {
         // Rule is only relevant if content contains potential HTML tags
         ctx.content.contains('<') && ctx.content.contains('>')
     }
@@ -266,7 +282,6 @@ impl DocumentStructureExtensions for MD033NoInlineHtml {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
-    use crate::utils::document_structure::DocumentStructure;
     use crate::rule::Rule;
 
     #[test]

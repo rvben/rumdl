@@ -1,9 +1,9 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD057ExistingRelativeLinks;
 use std::fs::File;
 use std::io::Write;
 use tempfile::tempdir;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_missing_links() {

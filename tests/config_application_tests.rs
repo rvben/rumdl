@@ -1,4 +1,4 @@
-use rumdl::config::{Config, GlobalConfig, RuleConfig, normalize_key};
+use rumdl::config::{normalize_key, Config, GlobalConfig, RuleConfig};
 use rumdl::rule::Rule;
 use rumdl::rules::*;
 use std::collections::BTreeMap;
@@ -75,14 +75,16 @@ fn apply_rule_configs(rules_in: &Vec<Box<dyn Rule>>, config: &Config) -> Vec<Box
             let style = rumdl::config::get_rule_config_value::<String>(config, "MD004", "style")
                 .unwrap_or_else(|| "consistent".to_string());
             let ul_style = match style.as_str() {
-                "asterisk" => rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Asterisk,
+                "asterisk" => {
+                    rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Asterisk
+                }
                 "plus" => rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Plus,
                 "dash" => rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Dash,
                 _ => rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Consistent,
             };
-             // Push the NEW configured instance
+            // Push the NEW configured instance
             rules_out.push(Box::new(MD004UnorderedListStyle::new(ul_style)));
-             continue; // Go to the next rule in the input vector
+            continue; // Go to the next rule in the input vector
         }
 
         // If rule doesn't need configuration, push a clone of the original instance
@@ -113,7 +115,8 @@ This is a line that exceeds the default 80 characters but is less than the confi
 "#;
 
     // Run the linter with the NEW configured rules vector
-    let warnings = rumdl::lint(test_content, &configured_rules, false).expect("Linting should succeed");
+    let warnings =
+        rumdl::lint(test_content, &configured_rules, false).expect("Linting should succeed");
 
     // Check MD013 behavior - should not trigger on >80 but <120 chars
     let md013_warnings = warnings
@@ -142,7 +145,8 @@ This is a line that exceeds the default 80 characters but is less than the confi
         .filter(|w| w.rule_name == Some("MD001"))
         .count();
     assert_eq!(
-        md001_warnings, 0, // MD001 doesn't trigger on this content anyway
+        md001_warnings,
+        0, // MD001 doesn't trigger on this content anyway
         "MD001 should not trigger on this content"
     );
 }
@@ -163,10 +167,13 @@ fn test_config_priority() {
     // Test with a line that's 100 chars (exceeds default but within config)
     let line_100_chars = "# Test
 
-".to_owned() + &"A".repeat(98); // 98 A's + 2 chars for "# " = 100 chars
+"
+    .to_owned()
+        + &"A".repeat(98); // 98 A's + 2 chars for "# " = 100 chars
 
     // Run linting with the NEW configured rules vector
-    let warnings = rumdl::lint(&line_100_chars, &configured_rules_1, false).expect("Linting should succeed");
+    let warnings =
+        rumdl::lint(&line_100_chars, &configured_rules_1, false).expect("Linting should succeed");
 
     // Should not trigger MD013 because config value is 120
     let md013_warnings = warnings
@@ -191,7 +198,8 @@ fn test_config_priority() {
     let configured_rules_2 = apply_rule_configs(&initial_rules, &config);
 
     // Should now trigger MD013
-    let warnings = rumdl::lint(&line_100_chars, &configured_rules_2, false).expect("Linting should succeed");
+    let warnings =
+        rumdl::lint(&line_100_chars, &configured_rules_2, false).expect("Linting should succeed");
     let md013_warnings = warnings
         .iter()
         .filter(|w| w.rule_name == Some("MD013"))
@@ -232,7 +240,8 @@ fn test_partial_rule_config() {
     let test_content = "This is a regular line that is longer than 80 characters but shorter than 100 characters in length.";
 
     // Run linting with the NEW configured rules vector
-    let warnings = rumdl::lint(test_content, &configured_rules_1, false).expect("Linting should succeed");
+    let warnings =
+        rumdl::lint(test_content, &configured_rules_1, false).expect("Linting should succeed");
 
     // Should NOT trigger MD013 because line_length is set to 100
     let md013_warnings = warnings
@@ -263,7 +272,8 @@ fn test_partial_rule_config() {
     let configured_rules_2 = apply_rule_configs(&initial_rules, &config);
 
     // Run linting with the NEW configured rules vector
-    let warnings = rumdl::lint(test_content, &configured_rules_2, false).expect("Linting should succeed");
+    let warnings =
+        rumdl::lint(test_content, &configured_rules_2, false).expect("Linting should succeed");
 
     // Now should trigger MD013 because line_length is less than the line length
     let md013_warnings = warnings
@@ -313,7 +323,8 @@ This line exceeds 20 characters.
     let configured_rules_1 = apply_rule_configs(&initial_rules_1, &config_1);
 
     // Run linting (MD001 should still run here as we haven't filtered)
-    let warnings_1 = rumdl::lint(test_content, &configured_rules_1, false).expect("Linting should succeed");
+    let warnings_1 =
+        rumdl::lint(test_content, &configured_rules_1, false).expect("Linting should succeed");
 
     // Verify MD001 WAS triggered (as filtering is not tested here)
     let md001_warnings_1 = warnings_1
@@ -330,7 +341,7 @@ This line exceeds 20 characters.
         .iter()
         .filter(|w| w.rule_name == Some("MD013"))
         .count();
-     assert_eq!(
+    assert_eq!(
         md013_warnings_1, 1,
         "MD013 should trigger once with line_length 20"
     );
@@ -355,7 +366,8 @@ line_length = 20 # Set a low limit to trigger it
     let configured_rules_2 = apply_rule_configs(&initial_rules_2, &config_2);
 
     // Run linting
-    let warnings_2 = rumdl::lint(test_content, &configured_rules_2, false).expect("Linting should succeed");
+    let warnings_2 =
+        rumdl::lint(test_content, &configured_rules_2, false).expect("Linting should succeed");
 
     // Verify MD013 triggers with configured length
     let md013_warnings_2 = warnings_2
@@ -372,7 +384,7 @@ line_length = 20 # Set a low limit to trigger it
         .iter()
         .filter(|w| w.rule_name == Some("MD001"))
         .count();
-     assert_eq!(
+    assert_eq!(
         md001_warnings_2, 1,
         "MD001 should run and trigger (filtering not tested)"
     );
@@ -423,7 +435,8 @@ This line > 10.
 "#;
 
     // Run linting with the configured (but not filtered) ruleset
-    let warnings = rumdl::lint(test_content, &configured_rules, false).expect("Linting should succeed");
+    let warnings =
+        rumdl::lint(test_content, &configured_rules, false).expect("Linting should succeed");
 
     // Verify MD013 triggered with its configured value (10)
     let md013_warnings = warnings

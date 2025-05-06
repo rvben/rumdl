@@ -1,6 +1,6 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD055TablePipeStyle;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_name() {
@@ -228,6 +228,7 @@ Cell 1   | Cell 2
 | -------- | -------- |
 | Cell 1   | Cell 2   |
     "#;
+    let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
     let fixed_ctx = LintContext::new(&fixed);
     let result = rule.check(&fixed_ctx).unwrap();
@@ -240,6 +241,7 @@ Header 1 | Header 2 |
 -------- | -------- |
 Cell 1   | Cell 2   |
     "#;
+    let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
     let fixed_ctx = LintContext::new(&fixed);
     let result = rule.check(&fixed_ctx).unwrap();
@@ -252,6 +254,7 @@ Cell 1   | Cell 2   |
 | -------- | -------- |
 | Cell 1   | Cell 2   |
     "#;
+    let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
     let fixed_ctx = LintContext::new(&fixed);
     let result = rule.check(&fixed_ctx).unwrap();

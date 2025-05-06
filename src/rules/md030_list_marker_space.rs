@@ -3,18 +3,16 @@
 //!
 //! See [docs/md030.md](../../docs/md030.md) for full documentation, configuration, and examples.
 
+use crate::rules::list_utils::ListType;
 use crate::utils::range_utils::LineIndex;
-use crate::utils::element_cache::{ElementCache, ListMarkerType};
-use crate::rules::list_utils::{is_list_item, is_multi_line_item, ListType};
 
+use crate::lint_context::LintContext;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use fancy_regex::Regex;
 use lazy_static::lazy_static;
-use fancy_regex::{Regex, Captures};
+use markdown::mdast::{List, Node};
 use toml;
-use crate::lint_context::LintContext;
-use markdown::mdast::{Node, List, ListItem};
-use std::collections::HashMap;
 
 lazy_static! {
     // Updated regex to better handle 0 spaces case with lookahead
@@ -102,7 +100,7 @@ impl MD030ListMarkerSpace {
             if is_list_line[i] {
                 let mut found_continuation = false;
                 let curr_indent = lines[i].chars().take_while(|c| c.is_whitespace()).count();
-                let mut j = i + 1;
+                let j = i + 1;
                 while j < lines.len() {
                     let next_line = lines[j];
                     if next_line.trim().is_empty() {
@@ -110,8 +108,14 @@ impl MD030ListMarkerSpace {
                         break;
                     }
                     let next_indent = next_line.chars().take_while(|c| c.is_whitespace()).count();
-                    let is_next_list = LIST_REGEX.captures(next_line).is_ok() && LIST_REGEX.captures(next_line).as_ref().unwrap().is_some()
-                        || LIST_NO_SPACE_REGEX.captures(next_line).is_ok() && LIST_NO_SPACE_REGEX.captures(next_line).as_ref().unwrap().is_some();
+                    let is_next_list = LIST_REGEX.captures(next_line).is_ok()
+                        && LIST_REGEX.captures(next_line).as_ref().unwrap().is_some()
+                        || LIST_NO_SPACE_REGEX.captures(next_line).is_ok()
+                            && LIST_NO_SPACE_REGEX
+                                .captures(next_line)
+                                .as_ref()
+                                .unwrap()
+                                .is_some();
                     if is_next_list {
                         if next_indent > curr_indent {
                             found_continuation = true; // parent of nested list is multi-line
@@ -154,18 +158,15 @@ impl Rule for MD030ListMarkerSpace {
             rule: &MD030ListMarkerSpace,
             line_index: &LineIndex,
             warnings: &mut Vec<LintWarning>,
-            nesting_level: usize,
+            _nesting_level: usize,
             parent_is_code_or_blockquote: bool,
         ) {
             use markdown::mdast::Node;
             struct ItemInfo<'a> {
-                li: &'a ListItem,
                 line: usize,
                 col: usize,
                 line_str: &'a str,
-                marker: String,
                 spaces: usize,
-                curr_indent: usize,
                 is_multi: bool,
                 list_type: ListType,
             }
@@ -182,20 +183,25 @@ impl Rule for MD030ListMarkerSpace {
                         let (line, col) = ctx.offset_to_line_col(start);
                         let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
                         // Check both patterns
-                        let (marker, spaces) = if let Ok(Some(cap)) = LIST_REGEX.captures(line_str) {
-                            (cap.get(2).map_or("", |m| m.as_str()).to_string(),
-                             cap.get(3).map_or("", |m| m.as_str()).len())
+                        let (marker, spaces) = if let Ok(Some(cap)) = LIST_REGEX.captures(line_str)
+                        {
+                            (
+                                cap.get(2).map_or("", |m| m.as_str()).to_string(),
+                                cap.get(3).map_or("", |m| m.as_str()).len(),
+                            )
                         } else if let Ok(Some(cap)) = LIST_NO_SPACE_REGEX.captures(line_str) {
                             (cap.get(2).map_or("", |m| m.as_str()).to_string(), 0)
                         } else {
                             continue;
                         };
-                        let curr_indent = line_str.chars().take_while(|c| c.is_whitespace()).count();
-                        let list_type = if marker.chars().next().map_or(false, |c| c.is_ascii_digit()) {
-                            ListType::Ordered
-                        } else {
-                            ListType::Unordered
-                        };
+                        let curr_indent =
+                            line_str.chars().take_while(|c| c.is_whitespace()).count();
+                        let list_type =
+                            if marker.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                                ListType::Ordered
+                            } else {
+                                ListType::Unordered
+                            };
                         // Find the next sibling's line number (at the same or lesser indentation)
                         let mut next_sibling_line = lines.len();
                         for other_item in &list_node.children {
@@ -204,8 +210,12 @@ impl Rule for MD030ListMarkerSpace {
                                     let other_start = other_pos.start.offset;
                                     let (other_line, _) = ctx.offset_to_line_col(other_start);
                                     if other_line > line && other_line < next_sibling_line {
-                                        let other_line_str = ctx.content.lines().nth(other_line - 1).unwrap_or("");
-                                        let other_indent = other_line_str.chars().take_while(|c| c.is_whitespace()).count();
+                                        let other_line_str =
+                                            ctx.content.lines().nth(other_line - 1).unwrap_or("");
+                                        let other_indent = other_line_str
+                                            .chars()
+                                            .take_while(|c| c.is_whitespace())
+                                            .count();
                                         if other_indent <= curr_indent {
                                             next_sibling_line = other_line;
                                         }
@@ -217,9 +227,16 @@ impl Rule for MD030ListMarkerSpace {
                         let mut i = line;
                         while i < next_sibling_line {
                             let next_line = ctx.content.lines().nth(i).unwrap_or("");
-                            let next_indent = next_line.chars().take_while(|c| c.is_whitespace()).count();
-                            let is_next_list = LIST_REGEX.captures(next_line).is_ok() && LIST_REGEX.captures(next_line).as_ref().unwrap().is_some()
-                                || LIST_NO_SPACE_REGEX.captures(next_line).is_ok() && LIST_NO_SPACE_REGEX.captures(next_line).as_ref().unwrap().is_some();
+                            let next_indent =
+                                next_line.chars().take_while(|c| c.is_whitespace()).count();
+                            let is_next_list = LIST_REGEX.captures(next_line).is_ok()
+                                && LIST_REGEX.captures(next_line).as_ref().unwrap().is_some()
+                                || LIST_NO_SPACE_REGEX.captures(next_line).is_ok()
+                                    && LIST_NO_SPACE_REGEX
+                                        .captures(next_line)
+                                        .as_ref()
+                                        .unwrap()
+                                        .is_some();
                             if next_line.trim().is_empty() {
                                 // Only treat as multi-line if the blank line is indented more than the marker (i.e., part of the item's content)
                                 if next_indent > curr_indent {
@@ -239,20 +256,17 @@ impl Rule for MD030ListMarkerSpace {
                         }
                         let is_multi = found_continuation;
                         items.push(ItemInfo {
-                            li,
                             line,
                             col,
                             line_str,
-                            marker,
                             spaces,
-                            curr_indent,
                             is_multi,
                             list_type,
                         });
                     }
                 }
             }
-            let list_type = if parent_is_ordered.unwrap_or(false) {
+            let _list_type = if parent_is_ordered.unwrap_or(false) {
                 ListType::Ordered
             } else {
                 ListType::Unordered
@@ -274,7 +288,11 @@ impl Rule for MD030ListMarkerSpace {
                         ),
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range(item.line, 1),
-                            replacement: rule.fix_line(item.line_str, item.list_type, item.is_multi),
+                            replacement: rule.fix_line(
+                                item.line_str,
+                                item.list_type,
+                                item.is_multi,
+                            ),
                         }),
                     });
                 }
@@ -287,22 +305,49 @@ impl Rule for MD030ListMarkerSpace {
             rule: &MD030ListMarkerSpace,
             line_index: &LineIndex,
             warnings: &mut Vec<LintWarning>,
-            nesting_level: usize,
+            _nesting_level: usize,
             parent_is_code_or_blockquote: bool,
         ) {
             use markdown::mdast::Node;
             match node {
                 Node::List(list) => {
-                    process_list_block(list, parent_is_ordered, ctx, rule, line_index, warnings, nesting_level, parent_is_code_or_blockquote);
+                    process_list_block(
+                        list,
+                        parent_is_ordered,
+                        ctx,
+                        rule,
+                        line_index,
+                        warnings,
+                        0,
+                        parent_is_code_or_blockquote,
+                    );
                     for item in &list.children {
-                        visit_lists(item, Some(list.ordered), ctx, rule, line_index, warnings, nesting_level + 1, parent_is_code_or_blockquote);
+                        visit_lists(
+                            item,
+                            Some(list.ordered),
+                            ctx,
+                            rule,
+                            line_index,
+                            warnings,
+                            0,
+                            parent_is_code_or_blockquote,
+                        );
                     }
                 }
                 Node::Blockquote(_) | Node::Code(_) | Node::Html(_) => {
                     // Set parent_is_code_or_blockquote = true for children
                     if let Some(children) = node.children() {
                         for child in children {
-                            visit_lists(child, parent_is_ordered, ctx, rule, line_index, warnings, nesting_level, true);
+                            visit_lists(
+                                child,
+                                parent_is_ordered,
+                                ctx,
+                                rule,
+                                line_index,
+                                warnings,
+                                0,
+                                true,
+                            );
                         }
                     }
                 }
@@ -314,13 +359,31 @@ impl Rule for MD030ListMarkerSpace {
                 _ => {
                     if let Some(children) = node.children() {
                         for child in children {
-                            visit_lists(child, parent_is_ordered, ctx, rule, line_index, warnings, nesting_level, parent_is_code_or_blockquote);
+                            visit_lists(
+                                child,
+                                parent_is_ordered,
+                                ctx,
+                                rule,
+                                line_index,
+                                warnings,
+                                0,
+                                parent_is_code_or_blockquote,
+                            );
                         }
                     }
                 }
             }
         }
-        visit_lists(&ctx.ast, None, ctx, rule, &line_index, &mut warnings, 0, false);
+        visit_lists(
+            &ctx.ast,
+            None,
+            ctx,
+            rule,
+            &line_index,
+            &mut warnings,
+            0,
+            false,
+        );
         Ok(warnings)
     }
 
@@ -347,7 +410,13 @@ impl Rule for MD030ListMarkerSpace {
                     self.ul_single
                 };
                 if actual_spaces < required_spaces {
-                    let fixed_line = format!("{}{}{}{}", indent, marker, " ".repeat(required_spaces), after);
+                    let fixed_line = format!(
+                        "{}{}{}{}",
+                        indent,
+                        marker,
+                        " ".repeat(required_spaces),
+                        after
+                    );
                     fixed_lines.push(fixed_line);
                 } else {
                     fixed_lines.push(line.to_string());
@@ -380,29 +449,52 @@ impl Rule for MD030ListMarkerSpace {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("ul-single".to_string(), toml::Value::Integer(self.ul_single as i64));
-        map.insert("ul-multi".to_string(), toml::Value::Integer(self.ul_multi as i64));
-        map.insert("ol-single".to_string(), toml::Value::Integer(self.ol_single as i64));
-        map.insert("ol-multi".to_string(), toml::Value::Integer(self.ol_multi as i64));
+        map.insert(
+            "ul-single".to_string(),
+            toml::Value::Integer(self.ul_single as i64),
+        );
+        map.insert(
+            "ul-multi".to_string(),
+            toml::Value::Integer(self.ul_multi as i64),
+        );
+        map.insert(
+            "ol-single".to_string(),
+            toml::Value::Integer(self.ol_single as i64),
+        );
+        map.insert(
+            "ol-multi".to_string(),
+            toml::Value::Integer(self.ol_multi as i64),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
-        fn get_key(config: &crate::config::Config, rule: &str, dash: &str, underscore: &str) -> usize {
+        fn get_key(
+            config: &crate::config::Config,
+            rule: &str,
+            dash: &str,
+            underscore: &str,
+        ) -> usize {
             crate::config::get_rule_config_value::<usize>(config, rule, dash)
                 .or_else(|| crate::config::get_rule_config_value::<usize>(config, rule, underscore))
                 .unwrap_or(1)
         }
         let ul_single = get_key(config, "MD030", "ul-single", "ul_single");
-        let ul_multi  = get_key(config, "MD030", "ul-multi", "ul_multi");
+        let ul_multi = get_key(config, "MD030", "ul-multi", "ul_multi");
         let ol_single = get_key(config, "MD030", "ol-single", "ol_single");
-        let ol_multi  = get_key(config, "MD030", "ol-multi", "ol_multi");
-        Box::new(MD030ListMarkerSpace::new(ul_single, ul_multi, ol_single, ol_multi))
+        let ol_multi = get_key(config, "MD030", "ol-multi", "ol_multi");
+        Box::new(MD030ListMarkerSpace::new(
+            ul_single, ul_multi, ol_single, ol_multi,
+        ))
     }
 }
 
 impl DocumentStructureExtensions for MD030ListMarkerSpace {
-    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         !doc_structure.list_lines.is_empty()
     }
 }

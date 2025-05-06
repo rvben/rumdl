@@ -7,8 +7,8 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
 use lazy_static::lazy_static;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use toml;
-use serde::{Serialize, Deserialize};
 
 lazy_static! {
     // Updated regex patterns that work with Unicode characters
@@ -302,9 +302,11 @@ impl Rule for MD054LinkImageStyle {
         Ok(warnings)
     }
 
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+    fn fix(&self, _ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         // Automatic fixing for link styles is not supported and could break content
-        Err(LintError::FixFailed("MD054 does not support automatic fixing of link/image style consistency.".to_string()))
+        Err(LintError::FixFailed(
+            "MD054 does not support automatic fixing of link/image style consistency.".to_string(),
+        ))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -314,11 +316,17 @@ impl Rule for MD054LinkImageStyle {
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
         map.insert("autolink".to_string(), toml::Value::Boolean(self.autolink));
-        map.insert("collapsed".to_string(), toml::Value::Boolean(self.collapsed));
+        map.insert(
+            "collapsed".to_string(),
+            toml::Value::Boolean(self.collapsed),
+        );
         map.insert("full".to_string(), toml::Value::Boolean(self.full));
         map.insert("inline".to_string(), toml::Value::Boolean(self.inline));
         map.insert("shortcut".to_string(), toml::Value::Boolean(self.shortcut));
-        map.insert("url_inline".to_string(), toml::Value::Boolean(self.url_inline));
+        map.insert(
+            "url_inline".to_string(),
+            toml::Value::Boolean(self.url_inline),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -327,12 +335,21 @@ impl Rule for MD054LinkImageStyle {
         Self: Sized,
     {
         // Read all style booleans from config, defaulting to true if not set
-        let autolink = crate::config::get_rule_config_value::<bool>(config, "MD054", "autolink").unwrap_or(true);
-        let collapsed = crate::config::get_rule_config_value::<bool>(config, "MD054", "collapsed").unwrap_or(true);
-        let full = crate::config::get_rule_config_value::<bool>(config, "MD054", "full").unwrap_or(true);
-        let inline = crate::config::get_rule_config_value::<bool>(config, "MD054", "inline").unwrap_or(true);
-        let shortcut = crate::config::get_rule_config_value::<bool>(config, "MD054", "shortcut").unwrap_or(true);
-        let url_inline = crate::config::get_rule_config_value::<bool>(config, "MD054", "url_inline").unwrap_or(true);
-        Box::new(MD054LinkImageStyle::new(autolink, collapsed, full, inline, shortcut, url_inline))
+        let autolink = crate::config::get_rule_config_value::<bool>(config, "MD054", "autolink")
+            .unwrap_or(true);
+        let collapsed = crate::config::get_rule_config_value::<bool>(config, "MD054", "collapsed")
+            .unwrap_or(true);
+        let full =
+            crate::config::get_rule_config_value::<bool>(config, "MD054", "full").unwrap_or(true);
+        let inline =
+            crate::config::get_rule_config_value::<bool>(config, "MD054", "inline").unwrap_or(true);
+        let shortcut = crate::config::get_rule_config_value::<bool>(config, "MD054", "shortcut")
+            .unwrap_or(true);
+        let url_inline =
+            crate::config::get_rule_config_value::<bool>(config, "MD054", "url_inline")
+                .unwrap_or(true);
+        Box::new(MD054LinkImageStyle::new(
+            autolink, collapsed, full, inline, shortcut, url_inline,
+        ))
     }
 }

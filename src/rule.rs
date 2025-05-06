@@ -2,13 +2,13 @@
 //! This module defines the Rule trait and related types for implementing linting rules in rumdl.
 //! Includes rule categories, dynamic dispatch helpers, and inline comment handling for rule enable/disable.
 
+use dyn_clone::DynClone;
 use std::ops::Range;
 use thiserror::Error;
-use dyn_clone::DynClone;
 
 // Import document structure
-use crate::utils::document_structure::DocumentStructure;
 use crate::lint_context::LintContext;
+use crate::utils::document_structure::DocumentStructure;
 
 // Macro to implement box_clone for Rule implementors
 #[macro_export]
@@ -84,7 +84,11 @@ pub trait Rule: DynClone {
 
     /// Enhanced check method using document structure
     /// By default, calls the regular check method if not overridden
-    fn check_with_structure(&self, ctx: &LintContext, _structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &LintContext,
+        _structure: &DocumentStructure,
+    ) -> LintResult {
         self.check(ctx)
     }
 
@@ -116,7 +120,10 @@ pub trait Rule: DynClone {
     where
         Self: Sized,
     {
-        panic!("from_config not implemented for rule: {}", std::any::type_name::<Self>());
+        panic!(
+            "from_config not implemented for rule: {}",
+            std::any::type_name::<Self>()
+        );
     }
 }
 

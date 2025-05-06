@@ -80,6 +80,6 @@ impl Rule for MD027MultipleSpacesBlockquote {
     where
         Self: Sized,
     {
-        Box::new(MD027MultipleSpacesBlockquote::default())
+        Box::new(MD027MultipleSpacesBlockquote)
     }
 }

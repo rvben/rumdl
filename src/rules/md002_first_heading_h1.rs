@@ -1,11 +1,10 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, RuleCategory, Severity};
 use crate::rule::Rule;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingStyle;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::document_structure::DocumentStructure;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
-use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref HEADING_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})\s+(.+?)(?:\s+#*)?$").unwrap();
@@ -210,7 +209,11 @@ impl Rule for MD002FirstHeadingH1 {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         let content = ctx.content;
         let mut result = Vec::new();
         if structure.heading_lines.is_empty() {
@@ -340,13 +343,18 @@ impl Rule for MD002FirstHeadingH1 {
     where
         Self: Sized,
     {
-        let level = crate::config::get_rule_config_value::<u32>(config, "MD002", "level").unwrap_or(1);
+        let level =
+            crate::config::get_rule_config_value::<u32>(config, "MD002", "level").unwrap_or(1);
         Box::new(MD002FirstHeadingH1::new(level))
     }
 }
 
 impl crate::utils::document_structure::DocumentStructureExtensions for MD002FirstHeadingH1 {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         let content = ctx.content;
         !content.is_empty() && !doc_structure.heading_lines.is_empty()
     }
@@ -355,6 +363,7 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD002Firs
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
 
     #[test]
     fn test_with_document_structure() {

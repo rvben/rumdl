@@ -99,7 +99,7 @@ pub use md049_emphasis_style::MD049EmphasisStyle;
 pub use md050_strong_style::MD050StrongStyle;
 pub use md051_link_fragments::MD051LinkFragments;
 pub use md052_reference_links_images::MD052ReferenceLinkImages;
-pub use md053_link_image_reference_definitions::{DefinitionStyle, MD053LinkImageReferenceDefinitions};
+pub use md053_link_image_reference_definitions::MD053LinkImageReferenceDefinitions;
 pub use md054_link_image_style::MD054LinkImageStyle;
 pub use md055_table_pipe_style::MD055TablePipeStyle;
 pub use md056_table_column_count::MD056TableColumnCount;
@@ -133,9 +133,6 @@ mod md057_existing_relative_links;
 pub use md057_existing_relative_links::MD057ExistingRelativeLinks;
 
 use crate::rule::Rule;
-use crate::rules::code_block_utils::CodeBlockStyle;
-use crate::rules::code_fence_utils::CodeFenceStyle;
-use crate::rules::strong_style::StrongStyle;
 
 /// Returns all rule instances for config validation and CLI
 pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
@@ -198,8 +195,14 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
         ("MD057", MD057ExistingRelativeLinks::from_config),
         ("MD058", MD058BlanksAroundTables::from_config),
     ];
-    let disabled_set: std::collections::HashSet<_> = config.global.disable.iter().map(|s| s.to_ascii_uppercase()).collect();
-    RULES.iter()
+    let disabled_set: std::collections::HashSet<_> = config
+        .global
+        .disable
+        .iter()
+        .map(|s| s.to_ascii_uppercase())
+        .collect();
+    RULES
+        .iter()
         .filter(|(name, _)| !disabled_set.contains(&name.to_ascii_uppercase()))
         .map(|(_, ctor)| ctor(config))
         .collect()
@@ -210,16 +213,9 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
 use crate::config::GlobalConfig;
 use std::collections::HashSet;
 
-pub fn filter_rules(
-    rules: &[Box<dyn Rule>],
-    global_config: &GlobalConfig,
-) -> Vec<Box<dyn Rule>> {
+pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Vec<Box<dyn Rule>> {
     let mut enabled_rules: Vec<Box<dyn Rule>> = Vec::new();
-    let mut disabled_rules: HashSet<String> = global_config
-        .disable
-        .iter()
-        .cloned()
-        .collect();
+    let disabled_rules: HashSet<String> = global_config.disable.iter().cloned().collect();
 
     // Handle 'disable: ["all"]'
     if disabled_rules.contains("all") {
@@ -246,7 +242,7 @@ pub fn filter_rules(
         let enabled_set: HashSet<String> = global_config.enable.iter().cloned().collect();
         for rule in rules {
             if enabled_set.contains(rule.name()) && !disabled_rules.contains(rule.name()) {
-                 enabled_rules.push(dyn_clone::clone_box(&**rule));
+                enabled_rules.push(dyn_clone::clone_box(&**rule));
             }
         }
     } else {

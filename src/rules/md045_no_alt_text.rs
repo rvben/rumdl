@@ -2,7 +2,6 @@ use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
-use lazy_static::lazy_static;
 
 /// Rule MD045: Images should have alt text
 ///

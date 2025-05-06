@@ -6,7 +6,6 @@ use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::ops::Range;
-use toml;
 
 lazy_static! {
     // Match ATX headings (with or without closing hashes)
@@ -395,7 +394,9 @@ impl Rule for MD026NoTrailingPunctuation {
     where
         Self: Sized,
     {
-        let punctuation = crate::config::get_rule_config_value::<String>(config, "MD026", "punctuation").unwrap_or_else(|| ".,;:!?".to_string());
+        let punctuation =
+            crate::config::get_rule_config_value::<String>(config, "MD026", "punctuation")
+                .unwrap_or_else(|| ".,;:!?".to_string());
         Box::new(MD026NoTrailingPunctuation::new(Some(punctuation)))
     }
 }

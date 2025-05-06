@@ -203,7 +203,11 @@ impl Rule for MD037NoSpaceInEmphasis {
     }
 
     /// Enhanced function to check for spaces inside emphasis markers
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         let _timer = crate::profiling::ScopedTimer::new("MD037_check_with_structure");
 
         let content = ctx.content;
@@ -370,7 +374,11 @@ impl Rule for MD037NoSpaceInEmphasis {
 }
 
 impl DocumentStructureExtensions for MD037NoSpaceInEmphasis {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, _doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> bool {
         let content = ctx.content;
         !content.is_empty() && (content.contains('*') || content.contains('_'))
     }

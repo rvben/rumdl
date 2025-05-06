@@ -227,15 +227,21 @@ Text immediately below heading (MD022)
         "Should detect at least one rule violation"
     );
 
-    // Run the fix operation
-    let _fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+    // Test fix operation
+    let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
         .args(["test.md", "--fix", "--verbose"])
         .output()
         .unwrap();
 
+    // Print debug output
+    println!("Fix command stdout: {}", String::from_utf8_lossy(&fix_output.stdout));
+    println!("Fix command stderr: {}", String::from_utf8_lossy(&fix_output.stderr));
+
     // Verify some issues were fixed
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();
+    println!("Original content:\n{}", test_content);
+    println!("Fixed content:\n{}", fixed_content);
     assert!(
         fixed_content != test_content,
         "File should be modified by fix operation"
@@ -277,6 +283,8 @@ Visit http://example.com for more information.
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{}\n{}", stdout, stderr);
 
+    println!("Check command output:\n{}", combined_output);
+
     // Check if at least one link-related issue was detected
     assert!(
         !output.status.success()
@@ -286,14 +294,20 @@ Visit http://example.com for more information.
     );
 
     // Test fix operation
-    let _fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+    let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["test.md", "--fix"])
+        .args(["test.md", "--fix", "--verbose"])
         .output()
         .unwrap();
 
+    // Print debug output
+    println!("Fix command stdout: {}", String::from_utf8_lossy(&fix_output.stdout));
+    println!("Fix command stderr: {}", String::from_utf8_lossy(&fix_output.stderr));
+
     // Verify the file was modified
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();
+    println!("Original content:\n{}", test_content);
+    println!("Fixed content:\n{}", fixed_content);
     assert!(
         fixed_content != test_content,
         "File should be modified by fix operation"

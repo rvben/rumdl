@@ -1,7 +1,7 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::code_block_utils::CodeBlockStyle;
 use rumdl::MD046CodeBlockStyle;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_consistent_fenced_blocks() {

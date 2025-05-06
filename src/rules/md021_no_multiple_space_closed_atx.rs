@@ -5,7 +5,6 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::lint_context::LintContext;
 
 lazy_static! {
     // Matches closed ATX headings with spaces between hashes and content,
@@ -20,6 +19,12 @@ lazy_static! {
 
 #[derive(Clone)]
 pub struct MD021NoMultipleSpaceClosedAtx;
+
+impl Default for MD021NoMultipleSpaceClosedAtx {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MD021NoMultipleSpaceClosedAtx {
     pub fn new() -> Self {
@@ -133,9 +138,13 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> LintResult {
         // Early return if no headings
-        if structure.heading_lines.is_empty() {
+        if _doc_structure.heading_lines.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -143,7 +152,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
         let lines: Vec<&str> = ctx.content.lines().collect();
 
         // Process only heading lines using structure.heading_lines
-        for &line_num in &structure.heading_lines {
+        for &line_num in &_doc_structure.heading_lines {
             let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
 
             // Skip if out of bounds
@@ -224,7 +233,11 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
 }
 
 impl DocumentStructureExtensions for MD021NoMultipleSpaceClosedAtx {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> bool {
         let content = ctx.content;
         !content.is_empty() && content.contains('#')
     }
@@ -242,13 +255,17 @@ mod tests {
         // Test with correct spacing
         let content = "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
+        let result = rule
+            .check_with_structure(&LintContext::new(content), &structure)
+            .unwrap();
         assert!(result.is_empty());
 
         // Test with multiple spaces
         let content = "#  Heading 1 #\n## Heading 2 ##\n### Heading 3  ###";
         let structure = DocumentStructure::new(content);
-        let result = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
+        let result = rule
+            .check_with_structure(&LintContext::new(content), &structure)
+            .unwrap();
         assert_eq!(result.len(), 2); // Should flag the two headings with multiple spaces
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 3);

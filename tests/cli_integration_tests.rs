@@ -1053,7 +1053,7 @@ line_length = 123
     let (success, _stdout, stderr) = run_cmd(&["config", "get", "MD999.line_length"]);
     assert!(!success, "config get MD999.line_length should fail");
     assert!(
-        stderr.contains("Unknown config key: MD999.line-length"), 
+        stderr.contains("Unknown config key: MD999.line-length"),
         "Unexpected stderr: {}",
         stderr
     );

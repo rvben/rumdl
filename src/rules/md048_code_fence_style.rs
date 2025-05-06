@@ -118,7 +118,10 @@ impl Rule for MD048CodeFenceStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
+        map.insert(
+            "style".to_string(),
+            toml::Value::String(self.style.to_string()),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 

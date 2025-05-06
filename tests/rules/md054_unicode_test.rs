@@ -1,6 +1,6 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD054LinkImageStyle;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_unicode_edge_cases() {

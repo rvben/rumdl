@@ -2,7 +2,6 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severi
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::lint_context::LintContext;
 
 lazy_static! {
     // Pattern for ATX headings
@@ -194,7 +193,11 @@ impl Rule for MD043RequiredHeadings {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         let mut warnings = Vec::new();
 
         // If no required headings are specified, the rule is disabled
@@ -203,7 +206,7 @@ impl Rule for MD043RequiredHeadings {
         }
 
         // Extract actual headings using document structure
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines: Vec<&str> = _ctx.content.lines().collect();
         let mut actual_headings = Vec::new();
 
         // Detect code blocks
@@ -404,13 +407,19 @@ impl Rule for MD043RequiredHeadings {
     where
         Self: Sized,
     {
-        let headings = crate::config::get_rule_config_value::<Vec<String>>(config, "MD043", "headings").unwrap_or_else(|| vec![]);
+        let headings =
+            crate::config::get_rule_config_value::<Vec<String>>(config, "MD043", "headings")
+                .unwrap_or_default();
         Box::new(MD043RequiredHeadings::new(headings))
     }
 }
 
 impl DocumentStructureExtensions for MD043RequiredHeadings {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         !doc_structure.heading_lines.is_empty() || !self.headings.is_empty()
     }
 }
@@ -418,6 +427,7 @@ impl DocumentStructureExtensions for MD043RequiredHeadings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
     use crate::utils::document_structure::document_structure_from_str;
 
     #[test]
@@ -462,7 +472,9 @@ mod tests {
         let content =
             "# Introduction\n\nContent\n\n# Method\n\nMore content\n\n# Results\n\nFinal content";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
+        let warnings = rule
+            .check_with_structure(&LintContext::new(content), &structure)
+            .unwrap();
         assert!(
             warnings.is_empty(),
             "Expected no warnings for matching headings"
@@ -471,7 +483,9 @@ mod tests {
         // Test with mismatched headings
         let content = "# Introduction\n\nContent\n\n# Results\n\nSkipped method";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
+        let warnings = rule
+            .check_with_structure(&LintContext::new(content), &structure)
+            .unwrap();
         assert!(
             !warnings.is_empty(),
             "Expected warnings for mismatched headings"
@@ -480,7 +494,9 @@ mod tests {
         // Test with no headings but requirements exist
         let content = "No headings here, just plain text";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
+        let warnings = rule
+            .check_with_structure(&LintContext::new(content), &structure)
+            .unwrap();
         assert!(
             !warnings.is_empty(),
             "Expected warnings when headings are missing"
@@ -489,7 +505,9 @@ mod tests {
         // Test with setext headings
         let content = "Introduction\n===========\n\nContent\n\nMethod\n------\n\nMore content\n\nResults\n=======\n\nFinal content";
         let structure = document_structure_from_str(content);
-        let warnings = rule.check_with_structure(&LintContext::new(content), &structure).unwrap();
+        let warnings = rule
+            .check_with_structure(&LintContext::new(content), &structure)
+            .unwrap();
         assert!(
             warnings.is_empty(),
             "Expected no warnings for matching setext headings"

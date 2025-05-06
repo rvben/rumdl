@@ -3,7 +3,6 @@ use crate::utils::document_structure::{
     CodeBlockType, DocumentStructure, DocumentStructureExtensions,
 };
 use crate::utils::range_utils::LineIndex;
-use lazy_static::lazy_static;
 
 /// Rule MD040: Fenced code blocks should have a language
 ///
@@ -76,10 +75,14 @@ impl Rule for MD040FencedCodeLanguage {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> LintResult {
         let content = ctx.content;
         // Early return if no code blocks
-        if !structure.has_code_blocks {
+        if !_doc_structure.has_code_blocks {
             return Ok(vec![]);
         }
 
@@ -87,7 +90,7 @@ impl Rule for MD040FencedCodeLanguage {
         let mut warnings = Vec::new();
 
         // Use the code blocks from document structure
-        for block in &structure.code_blocks {
+        for block in &_doc_structure.code_blocks {
             // Only check fenced code blocks
             match block.block_type {
                 CodeBlockType::Fenced => {
@@ -218,7 +221,11 @@ impl Rule for MD040FencedCodeLanguage {
 }
 
 impl DocumentStructureExtensions for MD040FencedCodeLanguage {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> bool {
         let content = ctx.content;
         // Rule is only relevant if content contains code fences
         content.contains("```") || content.contains("~~~")

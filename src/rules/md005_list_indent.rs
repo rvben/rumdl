@@ -6,12 +6,11 @@
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::document_structure::DocumentStructure;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use toml;
-use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref LIST_MARKER_REGEX: Regex = Regex::new(r"^\d+[.)]").unwrap();
@@ -454,7 +453,11 @@ impl Rule for MD005ListIndent {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         let content = ctx.content;
         // Early return if no lists
         if structure.list_lines.is_empty() {
@@ -753,7 +756,11 @@ impl Rule for MD005ListIndent {
 }
 
 impl crate::utils::document_structure::DocumentStructureExtensions for MD005ListIndent {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         let content = ctx.content;
         !content.is_empty() && !doc_structure.list_lines.is_empty()
     }
@@ -762,6 +769,7 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD005List
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
 
     // ... existing tests ...
 

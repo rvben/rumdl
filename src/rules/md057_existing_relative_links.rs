@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use toml;
-use url::Url;
 
 // Thread-local cache for file existence checks to avoid redundant filesystem operations
 thread_local! {
@@ -274,7 +273,11 @@ impl Rule for MD057ExistingRelativeLinks {
     }
 
     /// Optimized implementation using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         let content = ctx.content;
         if self.should_skip(ctx) {
             return Ok(Vec::new());
@@ -345,7 +348,9 @@ impl Rule for MD057ExistingRelativeLinks {
     where
         Self: Sized,
     {
-        let skip_media_files = crate::config::get_rule_config_value::<bool>(config, "MD057", "skip_media_files").unwrap_or(true);
+        let skip_media_files =
+            crate::config::get_rule_config_value::<bool>(config, "MD057", "skip_media_files")
+                .unwrap_or(true);
         Box::new(MD057ExistingRelativeLinks {
             base_path: RefCell::new(None),
             skip_media_files,
@@ -354,7 +359,11 @@ impl Rule for MD057ExistingRelativeLinks {
 }
 
 impl DocumentStructureExtensions for MD057ExistingRelativeLinks {
-    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, _doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> bool {
         true
     }
 }

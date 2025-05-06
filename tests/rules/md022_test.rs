@@ -1,7 +1,7 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD022BlanksAroundHeadings;
 use rumdl::utils::range_utils::LineIndex;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_headings() {
@@ -36,7 +36,7 @@ fn test_fix_headings() {
     let content = "Paragraph.\n# Heading 1\nContent.";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
     assert!(fixed.contains("\n\n# Heading 1\n\n"));
 }
 
@@ -71,14 +71,14 @@ fn test_code_block() {
     // Fix the content
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // Debug print
     println!("Original content:\n{}", content);
     println!("Fixed content:\n{}", fixed);
 
     // Check if we get warnings on the fixed content
-    let warnings = _rule.check(&fixed_ctx).unwrap();
+    let warnings = _rule.check(&_fixed_ctx).unwrap();
     println!("Warning count: {}", warnings.len());
     for (i, warning) in warnings.iter().enumerate() {
         println!(
@@ -121,7 +121,7 @@ fn test_fix_mixed_headings() {
     // Fix the content
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
     assert_ne!(fixed, content);
 
     // Instead of checking specific formatting, verify the fixed content follows the rule requirements
@@ -141,7 +141,7 @@ fn test_fix_mixed_headings() {
     assert!(fixed.contains("### Heading 3"));
 
     // Run check on the fixed content - it should have no warnings
-    let fixed_warnings = _rule.check(&fixed_ctx).unwrap();
+    let fixed_warnings = _rule.check(&_fixed_ctx).unwrap();
     assert!(
         fixed_warnings.is_empty(),
         "Fixed content should have no warnings"
@@ -161,10 +161,10 @@ fn test_custom_blank_lines() {
     // Fix content according to rule
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // The fixed content should now be valid
-    let fixed_warnings = _rule.check(&fixed_ctx).unwrap();
+    let fixed_warnings = _rule.check(&_fixed_ctx).unwrap();
     assert!(
         fixed_warnings.is_empty(),
         "Fixed content should have no warnings"
@@ -184,8 +184,8 @@ fn test_blanks_around_setext_headings() {
     // Then test that the fix produces valid content
     let ctx = LintContext::new(bad_content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
-    let fixed_result = _rule.check(&fixed_ctx).unwrap();
+    let _fixed_ctx = LintContext::new(&fixed);
+    let fixed_result = _rule.check(&_fixed_ctx).unwrap();
 
     // After fixing, there should be no warnings
     assert!(
@@ -206,7 +206,6 @@ fn test_empty_content_headings() {
 
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
 
     // Test that fix produces a different result
     assert!(fixed != content);
@@ -238,7 +237,7 @@ fn test_no_blanks_between_headings() {
 
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // Test that blank lines have been added
     assert!(fixed != content);
@@ -275,7 +274,7 @@ fn test_indented_headings() {
     // Fix the content
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // Test that blank lines have been added
     assert_ne!(
@@ -300,7 +299,7 @@ fn test_indented_headings() {
     );
 
     // Check that the fixed content passes validation
-    let fixed_warnings = _rule.check(&fixed_ctx).unwrap();
+    let fixed_warnings = _rule.check(&_fixed_ctx).unwrap();
     assert!(
         fixed_warnings.is_empty(),
         "Fixed content should have no warnings"
@@ -345,7 +344,7 @@ fn test_preserve_code_blocks() {
     // Fix the content
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // Check that the fix preserves the code block
     assert!(fixed.contains("```"));
@@ -355,7 +354,7 @@ fn test_preserve_code_blocks() {
     assert!(fixed.contains("# Real Heading"));
 
     // The fixed content should pass validation
-    let fixed_result = _rule.check(&fixed_ctx).unwrap();
+    let fixed_result = _rule.check(&_fixed_ctx).unwrap();
     assert!(
         fixed_result.is_empty(),
         "Fixed content should have no warnings"
@@ -375,13 +374,13 @@ fn test_fix_missing_blank_line_below() {
     // Fix the content
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // Verify the correct structure
     assert_eq!(fixed, "# Heading\n\nText");
 
     // Verify the fixed content passes
-    let fixed_warnings = _rule.check(&fixed_ctx).unwrap();
+    let fixed_warnings = _rule.check(&_fixed_ctx).unwrap();
     assert!(
         fixed_warnings.is_empty(),
         "Fixed content should have no warnings"
@@ -398,7 +397,7 @@ fn test_fix_specific_blank_line_cases() {
     // Fix the content
     let ctx = LintContext::new(simple_case);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // Verify that the fixed content has a blank line below the heading
     assert!(
@@ -407,7 +406,7 @@ fn test_fix_specific_blank_line_cases() {
     );
 
     // The fixed content should pass validation
-    let fixed_result = _rule.check(&fixed_ctx).unwrap();
+    let fixed_result = _rule.check(&_fixed_ctx).unwrap();
     assert!(
         fixed_result.is_empty(),
         "Fixed content should have no warnings"
@@ -421,7 +420,7 @@ fn test_fix_with_various_content_types() {
 
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // Verify structure improvements without specifying exact spacing
     assert!(fixed.contains("# Heading 1"));
@@ -434,7 +433,7 @@ fn test_fix_with_various_content_types() {
     assert!(fixed.contains("Final paragraph"));
 
     // Verify the fixed content passes checks
-    let fixed_warnings = _rule.check(&fixed_ctx).unwrap();
+    let fixed_warnings = _rule.check(&_fixed_ctx).unwrap();
     assert!(
         fixed_warnings.is_empty(),
         "Fixed content should have no warnings"
@@ -456,14 +455,14 @@ fn test_regression_fix_works() {
     // Fix the content
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // Verify the structure is correct
     let expected = "# Heading 1\n\nSome text\n\n## Heading 2\n\nMore text";
     assert_eq!(fixed, expected);
 
     // Verify the fixed content passes checks
-    let fixed_warnings = _rule.check(&fixed_ctx).unwrap();
+    let fixed_warnings = _rule.check(&_fixed_ctx).unwrap();
     assert!(
         fixed_warnings.is_empty(),
         "Fixed content should have no warnings"
@@ -485,7 +484,7 @@ fn test_multiple_consecutive_headings() {
     // Fix the content
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // Verify the fixed content contains all headings with blank lines between them
     assert!(fixed.contains("# Heading 1"));
@@ -521,7 +520,7 @@ fn test_multiple_consecutive_headings() {
     );
 
     // Verify the fixed content passes validation
-    let fixed_warnings = _rule.check(&fixed_ctx).unwrap();
+    let fixed_warnings = _rule.check(&_fixed_ctx).unwrap();
     assert!(
         fixed_warnings.is_empty(),
         "Fixed content should have no warnings"
@@ -543,7 +542,7 @@ fn test_consecutive_headings_pattern() {
     // Fix the content
     let ctx = LintContext::new(content);
     let fixed = _rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
 
     // Check for proper structure using less specific checks
     let fixed_lines: Vec<&str> = fixed.lines().collect();

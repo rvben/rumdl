@@ -1,6 +1,6 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD001HeadingIncrement;
-use rumdl::lint_context::LintContext;
 
 #[test]
 pub fn test_md001_valid() {

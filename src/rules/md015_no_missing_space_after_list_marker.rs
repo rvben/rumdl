@@ -4,10 +4,10 @@
 ///
 /// NOTE: The AST is not used for detection/fixing in this rule because the CommonMark parser only recognizes list items that already have a space after the marker. Lines missing the space are not parsed as lists in the AST, so regex/line-based logic is required to detect and fix these violations.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rules::code_block_utils::CodeBlockUtils;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
-use crate::rules::code_block_utils::CodeBlockUtils;
 
 lazy_static! {
     // Horizontal rule pattern
@@ -44,15 +44,6 @@ impl MD015NoMissingSpaceAfterListMarker {
     #[inline(always)]
     fn is_horizontal_rule(line: &str) -> bool {
         HR_PATTERN.is_match(line)
-    }
-
-    /// Check if a line is a list item missing a space after the marker
-    #[inline(always)]
-    fn is_list_item_without_space(line: &str) -> bool {
-        if line.is_empty() || line.trim().is_empty() {
-            return false;
-        }
-        LIST_ITEM_RE.captures(line).is_some()
     }
 
     /// Fix a single list item line by ensuring a single space after the marker
@@ -147,7 +138,10 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("require_space".to_string(), toml::Value::Boolean(self.require_space));
+        map.insert(
+            "require_space".to_string(),
+            toml::Value::Boolean(self.require_space),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -155,7 +149,9 @@ impl Rule for MD015NoMissingSpaceAfterListMarker {
     where
         Self: Sized,
     {
-        let require_space = crate::config::get_rule_config_value::<bool>(config, "MD015", "require_space").unwrap_or(true);
+        let require_space =
+            crate::config::get_rule_config_value::<bool>(config, "MD015", "require_space")
+                .unwrap_or(true);
         Box::new(MD015NoMissingSpaceAfterListMarker { require_space })
     }
 }

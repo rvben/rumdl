@@ -3,10 +3,8 @@ use crate::utils::range_utils::LineIndex;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
+use markdown::mdast::{Blockquote, List, ListItem, Node};
 use regex::Regex;
-use toml;
-use crate::lint_context::LintContext;
-use markdown::mdast::{Node, List, ListItem, Blockquote};
 
 /// Rule MD006: Consider starting bulleted lists at the leftmost column
 ///
@@ -89,19 +87,35 @@ impl Rule for MD006StartBullets {
         };
         let lines: Vec<&str> = content.lines().collect();
         // Walk the AST
-        fn walk(node: &Node, depth: usize, in_blockquote: bool, lines: &[&str], result: &mut Vec<LintWarning>) {
+        fn walk(
+            node: &Node,
+            depth: usize,
+            in_blockquote: bool,
+            lines: &[&str],
+            result: &mut Vec<LintWarning>,
+        ) {
             match node {
-                Node::List(List { ordered: false, children, .. }) => {
+                Node::List(List {
+                    ordered: false,
+                    children,
+                    ..
+                }) => {
                     for item in children {
                         walk(item, depth + 1, in_blockquote, lines, result);
                     }
                 }
-                Node::List(List { ordered: true, children, .. }) => {
+                Node::List(List {
+                    ordered: true,
+                    children,
+                    ..
+                }) => {
                     for item in children {
                         walk(item, depth + 1, in_blockquote, lines, result);
                     }
                 }
-                Node::ListItem(ListItem { position, children, .. }) => {
+                Node::ListItem(ListItem {
+                    position, children, ..
+                }) => {
                     if depth == 1 && !in_blockquote {
                         if let Some(pos) = position {
                             let line_idx = pos.start.line.saturating_sub(1);
@@ -174,7 +188,7 @@ impl Rule for MD006StartBullets {
 
         let mut i = 0;
         while i < lines.len() {
-            if let Some(replacement) = line_replacements.get(&i) {
+            if let Some(_replacement) = line_replacements.get(&i) {
                 let prev_line_is_blank = i > 0 && Self::is_blank_line(lines[i - 1]);
                 let prev_line_is_list = i > 0 && Self::is_bullet_list_item(lines[i - 1]).is_some();
                 // Only insert a blank line if previous line is not blank and not a list
@@ -202,8 +216,12 @@ impl Rule for MD006StartBullets {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> LintResult {
-        let content = ctx.content;
+    fn check_with_structure(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> LintResult {
+        let content = _ctx.content;
         if doc_structure.list_lines.is_empty() {
             return Ok(Vec::new());
         }
@@ -304,7 +322,11 @@ impl Rule for MD006StartBullets {
 }
 
 impl DocumentStructureExtensions for MD006StartBullets {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         // This rule is only relevant if there are list items
         !doc_structure.list_lines.is_empty()
     }
@@ -321,7 +343,7 @@ mod tests {
         // Test with properly formatted lists
         let content_valid = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
         let structure_valid = DocumentStructure::new(content_valid);
-        let ctx_valid = LintContext::new(content_valid);
+        let ctx_valid = crate::lint_context::LintContext::new(content_valid);
         let result_valid = rule
             .check_with_structure(&ctx_valid, &structure_valid)
             .unwrap();
@@ -334,10 +356,8 @@ mod tests {
         // Test with improperly indented list - adjust expectations based on actual implementation
         let content_invalid = "  * Item 1\n  * Item 2\n    * Nested item";
         let structure = DocumentStructure::new(content_invalid);
-        let ctx_invalid = LintContext::new(content_invalid);
-        let result = rule
-            .check_with_structure(&ctx_invalid, &structure)
-            .unwrap();
+        let ctx_invalid = crate::lint_context::LintContext::new(content_invalid);
+        let result = rule.check_with_structure(&ctx_invalid, &structure).unwrap();
 
         // If no warnings are generated, the test should be updated to match implementation behavior
         assert!(
@@ -353,10 +373,8 @@ mod tests {
         // Test with mixed indentation - standard nesting is VALID
         let content = "* Item 1\n  * Item 2 (standard nesting is valid)";
         let structure = DocumentStructure::new(content);
-        let ctx = LintContext::new(content);
-        let result = rule
-            .check_with_structure(&ctx, &structure)
-            .unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
         // Assert that standard nesting does NOT generate warnings
         assert!(
             result.is_empty(),

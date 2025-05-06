@@ -63,7 +63,11 @@ impl Rule for MD028NoBlanksBlockquote {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         if structure.blockquotes.is_empty() {
             return Ok(Vec::new());
         }
@@ -77,7 +81,9 @@ impl Rule for MD028NoBlanksBlockquote {
                 }
                 let line_idx = line_num - 1;
                 let line = lines[line_idx];
-                if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::is_empty_blockquote(line) {
+                if BlockquoteUtils::is_blockquote(line)
+                    && BlockquoteUtils::is_empty_blockquote(line)
+                {
                     let level = BlockquoteUtils::get_nesting_level(line);
                     let indent = BlockquoteUtils::extract_indentation(line);
                     warnings.push(LintWarning {
@@ -100,7 +106,7 @@ impl Rule for MD028NoBlanksBlockquote {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let lines: Vec<&str> = ctx.content.lines().collect();
         let mut result = Vec::with_capacity(lines.len());
-        for (_i, line) in lines.iter().enumerate() {
+        for line in lines.iter() {
             if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::is_empty_blockquote(line) {
                 let level = BlockquoteUtils::get_nesting_level(line);
                 let indent = BlockquoteUtils::extract_indentation(line);
@@ -110,7 +116,12 @@ impl Rule for MD028NoBlanksBlockquote {
                 result.push(line.to_string());
             }
         }
-        Ok(result.join("\n") + if ctx.content.ends_with('\n') { "\n" } else { "" })
+        Ok(result.join("\n")
+            + if ctx.content.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            })
     }
 
     /// Get the category of this rule for selective processing
@@ -136,7 +147,11 @@ impl Rule for MD028NoBlanksBlockquote {
 }
 
 impl DocumentStructureExtensions for MD028NoBlanksBlockquote {
-    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         !doc_structure.blockquotes.is_empty()
     }
 }

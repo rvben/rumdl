@@ -229,7 +229,10 @@ impl Rule for MD014CommandsShowOutput {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("show_output".to_string(), toml::Value::Boolean(self.show_output));
+        map.insert(
+            "show_output".to_string(),
+            toml::Value::Boolean(self.show_output),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -237,7 +240,9 @@ impl Rule for MD014CommandsShowOutput {
     where
         Self: Sized,
     {
-        let show_output = crate::config::get_rule_config_value::<bool>(config, "MD014", "show_output").unwrap_or(true);
+        let show_output =
+            crate::config::get_rule_config_value::<bool>(config, "MD014", "show_output")
+                .unwrap_or(true);
         Box::new(MD014CommandsShowOutput::with_show_output(show_output))
     }
 }

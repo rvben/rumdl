@@ -1,11 +1,11 @@
 pub mod config;
 pub mod init;
+pub mod lint_context;
+pub mod markdownlint_config;
 pub mod profiling;
 pub mod rule;
 pub mod rules;
 pub mod utils;
-pub mod markdownlint_config;
-pub mod lint_context;
 
 #[cfg(feature = "python")]
 pub mod python;
@@ -13,13 +13,13 @@ pub mod python;
 pub use rules::heading_utils::{Heading, HeadingStyle};
 pub use rules::*;
 
+pub use crate::lint_context::LintContext;
 use crate::rule::{LintResult, Rule};
 use crate::utils::document_structure::DocumentStructure;
 use std::time::Instant;
-pub use crate::lint_context::LintContext;
 
 /// Lint a file against the given rules
-/// Assumes the provided `rules` vector contains the final, 
+/// Assumes the provided `rules` vector contains the final,
 /// configured, and filtered set of rules to be executed.
 pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResult {
     let mut warnings = Vec::new();

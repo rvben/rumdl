@@ -1,6 +1,6 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD034NoBareUrls;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_urls() {
@@ -19,7 +19,7 @@ fn test_bare_urls() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "Visit <https://example.com> for more info");
 }
 
@@ -31,7 +31,7 @@ fn test_multiple_urls() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "Visit <https://example.com> and <http://another.com>"
@@ -46,7 +46,7 @@ fn test_urls_in_code_block() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "```\nhttps://example.com\n```\n<https://outside.com>"
@@ -61,7 +61,7 @@ fn test_urls_in_inline_code() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "`https://example.com`\n<https://outside.com>");
 }
 
@@ -73,7 +73,6 @@ fn test_urls_in_markdown_links() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "[Example](https://example.com)\n<https://bare.com>");
 }
 
@@ -85,7 +84,6 @@ fn test_ftp_urls() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "Download from <ftp://example.com/file>");
 }
 
@@ -97,7 +95,6 @@ fn test_complex_urls() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "Visit <https://example.com/path?param=value#fragment>"
@@ -112,7 +109,7 @@ fn test_multiple_protocols() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "<http://example.com>\n<https://secure.com>\n<ftp://files.com>"
@@ -127,7 +124,7 @@ fn test_mixed_content() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "# Heading\nVisit <https://example.com>\n> Quote with <https://another.com>"

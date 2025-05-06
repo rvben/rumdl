@@ -49,12 +49,11 @@
 ///
 /// Consistent list markers improve readability and reduce distraction, especially in large documents or when collaborating with others. This rule helps enforce a uniform style across all unordered lists.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::document_structure::DocumentStructure;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
-use crate::lint_context::LintContext;
 
 lazy_static! {
     static ref UNORDERED_LIST_REGEX: FancyRegex =
@@ -140,19 +139,19 @@ impl Rule for MD004UnorderedListStyle {
             if let Ok(Some(cap)) = UNORDERED_LIST_REGEX.captures(line) {
                 let marker = cap.name("marker").unwrap().as_str();
                 let indentation = cap.name("indent").map_or(0, |m| m.as_str().len());
-                
+
                 // Reverted: Simple first marker detection
                 if first_marker.is_none() {
                     first_marker = Some(marker.to_string());
                 }
-                
+
                 // Reverted: Determine expected marker based only on style and the single first_marker
                 let expected_marker = match self.style {
                     UnorderedListStyle::Consistent => {
-                         // Use unwrap() safely as first_marker is guaranteed to be Some here if style is Consistent and it's not the first item
-                         // If it IS the first item, first_marker was just set.
-                         first_marker.as_ref().map_or(marker, |fm| fm.as_str()) 
-                    },
+                        // Use unwrap() safely as first_marker is guaranteed to be Some here if style is Consistent and it's not the first item
+                        // If it IS the first item, first_marker was just set.
+                        first_marker.as_ref().map_or(marker, |fm| fm.as_str())
+                    }
                     UnorderedListStyle::Asterisk => "*",
                     UnorderedListStyle::Dash => "-",
                     UnorderedListStyle::Plus => "+",
@@ -160,7 +159,7 @@ impl Rule for MD004UnorderedListStyle {
 
                 // Reverted: Simple comparison, ignoring indentation level for Consistent style
                 if marker != expected_marker {
-                     warnings.push(LintWarning {
+                    warnings.push(LintWarning {
                         message: format!(
                             "Unordered list marker '{}' does not match expected style '{}'",
                             marker, expected_marker
@@ -171,7 +170,7 @@ impl Rule for MD004UnorderedListStyle {
                         fix: None,
                         rule_name: Some(self.name()),
                     });
-                } 
+                }
             }
         }
         Ok(warnings)
@@ -269,7 +268,7 @@ impl Rule for MD004UnorderedListStyle {
                 lines.push(line.to_string());
             }
         }
-        
+
         // Always ensure a single trailing newline, regardless of input
         let mut result = lines.join("\n");
         if !result.ends_with('\n') {
@@ -299,12 +298,18 @@ impl Rule for MD004UnorderedListStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(match self.style {
-            UnorderedListStyle::Asterisk => "asterisk",
-            UnorderedListStyle::Plus => "plus",
-            UnorderedListStyle::Dash => "dash",
-            UnorderedListStyle::Consistent => "consistent",
-        }.to_string()));
+        map.insert(
+            "style".to_string(),
+            toml::Value::String(
+                match self.style {
+                    UnorderedListStyle::Asterisk => "asterisk",
+                    UnorderedListStyle::Plus => "plus",
+                    UnorderedListStyle::Dash => "dash",
+                    UnorderedListStyle::Consistent => "consistent",
+                }
+                .to_string(),
+            ),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -325,7 +330,11 @@ impl Rule for MD004UnorderedListStyle {
 }
 
 impl crate::utils::document_structure::DocumentStructureExtensions for MD004UnorderedListStyle {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         let content = ctx.content;
         !content.is_empty() && !doc_structure.list_lines.is_empty()
     }
@@ -343,6 +352,10 @@ mod tests {
         let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
         let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert_eq!(warnings.len(), 2, "Expected 2 warnings for inconsistent markers");
+        assert_eq!(
+            warnings.len(),
+            2,
+            "Expected 2 warnings for inconsistent markers"
+        );
     }
 }

@@ -225,8 +225,10 @@ impl Rule for MD009TrailingSpaces {
     where
         Self: Sized,
     {
-        let br_spaces = crate::config::get_rule_config_value::<u32>(config, "MD009", "br_spaces").unwrap_or(2);
-        let strict = crate::config::get_rule_config_value::<bool>(config, "MD009", "strict").unwrap_or(false);
+        let br_spaces =
+            crate::config::get_rule_config_value::<u32>(config, "MD009", "br_spaces").unwrap_or(2);
+        let strict = crate::config::get_rule_config_value::<bool>(config, "MD009", "strict")
+            .unwrap_or(false);
         let br_spaces_usize = br_spaces as usize;
         Box::new(MD009TrailingSpaces::new(br_spaces_usize, strict))
     }

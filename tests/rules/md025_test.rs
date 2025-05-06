@@ -1,6 +1,6 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD025SingleTitle;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_md025_valid() {
@@ -181,8 +181,5 @@ fn test_md025_fix_with_indentation() {
 
     // Ensure there are no duplicate H1 headings (the issue this rule checks for)
     let result = rule.check(&fixed_ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Fixed content should have no warnings"
-    );
+    assert!(result.is_empty(), "Fixed content should have no warnings");
 }

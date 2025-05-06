@@ -1,7 +1,7 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD002FirstHeadingH1;
 use rumdl::utils::document_structure::DocumentStructure;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_custom_level() {

@@ -1,8 +1,8 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD036NoEmphasisAsHeading;
 use rumdl::MD015NoMissingSpaceAfterListMarker;
 use rumdl::MD053LinkImageReferenceDefinitions;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn cross_rule_md015_md053() {
@@ -10,9 +10,7 @@ fn cross_rule_md015_md053() {
 
     let ctx = LintContext::new(content);
     // Apply MD015 fix
-    let fixed = MD015NoMissingSpaceAfterListMarker::new()
-        .fix(&ctx)
-        .unwrap();
+    let fixed = MD015NoMissingSpaceAfterListMarker::new().fix(&ctx).unwrap();
     let fixed_ctx = LintContext::new(&fixed);
     // Check MD053 results
     let rule = MD053LinkImageReferenceDefinitions::default();

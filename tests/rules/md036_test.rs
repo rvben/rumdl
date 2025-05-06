@@ -1,6 +1,6 @@
+use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD036NoEmphasisAsHeading;
-use rumdl::lint_context::LintContext;
 
 #[test]
 fn test_valid_emphasis() {
@@ -19,7 +19,6 @@ fn test_emphasis_only() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
-    let ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "# Emphasized\n# Also emphasized");
 }
 
@@ -31,7 +30,6 @@ fn test_strong_only() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
-    let ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "## Strong emphasis\n## Also strong");
 }
 
@@ -43,7 +41,6 @@ fn test_emphasis_in_code_block() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    let ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "```\n*Emphasized*\n```\n\n# Emphasized");
 }
 
@@ -55,7 +52,6 @@ fn test_multiple_emphasis() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
-    let ctx = LintContext::new(&fixed);
     assert_eq!(
         fixed,
         "\n# First emphasis\n\nNormal line\n\n# Second emphasis\n"
@@ -97,6 +93,5 @@ fn test_emphasis_with_punctuation() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
-    let ctx = LintContext::new(&fixed);
     assert_eq!(fixed, "\n# Hello with punctuation!\n\n# Hi there!\n");
 }

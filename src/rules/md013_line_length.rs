@@ -126,9 +126,12 @@ impl Rule for MD013LineLength {
         let lines: Vec<&str> = content.lines().collect();
 
         // Create a quick lookup set for heading lines
-        let heading_lines_set: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
+        let heading_lines_set: std::collections::HashSet<usize> =
+            structure.heading_lines.iter().cloned().collect();
         // Create a quick lookup for setext headings (where start_line != end_line in regions)
-        let setext_lines_set: std::collections::HashSet<usize> = structure.heading_regions.iter()
+        let setext_lines_set: std::collections::HashSet<usize> = structure
+            .heading_regions
+            .iter()
             .filter(|(start, end)| start != end)
             .flat_map(|(start, end)| (*start..=*end).collect::<Vec<usize>>())
             .collect();
@@ -161,8 +164,7 @@ impl Rule for MD013LineLength {
                         rule_name: Some(self.name()), // Restore Option<&str>
                         message: format!(
                             "Line length {} exceeds {} characters",
-                            effective_length,
-                            self.line_length
+                            effective_length, self.line_length
                         ),
                         line: line_number,
                         column: self.line_length + 1,
@@ -210,11 +212,24 @@ impl Rule for MD013LineLength {
     where
         Self: Sized,
     {
-        let line_length = crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length").unwrap_or(80);
-        let code_blocks = crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks").unwrap_or(true);
-        let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables").unwrap_or(false);
-        let headings = crate::config::get_rule_config_value::<bool>(config, "MD013", "headings").unwrap_or(true);
-        let strict = crate::config::get_rule_config_value::<bool>(config, "MD013", "strict").unwrap_or(false);
-        Box::new(MD013LineLength::new(line_length, code_blocks, tables, headings, strict))
+        let line_length =
+            crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length")
+                .unwrap_or(80);
+        let code_blocks =
+            crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
+                .unwrap_or(true);
+        let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables")
+            .unwrap_or(false);
+        let headings = crate::config::get_rule_config_value::<bool>(config, "MD013", "headings")
+            .unwrap_or(true);
+        let strict = crate::config::get_rule_config_value::<bool>(config, "MD013", "strict")
+            .unwrap_or(false);
+        Box::new(MD013LineLength::new(
+            line_length,
+            code_blocks,
+            tables,
+            headings,
+            strict,
+        ))
     }
 }

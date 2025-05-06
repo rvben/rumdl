@@ -9,9 +9,8 @@ use crate::utils::document_structure::DocumentStructure;
 use crate::utils::markdown_elements::{ElementQuality, ElementType, MarkdownElements};
 use lazy_static::lazy_static;
 use regex::Regex;
-use toml;
-use crate::lint_context::LintContext;
 use std::str::FromStr;
+use toml;
 
 lazy_static! {
     static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
@@ -370,7 +369,11 @@ impl Rule for MD003HeadingStyle {
         Ok(fixed_content)
     }
 
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         let content = ctx.content;
         // Early return for empty content or no headings
         if content.is_empty() || structure.heading_lines.is_empty() {
@@ -476,7 +479,10 @@ impl Rule for MD003HeadingStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(self.style.to_string()));
+        map.insert(
+            "style".to_string(),
+            toml::Value::String(self.style.to_string()),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 

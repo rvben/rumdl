@@ -5,7 +5,6 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::markdown_elements::{ElementType, MarkdownElements};
 use crate::utils::range_utils::LineIndex;
-use crate::lint_context::LintContext;
 
 #[derive(Clone)]
 pub struct MD023HeadingStartLeft;
@@ -249,7 +248,11 @@ impl Rule for MD023HeadingStartLeft {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> LintResult {
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
         // Early return if no headings
         if structure.heading_lines.is_empty() {
             return Ok(Vec::new());
@@ -410,7 +413,11 @@ impl Rule for MD023HeadingStartLeft {
 }
 
 impl DocumentStructureExtensions for MD023HeadingStartLeft {
-    fn has_relevant_elements(&self, _ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
         // This rule is only relevant if there are headings
         !doc_structure.heading_lines.is_empty()
     }
