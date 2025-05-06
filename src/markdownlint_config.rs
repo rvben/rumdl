@@ -182,7 +182,8 @@ impl MarkdownlintConfig {
                             });
                     }
                 } else {
-                    eprintln!("[DEBUG]   Could not convert value for {:?} to TOML", key);
+                    eprintln!("\x1b[31mError: Could not convert value for rule key {:?} to rumdl's internal config format. This likely means the configuration value is invalid or not supported for this rule. Please check your markdownlint config.\x1b[0m", key);
+                    std::process::exit(1);
                 }
             }
         }

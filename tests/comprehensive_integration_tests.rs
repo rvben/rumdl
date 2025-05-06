@@ -235,8 +235,14 @@ Text immediately below heading (MD022)
         .unwrap();
 
     // Print debug output
-    println!("Fix command stdout: {}", String::from_utf8_lossy(&fix_output.stdout));
-    println!("Fix command stderr: {}", String::from_utf8_lossy(&fix_output.stderr));
+    println!(
+        "Fix command stdout: {}",
+        String::from_utf8_lossy(&fix_output.stdout)
+    );
+    println!(
+        "Fix command stderr: {}",
+        String::from_utf8_lossy(&fix_output.stderr)
+    );
 
     // Verify some issues were fixed
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();
@@ -301,8 +307,14 @@ Visit http://example.com for more information.
         .unwrap();
 
     // Print debug output
-    println!("Fix command stdout: {}", String::from_utf8_lossy(&fix_output.stdout));
-    println!("Fix command stderr: {}", String::from_utf8_lossy(&fix_output.stderr));
+    println!(
+        "Fix command stdout: {}",
+        String::from_utf8_lossy(&fix_output.stdout)
+    );
+    println!(
+        "Fix command stderr: {}",
+        String::from_utf8_lossy(&fix_output.stderr)
+    );
 
     // Verify the file was modified
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();

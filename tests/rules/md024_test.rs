@@ -29,12 +29,18 @@ fn test_fix_duplicate_headings() {
     let ctx = LintContext::new(content);
     // There should be duplicate heading warnings before fixing
     let before = rule.check(&ctx).unwrap();
-    assert!(!before.is_empty(), "Should detect duplicate headings before fix");
+    assert!(
+        !before.is_empty(),
+        "Should detect duplicate headings before fix"
+    );
 
     // Apply the fix
     let fixed = rule.fix(&ctx).unwrap();
     // The fix should NOT change the content (MD024 does not support auto-fixing)
-    assert_eq!(fixed, content, "Fix should not modify the content for MD024");
+    assert_eq!(
+        fixed, content,
+        "Fix should not modify the content for MD024"
+    );
 }
 
 #[test]

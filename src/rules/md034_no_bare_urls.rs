@@ -4,9 +4,9 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::early_returns;
 use crate::utils::regex_cache;
+use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use fancy_regex::Regex as FancyRegex;
 
 lazy_static! {
     // Simple pattern to quickly check if a line might contain a URL
@@ -107,6 +107,28 @@ impl MD034NoBareUrls {
             return warnings;
         }
 
+        // Collect all link and image ranges for this line from DocumentStructure
+        let mut link_ranges: Vec<(usize, usize)> = structure
+            .links
+            .iter()
+            .filter(|l| l.line == line_idx + 1)
+            .map(|l| (l.start_col - 1, l.end_col - 1))
+            .collect();
+        let mut image_ranges: Vec<(usize, usize)> = structure
+            .images
+            .iter()
+            .filter(|img| img.line == line_idx + 1)
+            .map(|img| (img.start_col - 1, img.end_col - 1))
+            .collect();
+        // Also check for angle-bracket links (e.g. <https://...>)
+        let mut angle_link_ranges: Vec<(usize, usize)> = ANGLE_LINK_PATTERN
+            .captures_iter(line)
+            .filter_map(|cap| cap.get(0).map(|m| (m.start(), m.end())))
+            .collect();
+        // Merge all ranges
+        link_ranges.append(&mut image_ranges);
+        link_ranges.append(&mut angle_link_ranges);
+
         for url_match in SIMPLE_URL_REGEX.find_iter(line) {
             let url_start = url_match.start();
             let url_end = url_match.end();
@@ -117,8 +139,11 @@ impl MD034NoBareUrls {
                 line.get(url_start - 1..url_start)
             };
             let after = line.get(url_end..url_end + 1);
-            let is_valid_boundary = before.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
-                && after.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
+            let is_valid_boundary = before.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_"
+            }) && after.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_"
+            });
             if !is_valid_boundary {
                 continue;
             }
@@ -126,8 +151,11 @@ impl MD034NoBareUrls {
             if structure.is_in_code_span(line_idx + 1, url_start + 1) {
                 continue;
             }
-            // Skip if URL is already in a link
-            if self.is_url_in_link(line, url_start, url_end) {
+            // Skip if URL is already in a link or image or angle-bracket link
+            let in_any_range = link_ranges
+                .iter()
+                .any(|(start, end)| url_start >= *start && url_end <= *end);
+            if in_any_range {
                 continue;
             }
             warnings.push(LintWarning {
@@ -231,8 +259,11 @@ impl Rule for MD034NoBareUrls {
                     line.get(url_start - 1..url_start)
                 };
                 let after = line.get(url_end..url_end + 1);
-                let is_valid_boundary = before.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
-                    && after.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
+                let is_valid_boundary = before.map_or(true, |c| {
+                    !c.chars().next().unwrap().is_alphanumeric() && c != "_"
+                }) && after.map_or(true, |c| {
+                    !c.chars().next().unwrap().is_alphanumeric() && c != "_"
+                });
                 if !is_valid_boundary {
                     continue;
                 }
