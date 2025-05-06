@@ -36,6 +36,9 @@ lazy_static! {
 
     // Captures full image in 0, alt text in 1, src in 2
     static ref MARKDOWN_IMAGE_PATTERN: Regex = Regex::new(r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap();
+
+    // Add a simple regex for candidate URLs (no look-behind/look-ahead)
+    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://[^\s<>\[\]()\\'\"`]+"#).unwrap();
 }
 
 #[derive(Default, Clone)]
@@ -104,36 +107,41 @@ impl MD034NoBareUrls {
             return warnings;
         }
 
-        for cap in URL_REGEX.captures_iter(line) {
-            if let Ok(cap) = cap {
-                let url = cap.get(1).unwrap();
-                let url_start = url.start();
-                let url_end = url.end();
-
-                // Skip if this URL is within a code span (using DocumentStructure)
-                if structure.is_in_code_span(line_idx + 1, url_start + 1) {
-                    continue;
-                }
-
-                // Skip if URL is already in a link
-                if self.is_url_in_link(line, url_start, url_end) {
-                    continue;
-                }
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_idx + 1,
-                    column: url_start + 1,
-                    message: format!("Bare URL found: {}", url.as_str()),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: url_start..url_end,
-                        replacement: format!("<{}>", url.as_str()),
-                    }),
-                });
+        for url_match in SIMPLE_URL_REGEX.find_iter(line) {
+            let url_start = url_match.start();
+            let url_end = url_match.end();
+            // Manual boundary check: not part of a larger word
+            let before = if url_start == 0 {
+                None
+            } else {
+                line.get(url_start - 1..url_start)
+            };
+            let after = line.get(url_end..url_end + 1);
+            let is_valid_boundary = before.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
+                && after.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
+            if !is_valid_boundary {
+                continue;
             }
+            // Skip if this URL is within a code span (using DocumentStructure)
+            if structure.is_in_code_span(line_idx + 1, url_start + 1) {
+                continue;
+            }
+            // Skip if URL is already in a link
+            if self.is_url_in_link(line, url_start, url_end) {
+                continue;
+            }
+            warnings.push(LintWarning {
+                rule_name: Some(self.name()),
+                line: line_idx + 1,
+                column: url_start + 1,
+                message: format!("Bare URL found: {}", &line[url_start..url_end]),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: url_start..url_end,
+                    replacement: format!("<{}>", &line[url_start..url_end]),
+                }),
+            });
         }
-
         warnings
     }
 
@@ -213,49 +221,45 @@ impl Rule for MD034NoBareUrls {
             let mut last_end = 0;
             let mut has_url = false;
 
-            for cap in URL_FIX_REGEX.captures_iter(line) {
-                if let Ok(cap) = cap {
-                    let url = cap.get(1).unwrap();
-                    let url_start = url.start();
-                    let url_end = url.end();
-
-                    // Skip if URL is in a code span or already in a link
-                    if structure.is_in_code_span(i + 1, url_start + 1)
-                        || self.is_url_in_link(line, url_start, url_end)
-                    {
-                        continue;
-                    }
-
-                    has_url = true;
-
-                    // Add text before the URL
-                    result.push_str(&line[last_end..url_start]);
-
-                    // Add the URL with angle brackets
-                    result.push_str(&format!("<{}>", url.as_str()));
-
-                    last_end = url_end;
+            for url_match in SIMPLE_URL_REGEX.find_iter(line) {
+                let url_start = url_match.start();
+                let url_end = url_match.end();
+                // Manual boundary check: not part of a larger word
+                let before = if url_start == 0 {
+                    None
+                } else {
+                    line.get(url_start - 1..url_start)
+                };
+                let after = line.get(url_end..url_end + 1);
+                let is_valid_boundary = before.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
+                    && after.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
+                if !is_valid_boundary {
+                    continue;
                 }
+                // Skip if URL is in a code span or already in a link
+                if structure.is_in_code_span(i + 1, url_start + 1)
+                    || self.is_url_in_link(line, url_start, url_end)
+                {
+                    continue;
+                }
+                has_url = true;
+                // Add text before the URL
+                result.push_str(&line[last_end..url_start]);
+                // Add the URL with angle brackets
+                result.push_str(&format!("<{}>", &line[url_start..url_end]));
+                last_end = url_end;
             }
-
             // Add any remaining text
             if has_url {
                 result.push_str(&line[last_end..]);
             } else {
                 result.push_str(line);
             }
-
             // Add newline for all lines except the last
             if i < lines.len() - 1 {
                 result.push('\n');
             }
         }
-
-        // Preserve trailing newline
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
-        }
-
         Ok(result)
     }
 
