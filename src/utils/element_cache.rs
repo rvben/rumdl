@@ -10,8 +10,8 @@ lazy_static! {
     static ref INDENTED_CODE_BLOCK_REGEX: Regex = Regex::new(r"^(\s{4,})(.+)$").unwrap();
 
     // List detection patterns
-    static ref UNORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
-    static ref ORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>\d+\.)(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
+    static ref UNORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]*)(?P<content>.*)$").unwrap();
+    static ref ORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>\d+\.)(?P<after>[ \t]*)(?P<content>.*)$").unwrap();
 
     // Inline code span pattern
     static ref CODE_SPAN_REGEX: Regex = Regex::new(r"`+").unwrap();
@@ -62,6 +62,8 @@ pub struct ListItem {
     pub spaces_after_marker: usize,
     pub nesting_level: usize,
     pub parent_line_number: Option<usize>,
+    pub blockquote_depth: usize, // Number of leading blockquote markers
+    pub blockquote_prefix: String, // The actual prefix (e.g., "> > ")
 }
 
 /// Cache for Markdown document structural elements
@@ -279,23 +281,82 @@ impl ElementCache {
     fn populate_list_items(&mut self) {
         if let Some(content) = &self.content {
             let lines: Vec<&str> = content.lines().collect();
-            let mut prev_items: Vec<(usize, usize)> = Vec::new(); // (nesting_level, line_number)
+            let mut prev_items: Vec<(usize, usize, usize)> = Vec::new(); // (blockquote_depth, nesting_level, line_number)
             for (i, line) in lines.iter().enumerate() {
                 // Reset stack on blank lines
                 if line.trim().is_empty() {
                     prev_items.clear(); // Reset nesting after blank line
                     continue;
                 }
-                // Always try to match a list item, regardless of indentation
-                if let Some(item) = self.parse_list_item(line, i + 1, &mut prev_items) {
+                // Parse and strip blockquote prefix
+                let (blockquote_depth, blockquote_prefix, rest) = Self::parse_blockquote_prefix(line);
+                // Always call parse_list_item and always push if Some
+                if let Some(item) = self.parse_list_item(rest, i + 1, &mut prev_items, blockquote_depth, blockquote_prefix.clone()) {
                     self.list_items.push(item);
                     self.list_line_map[i] = true;
-                    continue; // If it's a list item, do not treat as code block
                 }
-                // If not a list item, mark as code block if indented (4+ spaces)
-                // (This is for completeness, but code block map is handled elsewhere)
             }
         }
+    }
+
+    /// Parse and strip all leading blockquote markers, returning (depth, prefix, rest_of_line)
+    fn parse_blockquote_prefix(line: &str) -> (usize, String, &str) {
+        let mut rest = line;
+        let mut prefix = String::new();
+        let mut depth = 0;
+        loop {
+            let trimmed = rest.trim_start();
+            if trimmed.starts_with('>') {
+                // Find the '>' and a single optional space
+                let after = &trimmed[1..];
+                let mut chars = after.chars();
+                let mut space_count = 0;
+                if let Some(' ') = chars.next() {
+                    space_count = 1;
+                }
+                let (spaces, after_marker) = after.split_at(space_count);
+                prefix.push('>');
+                prefix.push_str(spaces);
+                rest = after_marker;
+                depth += 1;
+            } else {
+                break;
+            }
+        }
+        (depth, prefix, rest)
+    }
+
+    /// Calculate the nesting level for a list item, considering blockquote depth
+    fn calculate_nesting_level(
+        &self,
+        indent: usize,
+        blockquote_depth: usize,
+        prev_items: &mut Vec<(usize, usize, usize)>,
+    ) -> usize {
+        // Only consider previous items with the same blockquote depth
+        let mut nesting_level = 0;
+        if let Some(&(last_bq, last_indent, last_level)) = prev_items.iter().rev().find(|(bq, _, _)| *bq == blockquote_depth) {
+            if indent >= last_indent + 2 {
+                nesting_level = last_level + 1;
+            } else {
+                // Walk back to find the most recent indent <= current indent with same blockquote depth
+                for &(prev_bq, prev_indent, prev_level) in prev_items.iter().rev() {
+                    if prev_bq == blockquote_depth && prev_indent <= indent {
+                        nesting_level = prev_level;
+                        break;
+                    }
+                }
+            }
+        }
+        // Remove stack entries with indent >= current indent and same blockquote depth
+        while let Some(&(prev_bq, prev_indent, _)) = prev_items.last() {
+            if prev_bq != blockquote_depth || prev_indent < indent {
+                break;
+            }
+            prev_items.pop();
+        }
+        prev_items.push((blockquote_depth, indent, nesting_level));
+        nesting_level
     }
 
     /// Parse a line as a list item and determine its nesting level
@@ -303,7 +364,9 @@ impl ElementCache {
         &self,
         line: &str,
         line_num: usize,
-        prev_items: &mut Vec<(usize, usize)>,
+        prev_items: &mut Vec<(usize, usize, usize)>,
+        blockquote_depth: usize,
+        blockquote_prefix: String,
     ) -> Option<ListItem> {
         match UNORDERED_LIST_REGEX.captures(line) {
             Ok(Some(captures)) => {
@@ -323,13 +386,13 @@ impl ElementCache {
                     "-" => ListMarkerType::Minus,
                     _ => unreachable!(),
                 };
-                let nesting_level = self.calculate_nesting_level(indentation, prev_items);
-                // Find parent: most recent previous item with lower nesting_level
+                let nesting_level = self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
+                // Find parent: most recent previous item with lower nesting_level and same blockquote depth
                 let parent_line_number = prev_items
                     .iter()
                     .rev()
-                    .find(|(level, _)| *level < nesting_level)
-                    .map(|(_, line_num)| *line_num);
+                    .find(|(bq, _, level)| *bq == blockquote_depth && *level < nesting_level)
+                    .map(|(_, _, line_num)| *line_num);
                 return Some(ListItem {
                     line_number: line_num,
                     indentation,
@@ -340,6 +403,8 @@ impl ElementCache {
                     spaces_after_marker: spaces,
                     nesting_level,
                     parent_line_number,
+                    blockquote_depth,
+                    blockquote_prefix,
                 });
             }
             Ok(None) => {
@@ -361,13 +426,13 @@ impl ElementCache {
                     .map_or("", |m| m.as_str())
                     .trim_start()
                     .to_string();
-                let nesting_level = self.calculate_nesting_level(indentation, prev_items);
-                // Find parent: most recent previous item with lower nesting_level
+                let nesting_level = self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
+                // Find parent: most recent previous item with lower nesting_level and same blockquote depth
                 let parent_line_number = prev_items
                     .iter()
                     .rev()
-                    .find(|(level, _)| *level < nesting_level)
-                    .map(|(_, line_num)| *line_num);
+                    .find(|(bq, _, level)| *bq == blockquote_depth && *level < nesting_level)
+                    .map(|(_, _, line_num)| *line_num);
                 return Some(ListItem {
                     line_number: line_num,
                     indentation,
@@ -378,45 +443,14 @@ impl ElementCache {
                     spaces_after_marker: spaces,
                     nesting_level,
                     parent_line_number,
+                    blockquote_depth,
+                    blockquote_prefix,
                 });
             }
             Ok(None) => {}
             Err(_) => {}
         }
         None
-    }
-
-    /// Calculate the nesting level for a list item
-    fn calculate_nesting_level(
-        &self,
-        indent: usize,
-        prev_items: &mut Vec<(usize, usize)>,
-    ) -> usize {
-        // CommonMark: a list item is nested if it is indented at least 2 spaces more than the previous list item
-        let mut nesting_level = 0;
-        if let Some(&(last_indent, last_level)) = prev_items.last() {
-            if indent >= last_indent + 2 {
-                // Nested under previous
-                nesting_level = last_level + 1;
-            } else {
-                // Walk back to find the most recent indent <= current indent
-                for &(prev_indent, prev_level) in prev_items.iter().rev() {
-                    if prev_indent <= indent {
-                        nesting_level = prev_level;
-                        break;
-                    }
-                }
-            }
-        }
-        // Remove stack entries with indent >= current indent
-        while let Some(&(prev_indent, _)) = prev_items.last() {
-            if prev_indent < indent {
-                break;
-            }
-            prev_items.pop();
-        }
-        prev_items.push((indent, nesting_level));
-        nesting_level
     }
 }
 
