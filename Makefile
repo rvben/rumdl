@@ -12,6 +12,7 @@ clean:
 fmt:
 	cargo fmt
 	cargo clippy --fix --allow-dirty --allow-staged
+	cargo fix --allow-dirty --allow-staged
 
 lint:
 	cargo clippy --all-targets --all-features -- -D warnings
@@ -167,3 +168,9 @@ trigger-pre-commit:
 	-H "Authorization: Bearer $(PRECOMMIT_DISPATCH_TOKEN)" \
 	https://api.github.com/repos/rvben/rumdl-pre-commit/dispatches \
 	-d '{"event_type": "pypi_release"}'
+
+flues:
+	cargo run --bin rumdl -- check --config .markdownlint.yaml flues.md ; npx markdownlint-cli2 flues.md
+
+edge-cases:
+	cargo run --bin rumdl -- check --config .markdownlint.yaml tests/md030_edge_cases.md ; npx markdownlint-cli2 tests/md030_edge_cases.md
