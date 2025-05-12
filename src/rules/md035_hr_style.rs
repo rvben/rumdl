@@ -57,22 +57,34 @@ impl MD035HRStyle {
         }
 
         let line = lines[i].trim();
-
         let prev_line = lines[i - 1].trim();
 
-        // Check if the current line is all dashes or equals signs
-
         let is_dash_line = !line.is_empty() && line.chars().all(|c| c == '-');
-
         let is_equals_line = !line.is_empty() && line.chars().all(|c| c == '=');
-
-        // Check if the previous line is not empty and not a horizontal rule
-
         let prev_line_has_content = !prev_line.is_empty() && !Self::is_horizontal_rule(prev_line);
-
-        // If the current line is all dashes or equals signs and the previous line has content,
-        // it's likely a Setext heading
         (is_dash_line || is_equals_line) && prev_line_has_content
+    }
+
+    /// Find the most prevalent HR style in the document (excluding setext headings)
+    fn most_prevalent_hr_style(lines: &[&str]) -> Option<String> {
+        use std::collections::HashMap;
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        let mut order: Vec<&str> = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(lines, i) {
+                let style = line.trim();
+                let counter = counts.entry(style).or_insert(0);
+                *counter += 1;
+                if *counter == 1 {
+                    order.push(style);
+                }
+            }
+        }
+        // Find the style with the highest count, breaking ties by first encountered
+        counts
+            .iter()
+            .max_by_key(|&(style, count)| (*count, -(order.iter().position(|&s| s == *style).unwrap_or(usize::MAX) as isize)))
+            .map(|(style, _)| style.to_string())
     }
 }
 
@@ -90,21 +102,11 @@ impl Rule for MD035HRStyle {
         let _line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
-
         let lines: Vec<&str> = content.lines().collect();
 
-        // Use the configured style or find the first HR style
-
-        let expected_style = if self.style.is_empty() {
-            // Find the first HR in the document
-            let mut first_style = "---".to_string(); // Default if none found
-            for (i, line) in lines.iter().enumerate() {
-                if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(&lines, i) {
-                    first_style = line.trim().to_string();
-                    break;
-                }
-            }
-            first_style
+        // Use the configured style or find the most prevalent HR style
+        let expected_style = if self.style.is_empty() || self.style == "consistent" {
+            Self::most_prevalent_hr_style(&lines).unwrap_or_else(|| "---".to_string())
         } else {
             self.style.clone()
         };
@@ -148,21 +150,11 @@ impl Rule for MD035HRStyle {
         let _line_index = LineIndex::new(content.to_string());
 
         let mut result = Vec::new();
-
         let lines: Vec<&str> = content.lines().collect();
 
-        // Use the configured style or find the first HR style
-
-        let expected_style = if self.style.is_empty() {
-            // Find the first HR in the document
-            let mut first_style = "---".to_string(); // Default if none found
-            for (i, line) in lines.iter().enumerate() {
-                if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(&lines, i) {
-                    first_style = line.trim().to_string();
-                    break;
-                }
-            }
-            first_style
+        // Use the configured style or find the most prevalent HR style
+        let expected_style = if self.style.is_empty() || self.style == "consistent" {
+            Self::most_prevalent_hr_style(&lines).unwrap_or_else(|| "---".to_string())
         } else {
             self.style.clone()
         };
@@ -174,9 +166,6 @@ impl Rule for MD035HRStyle {
                 continue;
             }
 
-            let _trimmed = line.trim();
-
-            // Simplify the horizontal rule detection and replacement
             if Self::is_horizontal_rule(line) {
                 // Here we have a proper horizontal rule - replace it with the expected style
                 result.push(expected_style.clone());

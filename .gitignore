@@ -6,3 +6,4 @@ benchmark
 *.bak*
 .env
 *.log
+node_modules
