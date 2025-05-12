@@ -1,10 +1,9 @@
 /// Rule MD007: Unordered list indentation
 ///
 /// See [docs/md007.md](../../docs/md007.md) for full documentation, configuration, and examples.
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::element_cache::{ElementCache, ListMarkerType};
-use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -23,34 +22,6 @@ impl Default for MD007ULIndent {
 impl MD007ULIndent {
     pub fn new(indent: usize) -> Self {
         Self { indent }
-    }
-
-    /// Detect code blocks, including those inside blockquotes
-    fn compute_code_block_lines(content: &str) -> std::collections::HashSet<usize> {
-        let mut code_block_lines = std::collections::HashSet::new();
-        let mut in_code_block = false;
-        let mut fence: Option<String> = None;
-        for (i, line) in content.lines().enumerate() {
-            let trimmed = line.trim_start();
-            if !in_code_block {
-                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                    in_code_block = true;
-                    fence = Some(trimmed[..3].to_string());
-                    code_block_lines.insert(i + 1);
-                    continue;
-                }
-            } else {
-                code_block_lines.insert(i + 1);
-                if let Some(ref f) = fence {
-                    if trimmed.starts_with(f) {
-                        in_code_block = false;
-                        fence = None;
-                    }
-                }
-                continue;
-            }
-        }
-        code_block_lines
     }
 
     #[allow(dead_code)]
@@ -101,14 +72,6 @@ impl Rule for MD007ULIndent {
             }
             if matches!(item.marker_type, ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus) {
                 let expected_indent = item.nesting_level * self.indent;
-                println!(
-                    "MD007 DEBUG: line {} | indent={} | nesting={} | expected={} | emit_warning={}",
-                    item.line_number,
-                    item.indentation,
-                    item.nesting_level,
-                    expected_indent,
-                    item.indentation != expected_indent
-                );
                 if item.indentation != expected_indent {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),

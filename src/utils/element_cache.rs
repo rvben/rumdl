@@ -335,7 +335,8 @@ impl ElementCache {
     ) -> usize {
         // Only consider previous items with the same blockquote depth
         let mut nesting_level = 0;
-        if let Some(&(last_bq, last_indent, last_level)) = prev_items.iter().rev().find(|(bq, _, _)| *bq == blockquote_depth) {
+        // _last_bq is always equal to blockquote_depth here due to the filter above
+        if let Some(&(_last_bq, last_indent, last_level)) = prev_items.iter().rev().find(|(bq, _, _)| *bq == blockquote_depth) {
             if indent >= last_indent + 2 {
                 nesting_level = last_level + 1;
             } else {

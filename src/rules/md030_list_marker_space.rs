@@ -7,7 +7,7 @@ use crate::rules::list_utils::ListType;
 use crate::utils::range_utils::LineIndex;
 
 use crate::lint_context::LintContext;
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{Fix, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use fancy_regex::Regex;
 use lazy_static::lazy_static;
@@ -72,68 +72,6 @@ impl MD030ListMarkerSpace {
         } else {
             line.to_string()
         }
-    }
-
-    fn precompute_states(&self, lines: &[&str]) -> (Vec<bool>, Vec<bool>) {
-        let mut is_list_line = vec![false; lines.len()];
-        let mut multi_line = vec![false; lines.len()];
-        let mut in_code_block = false;
-
-        // First pass: mark code blocks and list items
-        for (i, &line) in lines.iter().enumerate() {
-            if CODE_BLOCK_REGEX.is_match(line).unwrap_or(false) {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if !in_code_block {
-                // Check both patterns
-                if let Ok(Some(_)) = LIST_REGEX.captures(line) {
-                    is_list_line[i] = true;
-                } else if let Ok(Some(_)) = LIST_NO_SPACE_REGEX.captures(line) {
-                    is_list_line[i] = true;
-                }
-            }
-        }
-
-        // Second pass: compute multi-line states
-        for i in 0..lines.len() {
-            if is_list_line[i] {
-                let mut found_continuation = false;
-                let curr_indent = lines[i].chars().take_while(|c| c.is_whitespace()).count();
-                let j = i + 1;
-                while j < lines.len() {
-                    let next_line = lines[j];
-                    if next_line.trim().is_empty() {
-                        found_continuation = true; // blank line always makes multi-line
-                        break;
-                    }
-                    let next_indent = next_line.chars().take_while(|c| c.is_whitespace()).count();
-                    let is_next_list = LIST_REGEX.captures(next_line).is_ok()
-                        && LIST_REGEX.captures(next_line).as_ref().unwrap().is_some()
-                        || LIST_NO_SPACE_REGEX.captures(next_line).is_ok()
-                            && LIST_NO_SPACE_REGEX
-                                .captures(next_line)
-                                .as_ref()
-                                .unwrap()
-                                .is_some();
-                    if is_next_list {
-                        if next_indent > curr_indent {
-                            found_continuation = true; // parent of nested list is multi-line
-                        }
-                        break;
-                    }
-                    if next_indent > curr_indent {
-                        found_continuation = true; // paragraph continuation
-                        break;
-                    } else {
-                        break;
-                    }
-                }
-                multi_line[i] = found_continuation;
-            }
-        }
-
-        (is_list_line, multi_line)
     }
 }
 
