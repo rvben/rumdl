@@ -118,14 +118,14 @@ version-push:
 # Combined targets for one-step release
 release-major: version-major version-push
 release-minor: version-minor version-push
-release-patch: version-patch version-push 
+release-patch: version-patch version-push
 
 maturin-build:
 	uv run --with pip,maturin[zig],cffi maturin build --release
 
 maturin-sdist:
 	uv run --with pip,maturin[zig],cffi maturin sdist
-	
+
 run:
 	cargo run --release --bin rumdl check .
 
@@ -168,9 +168,3 @@ trigger-pre-commit:
 	-H "Authorization: Bearer $(PRECOMMIT_DISPATCH_TOKEN)" \
 	https://api.github.com/repos/rvben/rumdl-pre-commit/dispatches \
 	-d '{"event_type": "pypi_release"}'
-
-flues:
-	cargo run --bin rumdl -- check --config .markdownlint.yaml flues.md ; npx markdownlint-cli2 flues.md
-
-edge-cases:
-	cargo run --bin rumdl -- check --config .markdownlint.yaml tests/md030_edge_cases.md ; npx markdownlint-cli2 tests/md030_edge_cases.md
