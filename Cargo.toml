@@ -73,6 +73,8 @@ rand = "0.9.1"
 
 pretty_assertions = "1.4"
 
+env_logger = "0.10"
+
 [[bench]]
 name = "rule_performance"
 harness = false

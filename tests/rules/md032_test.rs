@@ -89,8 +89,41 @@ fn test_list_with_content() {
     let rule = MD032BlanksAroundLists;
     let content = "Text\n* Item 1\n  Content\n* Item 2\n  More content\nText";
     let ctx = LintContext::new(content);
+
+    // --- Temporary Debugging ---
+    let temp_structure = rumdl::utils::document_structure::document_structure_from_str(ctx.content);
+    println!("DEBUG MD032 - test_list_with_content - structure.list_lines: {:?}", temp_structure.list_lines);
+
+    let lines_vec: Vec<&str> = ctx.content.lines().collect();
+    let num_lines_vec = lines_vec.len();
+    let mut calculated_blocks: Vec<(usize, usize)> = Vec::new();
+    let mut current_block_start_debug: Option<usize> = None;
+    for i_debug in 0..num_lines_vec {
+        let current_line_idx_1_debug = i_debug + 1;
+        let is_list_related_debug = temp_structure.list_lines.contains(&current_line_idx_1_debug);
+        let is_excluded_debug = temp_structure.is_in_code_block(current_line_idx_1_debug)
+            || temp_structure.is_in_front_matter(current_line_idx_1_debug);
+        if is_list_related_debug && !is_excluded_debug {
+            if current_block_start_debug.is_none() {
+                current_block_start_debug = Some(current_line_idx_1_debug);
+            }
+            if i_debug == num_lines_vec - 1 {
+                if let Some(start) = current_block_start_debug {
+                    calculated_blocks.push((start, current_line_idx_1_debug));
+                }
+            }
+        } else {
+            if let Some(start) = current_block_start_debug {
+                calculated_blocks.push((start, i_debug));
+                current_block_start_debug = None;
+            }
+        }
+    }
+    println!("DEBUG MD032 - test_list_with_content - calculated_blocks: {:?}", calculated_blocks);
+    // --- End Temporary Debugging ---
+
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
     let _ctx_fixed = LintContext::new(&fixed);
     assert_eq!(

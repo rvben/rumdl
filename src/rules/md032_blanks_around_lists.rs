@@ -1,14 +1,14 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rules::code_block_utils::CodeBlockUtils;
-use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::document_structure::document_structure_from_str;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
-use regex::Regex;
+use regex::{Captures, Regex};
+use std::collections::VecDeque;
 
 lazy_static! {
-    static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)\s").unwrap();
-    static ref LIST_CONTENT_REGEX: Regex = Regex::new(r"^\s{2,}").unwrap();
+    static ref LIST_ITEM_START_REGEX: Regex = Regex::new(r"^([\t ]*)(?:([*+-])|(\d+)\.)([\t ]*)").unwrap();
+    static ref BLOCKQUOTE_PREFIX_RE: Regex = Regex::new(r"^(\s*>)+(\s*)").unwrap();
+    static ref BLANK_LINE_RE: Regex = Regex::new(r"^\s*$").unwrap();
 }
 
 /// Rule MD032: Lists should be surrounded by blank lines
@@ -84,69 +84,159 @@ lazy_static! {
 pub struct MD032BlanksAroundLists;
 
 impl MD032BlanksAroundLists {
-    #[inline]
-    fn is_list_item(line: &str) -> bool {
-        // Early return for empty lines
-        if line.is_empty() || line.trim().is_empty() {
-            return false;
+    // Updated to return blockquote prefix along with block ranges
+    fn find_md032_list_blocks(&self, lines: &[&str], structure: &DocumentStructure) -> Vec<(usize, usize, String)> {
+        let mut list_blocks: Vec<(usize, usize, String)> = Vec::new();
+        let num_lines = lines.len();
+        let mut current_line_idx_0 = 0;
+
+        while current_line_idx_0 < num_lines {
+            let current_line_idx_1 = current_line_idx_0 + 1;
+            let line_str = lines[current_line_idx_0];
+
+            if structure.is_in_code_block(current_line_idx_1) || structure.is_in_front_matter(current_line_idx_1) {
+                current_line_idx_0 += 1;
+                continue;
+            }
+
+            // Determine blockquote prefix and content *before* checking for list item
+            let blockquote_prefix = BLOCKQUOTE_PREFIX_RE.find(line_str).map_or(String::new(), |m| m.as_str().to_string());
+            let line_content = line_str.trim_start_matches(&blockquote_prefix);
+
+            // Check for list item start on the line *content*
+            if let Some(captures) = LIST_ITEM_START_REGEX.captures(line_content) {
+                 // Use indent calculated from the *content* line for comparison
+                 if let Some(first_item_content_indent) = get_content_start_column(&captures) {
+                    let block_start_line_1 = current_line_idx_1;
+                    let mut block_end_line_1 = current_line_idx_1;
+                    // blockquote_prefix is already determined for the start line
+
+                    let mut lookahead_idx_0 = current_line_idx_0 + 1;
+                    let mut potential_blank_lines = VecDeque::new();
+
+                    while lookahead_idx_0 < num_lines {
+                        let next_line_idx_1 = lookahead_idx_0 + 1;
+                        let next_line_str = lines[lookahead_idx_0];
+
+                        if structure.is_in_code_block(next_line_idx_1) || structure.is_in_front_matter(next_line_idx_1) {
+                            break;
+                        }
+
+                        // Check blockquote consistency using the prefix from the *start* line
+                        let current_line_prefix = BLOCKQUOTE_PREFIX_RE.find(next_line_str).map_or(String::new(), |m| m.as_str().to_string());
+                        if current_line_prefix != blockquote_prefix {
+                            break;
+                        }
+
+                        // Get content of the lookahead line after the *consistent* prefix
+                        let next_line_content = next_line_str.trim_start_matches(&blockquote_prefix);
+
+                        // Check blankness on the *content* part
+                        if BLANK_LINE_RE.is_match(next_line_content) { // Check blankness *after* prefix
+                            potential_blank_lines.push_back(lookahead_idx_0);
+                            lookahead_idx_0 += 1;
+                            continue;
+                        }
+
+                        // Check continuation based on *content* after prefix
+                        let is_next_list_item_start = LIST_ITEM_START_REGEX.is_match(next_line_content);
+                        let next_line_indent = calculate_indent(next_line_content); // Calculate indent on content only
+
+                        // Compare indent against the first item's *content* indent
+                        if is_next_list_item_start || next_line_indent >= first_item_content_indent {
+                             block_end_line_1 = next_line_idx_1;
+                             potential_blank_lines.clear();
+                             lookahead_idx_0 += 1;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    list_blocks.push((block_start_line_1, block_end_line_1, blockquote_prefix)); // Store prefix
+                    current_line_idx_0 = block_end_line_1;
+                } else {
+                    // Should not happen if regex matched, but handle gracefully
+                    current_line_idx_0 += 1;
+                }
+            } else {
+                current_line_idx_0 += 1;
+            }
         }
 
-        // Fast literal check before regex
-        let trimmed = line.trim_start();
-        if trimmed.is_empty() {
-            return false;
-        }
+        // Merge adjacent/overlapping blocks
+        if list_blocks.is_empty() { return list_blocks; }
 
-        // Quick character check before using regex
-        let first_char = trimmed.chars().next().unwrap();
-        if !matches!(first_char, '-' | '*' | '+' | '0'..='9') {
-            return false;
-        }
+        let mut merged_blocks: Vec<(usize, usize, String)> = Vec::new();
+        let mut current_block = list_blocks[0].clone(); // Clone to own the prefix string
 
-        // For likely list items, verify with regex
-        if first_char.is_ascii_digit() {
-            // Additional check for ordered lists to avoid regex when possible
-            if let Some(idx) = trimmed.find('.') {
-                // Verify it's a number followed by a period and a space
-                if idx > 0
-                    && idx < trimmed.len() - 1
-                    && trimmed.as_bytes().get(idx + 1) == Some(&b' ')
-                {
-                    return true;
+        for next_block in list_blocks.iter().skip(1) {
+            if next_block.0 <= current_block.1 + 1 && next_block.2 == current_block.2 {
+                current_block.1 = std::cmp::max(current_block.1, next_block.1);
+            } else {
+                merged_blocks.push(current_block.clone());
+                current_block = next_block.clone();
+            }
+        }
+        merged_blocks.push(current_block);
+        merged_blocks
+    }
+
+     fn perform_checks(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+        lines: &[&str],
+        list_blocks: &[(usize, usize, String)],
+    ) -> LintResult {
+        let mut warnings = Vec::new();
+        let num_lines = lines.len();
+
+        for &(start_line, end_line, ref prefix) in list_blocks {
+            if start_line > 1 {
+                let prev_line_actual_idx_0 = start_line - 2;
+                let prev_line_actual_idx_1 = start_line - 1;
+                let prev_line_str = lines[prev_line_actual_idx_0];
+                let is_prev_excluded = structure.is_in_code_block(prev_line_actual_idx_1) || structure.is_in_front_matter(prev_line_actual_idx_1);
+                let prev_prefix = BLOCKQUOTE_PREFIX_RE.find(prev_line_str).map_or(String::new(), |m| m.as_str().to_string());
+                let prev_is_blank = is_blank_in_context(prev_line_str);
+                let prefixes_match = prev_prefix.trim() == prefix.trim();
+
+                // Compare trimmed prefixes
+                if !is_prev_excluded && !prev_is_blank && prefixes_match {
+                     warnings.push(LintWarning {
+                        line: start_line,
+                        column: 0,
+                        severity: Severity::Error,
+                        rule_name: Some(self.name()),
+                        message: format!("MD032/list-marker-space: List item on line {} should be preceded by a blank line.", start_line),
+                        fix: None,
+                    });
                 }
             }
-            // Fall back to regex for complex cases
-            return LIST_ITEM_REGEX.is_match(line);
-        } else if (first_char == '-' || first_char == '*' || first_char == '+')
-            && trimmed.len() > 1
-            && trimmed.as_bytes()[1] == b' '
-        {
-            // Fast path for simple unordered list items
-            return true;
+
+            if end_line < num_lines {
+                let next_line_idx_0 = end_line;
+                let next_line_idx_1 = end_line + 1;
+                let next_line_str = lines[next_line_idx_0];
+                let is_next_excluded = structure.is_in_code_block(next_line_idx_1) || structure.is_in_front_matter(next_line_idx_1);
+                let next_prefix = BLOCKQUOTE_PREFIX_RE.find(next_line_str).map_or(String::new(), |m| m.as_str().to_string());
+                let next_is_blank = is_blank_in_context(next_line_str);
+                let prefixes_match = next_prefix.trim() == prefix.trim();
+
+                 // Compare trimmed prefixes
+                 if !is_next_excluded && !next_is_blank && prefixes_match {
+                      warnings.push(LintWarning {
+                         line: end_line,
+                         column: 0,
+                         severity: Severity::Error,
+                         rule_name: Some(self.name()),
+                         message: format!("MD032/list-marker-space: List item on line {} should be followed by a blank line.", end_line),
+                         fix: None,
+                     });
+                 }
+            }
         }
-
-        // Use regex as fallback for complex cases
-        LIST_ITEM_REGEX.is_match(line)
-    }
-
-    #[inline]
-    fn is_empty_line(line: &str) -> bool {
-        line.trim().is_empty()
-    }
-
-    #[inline]
-    fn is_list_content(line: &str) -> bool {
-        // Early return for empty lines
-        if line.is_empty() || line.trim().is_empty() {
-            return false;
-        }
-
-        // Fast path - check if line starts with at least 2 spaces
-        if let Some(first_non_space) = line.as_bytes().iter().position(|&b| b != b' ') {
-            return first_non_space >= 2;
-        }
-
-        false
+        Ok(warnings)
     }
 }
 
@@ -160,197 +250,76 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        let structure = document_structure_from_str(content);
-        self.check_with_structure(ctx, &structure)
+        let structure = document_structure_from_str(ctx.content);
+        let lines: Vec<&str> = ctx.content.lines().collect();
+        if lines.is_empty() { return Ok(Vec::new()); }
+
+        let list_blocks = self.find_md032_list_blocks(&lines, &structure);
+
+        if list_blocks.is_empty() { return Ok(Vec::new()); }
+
+        self.perform_checks(ctx, &structure, &lines, &list_blocks)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        // Early returns for common cases
-        if content.is_empty() {
-            return Ok(String::new());
-        }
-
-        // Apply front matter fixes first if needed
-        let content = FrontMatterUtils::fix_malformed_front_matter(content);
-
-        let lines: Vec<&str> = content.lines().collect();
-        // Pre-allocate with extra capacity for added blank lines
-        let mut result = Vec::with_capacity(lines.len() + 10);
-
-        // Fast path check - if no list markers are present, return content as is
-        if !content.contains([
-            '-', '*', '+', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
-        ]) {
-            return Ok(content.to_string());
-        }
-
-        // Pre-compute which lines are in code blocks or front matter - only when needed
-        let mut excluded_lines = vec![false; lines.len()];
-        let has_code_blocks =
-            content.contains("```") || content.contains("~~~") || content.contains("    ");
-        let has_front_matter = content.starts_with("---\n") || content.starts_with("---\r\n");
-
-        if has_code_blocks || has_front_matter {
-            for (i, _) in lines.iter().enumerate() {
-                excluded_lines[i] = (has_front_matter
-                    && FrontMatterUtils::is_in_front_matter(&content, i))
-                    || (has_code_blocks && CodeBlockUtils::is_in_code_block(&content, i));
-            }
-        }
-
-        let mut in_list = false;
-        let mut _list_start_index = 0;
-        let mut _list_end_index = 0;
-
-        for (i, line) in lines.iter().enumerate() {
-            // If this line is in front matter or code block, keep it as is
-            if excluded_lines[i] {
-                result.push(*line);
-                continue;
-            }
-
-            if Self::is_list_item(line) {
-                if !in_list {
-                    // Starting a new list
-                    // Add blank line before list if needed (unless it's the start of the document)
-                    if i > 0
-                        && !Self::is_empty_line(lines[i - 1])
-                        && !excluded_lines[i - 1]
-                        && !result.is_empty()
-                    {
-                        result.push("");
-                    }
-                    in_list = true;
-                    _list_start_index = i;
-                }
-                result.push(*line);
-            } else if Self::is_list_content(line) {
-                // List content, just add it
-                result.push(*line);
-            } else if Self::is_empty_line(line) {
-                // Empty line
-                result.push(*line);
-                in_list = false;
-            } else {
-                // Regular content
-                if in_list {
-                    // End of list, add blank line if needed
-                    result.push("");
-                    in_list = false;
-                }
-                result.push(*line);
-            }
-        }
-
-        Ok(result.join("\n"))
-    }
-
-    /// Optimized check using document structure - Block-based approach
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        let mut warnings = Vec::new();
+        let structure = document_structure_from_str(ctx.content);
         let lines: Vec<&str> = ctx.content.lines().collect();
         let num_lines = lines.len();
+        if num_lines == 0 { return Ok(String::new()); }
 
-        let mut current_list_start: Option<usize> = None;
+        let list_blocks = self.find_md032_list_blocks(&lines, &structure);
+        if list_blocks.is_empty() { return Ok(ctx.content.to_string()); }
 
-        for i in 0..num_lines {
-            let line_idx = i + 1; // 1-based index
-            let is_excluded =
-                structure.is_in_code_block(line_idx) || structure.is_in_front_matter(line_idx);
-            let is_list_related = structure.list_lines.contains(&line_idx);
+        let mut insertions: std::collections::BTreeMap<usize, String> = std::collections::BTreeMap::new();
 
-            if is_list_related && !is_excluded {
-                // Part of a potential list block
-                if current_list_start.is_none() {
-                    current_list_start = Some(line_idx);
-                }
-            } else {
-                // Not part of a list block (or excluded)
-                if let Some(start_line) = current_list_start {
-                    // Just finished a list block ending at line i (0-based)
-                    let end_line = i; // The list ended on the previous line (i-1, which is 1-based `i`)
-
-                    // Check line *before* start_line
-                    if start_line > 1 {
-                        let prev_line_idx = start_line - 1;
-                        let prev_line_is_excluded = structure.is_in_code_block(prev_line_idx)
-                            || structure.is_in_front_matter(prev_line_idx);
-                        if !prev_line_is_excluded {
-                            let prev_line = lines.get(prev_line_idx - 1).unwrap_or(&"");
-                            if !Self::is_empty_line(prev_line) {
-                                warnings.push(LintWarning {
-                                    rule_name: Some(self.name()),
-                                    line: start_line,
-                                    column: 1,
-                                    message: "List should be preceded by a blank line".to_string(),
-                                    severity: Severity::Warning,
-                                    fix: None,
-                                });
-                            }
-                        }
-                    }
-
-                    // Check line *after* end_line
-                    // The current line (line_idx) is the one immediately after the list ended.
-                    if !is_excluded && !Self::is_empty_line(lines[i]) {
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: end_line + 1, // Warning points to the line *after* the list ended
-                            column: 1,
-                            message: "List should be followed by a blank line".to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    }
-                    current_list_start = None; // Reset for the next potential block
-                }
-                // If it wasn't a list line, just continue
-            }
-        }
-
-        // Check if the document ends with a list block
-        if let Some(start_line) = current_list_start {
-            let _end_line = num_lines; // Prefixed with underscore as it's not used below
-                                       // Check line *before* start_line
+        // Phase 1: Identify needed insertions
+        for &(start_line, end_line, ref prefix) in &list_blocks {
+            // Check before block
             if start_line > 1 {
-                let prev_line_idx = start_line - 1;
-                let prev_line_is_excluded = structure.is_in_code_block(prev_line_idx)
-                    || structure.is_in_front_matter(prev_line_idx);
-                if !prev_line_is_excluded {
-                    let prev_line = lines.get(prev_line_idx - 1).unwrap_or(&"");
-                    if !Self::is_empty_line(prev_line) {
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: start_line,
-                            column: 1,
-                            message: "List should be preceded by a blank line".to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    }
+                let prev_line_actual_idx_0 = start_line - 2;
+                let prev_line_actual_idx_1 = start_line - 1;
+                let is_prev_excluded = structure.is_in_code_block(prev_line_actual_idx_1) || structure.is_in_front_matter(prev_line_actual_idx_1);
+                let prev_prefix = BLOCKQUOTE_PREFIX_RE.find(lines[prev_line_actual_idx_0]).map_or(String::new(), |m| m.as_str().to_string());
+
+                if !is_prev_excluded && !is_blank_in_context(lines[prev_line_actual_idx_0]) && prev_prefix == *prefix {
+                    insertions.insert(start_line, prefix.clone());
                 }
             }
-            // No need to check line *after* end_line since it's the end of the file
+
+            // Check after block
+            if end_line < num_lines {
+                let after_block_line_idx_0 = end_line;
+                let after_block_line_idx_1 = end_line + 1;
+                let line_after_block_content_str = lines[after_block_line_idx_0];
+                let is_line_after_excluded = structure.is_in_code_block(after_block_line_idx_1)
+                    || structure.is_in_front_matter(after_block_line_idx_1);
+                let after_prefix = BLOCKQUOTE_PREFIX_RE.find(line_after_block_content_str).map_or(String::new(), |m| m.as_str().to_string());
+
+                if !is_line_after_excluded && !is_blank_in_context(line_after_block_content_str) && after_prefix == *prefix {
+                    insertions.insert(after_block_line_idx_1, prefix.clone());
+                }
+            }
         }
 
-        Ok(warnings)
+        // Phase 2: Reconstruct with insertions
+        let mut result_lines: Vec<String> = Vec::with_capacity(num_lines + insertions.len());
+        for (i, line) in lines.iter().enumerate() {
+            let current_line_num = i + 1;
+            if let Some(prefix_to_insert) = insertions.get(&current_line_num) {
+                 if result_lines.is_empty() || result_lines.last().unwrap() != prefix_to_insert {
+                     result_lines.push(prefix_to_insert.clone());
+                 }
+            }
+            result_lines.push(line.to_string());
+        }
+
+        Ok(result_lines.join("\n"))
     }
 
-    /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         ctx.content.is_empty()
-            || !ctx.content.contains([
-                '-', '*', '+', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
-            ])
     }
 
-    /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::List
     }
@@ -363,17 +332,36 @@ impl Rule for MD032BlanksAroundLists {
     where
         Self: Sized,
     {
-        Box::new(MD032BlanksAroundLists)
+        Box::new(Self)
     }
 }
 
-impl DocumentStructureExtensions for MD032BlanksAroundLists {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        !doc_structure.list_lines.is_empty()
+// Helper to determine the column where content starts after the marker
+fn get_content_start_column(captures: &Captures) -> Option<usize> {
+    let indent_len = captures.get(1).map_or(0, |m| m.as_str().len());
+    let marker_char_len = captures.get(2).or_else(|| captures.get(3)).map_or(0, |m| m.as_str().len());
+    let marker_full_len = if captures.get(3).is_some() { marker_char_len + 1 } else { marker_char_len };
+    let _space_after_len = captures.get(4).map_or(0, |m| m.as_str().len()); // Keep underscore prefix as it's unused now
+
+    Some(indent_len + marker_full_len + 1)
+}
+
+// Calculates visual indentation, treating tabs as expanding to 4 spaces (common behavior)
+fn calculate_indent(line: &str) -> usize {
+    // Find the first non-whitespace character
+    line.find(|c: char| !c.is_whitespace()).unwrap_or(0)
+}
+
+// Checks if a line is blank, considering blockquote context
+fn is_blank_in_context(line: &str) -> bool {
+    // A line is blank if it's empty or contains only whitespace,
+    // potentially after removing blockquote markers.
+    if let Some(m) = BLOCKQUOTE_PREFIX_RE.find(line) {
+        // If a blockquote prefix is found, check if the content *after* the prefix is blank.
+        line[m.end()..].trim().is_empty()
+    } else {
+        // No blockquote prefix, check the whole line for blankness.
+        line.trim().is_empty()
     }
 }
 
@@ -381,38 +369,207 @@ impl DocumentStructureExtensions for MD032BlanksAroundLists {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
-    use crate::utils::document_structure::document_structure_from_str;
+    use crate::rule::Rule;
+
+    fn lint(content: &str) -> Vec<LintWarning> {
+        let rule = MD032BlanksAroundLists::default();
+        let ctx = LintContext::new(content);
+        rule.check(&ctx).expect("Lint check failed")
+    }
+
+    fn fix(content: &str) -> String {
+        let rule = MD032BlanksAroundLists::default();
+        let ctx = LintContext::new(content);
+        rule.fix(&ctx).expect("Lint fix failed")
+    }
 
     #[test]
-    fn test_with_document_structure() {
-        let rule = MD032BlanksAroundLists;
+    fn test_list_at_start() {
+        let content = "- Item 1\n- Item 2\nText";
+        let warnings = lint(content);
+         assert_eq!(warnings.len(), 1, "Expected 1 warning for list at start without trailing blank line");
+         assert_eq!(warnings[0].line, 2, "Warning should be on the last line of the list (line 2)");
+         assert!(warnings[0].message.contains("followed by a blank line"));
 
-        // Test case 1: List without blank lines
-        let content = "Paragraph\n- Item 1\n- Item 2\nAnother paragraph";
-        let structure = document_structure_from_str(content);
-        let ctx = LintContext::new(content);
-        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert_eq!(warnings.len(), 2); // Should warn about missing blank lines before and after
-
-        // Test case 2: Lists with proper blank lines
-        let content = "Paragraph\n\n- Item 1\n- Item 2\n\nAnother paragraph";
-        let structure = document_structure_from_str(content);
-        let ctx = LintContext::new(content);
-        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert_eq!(warnings.len(), 0); // No warnings
-
-        // Test case 3: List at beginning of document
-        let content = "- Item 1\n- Item 2\n\nParagraph";
-        let structure = document_structure_from_str(content);
-        let ctx = LintContext::new(content);
-        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert_eq!(warnings.len(), 0); // No warnings for missing blank line before
-
-        // Test case 4: List at end of document
-        let content = "Paragraph\n\n- Item 1\n- Item 2";
-        let structure = document_structure_from_str(content);
-        let ctx = LintContext::new(content);
-        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert_eq!(warnings.len(), 0); // No warnings for missing blank line after
+        let fixed_content = fix(content);
+        assert_eq!(fixed_content, "- Item 1\n- Item 2\n\nText");
     }
+
+    #[test]
+    fn test_list_at_end() {
+        let content = "Text\n- Item 1\n- Item 2";
+        let warnings = lint(content);
+         assert_eq!(warnings.len(), 1, "Expected 1 warning for list at end without preceding blank line");
+         assert_eq!(warnings[0].line, 2, "Warning should be on the first line of the list (line 2)");
+         assert!(warnings[0].message.contains("preceded by a blank line"));
+
+        let fixed_content = fix(content);
+        assert_eq!(fixed_content, "Text\n\n- Item 1\n- Item 2");
+    }
+
+    #[test]
+    fn test_list_in_middle() {
+        let content = "Text 1\n- Item 1\n- Item 2\nText 2";
+        let warnings = lint(content);
+         assert_eq!(warnings.len(), 2, "Expected 2 warnings for list in middle without surrounding blank lines");
+         assert_eq!(warnings[0].line, 2, "First warning on line 2 (start)");
+         assert!(warnings[0].message.contains("preceded by a blank line"));
+         assert_eq!(warnings[1].line, 3, "Second warning on line 3 (end)");
+         assert!(warnings[1].message.contains("followed by a blank line"));
+
+
+        let fixed_content = fix(content);
+        assert_eq!(fixed_content, "Text 1\n\n- Item 1\n- Item 2\n\nText 2");
+    }
+
+    #[test]
+    fn test_correct_spacing() {
+        let content = "Text 1\n\n- Item 1\n- Item 2\n\nText 2";
+        let warnings = lint(content);
+        assert_eq!(warnings.len(), 0, "Expected no warnings for correctly spaced list");
+
+        let fixed_content = fix(content);
+        assert_eq!(fixed_content, content, "Fix should not change correctly spaced content");
+    }
+
+    #[test]
+     fn test_list_with_content() {
+         let content = "Text\n* Item 1\n  Content\n* Item 2\n  More content\nText";
+         let warnings = lint(content);
+         assert_eq!(warnings.len(), 2, "Expected 2 warnings for list block (lines 2-5) missing surrounding blanks. Got: {:?}", warnings);
+         if warnings.len() == 2 {
+             assert_eq!(warnings[0].line, 2, "Warning 1 should be on line 2 (start)");
+             assert!(warnings[0].message.contains("preceded by a blank line"));
+             assert_eq!(warnings[1].line, 5, "Warning 2 should be on line 5 (end)");
+             assert!(warnings[1].message.contains("followed by a blank line"));
+         }
+         let fixed_content = fix(content);
+         let expected_fixed = "Text\n\n* Item 1\n  Content\n* Item 2\n  More content\n\nText";
+         assert_eq!(fixed_content, expected_fixed, "Fix did not produce the expected output. Got:\n{}", fixed_content);
+     }
+
+    #[test]
+    fn test_nested_list() {
+        let content = "Text\n- Item 1\n  - Nested 1\n- Item 2\nText";
+        let warnings = lint(content);
+        assert_eq!(warnings.len(), 2, "Nested list block warnings. Got: {:?}", warnings); // Needs blank before line 2, after line 4
+        if warnings.len() == 2 {
+             assert_eq!(warnings[0].line, 2);
+             assert_eq!(warnings[1].line, 4);
+        }
+        let fixed_content = fix(content);
+        assert_eq!(fixed_content, "Text\n\n- Item 1\n  - Nested 1\n- Item 2\n\nText");
+    }
+
+     #[test]
+     fn test_list_with_internal_blanks() {
+         let content = "Text\n* Item 1\n\n  More Item 1 Content\n* Item 2\nText";
+         let warnings = lint(content);
+         assert_eq!(warnings.len(), 2, "List with internal blanks warnings. Got: {:?}", warnings);
+         if warnings.len() == 2 {
+             assert_eq!(warnings[0].line, 2);
+             assert_eq!(warnings[1].line, 5); // End of block is line 5
+         }
+         let fixed_content = fix(content);
+         assert_eq!(fixed_content, "Text\n\n* Item 1\n\n  More Item 1 Content\n* Item 2\n\nText");
+     }
+
+    #[test]
+    fn test_ignore_code_blocks() {
+        let content = "```\n- Not a list item\n```\nText";
+        let warnings = lint(content);
+        assert_eq!(warnings.len(), 0);
+        let fixed_content = fix(content);
+        assert_eq!(fixed_content, content);
+    }
+
+     #[test]
+     fn test_ignore_front_matter() {
+         let content = "---\ntitle: Test\n---\n- List Item\nText";
+         let warnings = lint(content);
+         assert_eq!(warnings.len(), 1, "Front matter test warnings. Got: {:?}", warnings);
+         if !warnings.is_empty() {
+             assert_eq!(warnings[0].line, 4); // Warning on last line of list
+             assert!(warnings[0].message.contains("followed by a blank line"));
+         }
+         let fixed_content = fix(content);
+         assert_eq!(fixed_content, "---\ntitle: Test\n---\n- List Item\n\nText");
+     }
+
+     #[test]
+     fn test_multiple_lists() {
+         let content = "Text\n- List 1 Item 1\n- List 1 Item 2\nText 2\n* List 2 Item 1\nText 3";
+         let warnings = lint(content);
+         assert_eq!(warnings.len(), 4, "Multiple lists warnings. Got: {:?}", warnings);
+         let fixed_content = fix(content);
+         assert_eq!(fixed_content, "Text\n\n- List 1 Item 1\n- List 1 Item 2\n\nText 2\n\n* List 2 Item 1\n\nText 3");
+     }
+
+      #[test]
+     fn test_adjacent_lists() {
+         let content = "- List 1\n\n* List 2";
+         let warnings = lint(content);
+         assert_eq!(warnings.len(), 0);
+         let fixed_content = fix(content);
+         assert_eq!(fixed_content, content);
+     }
+
+      #[test]
+     fn test_list_in_blockquote() {
+          let content = "> Quote line 1\n> - List item 1\n> - List item 2\n> Quote line 2";
+          let warnings = lint(content);
+          assert_eq!(warnings.len(), 2, "Expected 2 warnings for blockquoted list. Got: {:?}", warnings);
+         if warnings.len() == 2 {
+             assert_eq!(warnings[0].line, 2);
+             assert_eq!(warnings[1].line, 3);
+         }
+          let fixed_content = fix(content);
+          // Check expected output preserves the space after >
+          assert_eq!(fixed_content, "> Quote line 1\n> \n> - List item 1\n> - List item 2\n> \n> Quote line 2", "Fix for blockquoted list failed. Got:\n{}", fixed_content);
+     }
+
+     #[test]
+     fn test_ordered_list() {
+         let content = "Text\n1. Item 1\n2. Item 2\nText";
+         let warnings = lint(content);
+         assert_eq!(warnings.len(), 2);
+         let fixed_content = fix(content);
+         assert_eq!(fixed_content, "Text\n\n1. Item 1\n2. Item 2\n\nText");
+     }
+
+     #[test]
+      fn test_no_double_blank_fix() {
+          let content = "Text\n\n- Item 1\n- Item 2\nText"; // Missing blank after
+          let warnings = lint(content);
+          assert_eq!(warnings.len(), 1);
+          if !warnings.is_empty() { assert_eq!(warnings[0].line, 4, "Warning line for missing blank after should be the last line of the block"); }
+          let fixed_content = fix(content);
+          assert_eq!(fixed_content, "Text\n\n- Item 1\n- Item 2\n\nText", "Fix added extra blank after. Got:\n{}", fixed_content);
+
+          let content2 = "Text\n- Item 1\n- Item 2\n\nText"; // Missing blank before
+           let warnings2 = lint(content2);
+           assert_eq!(warnings2.len(), 1);
+           if !warnings2.is_empty() { assert_eq!(warnings2[0].line, 2, "Warning line for missing blank before should be the first line of the block"); }
+           let fixed_content2 = fix(content2);
+           assert_eq!(fixed_content2, "Text\n\n- Item 1\n- Item 2\n\nText", "Fix added extra blank before. Got:\n{}", fixed_content2);
+      }
+
+       #[test]
+       fn test_empty_input() {
+           let content = "";
+           let warnings = lint(content);
+           assert_eq!(warnings.len(), 0);
+           let fixed_content = fix(content);
+           assert_eq!(fixed_content, "");
+       }
+
+        #[test]
+        fn test_only_list() {
+            let content = "- Item 1\n- Item 2";
+            let warnings = lint(content);
+            assert_eq!(warnings.len(), 0);
+            let fixed_content = fix(content);
+            assert_eq!(fixed_content, content);
+        }
+
 }

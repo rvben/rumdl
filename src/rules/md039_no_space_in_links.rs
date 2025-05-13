@@ -11,6 +11,9 @@ use crate::utils::range_utils::LineIndex;
 #[derive(Debug, Default, Clone)]
 pub struct MD039NoSpaceInLinks;
 
+// Static definition for the warning message
+const WARNING_MESSAGE: &str = "Spaces inside link text should be removed";
+
 impl MD039NoSpaceInLinks {
     pub fn new() -> Self {
         Self
@@ -24,11 +27,11 @@ impl MD039NoSpaceInLinks {
 
     /// Check if the text has leading or trailing spaces, and return the fixed version if so
     #[inline]
-    fn check_link_text(&self, text: &str) -> Option<String> {
+    fn check_link_text<'a>(&self, text: &'a str) -> Option<&'a str> {
         if text.starts_with(' ') || text.ends_with(' ') {
             let trimmed = text.trim();
             if !trimmed.is_empty() {
-                Some(trimmed.to_string())
+                Some(trimmed)
             } else {
                 None
             }
@@ -164,7 +167,7 @@ impl Rule for MD039NoSpaceInLinks {
                     rule_name: Some(self.name()),
                     line: line_num,
                     column: start_col,
-                    message: "Spaces inside link text should be removed".to_string(),
+                    message: WARNING_MESSAGE.to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: start_pos..start_pos + original.len(),
@@ -177,69 +180,52 @@ impl Rule for MD039NoSpaceInLinks {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         if self.should_skip(ctx) {
             return Ok(Vec::new());
         }
 
-        // Get document structure for code block detection
-        let doc_structure = DocumentStructure::new(content);
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
+        // Create document structure once
+        let doc_structure = DocumentStructure::new(ctx.content);
 
-        for (i, line) in content.lines().enumerate() {
-            let line_num = i + 1;
-            // Skip lines in code blocks using centralized detection
-            if !doc_structure.is_in_code_block(line_num) {
-                for (column, _original, fixed) in self.check_line(line) {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: line_num,
-                        column,
-                        message: "Spaces inside link text should be removed".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num, column),
-                            replacement: fixed,
-                        }),
-                    });
-                }
-            }
-        }
-
-        Ok(warnings)
+        // Call check_with_structure
+        self.check_with_structure(ctx, &doc_structure)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
         if self.should_skip(ctx) {
-            return Ok(content.to_string());
+            return Ok(ctx.content.to_string());
         }
 
-        // Get document structure for code block detection
-        let doc_structure = DocumentStructure::new(content);
-        let lines: Vec<&str> = content.lines().collect();
-        let mut result = String::with_capacity(content.len());
+        // Get warnings using the consolidated check method
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
+        }
 
-        for (i, line) in lines.iter().enumerate() {
-            let mut line_str = line.to_string();
-            let line_num = i + 1;
-
-            // Skip lines in code blocks using centralized detection
-            if !doc_structure.is_in_code_block(line_num) {
-                for (_, original, fixed) in self.check_line(line) {
-                    // Use a safe replacement method
-                    line_str = line_str.replace(&original, &fixed);
-                }
-            }
-
-            result.push_str(&line_str);
-            if i < lines.len() - 1 {
-                result.push('\n');
+        // Apply fixes using the information from warnings
+        // BTreeMap ensures fixes are applied in reverse order by start position
+        let mut fixes: std::collections::BTreeMap<usize, Fix> = std::collections::BTreeMap::new();
+        for warning in warnings {
+            if let Some(fix) = warning.fix {
+                // Use start position as key for sorting
+                fixes.insert(fix.range.start, fix);
             }
         }
 
-        Ok(result)
+        let mut fixed_content = ctx.content.to_string();
+        for (_, fix) in fixes.iter().rev() { // Iterate in reverse order of start position
+             // Ensure range is valid for the current state of fixed_content
+             if fix.range.end <= fixed_content.len() {
+                fixed_content.replace_range(fix.range.clone(), &fix.replacement);
+             } else {
+                 // Log or handle invalid range error - maybe return error?
+                 // For now, let's skip invalid ranges to avoid panic
+                 eprintln!("Warning: Skipping fix for rule {} due to invalid range {:?} in content of length {}.",
+                          self.name(), fix.range, fixed_content.len());
+             }
+        }
+
+        Ok(fixed_content)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -250,7 +236,7 @@ impl Rule for MD039NoSpaceInLinks {
     where
         Self: Sized,
     {
-        Box::new(MD039NoSpaceInLinks)
+        Box::new(Self)
     }
 }
 
