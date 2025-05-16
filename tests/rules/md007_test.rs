@@ -125,3 +125,169 @@ fn test_blockquote_list_with_code_block() {
         result
     );
 }
+
+mod parity_with_markdownlint {
+    use super::*;
+    use rumdl::rules::MD007ULIndent;
+    use rumdl::lint_context::LintContext;
+    use rumdl::rule::Rule;
+
+    #[test]
+    fn parity_flat_list_default_indent() {
+        let input = "* Item 1\n* Item 2\n* Item 3";
+        let expected = "* Item 1\n* Item 2\n* Item 3";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parity_nested_list_default_indent() {
+        let input = "* Item 1\n  * Nested 1\n    * Nested 2";
+        let expected = "* Item 1\n  * Nested 1\n    * Nested 2";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parity_nested_list_incorrect_indent() {
+        let input = "* Item 1\n * Nested 1\n   * Nested 2";
+        let expected = "* Item 1\n  * Nested 1\n    * Nested 2";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+    }
+
+    #[test]
+    fn parity_mixed_markers() {
+        let input = "* Item 1\n  - Nested 1\n    + Nested 2";
+        let expected = "* Item 1\n  - Nested 1\n    + Nested 2";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parity_blockquote_list() {
+        let input = "> * Item 1\n>   * Nested";
+        let expected = "> * Item 1\n>   * Nested";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parity_tabs_for_indent() {
+        let input = "* Item 1\n\t* Nested";
+        let expected = "* Item 1\n  * Nested";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn parity_code_block_ignored() {
+        let input = "```\n* Not a list\n  * Not a nested list\n```\n* Item 1";
+        let expected = "```\n* Not a list\n  * Not a nested list\n```\n* Item 1";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parity_custom_indent_4() {
+        let input = "* Item 1\n  * Nested 1\n    * Nested 2";
+        let expected = "* Item 1\n    * Nested 1\n        * Nested 2";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::new(4);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn parity_empty_input() {
+        let input = "";
+        let expected = "";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parity_no_lists() {
+        let input = "# Heading\nSome text";
+        let expected = "# Heading\nSome text";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parity_list_with_blank_lines_between_items() {
+        let input = "* Item 1\n\n* Item 2\n\n  * Nested item 1\n\n  * Nested item 2\n* Item 3";
+        let expected = "* Item 1\n\n* Item 2\n\n  * Nested item 1\n\n  * Nested item 2\n* Item 3";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn parity_list_items_with_trailing_whitespace() {
+        let input = "* Item 1   \n  * Nested item 1   \n* Item 2   ";
+        let expected = "* Item 1   \n  * Nested item 1   \n* Item 2   ";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn parity_deeply_nested_blockquotes_with_lists() {
+        let input = "> > * Item 1\n> >   * Nested item 1\n> >     * Nested item 2\n> > * Item 2";
+        let expected = "> > * Item 1\n> >   * Nested item 1\n> >     * Nested item 2\n> > * Item 2";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn parity_inconsistent_marker_styles_different_nesting() {
+        let input = "* Item 1\n  - Nested item 1\n    + Nested item 2\n* Item 2";
+        let expected = "* Item 1\n  - Nested item 1\n    + Nested item 2\n* Item 2";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn parity_mixed_tabs_and_spaces_in_indentation() {
+        let input = "* Item 1\n\t* Nested item 1\n  \t* Nested item 2\n* Item 2";
+        let expected = "* Item 1\n  * Nested item 1\n    * Nested item 2\n* Item 2";
+        let ctx = LintContext::new(input);
+        let rule = MD007ULIndent::default();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+    }
+}

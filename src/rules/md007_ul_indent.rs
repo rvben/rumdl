@@ -101,28 +101,98 @@ impl Rule for MD007ULIndent {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let element_cache = ElementCache::new(content);
-        let mut lines: Vec<&str> = content.lines().collect();
-        for item in element_cache.get_list_items() {
-            if element_cache.is_in_code_block(item.line_number) {
+        let tab_str = " ".repeat(self.indent);
+        let mut lines: Vec<String> = content
+            .lines()
+            .map(|l| {
+                // Normalize leading tabs to spaces
+                let mut norm = String::new();
+                let mut chars = l.chars().peekable();
+                while let Some(&c) = chars.peek() {
+                    if c == '\t' {
+                        norm.push_str(&tab_str);
+                        chars.next();
+                    } else if c == ' ' {
+                        norm.push(' ');
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                norm.extend(chars);
+                norm
+            })
+            .collect();
+
+        // Recompute logical nesting for each unordered list item
+        let mut prev_items: Vec<(usize, usize, usize)> = Vec::new(); // (blockquote_depth, indent, nesting_level)
+        for (i, line) in lines.iter_mut().enumerate() {
+            let orig_line = line.clone();
+            // Inline blockquote prefix parsing (since parse_blockquote_prefix is private)
+            let mut rest = orig_line.as_str();
+            let mut blockquote_prefix = String::new();
+            let mut blockquote_depth = 0;
+            loop {
+                let trimmed = rest.trim_start();
+                if trimmed.starts_with('>') {
+                    // Find the '>' and a single optional space
+                    let after = &trimmed[1..];
+                    let mut chars = after.chars();
+                    let mut space_count = 0;
+                    if let Some(' ') = chars.next() {
+                        space_count = 1;
+                    }
+                    let (spaces, after_marker) = after.split_at(space_count);
+                    blockquote_prefix.push('>');
+                    blockquote_prefix.push_str(spaces);
+                    rest = after_marker;
+                    blockquote_depth += 1;
+                } else {
+                    break;
+                }
+            }
+            // Only process unordered list items outside code blocks
+            if rest.trim().is_empty() || rest.starts_with("```") || rest.starts_with("~~~") {
+                // Do NOT clear prev_items on blank lines; only skip processing
                 continue;
             }
-            if matches!(item.marker_type, ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus) {
-                let expected_indent = item.nesting_level * self.indent;
-                if item.indentation != expected_indent {
-                    // Reconstruct the line: blockquote_prefix + correct_indent + marker + spaces_after_marker + content
-                    let correct_indent = " ".repeat(expected_indent);
-                    let marker = &item.marker;
-                    let after_marker = " ".repeat(item.spaces_after_marker.max(1));
-                    let new_line = format!(
-                        "{}{}{}{}{}",
-                        item.blockquote_prefix,
-                        correct_indent,
-                        marker,
-                        after_marker,
-                        item.content
-                    );
-                    lines[item.line_number - 1] = Box::leak(new_line.into_boxed_str());
+            // Use the same regex as element_cache
+            let re = regex::Regex::new(r"^(?P<indent>[ ]*)(?P<marker>[*+-])(?P<after>[ ]+)(?P<content>.*)$").unwrap();
+            if let Some(caps) = re.captures(rest) {
+                let indent_str = caps.name("indent").map_or("", |m| m.as_str());
+                let marker = caps.name("marker").unwrap().as_str();
+                let after = caps.name("after").map_or(" ", |m| m.as_str());
+                let content = caps.name("content").map_or("", |m| m.as_str());
+                let indent = indent_str.len();
+                // Compute logical nesting level
+                let mut nesting_level = 0;
+                if let Some(&(_last_bq, last_indent, last_level)) = prev_items.iter().rev().find(|(bq, _, _)| *bq == blockquote_depth) {
+                    if indent > last_indent {
+                        nesting_level = last_level + 1;
+                    } else {
+                        for &(prev_bq, prev_indent, prev_level) in prev_items.iter().rev() {
+                            if prev_bq == blockquote_depth && prev_indent <= indent {
+                                nesting_level = prev_level;
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Remove stack entries with indent >= current indent and same blockquote depth
+                while let Some(&(prev_bq, prev_indent, _)) = prev_items.last() {
+                    if prev_bq != blockquote_depth || prev_indent < indent {
+                        break;
+                    }
+                    prev_items.pop();
+                }
+                prev_items.push((blockquote_depth, indent, nesting_level));
+                // Reconstruct line with correct indentation
+                let correct_indent = " ".repeat(nesting_level * self.indent);
+                *line = format!("{}{}{}{}{}", blockquote_prefix, correct_indent, marker, after, content);
+            } else {
+                // Only clear prev_items if the line is not blank and not a list item
+                if !rest.trim().is_empty() {
+                    prev_items.clear();
                 }
             }
         }
@@ -174,12 +244,4 @@ impl DocumentStructureExtensions for MD007ULIndent {
         // Use the document structure to check if there are any unordered list elements
         !doc_structure.list_lines.is_empty()
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lint_context::LintContext;
-
-    // Remove test_with_document_structure, as the rule no longer uses DocumentStructure for its logic
 }
