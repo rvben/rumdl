@@ -5,6 +5,7 @@
 use dyn_clone::DynClone;
 use std::ops::Range;
 use thiserror::Error;
+use serde::Serialize;
 
 // Import document structure
 use crate::lint_context::LintContext;
@@ -36,7 +37,7 @@ pub enum LintError {
 
 pub type LintResult = Result<Vec<LintWarning>, LintError>;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct LintWarning {
     pub message: String,
     pub line: usize,
@@ -46,13 +47,13 @@ pub struct LintWarning {
     pub rule_name: Option<&'static str>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct Fix {
     pub range: Range<usize>,
     pub replacement: String,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize)]
 pub enum Severity {
     Error,
     Warning,

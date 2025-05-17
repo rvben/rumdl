@@ -212,26 +212,36 @@ impl Rule for MD030ListMarkerSpace {
             // Per-item logic: only require multi-line spacing for items that are actually multi-line
             for item in &items {
                 let config_value = rule.get_expected_spaces(item.list_type, item.is_multi);
+                // Skip horizontal rules (***, ---, ___)
+                let trimmed = item.line_str.trim();
+                if trimmed == "***" || trimmed == "---" || trimmed == "___" {
+                    continue;
+                }
+                // Warn if missing space (spaces < config_value)
                 if item.spaces < config_value {
+                    let msg = if item.spaces == 0 {
+                        format!(
+                            "Missing space after {} list marker",
+                            match item.list_type {
+                                ListType::Unordered => "unordered",
+                                ListType::Ordered => "ordered",
+                            }
+                        )
+                    } else {
+                        format!(
+                            "Expected at least {} space{} after list marker, found {}",
+                            config_value,
+                            if config_value == 1 { "" } else { "s" },
+                            item.spaces
+                        )
+                    };
                     warnings.push(LintWarning {
                         rule_name: Some(rule.name()),
                         severity: Severity::Warning,
                         line: item.line,
                         column: item.col + 1,
-                        message: format!(
-                            "Expected at least {} space{} after list marker, found {}",
-                            config_value,
-                            if config_value == 1 { "" } else { "s" },
-                            item.spaces
-                        ),
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(item.line, 1),
-                            replacement: rule.fix_line(
-                                item.line_str,
-                                item.list_type,
-                                item.is_multi,
-                            ),
-                        }),
+                        message: msg,
+                        fix: None, // No fix for now
                     });
                 }
             }

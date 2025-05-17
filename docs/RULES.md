@@ -82,7 +82,7 @@ Each rule has a brief description and a link to its detailed documentation.
 
 | Rule ID | Rule Name | Description |
 |---------|-----------|-------------|
-| [MD014](md014.md) | Commands show output | Dollar signs used before commands without showing output |
+| [MD014](md014.md) | Commands show output | Code blocks should show output when appropriate |
 | [MD040](md040.md) | Fenced code language | Fenced code blocks should have a language specified |
 | [MD046](md046.md) | Code block style | Code block style |
 | [MD048](md048.md) | Code fence style | Code fence style |
@@ -111,7 +111,6 @@ Each rule has a brief description and a link to its detailed documentation.
 
 | Rule ID | Rule Name | Description |
 |---------|-----------|-------------|
-| [MD015](md015.md) | No multiple space list | Multiple spaces after list marker |
 | [MD057](md057.md) | Relative links | Relative links should exist |
 
 ## Using Rules

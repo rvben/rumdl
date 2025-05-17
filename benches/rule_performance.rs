@@ -1,8 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rumdl::rule::Rule;
 use rumdl::rules::{
-    MD013LineLength, MD015NoMissingSpaceAfterListMarker, MD033NoInlineHtml, MD037NoSpaceInEmphasis,
-    MD044ProperNames, MD051LinkFragments, MD053LinkImageReferenceDefinitions,
+    MD013LineLength, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD044ProperNames, MD051LinkFragments,
+    MD053LinkImageReferenceDefinitions,
 };
 
 /// Benchmark MD013 rule on a large content with long lines
@@ -16,20 +16,11 @@ fn bench_md013(c: &mut Criterion) {
     let rule = MD013LineLength::default();
 
     c.bench_function("MD013 check 100 long lines", |b| {
-        b.iter(|| rule.check(black_box(&content)))
+        b.iter(|| rule.check(&rumdl::lint_context::LintContext::new(&content)))
     });
 
     c.bench_function("MD013 fix 100 long lines", |b| {
-        b.iter(|| rule.fix(black_box(&content)))
-    });
-}
-
-/// Benchmark MD015 rule on a large content with list items
-fn bench_md015(c: &mut Criterion) {
-    let rule = MD015NoMissingSpaceAfterListMarker::new();
-    let content = "-Item 1\n*Item 2\n+Item 3".repeat(1000);
-    c.bench_function("MD015 fix 1000 items", |b| {
-        b.iter(|| rule.fix(black_box(&content)))
+        b.iter(|| rule.fix(&rumdl::lint_context::LintContext::new(&content)))
     });
 }
 
@@ -44,7 +35,7 @@ fn bench_md033(c: &mut Criterion) {
     let rule = MD033NoInlineHtml::default();
 
     c.bench_function("MD033 check 500 HTML tags", |b| {
-        b.iter(|| rule.check(black_box(&content)))
+        b.iter(|| rule.check(&rumdl::lint_context::LintContext::new(&content)))
     });
 }
 
@@ -68,11 +59,11 @@ fn bench_md037(c: &mut Criterion) {
     let rule = MD037NoSpaceInEmphasis;
 
     c.bench_function("MD037 check 500 emphasis markers", |b| {
-        b.iter(|| rule.check(black_box(&content)))
+        b.iter(|| rule.check(&rumdl::lint_context::LintContext::new(&content)))
     });
 
     c.bench_function("MD037 fix 500 emphasis markers", |b| {
-        b.iter(|| rule.fix(black_box(&content)))
+        b.iter(|| rule.fix(&rumdl::lint_context::LintContext::new(&content)))
     });
 }
 
@@ -117,11 +108,11 @@ fn bench_md044(c: &mut Criterion) {
     let rule = MD044ProperNames::new(proper_names, true); // true = exclude code blocks
 
     c.bench_function("MD044 check 500 proper name occurrences", |b| {
-        b.iter(|| rule.check(black_box(&content)))
+        b.iter(|| rule.check(&rumdl::lint_context::LintContext::new(&content)))
     });
 
     c.bench_function("MD044 fix 500 proper name occurrences", |b| {
-        b.iter(|| rule.fix(black_box(&content)))
+        b.iter(|| rule.fix(&rumdl::lint_context::LintContext::new(&content)))
     });
 }
 
@@ -155,7 +146,7 @@ fn bench_md051(c: &mut Criterion) {
     let rule = MD051LinkFragments::new();
 
     c.bench_function("MD051 check 500 link fragments", |b| {
-        b.iter(|| rule.check(black_box(&content)))
+        b.iter(|| rule.check(&rumdl::lint_context::LintContext::new(&content)))
     });
 }
 
@@ -190,7 +181,7 @@ fn bench_md053(c: &mut Criterion) {
     c.bench_function("MD053 check cold cache", |b| {
         b.iter_with_setup(
             MD053LinkImageReferenceDefinitions::default, // Create a new instance for each iteration
-            |r| r.check(black_box(&content)),
+            |r| r.check(&rumdl::lint_context::LintContext::new(&content)),
         )
     });
 
@@ -198,21 +189,20 @@ fn bench_md053(c: &mut Criterion) {
     c.bench_function("MD053 check warm cache", |b| {
         // First, prime the cache
         let primed_rule = rule.clone();
-        let _ = primed_rule.check(&content);
+        let _ = primed_rule.check(&rumdl::lint_context::LintContext::new(&content));
 
         // Then benchmark with warm cache
-        b.iter(|| primed_rule.check(black_box(&content)))
+        b.iter(|| primed_rule.check(&rumdl::lint_context::LintContext::new(&content)))
     });
 
     c.bench_function("MD053 fix unused references", |b| {
-        b.iter(|| rule.fix(black_box(&content)))
+        b.iter(|| rule.fix(&rumdl::lint_context::LintContext::new(&content)))
     });
 }
 
 criterion_group!(
     benches,
     bench_md013,
-    bench_md015,
     bench_md033,
     bench_md037,
     bench_md044,

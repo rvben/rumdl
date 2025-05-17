@@ -168,6 +168,10 @@ struct CheckArgs {
     /// Quiet mode
     #[arg(short, long)]
     quiet: bool,
+
+    /// Output format: text (default) or json
+    #[arg(long, short = 'o', default_value = "text")]
+    output: String,
 }
 
 // Get a complete set of enabled rules based on CLI options and config
@@ -561,7 +565,6 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
         Box::new(MD011NoReversedLinks {}),
         Box::new(MD012NoMultipleBlanks::default()),
         Box::new(MD013LineLength::default()),
-        Box::new(MD015NoMissingSpaceAfterListMarker::default()),
         Box::new(MD018NoMissingSpaceAtx {}),
         Box::new(MD019NoMultipleSpaceAtx {}),
         Box::new(MD020NoMissingSpaceClosedAtx {}),
@@ -820,7 +823,6 @@ build-backend = \"setuptools.build_meta\"
                     Box::new(MD011NoReversedLinks {}),
                     Box::new(MD012NoMultipleBlanks::default()),
                     Box::new(MD013LineLength::default()),
-                    Box::new(MD015NoMissingSpaceAfterListMarker::default()),
                     Box::new(MD018NoMissingSpaceAtx {}),
                     Box::new(MD019NoMultipleSpaceAtx {}),
                     Box::new(MD020NoMissingSpaceClosedAtx {}),
@@ -1114,6 +1116,7 @@ build-backend = \"setuptools.build_meta\"
                         verbose: cli.verbose,
                         profile: cli.profile,
                         quiet: cli.quiet,
+                        output: "text".to_string(),
                     };
                     eprintln!("{}: Deprecation warning: Running 'rumdl .' or 'rumdl [PATHS...]' without a subcommand is deprecated and will be removed in a future release. Please use 'rumdl check .' instead.", "[rumdl]".yellow().bold());
                     run_check(&args, cli.config.as_deref());
@@ -1179,6 +1182,23 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>) {
         if !args.quiet {
             println!("No markdown files found to check.");
         }
+        return;
+    }
+
+    // JSON output mode: collect all warnings and print as JSON
+    if args.output == "json" {
+        let mut all_warnings = Vec::new();
+        for file_path in &file_paths {
+            let warnings = process_file_collect_warnings(
+                file_path,
+                &enabled_rules,
+                args.fix,
+                args.verbose,
+                args.quiet,
+            );
+            all_warnings.extend(warnings);
+        }
+        println!("{}", serde_json::to_string_pretty(&all_warnings).unwrap());
         return;
     }
 
@@ -1414,4 +1434,34 @@ fn process_file(
     }
 
     (true, total_warnings, warnings_fixed, fixable_warnings)
+}
+
+fn process_file_collect_warnings(
+    file_path: &str,
+    rules: &[Box<dyn Rule>],
+    fix: bool,
+    verbose: bool,
+    quiet: bool,
+) -> Vec<rumdl::rule::LintWarning> {
+    use std::time::Instant;
+    let _start_time = Instant::now();
+    if verbose && !quiet {
+        println!("Processing file: {}", file_path);
+    }
+    let content = match std::fs::read_to_string(file_path) {
+        Ok(content) => content,
+        Err(_) => return Vec::new(),
+    };
+    std::env::set_var("RUMDL_FILE_PATH", file_path);
+    let warnings_result = rumdl::lint(&content, rules, verbose);
+    std::env::remove_var("RUMDL_FILE_PATH");
+    let mut all_warnings = warnings_result.unwrap_or_default();
+    all_warnings.sort_by(|a, b| {
+        if a.line == b.line {
+            a.column.cmp(&b.column)
+        } else {
+            a.line.cmp(&b.line)
+        }
+    });
+    all_warnings
 }
