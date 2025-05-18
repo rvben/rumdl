@@ -27,7 +27,7 @@ mod md026_no_trailing_punctuation;
 mod md027_multiple_spaces_blockquote;
 mod md028_no_blanks_blockquote;
 mod md029_ordered_list_prefix;
-mod md030_list_marker_space;
+pub mod md030_list_marker_space;
 mod md031_blanks_around_fences;
 mod md032_blanks_around_lists;
 mod md033_no_inline_html;
