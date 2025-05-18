@@ -49,6 +49,8 @@ pub struct DocumentStructure {
     pub blockquotes: Vec<BlockquoteRange>,
     /// OPTIMIZATION 4: Bitmap indicating which lines are inside blockquotes
     pub in_blockquote: Vec<bool>,
+    /// Bitmap indicating which lines are inside HTML blocks
+    pub in_html_block: Vec<bool>,
 }
 
 /// Front matter block
@@ -202,6 +204,7 @@ impl DocumentStructure {
             list_items: Vec::new(),
             blockquotes: Vec::new(),
             in_blockquote: Vec::new(),
+            in_html_block: Vec::new(),
         };
 
         // Analyze the document and populate the structure
@@ -231,6 +234,9 @@ impl DocumentStructure {
 
         // OPTIMIZATION 4: Detect blockquotes (before code spans and links)
         self.detect_blockquotes(content);
+
+        // Detect HTML blocks (block-level HTML regions)
+        self.detect_html_blocks(content);
 
         // OPTIMIZATION 1: Detect inline code spans
         self.detect_code_spans(content);
@@ -972,6 +978,47 @@ impl DocumentStructure {
         }
     }
 
+    /// Detect HTML blocks (block-level HTML regions)
+    fn detect_html_blocks(&mut self, content: &str) {
+        let lines: Vec<&str> = content.lines().collect();
+        self.in_html_block = vec![false; lines.len()];
+        let mut in_block_html = false;
+        let mut block_html_end_pat = String::new();
+        let mut i = 0;
+        while i < lines.len() {
+            let line = lines[i];
+            let trimmed = line.trim_start();
+            if in_block_html {
+                self.in_html_block[i] = true;
+                // End block if closing tag or blank line
+                if trimmed.starts_with(&block_html_end_pat) || trimmed.is_empty() {
+                    in_block_html = false;
+                }
+                i += 1;
+                continue;
+            }
+            if let Some(c) = trimmed.chars().nth(0) {
+                if c == '<' && trimmed.len() > 1 && trimmed.chars().nth(1).unwrap().is_ascii_alphabetic() {
+                    // Find tag name
+                    let tag_name: String = trimmed[1..]
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphabetic())
+                        .collect();
+                    let end_pat = format!("</{}", tag_name);
+                    // If tag is not closed on the same line, treat as block HTML
+                    if !trimmed.contains(&format!("</{}", tag_name)) && !trimmed.contains(">") {
+                        in_block_html = true;
+                        block_html_end_pat = end_pat.clone();
+                        self.in_html_block[i] = true;
+                        i += 1;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+
     /// Check if a position is inside a code span
     pub fn is_in_code_span(&self, line_num: usize, col: usize) -> bool {
         if line_num == 0 || line_num > self.in_code_span.len() {
@@ -1025,6 +1072,14 @@ impl DocumentStructure {
             .iter()
             .filter(|img| img.alt_text.trim().is_empty())
             .collect()
+    }
+
+    /// Check if a line is inside an HTML block
+    pub fn is_in_html_block(&self, line_num: usize) -> bool {
+        if line_num == 0 || line_num > self.in_html_block.len() {
+            return false;
+        }
+        self.in_html_block[line_num - 1]
     }
 }
 

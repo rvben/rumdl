@@ -37,6 +37,10 @@ struct Cli {
     #[arg(long, global = true, help = "Path to configuration file")]
     config: Option<String>,
 
+    /// Ignore all configuration files and use built-in defaults
+    #[arg(long, global = true, help = "Ignore all configuration files and use built-in defaults")]
+    no_config: bool,
+
     /// Fix issues automatically where possible
     #[arg(short, long, default_value = "false", hide = true)]
     fix: bool,
@@ -805,7 +809,12 @@ build-backend = \"setuptools.build_meta\"
                 }
             }
             Some(Commands::Check(args)) => {
-                run_check(args, cli.config.as_deref());
+                // If --no-config is set, skip config loading
+                if cli.no_config {
+                    run_check(args, None);
+                } else {
+                    run_check(args, cli.config.as_deref());
+                }
             }
             Some(Commands::Rule { rule }) => {
                 use rumdl::rules::*;

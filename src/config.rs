@@ -150,7 +150,7 @@ exclude = [
     "vendor",
     "dist",
     "build",
-    
+
     # Specific files or patterns
     "CHANGELOG.md",
     "LICENSE.md",
@@ -670,6 +670,9 @@ impl SourcedConfig {
         config_path: Option<&str>,
         cli_overrides: Option<&SourcedGlobalConfig>,
     ) -> Result<Self, ConfigError> {
+        if config_path.is_none() {
+            return Ok(SourcedConfig::default());
+        }
         let mut sourced_config = SourcedConfig::default();
         let mut loaded_toml_or_pyproject = false;
 

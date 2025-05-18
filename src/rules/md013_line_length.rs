@@ -9,8 +9,8 @@ use toml;
 
 lazy_static! {
     static ref URL_PATTERN: Regex = Regex::new(r"^https?://\S+$").unwrap();
-    static ref IMAGE_REF_PATTERN: Regex = Regex::new(r"^\s*!\[.*?\]\[.*?\]\s*$").unwrap();
-    static ref LINK_REF_PATTERN: Regex = Regex::new(r"^\s*\[.*?\]:\s*https?://\S+\s*$").unwrap();
+    static ref IMAGE_REF_PATTERN: Regex = Regex::new(r"^!\[.*?\]\[.*?\]$" ).unwrap();
+    static ref LINK_REF_PATTERN: Regex = Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap();
 }
 
 #[derive(Clone)]
@@ -26,7 +26,7 @@ impl Default for MD013LineLength {
     fn default() -> Self {
         Self {
             line_length: 80,
-            code_blocks: true,
+            code_blocks: false,
             tables: false,
             headings: true,
             strict: false,
@@ -82,17 +82,15 @@ impl MD013LineLength {
             return false;
         }
 
-        // URLs on their own line
-        if URL_PATTERN.is_match(line.trim()) {
+        // Only skip if the entire line is a URL
+        if URL_PATTERN.is_match(line) {
             return true;
         }
-
-        // Image references
+        // Only skip if the entire line is an image reference
         if IMAGE_REF_PATTERN.is_match(line) {
             return true;
         }
-
-        // Link references
+        // Only skip if the entire line is a link reference
         if LINK_REF_PATTERN.is_match(line) {
             return true;
         }
@@ -106,6 +104,23 @@ impl MD013LineLength {
             return true;
         }
 
+        false
+    }
+
+    /// Returns true if the line is a Markdown list item (unordered or ordered)
+    fn is_list_item_line(line: &str) -> bool {
+        let trimmed = line.trim_start();
+        // Unordered: -, *, + followed by space
+        if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
+            return true;
+        }
+        // Ordered: 1. 2. 3. etc. (optionally with more digits)
+        if let Some(idx) = trimmed.find('.') {
+            let (num, rest) = trimmed.split_at(idx);
+            if num.chars().all(|c| c.is_ascii_digit()) && rest.starts_with(". ") {
+                return true;
+            }
+        }
         false
     }
 }
@@ -135,46 +150,74 @@ impl Rule for MD013LineLength {
             .filter(|(start, end)| start != end)
             .flat_map(|(start, end)| (*start..=*end).collect::<Vec<usize>>())
             .collect();
+        // Create a quick lookup set for list item lines (including continuations)
+        let list_lines_set: std::collections::HashSet<usize> =
+            structure.list_lines.iter().cloned().collect();
 
         for (line_num, &line) in lines.iter().enumerate() {
-            let line_number = line_num + 1; // 1-based line number
+            let line_number = line_num + 1; // 1-based
 
-            // Skip setext underline lines (=== or ---)
-            if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
-                continue;
-            }
+            if !self.strict {
+                // Skip setext underline lines (=== or ---)
+                if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
+                    println!("MD013 DEBUG: Skipping setext underline at line {}: {:?}", line_number, line);
+                    continue;
+                }
 
-            // Use the precomputed setext check
-            let effective_length = if self.strict && setext_lines_set.contains(&line_number) {
-                line.trim_end().len() // Strict mode for setext headings
-            } else {
-                line.len() // Normal length check
-            };
+                // Skip block elements according to config flags
+                let mut is_block = false;
+                if self.headings && heading_lines_set.contains(&line_number) {
+                    println!("MD013 DEBUG: Skipping as heading at line {}: {:?}", line_number, line);
+                    is_block = true;
+                }
+                if self.code_blocks && structure.is_in_code_block(line_number) {
+                    println!("MD013 DEBUG: Skipping as code block at line {}: {:?}", line_number, line);
+                    is_block = true;
+                }
+                if self.tables && Self::is_in_table(&lines, line_num) {
+                    println!("MD013 DEBUG: Skipping as table at line {}: {:?}", line_number, line);
+                    is_block = true;
+                }
+                if structure.is_in_blockquote(line_number) {
+                    println!("MD013 DEBUG: Skipping as blockquote at line {}: {:?}", line_number, line);
+                    is_block = true;
+                }
+                if structure.is_in_html_block(line_number) {
+                    println!("MD013 DEBUG: Skipping as HTML block at line {}: {:?}", line_number, line);
+                    is_block = true;
+                }
+                if is_block {
+                    println!("MD013 DEBUG: Skipping block element at line {}: {:?}", line_number, line);
+                    continue;
+                }
 
-            if effective_length > self.line_length {
-                // Check if line should be skipped based on configuration
-                let is_heading = heading_lines_set.contains(&line_number); // Use the set
-                let skip = (!self.code_blocks && structure.is_in_code_block(line_number))
-                    || (!self.tables && Self::is_in_table(&lines, line_num))
-                    || (!self.headings && is_heading) // Use the variable
-                    || self.should_ignore_line(line, &lines, line_num, &structure);
-
-                if !skip {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()), // Restore Option<&str>
-                        message: format!(
-                            "Line length {} exceeds {} characters",
-                            effective_length, self.line_length
-                        ),
-                        line: line_number,
-                        column: self.line_length + 1,
-                        severity: Severity::Warning,
-                        fix: None, // Line wrapping requires manual intervention
-                    });
+                // Skip lines that are only a URL, image ref, or link ref
+                if self.should_ignore_line(line, &lines, line_num, &structure) {
+                    println!("MD013 DEBUG: Skipping line {} due to should_ignore_line: {:?}", line_number, line);
+                    continue;
                 }
             }
+
+            // Check line length
+            let effective_length = line.len();
+            if effective_length > self.line_length {
+                println!("MD013 DEBUG: Flagging normal line {}: len {}", line_number, effective_length);
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    message: format!(
+                        "Line length {} exceeds {} characters",
+                        effective_length, self.line_length
+                    ),
+                    line: line_number,
+                    column: self.line_length + 1,
+                    severity: Severity::Warning,
+                    fix: None,
+                });
+            } else {
+                println!("MD013 DEBUG: Not flagging normal line {}: len {}", line_number, effective_length);
+            }
         }
-        Ok(warnings) // Restore Ok() wrapper
+        Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -217,7 +260,7 @@ impl Rule for MD013LineLength {
                 .unwrap_or(80);
         let code_blocks =
             crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
-                .unwrap_or(true);
+                .unwrap_or(false);
         let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables")
             .unwrap_or(false);
         let headings = crate::config::get_rule_config_value::<bool>(config, "MD013", "headings")

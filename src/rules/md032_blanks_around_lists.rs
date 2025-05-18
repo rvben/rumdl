@@ -97,7 +97,7 @@ impl MD032BlanksAroundLists {
             if structure.is_in_code_block(current_line_idx_1) || structure.is_in_front_matter(current_line_idx_1) {
                 current_line_idx_0 += 1;
                 continue;
-            }
+        }
 
             // Determine blockquote prefix and content *before* checking for list item
             let blockquote_prefix = BLOCKQUOTE_PREFIX_RE.find(line_str).map_or(String::new(), |m| m.as_str().to_string());
@@ -136,7 +136,7 @@ impl MD032BlanksAroundLists {
                             potential_blank_lines.push_back(lookahead_idx_0);
                             lookahead_idx_0 += 1;
                             continue;
-                        }
+                }
 
                         // Check continuation based on *content* after prefix
                         let is_next_list_item_start = LIST_ITEM_START_REGEX.is_match(next_line_content);
@@ -233,7 +233,7 @@ impl MD032BlanksAroundLists {
                          message: format!("MD032/list-marker-space: List item on line {} should be followed by a blank line.", end_line),
                          fix: None,
                      });
-                 }
+        }
             }
         }
         Ok(warnings)
@@ -275,7 +275,7 @@ impl Rule for MD032BlanksAroundLists {
         // Phase 1: Identify needed insertions
         for &(start_line, end_line, ref prefix) in &list_blocks {
             // Check before block
-            if start_line > 1 {
+                    if start_line > 1 {
                 let prev_line_actual_idx_0 = start_line - 2;
                 let prev_line_actual_idx_1 = start_line - 1;
                 let is_prev_excluded = structure.is_in_code_block(prev_line_actual_idx_1) || structure.is_in_front_matter(prev_line_actual_idx_1);
@@ -283,8 +283,8 @@ impl Rule for MD032BlanksAroundLists {
 
                 if !is_prev_excluded && !is_blank_in_context(lines[prev_line_actual_idx_0]) && prev_prefix == *prefix {
                     insertions.insert(start_line, prefix.clone());
-                }
-            }
+                        }
+                    }
 
             // Check after block
             if end_line < num_lines {
@@ -311,7 +311,7 @@ impl Rule for MD032BlanksAroundLists {
                  }
             }
             result_lines.push(line.to_string());
-        }
+                    }
 
         Ok(result_lines.join("\n"))
     }
