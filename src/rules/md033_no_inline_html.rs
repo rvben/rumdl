@@ -96,7 +96,6 @@ impl Rule for MD033NoInlineHtml {
         ctx: &crate::lint_context::LintContext,
         structure: &DocumentStructure,
     ) -> LintResult {
-        // Restore early exit check (without structure.has_html)
         if ctx.content.is_empty()
             || !ctx.content.contains('<')
             || !HTML_TAG_QUICK_CHECK.is_match(ctx.content)
@@ -106,56 +105,100 @@ impl Rule for MD033NoInlineHtml {
 
         let mut warnings = Vec::new();
         let line_index = LineIndex::new(ctx.content.to_string());
-
-        for (i, line) in ctx.content.lines().enumerate() {
+        let lines: Vec<&str> = ctx.content.lines().collect();
+        let mut in_block_html = false;
+        let mut block_html_tag_name = String::new();
+        let mut block_html_end_pat = String::new();
+        let mut i = 0;
+        while i < lines.len() {
+            let line = lines[i];
             let line_num = i + 1;
-
-            // Restore initial skip: only skip empty or code block lines
-            // The !line.contains('<') check is redundant due to the early exit above
             if line.trim().is_empty() || structure.is_in_code_block(line_num) {
+                in_block_html = false;
+                i += 1;
                 continue;
             }
-
+            let trimmed = line.trim_start();
+            if in_block_html {
+                // End block if closing tag or blank line
+                if trimmed.starts_with(&block_html_end_pat) || trimmed.is_empty() {
+                    in_block_html = false;
+                }
+                // Only skip if the line is a comment or contains only allowed tags
+                if !self.is_html_comment(trimmed) && !self.is_tag_allowed(trimmed) {
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: line_num,
+                        column: 1,
+                        message: "Inline HTML in block".to_string(),
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
+                }
+                i += 1;
+                continue;
+            }
+            // Detect block HTML: line starts with <[A-Za-z] (optionally after whitespace)
+            if let Some(c) = trimmed.chars().nth(0) {
+                if c == '<' && trimmed.len() > 1 && trimmed.chars().nth(1).unwrap().is_ascii_alphabetic() {
+                    // Find tag name
+                    let tag_name: String = trimmed[1..]
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphabetic())
+                        .collect();
+                    let end_pat = format!("</{}", tag_name);
+                    // Skip HTML comments
+                    if self.is_html_comment(trimmed) {
+                        i += 1;
+                        continue;
+                    }
+                    // If tag is not closed on the same line, treat as block HTML
+                    if !trimmed.contains(&format!("</{}", tag_name)) && !trimmed.contains(">") {
+                        in_block_html = true;
+                        block_html_tag_name = tag_name.clone();
+                        block_html_end_pat = end_pat.clone();
+                        // Warn for the opening tag line
+                        if !self.is_tag_allowed(trimmed) {
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                line: line_num,
+                                column: 1,
+                                message: "Inline HTML in block".to_string(),
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
+                        i += 1;
+                        continue;
+                    }
+                }
+            }
+            // Inline HTML detection (existing logic)
             for cap in HTML_TAG_FINDER.captures_iter(line) {
                 let tag_match = cap.get(0).unwrap();
                 let html_tag = tag_match.as_str();
                 let start_byte_offset_in_line = tag_match.start();
                 let end_byte_offset_in_line = tag_match.end();
                 let start_col = line[..start_byte_offset_in_line].chars().count() + 1;
-
-                // Restore skipping logic
-                // Skip HTML comments
                 if self.is_html_comment(html_tag) {
                     continue;
                 }
-
-                // IMPROVED CHECK: Skip tags within markdown links using DocumentStructure
                 let is_in_link = structure.links.iter().any(|link| {
                     link.line == line_num && start_col >= link.start_col && start_col < link.end_col
                 });
                 if is_in_link {
                     continue;
                 }
-
-                // RESTORED CHECK: Skip tags within code spans
                 if structure.is_in_code_span(line_num, start_col) {
                     continue;
                 }
-
-                // Skip allowed tags (case-insensitive)
                 if self.is_tag_allowed(html_tag) {
                     continue;
                 }
-
-                // If tag is not skipped, report it
                 if let Some(line_start_byte) = line_index.get_line_start_byte(line_num) {
                     let global_start_byte = line_start_byte + start_byte_offset_in_line;
                     let global_end_byte = line_start_byte + end_byte_offset_in_line;
                     let warning_range = global_start_byte..global_end_byte;
-
-                    // IMPROVED FIX: Escape the tag instead of deleting it - REVERTING this based on test failures
-                    // let escaped_tag = html_tag.replace('<', "&lt;").replace('>', "&gt;");
-
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: line_num,
@@ -164,18 +207,13 @@ impl Rule for MD033NoInlineHtml {
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: warning_range,
-                            replacement: String::new(), // Replace with empty string to remove the tag
+                            replacement: String::new(),
                         }),
                     });
-                } else {
-                    eprintln!(
-                        "Warning: Could not find line start for line {} in MD033",
-                        line_num
-                    );
                 }
             }
+            i += 1;
         }
-
         Ok(warnings)
     }
 
