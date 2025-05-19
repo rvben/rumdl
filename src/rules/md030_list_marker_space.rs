@@ -3,18 +3,13 @@
 //!
 //! See [docs/md030.md](../../docs/md030.md) for full documentation, configuration, and examples.
 
-use crate::rules::list_utils::ListType;
-use crate::utils::range_utils::LineIndex;
-
-use crate::lint_context::LintContext;
-use crate::rule::{Fix, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::rules::list_utils::ListType;
 use regex::Regex;
 use lazy_static::lazy_static;
-use markdown::mdast::{List, Node};
 use toml;
-use log;
-use std::io::Write;
+use markdown::mdast::{List, Node};
 
 lazy_static! {
     // Matches indentation, marker, and whitespace after marker

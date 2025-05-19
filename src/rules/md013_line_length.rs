@@ -106,23 +106,6 @@ impl MD013LineLength {
 
         false
     }
-
-    /// Returns true if the line is a Markdown list item (unordered or ordered)
-    fn is_list_item_line(line: &str) -> bool {
-        let trimmed = line.trim_start();
-        // Unordered: -, *, + followed by space
-        if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
-            return true;
-        }
-        // Ordered: 1. 2. 3. etc. (optionally with more digits)
-        if let Some(idx) = trimmed.find('.') {
-            let (num, rest) = trimmed.split_at(idx);
-            if num.chars().all(|c| c.is_ascii_digit()) && rest.starts_with(". ") {
-                return true;
-            }
-        }
-        false
-    }
 }
 
 impl Rule for MD013LineLength {
@@ -144,14 +127,14 @@ impl Rule for MD013LineLength {
         let heading_lines_set: std::collections::HashSet<usize> =
             structure.heading_lines.iter().cloned().collect();
         // Create a quick lookup for setext headings (where start_line != end_line in regions)
-        let setext_lines_set: std::collections::HashSet<usize> = structure
+        let _setext_lines_set: std::collections::HashSet<usize> = structure
             .heading_regions
             .iter()
             .filter(|(start, end)| start != end)
             .flat_map(|(start, end)| (*start..=*end).collect::<Vec<usize>>())
             .collect();
         // Create a quick lookup set for list item lines (including continuations)
-        let list_lines_set: std::collections::HashSet<usize> =
+        let _list_lines_set: std::collections::HashSet<usize> =
             structure.list_lines.iter().cloned().collect();
 
         for (line_num, &line) in lines.iter().enumerate() {
@@ -160,40 +143,32 @@ impl Rule for MD013LineLength {
             if !self.strict {
                 // Skip setext underline lines (=== or ---)
                 if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
-                    println!("MD013 DEBUG: Skipping setext underline at line {}: {:?}", line_number, line);
                     continue;
                 }
 
                 // Skip block elements according to config flags
                 let mut is_block = false;
                 if self.headings && heading_lines_set.contains(&line_number) {
-                    println!("MD013 DEBUG: Skipping as heading at line {}: {:?}", line_number, line);
                     is_block = true;
                 }
                 if self.code_blocks && structure.is_in_code_block(line_number) {
-                    println!("MD013 DEBUG: Skipping as code block at line {}: {:?}", line_number, line);
                     is_block = true;
                 }
                 if self.tables && Self::is_in_table(&lines, line_num) {
-                    println!("MD013 DEBUG: Skipping as table at line {}: {:?}", line_number, line);
                     is_block = true;
                 }
                 if structure.is_in_blockquote(line_number) {
-                    println!("MD013 DEBUG: Skipping as blockquote at line {}: {:?}", line_number, line);
                     is_block = true;
                 }
                 if structure.is_in_html_block(line_number) {
-                    println!("MD013 DEBUG: Skipping as HTML block at line {}: {:?}", line_number, line);
                     is_block = true;
                 }
                 if is_block {
-                    println!("MD013 DEBUG: Skipping block element at line {}: {:?}", line_number, line);
                     continue;
                 }
 
                 // Skip lines that are only a URL, image ref, or link ref
                 if self.should_ignore_line(line, &lines, line_num, &structure) {
-                    println!("MD013 DEBUG: Skipping line {} due to should_ignore_line: {:?}", line_number, line);
                     continue;
                 }
             }
@@ -201,7 +176,6 @@ impl Rule for MD013LineLength {
             // Check line length
             let effective_length = line.len();
             if effective_length > self.line_length {
-                println!("MD013 DEBUG: Flagging normal line {}: len {}", line_number, effective_length);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     message: format!(
@@ -213,8 +187,6 @@ impl Rule for MD013LineLength {
                     severity: Severity::Warning,
                     fix: None,
                 });
-            } else {
-                println!("MD013 DEBUG: Not flagging normal line {}: len {}", line_number, effective_length);
             }
         }
         Ok(warnings)

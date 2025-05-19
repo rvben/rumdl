@@ -413,6 +413,7 @@ disable = ["all"]
 
 [MD013]
 line_length = 10
+headings = false
 "#;
     fs::write(&config_path, config_content).expect("Failed to write config");
 

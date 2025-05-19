@@ -1,6 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::document_structure_from_str;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::document_structure::DocumentStructure;
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 use std::collections::VecDeque;

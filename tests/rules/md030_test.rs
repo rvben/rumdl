@@ -1,9 +1,7 @@
 mod tests {
-    use super::*;
     use rumdl::lint_context::LintContext;
     use rumdl::rule::Rule;
     use rumdl::rules::MD030ListMarkerSpace;
-    use fancy_regex::Regex;
 
     #[test]
     fn test_valid_single_line_lists() {

@@ -1,7 +1,6 @@
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD036NoEmphasisAsHeading;
-use rumdl::MD053LinkImageReferenceDefinitions;
 
 #[test]
 fn test_md036_for_emphasis_only_lines() {

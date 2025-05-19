@@ -247,14 +247,6 @@ impl Rule for MD033NoInlineHtml {
             {
                 // Perform the replacement (escaping) using byte offsets
                 fixed_content.replace_range(fix.range, &fix.replacement);
-            } else {
-                // Log error or handle invalid range - potentially due to overlapping fixes or calculation errors
-                eprintln!(
-                    "Warning: Skipping fix for rule {} at {}:{} due to invalid byte range {:?}, content length {}.",
-                    self.name(), warning.line, warning.column, fix.range, fixed_content.len()
-                );
-                // Optionally, return an error instead of just printing
-                // return Err(LintError::FixFailed(format!("Invalid range {:?} for fix at {}:{}", fix.range, warning.line, warning.column)));
             }
         }
 

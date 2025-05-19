@@ -43,7 +43,7 @@ struct Cli {
 
     /// Fix issues automatically where possible
     #[arg(short, long, default_value = "false", hide = true)]
-    fix: bool,
+    _fix: bool,
 
     /// List all available rules
     #[arg(short, long, default_value = "false", hide = true)]
@@ -131,7 +131,7 @@ struct CheckArgs {
 
     /// Fix issues automatically where possible
     #[arg(short, long, default_value = "false")]
-    fix: bool,
+    _fix: bool,
 
     /// List all available rules
     #[arg(short, long, default_value = "false")]
@@ -464,7 +464,7 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
     // Show results summary
     if has_issues {
         // If fix mode is enabled, only show the fixed summary
-        if args.fix && total_issues_fixed > 0 {
+        if args._fix && total_issues_fixed > 0 {
             println!(
                 "\n{} Fixed {}/{} issues in {} {} ({}ms)",
                 "Fixed:".green().bold(),
@@ -493,7 +493,7 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
                 duration_ms
             );
 
-            if !args.fix && total_fixable_issues > 0 {
+            if !args._fix && total_fixable_issues > 0 {
                 // Display the exact count of fixable issues
                 println!(
                     "Run with `--fix` to automatically fix {} of the {} issues",
@@ -1115,7 +1115,7 @@ build-backend = \"setuptools.build_meta\"
                 if !cli.paths.is_empty() {
                     let args = CheckArgs {
                         paths: cli.paths.clone(),
-                        fix: cli.fix,
+                        _fix: cli._fix,
                         list_rules: cli.list_rules,
                         disable: cli.disable.clone(),
                         enable: cli.enable.clone(),
@@ -1201,7 +1201,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>) {
             let warnings = process_file_collect_warnings(
                 file_path,
                 &enabled_rules,
-                args.fix,
+                args._fix,
                 args.verbose,
                 args.quiet,
             );
@@ -1212,7 +1212,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>) {
     }
 
     // Confirm with the user if we're fixing a large number of files
-    if args.fix && file_paths.len() > 10 && !args.quiet {
+    if args._fix && file_paths.len() > 10 && !args.quiet {
         println!(
             "You are about to fix {} files. This will modify files in-place.",
             file_paths.len()
@@ -1243,7 +1243,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>) {
         let (file_has_issues, issues_found, issues_fixed, fixable_issues) = process_file(
             file_path,
             &enabled_rules,
-            args.fix,
+            args._fix,
             args.verbose,
             args.quiet,
         );

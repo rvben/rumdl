@@ -315,11 +315,6 @@ impl Rule for MD049EmphasisStyle {
                     );
                     fixed_content
                         .replace_range(adjusted_end - 1..adjusted_end, &correct_char.to_string());
-                } else {
-                    eprintln!(
-                        "Warning: Invalid range detected during MD049 fix: {}..{}",
-                        adjusted_start, adjusted_end
-                    );
                 }
             }
         }

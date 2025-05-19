@@ -12,6 +12,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use toml_edit::DocumentMut;
+use std::env;
+use log;
 
 lazy_static! {
     // Map common markdownlint config keys to rumdl rule names
@@ -670,8 +672,12 @@ impl SourcedConfig {
         config_path: Option<&str>,
         cli_overrides: Option<&SourcedGlobalConfig>,
     ) -> Result<Self, ConfigError> {
+        use std::env;
+        log::debug!("[rumdl-config] Current working directory: {:?}", env::current_dir());
         if config_path.is_none() {
-            return Ok(SourcedConfig::default());
+            log::debug!("[rumdl-config] No explicit config_path provided, will search default locations");
+        } else {
+            log::debug!("[rumdl-config] Explicit config_path provided: {:?}", config_path);
         }
         let mut sourced_config = SourcedConfig::default();
         let mut loaded_toml_or_pyproject = false;
@@ -683,6 +689,8 @@ impl SourcedConfig {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("");
+            log::debug!("[rumdl-config] Trying to load config file: {}", filename);
+            let path_str = path.to_string();
 
             // Known markdownlint config files
             const MARKDOWNLINT_FILENAMES: &[&str] = &[
@@ -695,40 +703,41 @@ impl SourcedConfig {
             {
                 let content = std::fs::read_to_string(path).map_err(|e| ConfigError::IoError {
                     source: e,
-                    path: path.to_string(),
+                    path: path_str.clone(),
                 })?;
                 if filename == "pyproject.toml" {
-                    if let Some(fragment) = parse_pyproject_toml(&content, path)? {
+                    if let Some(fragment) = parse_pyproject_toml(&content, &path_str)? {
                         sourced_config.merge(fragment);
-                        sourced_config.loaded_files.push(path.to_string());
+                        sourced_config.loaded_files.push(path_str.clone());
                         loaded_toml_or_pyproject = true;
                     }
                 } else {
-                    let fragment = parse_rumdl_toml(&content, path)?;
+                    let fragment = parse_rumdl_toml(&content, &path_str)?;
                     sourced_config.merge(fragment);
-                    sourced_config.loaded_files.push(path.to_string());
+                    sourced_config.loaded_files.push(path_str.clone());
                     loaded_toml_or_pyproject = true;
                 }
             } else if MARKDOWNLINT_FILENAMES.contains(&filename) {
                 // Parse as markdownlint config (JSON/YAML)
-                let fragment = load_from_markdownlint(path)?;
+                let fragment = load_from_markdownlint(&path_str)?;
                 sourced_config.merge(fragment);
-                sourced_config.loaded_files.push(path.to_string());
+                sourced_config.loaded_files.push(path_str.clone());
                 // Do NOT set loaded_toml_or_pyproject = true; markdownlint is fallback only
             } else {
                 // Try TOML only
                 let content = std::fs::read_to_string(path).map_err(|e| ConfigError::IoError {
                     source: e,
-                    path: path.to_string(),
+                    path: path_str.clone(),
                 })?;
-                let fragment = parse_rumdl_toml(&content, path)?;
+                let fragment = parse_rumdl_toml(&content, &path_str)?;
                 sourced_config.merge(fragment);
-                sourced_config.loaded_files.push(path.to_string());
+                sourced_config.loaded_files.push(path_str.clone());
                 loaded_toml_or_pyproject = true;
             }
         } else {
             // 2. Discover and load default files: pyproject.toml first
             if std::path::Path::new("pyproject.toml").exists() {
+                log::debug!("[rumdl-config] Found pyproject.toml in current directory");
                 let content = std::fs::read_to_string("pyproject.toml").map_err(|e| {
                     ConfigError::IoError {
                         source: e,
@@ -749,6 +758,7 @@ impl SourcedConfig {
             // 3. Discover and load .rumdl.toml / rumdl.toml (overrides pyproject)
             for filename in [".rumdl.toml", "rumdl.toml"] {
                 if std::path::Path::new(filename).exists() {
+                    log::debug!("[rumdl-config] Found {} in current directory", filename);
                     let content =
                         std::fs::read_to_string(filename).map_err(|e| ConfigError::IoError {
                             source: e,
@@ -759,6 +769,8 @@ impl SourcedConfig {
                     sourced_config.loaded_files.push(filename.to_string());
                     loaded_toml_or_pyproject = true;
                     break; // Load only the first one found
+                } else {
+                    log::debug!("[rumdl-config] {} not found in current directory", filename);
                 }
             }
         }
