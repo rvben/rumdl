@@ -1,20 +1,8 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
-use crate::utils::document_structure::DocumentStructure;
-use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
-use regex::Regex;
-
-lazy_static! {
-    // Fancy regex patterns with lookbehind assertions
-    static ref UNDERSCORE_PATTERN: FancyRegex = FancyRegex::new(r"(?<!\\)_([^\s_][^\n_]*?[^\s_])(?<!\\)_").unwrap();
-    static ref ASTERISK_PATTERN: FancyRegex = FancyRegex::new(r"(?<!\\)\*([^\s\*][^\n\*]*?[^\s\*])(?<!\\)\*").unwrap();
-
-    // URL detection
-    static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r"\[.*?\]\(.*?\)").unwrap();
-    static ref MARKDOWN_LINK_URL_PART: Regex = Regex::new(r"\[.*?\]\(([^)]+)").unwrap();
-    static ref URL_PATTERN: Regex = Regex::new(r"https?://[^\s)]+").unwrap();
-}
+use crate::lint_context::LintContext;
+use markdown::mdast::{Node, Emphasis, Link, Image, Code};
+use std::fmt::Write as _;
 
 /// Rule MD049: Emphasis style
 ///
@@ -36,119 +24,69 @@ impl MD049EmphasisStyle {
         MD049EmphasisStyle { style }
     }
 
-    /// Determine if the content is a URL or part of a Markdown link
-    fn is_url(
-        &self,
-        content_slice: &str,
-        doc_structure: &DocumentStructure,
-        line_num: usize,
-        start_col: usize,
-        end_col: usize,
-    ) -> bool {
-        // Check for standard URL patterns within the slice
-        if content_slice.contains("http://")
-            || content_slice.contains("https://")
-            || content_slice.contains("ftp://")
-        {
-            return true;
-        }
-
-        // Check if this position is inside a Markdown link URL using pre-calculated links
-        for link in &doc_structure.links {
-            if link.line == line_num {
-                // Check if the emphasis span overlaps with the URL part of the link
-                // Heuristic: Assuming URL starts after '(' in [text](url)
-                let url_start_col = link.start_col + link.text.len() + 3; // Approx: '[' + text + ']('
-                if start_col >= url_start_col && end_col < link.end_col
-                // Approx: ends before ')'
-                {
-                    return true;
+    // Recursively walk AST and collect all valid emphasis nodes with marker info
+    fn collect_emphasis<'a>(
+        &'a self,
+        node: &'a Node,
+        parent_type: Option<&'static str>,
+        emphasis_nodes: &mut Vec<(usize, usize, char, &'a Emphasis)>, // (line, col, marker, node)
+        ctx: &LintContext,
+    ) {
+        match node {
+            Node::Emphasis(em) => {
+                if let Some(pos) = &em.position {
+                    let start = pos.start.offset;
+                    let (line, col) = ctx.offset_to_line_col(start);
+                    let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
+                    // Find marker at col-1 (1-based col)
+                    let marker = line_str.chars().nth(col - 1).unwrap_or('*');
+                    // Only consider if not inside ignored parent
+                    if !matches!(parent_type, Some("Link" | "Image" | "Code")) {
+                        emphasis_nodes.push((line, col, marker, em));
+                    }
+                }
+                // Recurse into children
+                for child in &em.children {
+                    self.collect_emphasis(child, Some("Emphasis"), emphasis_nodes, ctx);
+                }
+            }
+            Node::Link(_) | Node::Image(_) | Node::Code(_) => {
+                // Do not recurse into these
+            }
+            _ => {
+                if let Some(children) = node.children() {
+                    for child in children {
+                        self.collect_emphasis(child, parent_type, emphasis_nodes, ctx);
+                    }
                 }
             }
         }
-
-        // Check if any part of the slice is within a code span (fallback/general check)
-        for col in start_col..end_col {
-            if doc_structure.is_in_code_span(line_num, col) {
-                return true; // Part of the emphasis is inside a code span, potentially a URL-like string
-            }
-        }
-
-        false
     }
 
-    /// Determine the target emphasis style based on the content and configured style
-    fn get_target_style(&self, content: &str, doc_structure: &DocumentStructure) -> EmphasisStyle {
+    // Determine the target style based on config and content
+    fn get_target_style(&self, emphasis_nodes: &[(usize, usize, char, &Emphasis)]) -> EmphasisStyle {
         match self.style {
             EmphasisStyle::Consistent => {
-                let mut first_asterisk_pos = usize::MAX;
-                let mut first_underscore_pos = usize::MAX;
-
-                // Find first asterisk not in code
-                if let Ok(matches) = ASTERISK_PATTERN
-                    .find_iter(content)
-                    .collect::<Result<Vec<_>, _>>()
-                {
-                    for m in matches {
-                        let (line, col) = self.byte_pos_to_line_col(content, m.start());
-                        if !doc_structure.is_in_code_block(line)
-                            && !doc_structure.is_in_code_span(line, col)
-                        {
-                            first_asterisk_pos = m.start();
-                            break;
-                        }
-                    }
-                }
-
-                // Find first underscore not in code
-                if let Ok(matches) = UNDERSCORE_PATTERN
-                    .find_iter(content)
-                    .collect::<Result<Vec<_>, _>>()
-                {
-                    for m in matches {
-                        let (line, col) = self.byte_pos_to_line_col(content, m.start());
-                        if !doc_structure.is_in_code_block(line)
-                            && !doc_structure.is_in_code_span(line, col)
-                        {
-                            first_underscore_pos = m.start();
-                            break;
-                        }
-                    }
-                }
-
-                // Determine style based on first found
-                if first_asterisk_pos < first_underscore_pos {
+                let asterisk_count = emphasis_nodes.iter().filter(|(_, _, m, _)| *m == '*').count();
+                let underscore_count = emphasis_nodes.iter().filter(|(_, _, m, _)| *m == '_').count();
+                if asterisk_count > underscore_count {
                     EmphasisStyle::Asterisk
-                } else if first_underscore_pos < usize::MAX {
+                } else if underscore_count > asterisk_count {
                     EmphasisStyle::Underscore
                 } else {
-                    // Default if no emphasis found or only asterisks found
-                    EmphasisStyle::Asterisk
+                    // Tiebreaker: first found
+                    for (_, _, m, _) in emphasis_nodes {
+                        if *m == '*' {
+                            return EmphasisStyle::Asterisk;
+                        } else if *m == '_' {
+                            return EmphasisStyle::Underscore;
+                        }
+                    }
+                    EmphasisStyle::Asterisk // Default
                 }
             }
-            style => style, // Use configured style directly
+            style => style,
         }
-    }
-
-    // Helper to calculate line/col from byte position (manual for now)
-    fn byte_pos_to_line_col(&self, content: &str, byte_pos: usize) -> (usize, usize) {
-        let mut line_num = 1;
-        let mut col_num = 1;
-        let mut current_byte = 0;
-
-        for c in content.chars() {
-            if current_byte >= byte_pos {
-                break;
-            }
-            if c == '\n' {
-                line_num += 1;
-                col_num = 1;
-            } else {
-                col_num += c.len_utf8(); // Use UTF-8 length for column
-            }
-            current_byte += c.len_utf8();
-        }
-        (line_num, col_num)
     }
 }
 
@@ -162,164 +100,209 @@ impl Rule for MD049EmphasisStyle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
-        let mut warnings = Vec::new();
-
-        let target_style = self.get_target_style(content, structure);
-
-        let pattern_to_find: &FancyRegex = match target_style {
-            EmphasisStyle::Asterisk => &UNDERSCORE_PATTERN,
-            EmphasisStyle::Underscore => &ASTERISK_PATTERN,
+        let mut warnings = vec![];
+        let ast = &ctx.ast;
+        // Only enforce per-paragraph for Consistent mode
+        match self.style {
             EmphasisStyle::Consistent => {
-                return Ok(warnings);
-            }
-        };
-
-        let incorrect_char = match target_style {
-            EmphasisStyle::Asterisk => '_',
-            EmphasisStyle::Underscore => '*',
-            EmphasisStyle::Consistent => return Ok(warnings),
-        };
-        let correct_char = match target_style {
-            EmphasisStyle::Asterisk => '*',
-            EmphasisStyle::Underscore => '_',
-            EmphasisStyle::Consistent => return Ok(warnings),
-        };
-
-        if let Ok(matches) = pattern_to_find
-            .find_iter(content)
-            .collect::<Result<Vec<_>, _>>()
-        {
-            for m in matches {
-                let start_byte = m.start();
-                let end_byte = m.end();
-
-                let (line_num, start_col) = self.byte_pos_to_line_col(content, start_byte);
-                let (_, end_col) = self.byte_pos_to_line_col(content, end_byte - 1);
-
-                if structure.is_in_code_block(line_num) {
-                    continue;
-                }
-
-                let mut in_span = false;
-                for col in start_col..=end_col {
-                    if structure.is_in_code_span(line_num, col) {
-                        in_span = true;
-                        break;
+                // Walk the AST, find Paragraph nodes
+                fn walk_paragraphs<'a>(
+                    node: &'a Node,
+                    ctx: &LintContext,
+                    rule: &MD049EmphasisStyle,
+                    warnings: &mut Vec<LintWarning>,
+                ) {
+                    match node {
+                        Node::Paragraph(par) => {
+                            // Collect all direct Emphasis children
+                            let mut emphasis_nodes = vec![];
+                            for child in &par.children {
+                                if let Node::Emphasis(em) = child {
+                                    if let Some(pos) = &em.position {
+                                        let start = pos.start.offset;
+                                        let (line, col) = ctx.offset_to_line_col(start);
+                                        let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
+                                        let marker = line_str.chars().nth(col - 1).unwrap_or('*');
+                                        emphasis_nodes.push((line, col, marker, em));
+                                    }
+                                }
+                            }
+                            // Count styles
+                            let asterisk_count = emphasis_nodes.iter().filter(|(_, _, m, _)| *m == '*').count();
+                            let underscore_count = emphasis_nodes.iter().filter(|(_, _, m, _)| *m == '_').count();
+                            if asterisk_count == 0 || underscore_count == 0 {
+                                // Only one style present, do not flag anything
+                                return;
+                            }
+                            let target_style = if asterisk_count > underscore_count {
+                                EmphasisStyle::Asterisk
+                            } else if underscore_count > asterisk_count {
+                                EmphasisStyle::Underscore
+                            } else {
+                                // Tiebreaker: first found
+                                for (_, _, m, _) in &emphasis_nodes {
+                                    if *m == '*' {
+                                        return;
+                                    } else if *m == '_' {
+                                        return;
+                                    }
+                                }
+                                return;
+                            };
+                            let (wrong_marker, correct_marker) = match target_style {
+                                EmphasisStyle::Asterisk => ('_', '*'),
+                                EmphasisStyle::Underscore => ('*', '_'),
+                                EmphasisStyle::Consistent => return,
+                            };
+                            for (line, col, marker, _) in &emphasis_nodes {
+                                if *marker == wrong_marker {
+                                    warnings.push(LintWarning {
+                                        rule_name: Some(rule.name()),
+                                        line: *line,
+                                        column: *col,
+                                        message: format!("Emphasis should use {} instead of {}", correct_marker, wrong_marker),
+                                        fix: None,
+                                        severity: Severity::Warning,
+                                    });
+                                }
+                            }
+                        }
+                        _ => {
+                            if let Some(children) = node.children() {
+                                for child in children {
+                                    walk_paragraphs(child, ctx, rule, warnings);
+                                }
+                            }
+                        }
                     }
                 }
-                if in_span {
-                    continue;
+                walk_paragraphs(ast, ctx, self, &mut warnings);
+            }
+            // For explicit asterisk/underscore config, enforce globally
+            EmphasisStyle::Asterisk | EmphasisStyle::Underscore => {
+                let mut emphasis_nodes = vec![];
+                self.collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
+                let (wrong_marker, correct_marker) = match self.style {
+                    EmphasisStyle::Asterisk => ('_', '*'),
+                    EmphasisStyle::Underscore => ('*', '_'),
+                    EmphasisStyle::Consistent => unreachable!(),
+                };
+                for (line, col, marker, _) in &emphasis_nodes {
+                    if *marker == wrong_marker {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: *line,
+                            column: *col,
+                            message: format!("Emphasis should use {} instead of {}", correct_marker, wrong_marker),
+                            fix: None,
+                            severity: Severity::Warning,
+                        });
+                    }
                 }
-
-                if self.is_url(
-                    &content[start_byte..end_byte],
-                    structure,
-                    line_num,
-                    start_col,
-                    end_col,
-                ) {
-                    continue;
-                }
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num,
-                    column: start_col,
-                    message: format!(
-                        "Emphasis should use {} instead of {}",
-                        correct_char, incorrect_char
-                    ),
-                    fix: None,
-                    severity: Severity::Warning,
-                });
             }
         }
-
         Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let doc_structure = DocumentStructure::new(content);
-
-        let target_style = self.get_target_style(content, &doc_structure);
-
-        let (pattern_to_find, correct_char): (&FancyRegex, char) = match target_style {
-            EmphasisStyle::Asterisk => (&UNDERSCORE_PATTERN, '*'),
-            EmphasisStyle::Underscore => (&ASTERISK_PATTERN, '_'),
+        let ast = &ctx.ast;
+        let mut edits = vec![];
+        match self.style {
             EmphasisStyle::Consistent => {
-                return Ok(content.to_string());
-            }
-        };
-
-        let mut fixed_content = content.to_string();
-        let offset = 0;
-
-        if let Ok(matches) = pattern_to_find
-            .find_iter(content)
-            .collect::<Result<Vec<_>, _>>()
-        {
-            for m in matches {
-                let start_byte = m.start();
-                let end_byte = m.end();
-
-                let (line_num, start_col) = self.byte_pos_to_line_col(content, start_byte);
-                let (_, end_col) = self.byte_pos_to_line_col(content, end_byte - 1);
-
-                if doc_structure.is_in_code_block(line_num) {
-                    continue;
-                }
-
-                let mut in_span = false;
-                for col in start_col..=end_col {
-                    if doc_structure.is_in_code_span(line_num, col) {
-                        in_span = true;
-                        break;
+                // Per-paragraph fix
+                fn walk_paragraphs<'a>(
+                    node: &'a Node,
+                    ctx: &LintContext,
+                    rule: &MD049EmphasisStyle,
+                    edits: &mut Vec<(usize, char)>,
+                ) {
+                    match node {
+                        Node::Paragraph(par) => {
+                            let mut emphasis_nodes = vec![];
+                            for child in &par.children {
+                                if let Node::Emphasis(em) = child {
+                                    if let Some(pos) = &em.position {
+                                        let start = pos.start.offset;
+                                        let end = pos.end.offset;
+                                        let (line, col) = ctx.offset_to_line_col(start);
+                                        let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
+                                        let marker = line_str.chars().nth(col - 1).unwrap_or('*');
+                                        emphasis_nodes.push((line, col, marker, em, start, end));
+                                    }
+                                }
+                            }
+                            let asterisk_count = emphasis_nodes.iter().filter(|(_, _, m, _, _, _)| *m == '*').count();
+                            let underscore_count = emphasis_nodes.iter().filter(|(_, _, m, _, _, _)| *m == '_').count();
+                            if asterisk_count == 0 || underscore_count == 0 {
+                                // Only one style present, do not flag anything
+                                return;
+                            }
+                            let target_style = if asterisk_count > underscore_count {
+                                EmphasisStyle::Asterisk
+                            } else if underscore_count > asterisk_count {
+                                EmphasisStyle::Underscore
+                            } else {
+                                for (_, _, m, _, _, _) in &emphasis_nodes {
+                                    if *m == '*' {
+                                        return;
+                                    } else if *m == '_' {
+                                        return;
+                                    }
+                                }
+                                return;
+                            };
+                            let (wrong_marker, correct_marker) = match target_style {
+                                EmphasisStyle::Asterisk => ('_', '*'),
+                                EmphasisStyle::Underscore => ('*', '_'),
+                                EmphasisStyle::Consistent => return,
+                            };
+                            for (_, _, marker, _, start, end) in &emphasis_nodes {
+                                if *marker == wrong_marker {
+                                    edits.push((*start, correct_marker));
+                                    edits.push((*end - 1, correct_marker));
+                                }
+                            }
+                        }
+                        _ => {
+                            if let Some(children) = node.children() {
+                                for child in children {
+                                    walk_paragraphs(child, ctx, rule, edits);
+                                }
+                            }
+                        }
                     }
                 }
-                if in_span {
-                    continue;
-                }
-
-                if self.is_url(
-                    &content[start_byte..end_byte],
-                    &doc_structure,
-                    line_num,
-                    start_col,
-                    end_col,
-                ) {
-                    continue;
-                }
-
-                let adjusted_start = start_byte + offset;
-                let adjusted_end = end_byte + offset;
-
-                if adjusted_start < fixed_content.len()
-                    && adjusted_end <= fixed_content.len()
-                    && adjusted_start < adjusted_end
-                {
-                    fixed_content.replace_range(
-                        adjusted_start..adjusted_start + 1,
-                        &correct_char.to_string(),
-                    );
-                    fixed_content
-                        .replace_range(adjusted_end - 1..adjusted_end, &correct_char.to_string());
+                walk_paragraphs(ast, ctx, self, &mut edits);
+            }
+            EmphasisStyle::Asterisk | EmphasisStyle::Underscore => {
+                let mut emphasis_nodes = vec![];
+                self.collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
+                let (wrong_marker, correct_marker) = match self.style {
+                    EmphasisStyle::Asterisk => ('_', '*'),
+                    EmphasisStyle::Underscore => ('*', '_'),
+                    EmphasisStyle::Consistent => unreachable!(),
+                };
+                for (_, _, marker, em) in &emphasis_nodes {
+                    if *marker == wrong_marker {
+                        if let Some(pos) = &em.position {
+                            let start = pos.start.offset;
+                            let end = pos.end.offset;
+                            edits.push((start, correct_marker));
+                            edits.push((end - 1, correct_marker));
+                        }
+                    }
                 }
             }
         }
-
-        Ok(fixed_content)
+        // Apply edits in reverse order
+        let mut result = ctx.content.to_string();
+        edits.sort_by(|a, b| b.0.cmp(&a.0));
+        for (offset, marker) in edits {
+            if offset < result.len() {
+                result.replace_range(offset..offset + 1, &marker.to_string());
+            }
+        }
+        Ok(result)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
