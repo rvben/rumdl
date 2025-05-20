@@ -436,7 +436,6 @@ mod tests {
 
     #[test]
     fn test_parity_only_whitespace_and_newlines_minimal() {
-        let _ = env_logger::builder().is_test(true).try_init();
         let rule = MD039NoSpaceInLinks::new();
         let content = "[   \n  ](url) and [\t\n\t](url)";
         let ctx = crate::lint_context::LintContext::new(content);
@@ -447,7 +446,6 @@ mod tests {
 
     #[test]
     fn test_parity_internal_newlines_minimal() {
-        let _ = env_logger::builder().is_test(true).try_init();
         let rule = MD039NoSpaceInLinks::new();
         let content = "[link\ntext](url) and [ another\nlink ](url)";
         let ctx = crate::lint_context::LintContext::new(content);
@@ -458,7 +456,6 @@ mod tests {
 
     #[test]
     fn test_parity_escaped_brackets_minimal() {
-        let _ = env_logger::builder().is_test(true).try_init();
         let rule = MD039NoSpaceInLinks::new();
         let content = "[link\\]](url) and [link\\[]](url)";
         let ctx = crate::lint_context::LintContext::new(content);
