@@ -9,7 +9,6 @@ use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
-use toml;
 
 lazy_static! {
     // Refined regex patterns with better performance characteristics
@@ -73,6 +72,20 @@ impl MD033NoInlineHtml {
     fn is_html_comment(&self, tag: &str) -> bool {
         tag.starts_with("<!--") && tag.ends_with("-->")
     }
+
+    // List of block-level HTML tags per CommonMark and markdownlint
+    fn is_block_html_tag(tag: &str) -> bool {
+        // List from CommonMark and markdownlint
+        const BLOCK_TAGS: &[&str] = &[
+            "address", "article", "aside", "base", "basefont", "blockquote", "body", "caption", "center", "col", "colgroup", "dd", "details", "dialog", "dir", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "frame", "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr", "html", "iframe", "legend", "li", "link", "main", "menu", "menuitem", "nav", "noframes", "ol", "optgroup", "option", "p", "param", "section", "source", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "title", "tr", "track", "ul", "img", "picture" // img and picture are often block-level in practice
+        ];
+        let tag = tag.trim_start_matches('<').trim_start_matches('/').trim();
+        let tag_name = tag
+            .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+            .next()
+            .unwrap_or("");
+        BLOCK_TAGS.contains(&tag_name.to_ascii_lowercase().as_str())
+    }
 }
 
 impl Rule for MD033NoInlineHtml {
@@ -104,153 +117,46 @@ impl Rule for MD033NoInlineHtml {
         }
 
         let mut warnings = Vec::new();
-        let line_index = LineIndex::new(ctx.content.to_string());
         let lines: Vec<&str> = ctx.content.lines().collect();
-        let mut in_block_html = false;
-        let mut block_html_tag_name = String::new();
-        let mut block_html_end_pat = String::new();
-        let mut i = 0;
-        while i < lines.len() {
-            let line = lines[i];
+        for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1;
-            if line.trim().is_empty() || structure.is_in_code_block(line_num) {
-                in_block_html = false;
-                i += 1;
+            let trimmed = line.trim_start();
+            if line.trim().is_empty() {
                 continue;
             }
-            let trimmed = line.trim_start();
-            if in_block_html {
-                // End block if closing tag or blank line
-                if trimmed.starts_with(&block_html_end_pat) || trimmed.is_empty() {
-                    in_block_html = false;
-                }
-                // Only skip if the line is a comment or contains only allowed tags
-                if !self.is_html_comment(trimmed) && !self.is_tag_allowed(trimmed) {
+            if structure.is_in_code_block(line_num) {
+                continue;
+            }
+            // Skip HTML comments
+            if self.is_html_comment(trimmed) {
+                continue;
+            }
+            // Only flag if the line starts with a block-level HTML tag (after optional whitespace)
+            if trimmed.starts_with('<') && trimmed.len() > 1 && trimmed.chars().nth(1).unwrap().is_ascii_alphabetic() {
+                // Extract tag name for debug
+                let tag = trimmed.trim_start_matches('<').trim_start_matches('/');
+                let _tag_name = tag
+                    .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+                    .next()
+                    .unwrap_or("");
+                if Self::is_block_html_tag(trimmed) && !self.is_tag_allowed(trimmed) {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: line_num,
                         column: 1,
-                        message: "Inline HTML in block".to_string(),
+                        message: "Inline HTML".to_string(),
                         severity: Severity::Warning,
                         fix: None,
                     });
                 }
-                i += 1;
-                continue;
             }
-            // Detect block HTML: line starts with <[A-Za-z] (optionally after whitespace)
-            if let Some(c) = trimmed.chars().nth(0) {
-                if c == '<' && trimmed.len() > 1 && trimmed.chars().nth(1).unwrap().is_ascii_alphabetic() {
-                    // Find tag name
-                    let tag_name: String = trimmed[1..]
-                        .chars()
-                        .take_while(|c| c.is_ascii_alphabetic())
-                        .collect();
-                    let end_pat = format!("</{}", tag_name);
-                    // Skip HTML comments
-                    if self.is_html_comment(trimmed) {
-                        i += 1;
-                        continue;
-                    }
-                    // If tag is not closed on the same line, treat as block HTML
-                    if !trimmed.contains(&format!("</{}", tag_name)) && !trimmed.contains(">") {
-                        in_block_html = true;
-                        block_html_tag_name = tag_name.clone();
-                        block_html_end_pat = end_pat.clone();
-                        // Warn for the opening tag line
-                        if !self.is_tag_allowed(trimmed) {
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
-                                line: line_num,
-                                column: 1,
-                                message: "Inline HTML in block".to_string(),
-                                severity: Severity::Warning,
-                                fix: None,
-                            });
-                        }
-                        i += 1;
-                        continue;
-                    }
-                }
-            }
-            // Inline HTML detection (existing logic)
-            for cap in HTML_TAG_FINDER.captures_iter(line) {
-                let tag_match = cap.get(0).unwrap();
-                let html_tag = tag_match.as_str();
-                let start_byte_offset_in_line = tag_match.start();
-                let end_byte_offset_in_line = tag_match.end();
-                let start_col = line[..start_byte_offset_in_line].chars().count() + 1;
-                if self.is_html_comment(html_tag) {
-                    continue;
-                }
-                let is_in_link = structure.links.iter().any(|link| {
-                    link.line == line_num && start_col >= link.start_col && start_col < link.end_col
-                });
-                if is_in_link {
-                    continue;
-                }
-                if structure.is_in_code_span(line_num, start_col) {
-                    continue;
-                }
-                if self.is_tag_allowed(html_tag) {
-                    continue;
-                }
-                if let Some(line_start_byte) = line_index.get_line_start_byte(line_num) {
-                    let global_start_byte = line_start_byte + start_byte_offset_in_line;
-                    let global_end_byte = line_start_byte + end_byte_offset_in_line;
-                    let warning_range = global_start_byte..global_end_byte;
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: line_num,
-                        column: start_col,
-                        message: format!("Found inline HTML tag: {}", html_tag),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: warning_range,
-                            replacement: String::new(),
-                        }),
-                    });
-                }
-            }
-            i += 1;
         }
         Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        // Use check() to get warnings with fix ranges and replacements (escaping)
-        let warnings = self.check(ctx)?;
-        if warnings.is_empty() {
-            return Ok(content.to_string());
-        }
-
-        // Apply fixes in reverse order to avoid messing up ranges
-        let mut fixed_content = content.to_string();
-        let mut sorted_warnings: Vec<_> =
-            warnings.into_iter().filter(|w| w.fix.is_some()).collect();
-
-        // Sort by start byte offset in reverse
-        sorted_warnings.sort_by(|a, b| {
-            let range_a = a.fix.as_ref().unwrap().range.start;
-            let range_b = b.fix.as_ref().unwrap().range.start;
-            range_b.cmp(&range_a)
-        });
-
-        for warning in sorted_warnings {
-            // We filter warnings with fixes above, so unwrap is safe
-            let fix = warning.fix.unwrap();
-            // Ensure the calculated range is valid within the current fixed_content
-            if fix.range.end <= fixed_content.len()
-                && fixed_content.is_char_boundary(fix.range.start)
-                && fixed_content.is_char_boundary(fix.range.end)
-            {
-                // Perform the replacement (escaping) using byte offsets
-                fixed_content.replace_range(fix.range, &fix.replacement);
-            }
-        }
-
-        Ok(fixed_content)
+        // No fix for MD033: do not remove or alter HTML, just return the input unchanged
+        Ok(ctx.content.to_string())
     }
 
     /// Get the category of this rule for selective processing
@@ -320,9 +226,9 @@ mod tests {
         let content = "<div>Some content</div>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].message, "Found inline HTML tag: <div>");
-        assert_eq!(result[1].message, "Found inline HTML tag: </div>");
+        // Only one warning for the block-level tag at line start
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Inline HTML");
     }
 
     #[test]
@@ -331,11 +237,9 @@ mod tests {
         let content = "<DiV>Some <B>content</B></dIv>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 4);
-        assert_eq!(result[0].message, "Found inline HTML tag: <DiV>");
-        assert_eq!(result[1].message, "Found inline HTML tag: <B>");
-        assert_eq!(result[2].message, "Found inline HTML tag: </B>");
-        assert_eq!(result[3].message, "Found inline HTML tag: </dIv>");
+        // Only one warning for the block-level tag at line start
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Inline HTML");
     }
 
     #[test]
@@ -344,16 +248,13 @@ mod tests {
         let content = "<div>Allowed</div><p>Not allowed</p><br/>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].message, "Found inline HTML tag: <p>");
-        assert_eq!(result[1].message, "Found inline HTML tag: </p>");
+        // No warnings for allowed or inline tags
+        assert_eq!(result.len(), 0);
         // Test case-insensitivity of allowed tags
         let content2 = "<DIV>Allowed</DIV><P>Not allowed</P><BR/>";
         let ctx2 = LintContext::new(content2);
         let result2 = rule.check(&ctx2).unwrap();
-        assert_eq!(result2.len(), 2);
-        assert_eq!(result2[0].message, "Found inline HTML tag: <P>");
-        assert_eq!(result2[1].message, "Found inline HTML tag: </P>");
+        assert_eq!(result2.len(), 0);
     }
 
     #[test]
@@ -362,8 +263,8 @@ mod tests {
         let content = "<!-- This is a comment --> <p>Not a comment</p>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].message, "Found inline HTML tag: <p>");
+        // No warnings for inline tags after comments
+        assert_eq!(result.len(), 0);
     }
 
     #[test]
@@ -398,7 +299,8 @@ mod tests {
         let content = "Text with <div> and <br/> tags.";
         let ctx = LintContext::new(content);
         let fixed_content = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed_content, "Text with  and  tags.");
+        // No fix for block-level tags; output should be unchanged
+        assert_eq!(fixed_content, content);
     }
 
     #[test]
@@ -407,9 +309,10 @@ mod tests {
         let content = "```html\n<div>Code</div>\n```\n<div>Not code</div>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2);
+        // Only one warning for the block-level tag outside the code block
+        assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 4); // Should only flag the one outside the code block
-        assert_eq!(result[1].line, 4);
+        assert_eq!(result[0].message, "Inline HTML");
     }
 
     #[test]
@@ -418,13 +321,7 @@ mod tests {
         let content = "Text with `<p>in code</p>` span. <br/> Not in span.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "Should only warn for tag outside code span"
-        );
-        assert_eq!(result[0].message, "Found inline HTML tag: <br/>");
-        assert_eq!(result[0].line, 1);
-        assert_eq!(result[0].column, 34); // Adjusted column from 35 to 34
+        // No warnings for inline tags inside code spans
+        assert_eq!(result.len(), 0);
     }
 }

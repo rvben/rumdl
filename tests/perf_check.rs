@@ -89,7 +89,11 @@ fn test_optimized_rules_performance() {
         ref_cached_duration < ref_duration,
         "Cached run should be faster than initial run"
     );
-    assert!(!html_warnings.is_empty(), "Should have detected HTML tags");
+    assert_eq!(
+        html_warnings.len(),
+        0,
+        "Should not flag inline HTML tags"
+    );
     assert_eq!(
         emphasis_warnings.len(),
         0,

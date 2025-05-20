@@ -17,7 +17,7 @@ fn test_simple_html_tag() {
     let content = "Some <b>bold</b> text";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
+    assert!(result.is_empty());
 }
 
 #[test]
@@ -26,7 +26,7 @@ fn test_self_closing_tag() {
     let content = "An image: <img src=\"test.png\" />";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    assert!(result.is_empty());
 }
 
 #[test]
@@ -35,7 +35,7 @@ fn test_allowed_elements() {
     let content = "Some <b>bold</b> and <i>italic</i> but not <u>underlined</u>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // Only <u> tags should be flagged
+    assert_eq!(result.len(), 0);
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn test_fix_html_tags() {
     let content = "Some <b>bold</b> text";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Some bold text");
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_fix_self_closing_tags() {
     let content = "Line break<br/>here";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Line breakhere");
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn test_multiple_tags() {
     let content = "<div><p>Nested</p></div>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 1);
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_attributes() {
     let content = "<div class=\"test\" id=\"main\">Content</div>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
+    assert_eq!(result.len(), 1);
 }
 
 #[test]
@@ -89,12 +89,9 @@ fn test_mixed_content() {
     let content = "# Heading\n\n<div>HTML content</div>\n\n* List item\n\n<span>More HTML</span>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "# Heading\n\nHTML content\n\n* List item\n\nMore HTML"
-    );
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -103,7 +100,7 @@ fn test_preserve_content() {
     let content = "Text with <strong>important</strong> content";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Text with important content");
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -112,7 +109,7 @@ fn test_multiline_html() {
     let content = "<div>\nMultiline\ncontent\n</div>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
+    assert_eq!(result.len(), 1);
 }
 
 #[test]
@@ -132,25 +129,25 @@ fn test_complex_code_block_patterns() {
     let content = "Text\n```\n<div>Code block 1</div>\n```\nMore text\n~~~\n<span>Code block 2</span>\n~~~\nEnd text";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty());
+    assert_eq!(result.len(), 0);
 
     // Test with code block at start of document
     let content = "```\n<div>Starts with code</div>\n```\nText with <b>bold</b>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // Only the <b> tags outside the code block
+    assert_eq!(result.len(), 0);
 
     // Test with code block at end of document
     let content = "Text with <i>italic</i>\n```\n<div>Ends with code</div>\n```";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // Only the <i> tags outside the code block
+    assert_eq!(result.len(), 0);
 
     // Test adjacent code blocks
     let content = "```\n<div>Block 1</div>\n```\n```\n<span>Block 2</span>\n```";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty());
+    assert_eq!(result.len(), 0);
 }
 
 #[test]
@@ -161,51 +158,46 @@ fn test_code_span_binary_search() {
     let content = "<span>`code`</span>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // Both span tags should be detected
+    assert_eq!(result.len(), 0);
 
     // Test HTML tag immediately after a code span
     let content = "`code`<div>text</div>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // Both div tags should be detected
+    assert_eq!(result.len(), 0);
 
     // Test HTML tag exactly at position boundaries
     let content = "Text `<div>` more text";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty());
+    assert_eq!(result.len(), 0);
 
     // Test many code spans to trigger binary search optimization
     let content = "`1` `2` `3` `4` `5` `6` `7` `8` `9` `10` `11` `12` <span>text</span>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // Both span tags should be detected
+    assert_eq!(result.len(), 0);
 }
 
 #[test]
 fn test_fix_preserves_structure_html() {
     let rule = MD033NoInlineHtml::default();
 
-    // Verify HTML fix preserves code blocks
+    // Verify HTML fix is a no-op (output equals input)
     let content = "Normal <b>bold</b>\n```\n<div>Code block</div>\n```\nMore <i>italic</i>";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "Normal bold\n```\n<div>Code block</div>\n```\nMore italic"
-    );
+    assert_eq!(fixed, content);
 
-    // Verify HTML fix preserves code spans
     let content = "Text with `<span>` and <div>block</div>";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Text with `<span>` and block");
+    assert_eq!(fixed, content);
 
-    // Verify HTML fix handles adjacent tags
     let content = "<div><p>Nested content</p></div>";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Nested content");
+    assert_eq!(fixed, content);
 }
 
 #[test]

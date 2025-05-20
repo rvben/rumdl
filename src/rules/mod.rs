@@ -191,15 +191,8 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
         ("MD057", MD057ExistingRelativeLinks::from_config),
         ("MD058", MD058BlanksAroundTables::from_config),
     ];
-    let disabled_set: std::collections::HashSet<_> = config
-        .global
-        .disable
-        .iter()
-        .map(|s| s.to_ascii_uppercase())
-        .collect();
     RULES
         .iter()
-        .filter(|(name, _)| !disabled_set.contains(&name.to_ascii_uppercase()))
         .map(|(_, ctor)| ctor(config))
         .collect()
 }

@@ -45,7 +45,7 @@ console = "0.15.11"
 dialoguer = "0.11.0"
 indicatif = "0.17.11"
 
-log = "0.4.27"
+log = "0.4"
 pretty_assertions = "1.4"
 markdown = "1.0.0"
 config = "0.15"
@@ -72,8 +72,6 @@ criterion = { version = "0.5", features = ["html_reports"] }
 rand = "0.9.1"
 
 pretty_assertions = "1.4"
-
-env_logger = "0.10"
 
 [[bench]]
 name = "rule_performance"

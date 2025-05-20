@@ -211,11 +211,14 @@ fn get_enabled_rules_from_checkargs(
         config.global.disable.iter().map(|s| s.as_str()).collect();
 
     if let Some(enabled_cli) = &cli_enable_set {
-        // --- Case 1: CLI --enable provided ---
-        // CLI --enable overrides *everything* (config enable/disable are ignored).
+        // Normalize CLI enable values
+        let enabled_cli_normalized: HashSet<String> = enabled_cli.iter()
+            .map(|s| normalize_key(s))
+            .collect();
+        let _all_rule_names: Vec<String> = all_rules.iter().map(|r| normalize_key(r.name())).collect();
         final_rules = all_rules
             .into_iter()
-            .filter(|rule| enabled_cli.contains(rule.name()))
+            .filter(|rule| enabled_cli_normalized.contains(&normalize_key(rule.name())))
             .collect();
         // Note: CLI --disable is IGNORED if CLI --enable is present.
     } else {
@@ -1294,7 +1297,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>) {
 fn process_file(
     file_path: &str,
     rules: &[Box<dyn Rule>],
-    fix: bool,
+    _fix: bool,
     verbose: bool,
     quiet: bool,
 ) -> (bool, usize, usize, usize) {
@@ -1358,7 +1361,7 @@ fn process_file(
 
             // Add fix indicator if this warning has a fix
             let fix_indicator = if warning.fix.is_some() {
-                if fix {
+                if _fix {
                     " [fixed]"
                 } else {
                     " [*]"
@@ -1382,7 +1385,7 @@ fn process_file(
 
     // Fix issues if requested
     let mut warnings_fixed = 0;
-    if fix {
+    if _fix {
         // Skip rules that don't have fixes
         for rule in rules {
             if all_warnings
@@ -1448,7 +1451,7 @@ fn process_file(
 fn process_file_collect_warnings(
     file_path: &str,
     rules: &[Box<dyn Rule>],
-    fix: bool,
+    _fix: bool,
     verbose: bool,
     quiet: bool,
 ) -> Vec<rumdl::rule::LintWarning> {
