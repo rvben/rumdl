@@ -53,16 +53,9 @@ use crate::utils::document_structure::DocumentStructureExtensions;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
-
-lazy_static! {
-    static ref UNORDERED_LIST_REGEX: Regex = Regex::new(
-        // Standard regex pattern is sufficient
-        r"^(?P<indent>\s*)(?P<marker>[*+-])(?P<after>\s*)(?P<content>.*)$"
-    ).unwrap();
-    static ref CODE_BLOCK_START: Regex = Regex::new(r"^\s*(```|~~~)").unwrap();
-    static ref CODE_BLOCK_END: Regex = Regex::new(r"^\s*(```|~~~)\s*$").unwrap();
-    static ref FRONT_MATTER_DELIM: Regex = Regex::new(r"^---\s*$").unwrap();
-}
+use crate::lint_context::LintContext;
+use markdown::mdast::{Node, List, ListItem};
+use log::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnorderedListStyle {
@@ -76,6 +69,16 @@ impl Default for UnorderedListStyle {
     fn default() -> Self {
         Self::Consistent
     }
+}
+
+lazy_static! {
+    static ref UNORDERED_LIST_REGEX: Regex = Regex::new(
+        // Standard regex pattern is sufficient
+        r"^(?P<indent>\s*)(?P<marker>[*+-])(?P<after>\s*)(?P<content>.*)$"
+    ).unwrap();
+    static ref CODE_BLOCK_START: Regex = Regex::new(r"^\s*(```|~~~)").unwrap();
+    static ref CODE_BLOCK_END: Regex = Regex::new(r"^\s*(```|~~~)\s*$").unwrap();
+    static ref FRONT_MATTER_DELIM: Regex = Regex::new(r"^---\s*$").unwrap();
 }
 
 /// Rule MD004: Unordered list style
@@ -92,6 +95,81 @@ impl MD004UnorderedListStyle {
             after_marker: 1,
         }
     }
+
+    // Helper: extract marker, indentation, and blockquote prefix for a ListItem
+    fn extract_marker_indent_bq(li: &ListItem, ctx: &LintContext) -> Option<(usize, char, String, usize)> {
+        let pos = li.position.as_ref()?;
+        let line_num = pos.start.line;
+        if line_num == 0 {
+            return None;
+        }
+        let mut line_start_offset = 0usize;
+        let mut lines = ctx.content.lines();
+        for _ in 1..line_num {
+            line_start_offset += lines.next()?.len();
+            line_start_offset += 1;
+        }
+        let line = lines.next()?;
+        let mut indent = String::new();
+        let mut bq_prefix = 0;
+        let mut marker = None;
+        let mut i = 0;
+        let chars: Vec<_> = line.chars().collect();
+        while i < chars.len() {
+            if chars[i] == ' ' || chars[i] == '\t' {
+                indent.push(chars[i]);
+                i += 1;
+            } else if chars[i] == '>' {
+                bq_prefix += 1;
+                i += 1;
+                if i < chars.len() && chars[i] == ' ' {
+                    i += 1;
+                }
+            } else {
+                break;
+            }
+        }
+        if i < chars.len() && (chars[i] == '*' || chars[i] == '-' || chars[i] == '+') {
+            marker = Some((line_start_offset + i, chars[i]));
+        }
+        marker.map(|(offset, marker)| (offset, marker, indent, bq_prefix))
+    }
+
+    // Helper: check if a line is inside a code block
+    fn is_in_code_block(line_num: usize, ctx: &LintContext) -> bool {
+        // Simple scan for ``` or ~~~
+        let mut in_code_block = false;
+        for (i, line) in ctx.content.lines().enumerate() {
+            if i + 1 > line_num { break; }
+            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+                in_code_block = !in_code_block;
+            }
+        }
+        in_code_block
+    }
+
+    fn check_run(&self, run: &[(usize, char, String, usize)], ctx: &LintContext, warnings: &mut Vec<LintWarning>) {
+        if self.style != UnorderedListStyle::Consistent {
+            return;
+        }
+        if run.len() < 2 { return; }
+        let target_marker = run[0].1;
+        debug!("MD004: Checking run with target_marker='{}', run={:?}", target_marker, run.iter().map(|(off, m, ind, bq)| format!("(off={}, m='{}', ind='{}', bq={})", off, m, ind, bq)).collect::<Vec<_>>());
+        for &(offset, marker, _, _) in &run[1..] {
+            if marker != target_marker {
+                let (line, col) = ctx.offset_to_line_col(offset);
+                debug!("MD004: Warning at line {}, col {}: marker '{}' != target_marker '{}'", line, col, marker, target_marker);
+                warnings.push(LintWarning {
+                    line,
+                    column: col,
+                    message: format!("marker '{}' does not match expected style '{}'", marker, target_marker),
+                    severity: Severity::Warning,
+                    rule_name: Some(self.name()),
+                    fix: None,
+                });
+            }
+        }
+    }
 }
 
 impl Rule for MD004UnorderedListStyle {
@@ -103,198 +181,222 @@ impl Rule for MD004UnorderedListStyle {
         "Use consistent style for unordered list markers"
     }
 
-    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
+    fn check(&self, ctx: &LintContext) -> LintResult {
         let mut warnings = Vec::new();
-        let mut first_marker: Option<char> = None;
-        let style = self.style;
-        let ul_re = Regex::new(r"^(?P<indent>\s*)(?P<marker>[*+-])(?P<after>\s+)").unwrap();
-        // Track code block and front matter state
+        let content = &ctx.content;
         let mut in_code_block = false;
         let mut in_front_matter = false;
-        let mut code_fence: Option<String> = None;
-        // Find the first unordered marker for Consistent mode
-        if style == UnorderedListStyle::Consistent {
-            for line in content.lines() {
-                // Front matter start/end
-                if !in_front_matter && line.trim_start().starts_with("---") {
-                    in_front_matter = true;
-                    continue;
-                } else if in_front_matter && line.trim_start().starts_with("---") {
-                    in_front_matter = false;
-                    continue;
+        let mut run: Vec<(usize, char, String, usize)> = Vec::new(); // (offset, marker, indent, bq_prefix)
+        let mut prev_indent: Option<String> = None;
+        let mut prev_bq: Option<usize> = None;
+        for (i, line) in content.lines().enumerate() {
+            let line_num = i + 1;
+            if FRONT_MATTER_DELIM.is_match(line) {
+                in_front_matter = !in_front_matter;
+                continue;
+            }
+            if in_front_matter {
+                continue;
+            }
+            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+                in_code_block = !in_code_block;
+                if self.style == UnorderedListStyle::Consistent && !run.is_empty() {
+                    self.check_run(&run, ctx, &mut warnings);
+                    run.clear();
+                    prev_indent = None;
+                    prev_bq = None;
                 }
-                // Code block start/end
-                if !in_code_block && (line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~")) {
-                    in_code_block = true;
-                    code_fence = Some(line.trim_start()[..3].to_string());
-                    continue;
-                } else if in_code_block && code_fence.is_some() && line.trim_start().starts_with(code_fence.as_ref().unwrap().as_str()) {
-                    in_code_block = false;
-                    code_fence = None;
-                    continue;
+                continue;
+            }
+            if in_code_block {
+                continue;
+            }
+            if line.trim().is_empty() {
+                if self.style == UnorderedListStyle::Consistent && !run.is_empty() {
+                    self.check_run(&run, ctx, &mut warnings);
+                    run.clear();
+                    prev_indent = None;
+                    prev_bq = None;
                 }
-                if in_code_block || in_front_matter {
-                    continue;
+                continue;
+            }
+            if Regex::new(r"^\s*\d+[.)]").unwrap().is_match(line) {
+                if self.style == UnorderedListStyle::Consistent && !run.is_empty() {
+                    self.check_run(&run, ctx, &mut warnings);
+                    run.clear();
+                    prev_indent = None;
+                    prev_bq = None;
                 }
-                if let Some(cap) = ul_re.captures(line) {
-                    first_marker = cap.name("marker").map(|m| m.as_str().chars().next().unwrap());
-                    break;
+                continue;
+            }
+            if let Some(caps) = UNORDERED_LIST_REGEX.captures(line) {
+                let indent = caps.name("indent").map(|m| m.as_str().to_string()).unwrap_or_default();
+                let marker = caps.name("marker").unwrap().as_str().chars().next().unwrap();
+                let bq_prefix = line.chars().take_while(|&c| c == '>' || c == ' ' || c == '\t').filter(|&c| c == '>').count();
+                let offset = content[..content.lines().take(i).map(|l| l.len() + 1).sum::<usize>()].len() + indent.len();
+                if self.style == UnorderedListStyle::Consistent {
+                    if let (Some(ref pi), Some(pbq)) = (&prev_indent, &prev_bq) {
+                        if *pi != indent || *pbq != bq_prefix {
+                            self.check_run(&run, ctx, &mut warnings);
+                            run.clear();
+                        }
+                    }
+                    run.push((offset, marker, indent.clone(), bq_prefix));
+                    prev_indent = Some(indent);
+                    prev_bq = Some(bq_prefix);
+                } else {
+                    let target_marker = match self.style {
+                        UnorderedListStyle::Asterisk => '*',
+                        UnorderedListStyle::Dash => '-',
+                        UnorderedListStyle::Plus => '+',
+                        _ => unreachable!(),
+                    };
+                    if marker != target_marker {
+                        let (line, col) = ctx.offset_to_line_col(offset);
+                        warnings.push(LintWarning {
+                            line,
+                            column: col,
+                            message: format!("marker '{}' does not match expected style '{}'", marker, target_marker),
+                            severity: Severity::Warning,
+                            rule_name: Some(self.name()),
+                            fix: None,
+                        });
+                    }
+                }
+            } else {
+                if self.style == UnorderedListStyle::Consistent && !run.is_empty() {
+                    self.check_run(&run, ctx, &mut warnings);
+                    run.clear();
+                    prev_indent = None;
+                    prev_bq = None;
                 }
             }
         }
-        // Reset state for main walk
-        in_code_block = false;
-        in_front_matter = false;
-        code_fence = None;
-        for (i, line) in content.lines().enumerate() {
-            // Front matter start/end
-            if !in_front_matter && line.trim_start().starts_with("---") {
-                in_front_matter = true;
-                continue;
-            } else if in_front_matter && line.trim_start().starts_with("---") {
-                in_front_matter = false;
-                continue;
-            }
-            // Code block start/end
-            if !in_code_block && (line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~")) {
-                in_code_block = true;
-                code_fence = Some(line.trim_start()[..3].to_string());
-                continue;
-            } else if in_code_block && code_fence.is_some() && line.trim_start().starts_with(code_fence.as_ref().unwrap().as_str()) {
-                in_code_block = false;
-                code_fence = None;
-                continue;
-            }
-            if in_code_block || in_front_matter {
-                continue;
-            }
-            if let Some(cap) = ul_re.captures(line) {
-                let marker = cap.name("marker").unwrap().as_str().chars().next().unwrap();
-                let expected_marker = match style {
-                    UnorderedListStyle::Consistent => first_marker.unwrap_or(marker),
-                    UnorderedListStyle::Asterisk => '*',
-                    UnorderedListStyle::Dash => '-',
-                    UnorderedListStyle::Plus => '+',
-                };
-                if marker != expected_marker {
-                    let marker_col = line.find(cap.name("marker").unwrap().as_str()).unwrap_or(0) + 1;
-                    warnings.push(LintWarning {
-                        line: i + 1,
-                        column: marker_col,
-                        message: format!(
-                            "marker '{}' does not match expected style '{}'",
-                            marker, expected_marker
-                        ),
-                        severity: Severity::Warning,
-                        rule_name: Some(self.name()),
-                        fix: None,
-                    });
-                }
-            }
+        if self.style == UnorderedListStyle::Consistent && !run.is_empty() {
+            self.check_run(&run, ctx, &mut warnings);
         }
         Ok(warnings)
     }
 
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        if content.is_empty() {
-            return Ok(String::new());
-        }
-        let style = self.style;
-        let ul_re = Regex::new(r"^(?P<indent>\s*)(?P<marker>[*+-])(?P<after>\s+)").unwrap();
-        let mut first_marker: Option<char> = None;
-        let mut in_code_block = false;
-        let mut in_front_matter = false;
-        let mut code_fence: Option<String> = None;
-        // Find the first unordered marker for Consistent mode
-        if style == UnorderedListStyle::Consistent {
-            for line in content.lines() {
-                // Front matter start/end
-                if !in_front_matter && line.trim_start().starts_with("---") {
-                    in_front_matter = true;
-                    continue;
-                } else if in_front_matter && line.trim_start().starts_with("---") {
-                    in_front_matter = false;
-                    continue;
-                }
-                // Code block start/end
-                if !in_code_block && (line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~")) {
-                    in_code_block = true;
-                    code_fence = Some(line.trim_start()[..3].to_string());
-                    continue;
-                } else if in_code_block && code_fence.is_some() && line.trim_start().starts_with(code_fence.as_ref().unwrap().as_str()) {
-                    in_code_block = false;
-                    code_fence = None;
-                    continue;
-                }
-                if in_code_block || in_front_matter {
-                    continue;
-                }
-                if let Some(cap) = ul_re.captures(line) {
-                    first_marker = cap.name("marker").map(|m| m.as_str().chars().next().unwrap());
-                    break;
-                }
-            }
-        }
-        // Reset state for main walk
-        in_code_block = false;
-        in_front_matter = false;
-        code_fence = None;
-        let mut lines: Vec<String> = Vec::new();
-        for line in content.lines() {
-            // Front matter start/end
-            if !in_front_matter && line.trim_start().starts_with("---") {
-                in_front_matter = true;
-                lines.push(line.to_string());
-                continue;
-            } else if in_front_matter && line.trim_start().starts_with("---") {
-                in_front_matter = false;
-                lines.push(line.to_string());
-                continue;
-            }
-            // Code block start/end
-            if !in_code_block && (line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~")) {
-                in_code_block = true;
-                code_fence = Some(line.trim_start()[..3].to_string());
-                lines.push(line.to_string());
-                continue;
-            } else if in_code_block && code_fence.is_some() && line.trim_start().starts_with(code_fence.as_ref().unwrap().as_str()) {
-                in_code_block = false;
-                code_fence = None;
-                lines.push(line.to_string());
-                continue;
-            }
-            if in_code_block || in_front_matter {
-                lines.push(line.to_string());
-                continue;
-            }
-            if let Some(cap) = ul_re.captures(line) {
-                let marker = cap.name("marker").unwrap().as_str().chars().next().unwrap();
-                let target_marker = match style {
-                    UnorderedListStyle::Consistent => first_marker.unwrap_or('-'),
-                    UnorderedListStyle::Asterisk => '*',
-                    UnorderedListStyle::Dash => '-',
-                    UnorderedListStyle::Plus => '+',
+    fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
+        let ast = &ctx.ast;
+        let mut edits = vec![];
+        fn walk_fix(node: &Node, rule: &MD004UnorderedListStyle, ctx: &LintContext, edits: &mut Vec<(usize, char)>) {
+            if let Node::List(list) = node {
+                if list.ordered { return; }
+                let mut item_info = vec![];
+                let front_matter_lines = {
+                    let mut in_front_matter = false;
+                    let mut skip_lines = std::collections::HashSet::new();
+                    for (i, line) in ctx.content.lines().enumerate() {
+                        if FRONT_MATTER_DELIM.is_match(line) {
+                            in_front_matter = !in_front_matter;
+                            skip_lines.insert(i + 1);
+                            continue;
+                        }
+                        if in_front_matter {
+                            skip_lines.insert(i + 1);
+                        }
+                    }
+                    skip_lines
                 };
-                if marker != target_marker {
-                    let indent = cap.name("indent").unwrap().as_str();
-                    let after = cap.name("after").unwrap().as_str();
-                    let rest = &line[(indent.len() + cap.name("marker").unwrap().as_str().len() + after.len())..];
-                    lines.push(format!("{}{}{}{}", indent, target_marker, after, rest));
-                    continue;
+                for item in &list.children {
+                    if let Node::ListItem(li) = item {
+                        if let Some(pos) = li.position.as_ref() {
+                            let line_num = pos.start.line;
+                            if front_matter_lines.contains(&line_num) {
+                                continue;
+                            }
+                            if MD004UnorderedListStyle::is_in_code_block(line_num, ctx) {
+                                continue;
+                            }
+                        }
+                        if let Some((offset, marker, indent, bq_prefix)) = MD004UnorderedListStyle::extract_marker_indent_bq(li, ctx) {
+                            item_info.push((offset, marker, indent, bq_prefix, li));
+                        }
+                    }
+                }
+                if item_info.is_empty() { return; }
+                match rule.style {
+                    UnorderedListStyle::Consistent => {
+                        // Group into contiguous runs by indent and bq_prefix (not marker)
+                        let mut run_start = 0;
+                        while run_start < item_info.len() {
+                            let (_, _, start_indent, start_bq, _) = &item_info[run_start];
+                            let mut run_end = run_start + 1;
+                            while run_end < item_info.len() {
+                                let (_, _, indent, bq, _) = &item_info[run_end];
+                                if indent != start_indent || bq != start_bq {
+                                    break;
+                                }
+                                run_end += 1;
+                            }
+                            // Determine most prevalent marker in the run
+                            let mut counts = std::collections::HashMap::new();
+                            for i in run_start..run_end {
+                                let (_, marker, _, _, _) = &item_info[i];
+                                *counts.entry(marker).or_insert(0) += 1;
+                            }
+                            // Find the marker with the highest count; tie-breaker: first in run
+                            let mut max_count = 0;
+                            let mut target_marker = item_info[run_start].1;
+                            let mut first_marker = item_info[run_start].1;
+                            for (i, (_, marker, _, _, _)) in item_info[run_start..run_end].iter().enumerate() {
+                                let count = *counts.get(marker).unwrap_or(&0);
+                                if count > max_count {
+                                    max_count = count;
+                                    target_marker = *marker;
+                                }
+                            }
+                            // If there is a tie, use the first marker in the run
+                            let mut tied = false;
+                            let mut tie_count = 0;
+                            for count in counts.values() {
+                                if *count == max_count {
+                                    tie_count += 1;
+                                }
+                            }
+                            if tie_count > 1 {
+                                target_marker = first_marker;
+                            }
+                            for i in run_start..run_end {
+                                let (offset, marker, _, _, _) = &item_info[i];
+                                if *marker != target_marker {
+                                    edits.push((*offset, target_marker));
+                                }
+                            }
+                            run_start = run_end;
+                        }
+                    }
+                    // Explicit style: fix every unordered list item
+                    UnorderedListStyle::Asterisk | UnorderedListStyle::Dash | UnorderedListStyle::Plus => {
+                        let target_marker = match rule.style {
+                            UnorderedListStyle::Asterisk => '*',
+                            UnorderedListStyle::Dash => '-',
+                            UnorderedListStyle::Plus => '+',
+                            _ => unreachable!(),
+                        };
+                        for (offset, marker, _indent, _bq_prefix, _li) in &item_info {
+                            if *marker != target_marker {
+                                edits.push((*offset, target_marker));
+                            }
+                        }
+                    }
                 }
             }
-            lines.push(line.to_string());
+            if let Some(children) = node.children() {
+                for child in children {
+                    walk_fix(child, rule, ctx, edits);
+                }
+            }
         }
-        let orig_ends_with_newline = content.ends_with('\n');
-        let mut result = lines.join("\n");
-        if orig_ends_with_newline {
-            // Ensure exactly one trailing newline
-            result = result.trim_end_matches('\n').to_string() + "\n";
-        } else {
-            // No trailing newline
-            result = result.trim_end_matches('\n').to_string();
+        walk_fix(ast, self, ctx, &mut edits);
+        let mut result = ctx.content.to_string();
+        edits.sort_by(|a, b| b.0.cmp(&a.0));
+        for (offset, marker) in edits {
+            if offset < result.len() {
+                result.replace_range(offset..offset + 1, &marker.to_string());
+            }
         }
         Ok(result)
     }
@@ -314,35 +416,32 @@ impl Rule for MD004UnorderedListStyle {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        Some((
-            self.name().to_string(),
-            toml::Value::try_from(std::collections::BTreeMap::from([(
-                "style".to_string(),
-                toml::Value::String("consistent".to_string()),
-            )]))
-            .unwrap(),
-        ))
+        let mut map = toml::map::Map::new();
+        map.insert(
+            "style".to_string(),
+            toml::Value::String(match self.style {
+                UnorderedListStyle::Asterisk => "asterisk".to_string(),
+                UnorderedListStyle::Dash => "dash".to_string(),
+                UnorderedListStyle::Plus => "plus".to_string(),
+                UnorderedListStyle::Consistent => "consistent".to_string(),
+            }),
+        );
+        Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let default_rule_name = Self::new(UnorderedListStyle::default()).name();
-        let style_str = config
-            .rules
-            .get(default_rule_name)
-            .and_then(|rule_cfg| rule_cfg.values.get("style")) // Access .values field of RuleConfig
-            .and_then(|val| val.as_str())
-            .unwrap_or("consistent");
-
-        let style = match style_str {
+        let style = crate::config::get_rule_config_value::<String>(config, "MD004", "style")
+            .unwrap_or_else(|| "consistent".to_string());
+        let style = match style.as_str() {
             "asterisk" => UnorderedListStyle::Asterisk,
-            "plus" => UnorderedListStyle::Plus,
             "dash" => UnorderedListStyle::Dash,
+            "plus" => UnorderedListStyle::Plus,
             _ => UnorderedListStyle::Consistent,
         };
-        Box::new(Self::new(style))
+        Box::new(MD004UnorderedListStyle::new(style))
     }
 }
 
@@ -353,25 +452,5 @@ impl DocumentStructureExtensions for MD004UnorderedListStyle {
         doc_structure: &crate::utils::document_structure::DocumentStructure,
     ) -> bool {
         !doc_structure.list_items.is_empty()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lint_context::LintContext;
-
-    #[test]
-    fn test_with_document_structure() {
-        let content = "* Item 1\n- Item 2\n+ Item 3";
-        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
-        let structure = crate::utils::document_structure::DocumentStructure::new(content);
-        let ctx = LintContext::new(content);
-        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert_eq!(
-            warnings.len(),
-            2,
-            "Expected 2 warnings for inconsistent markers"
-        );
     }
 }

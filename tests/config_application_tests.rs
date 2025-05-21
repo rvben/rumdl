@@ -136,7 +136,7 @@ This is a line that exceeds the default 80 characters but is less than the confi
     assert_eq!(
         md004_warnings.len(),
         2,
-        "MD004 should trigger twice (dash and plus markers)"
+        "MD004 should trigger for all unordered list items with non-asterisk markers in explicit style mode, matching markdownlint"
     );
 
     // Make sure the non-configured rule (MD001) still works normally
