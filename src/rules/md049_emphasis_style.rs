@@ -102,10 +102,8 @@ impl Rule for MD049EmphasisStyle {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = vec![];
         let ast = &ctx.ast;
-        // Only enforce per-paragraph for Consistent mode
         match self.style {
             EmphasisStyle::Consistent => {
-                // Walk the AST, find Paragraph nodes
                 fn walk_paragraphs<'a>(
                     node: &'a Node,
                     ctx: &LintContext,
@@ -114,7 +112,6 @@ impl Rule for MD049EmphasisStyle {
                 ) {
                     match node {
                         Node::Paragraph(par) => {
-                            // Collect all direct Emphasis children
                             let mut emphasis_nodes = vec![];
                             for child in &par.children {
                                 if let Node::Emphasis(em) = child {
@@ -127,40 +124,17 @@ impl Rule for MD049EmphasisStyle {
                                     }
                                 }
                             }
-                            // Count styles
-                            let asterisk_count = emphasis_nodes.iter().filter(|(_, _, m, _)| *m == '*').count();
-                            let underscore_count = emphasis_nodes.iter().filter(|(_, _, m, _)| *m == '_').count();
-                            if asterisk_count == 0 || underscore_count == 0 {
-                                // Only one style present, do not flag anything
+                            if emphasis_nodes.len() < 2 {
                                 return;
                             }
-                            let target_style = if asterisk_count > underscore_count {
-                                EmphasisStyle::Asterisk
-                            } else if underscore_count > asterisk_count {
-                                EmphasisStyle::Underscore
-                            } else {
-                                // Tiebreaker: first found
-                                for (_, _, m, _) in &emphasis_nodes {
-                                    if *m == '*' {
-                                        return;
-                                    } else if *m == '_' {
-                                        return;
-                                    }
-                                }
-                                return;
-                            };
-                            let (wrong_marker, correct_marker) = match target_style {
-                                EmphasisStyle::Asterisk => ('_', '*'),
-                                EmphasisStyle::Underscore => ('*', '_'),
-                                EmphasisStyle::Consistent => return,
-                            };
-                            for (line, col, marker, _) in &emphasis_nodes {
-                                if *marker == wrong_marker {
+                            let target_marker = emphasis_nodes[0].2;
+                            for (i, (line, col, marker, _)) in emphasis_nodes.iter().enumerate().skip(1) {
+                                if *marker != target_marker {
                                     warnings.push(LintWarning {
                                         rule_name: Some(rule.name()),
                                         line: *line,
                                         column: *col,
-                                        message: format!("Emphasis should use {} instead of {}", correct_marker, wrong_marker),
+                                        message: format!("Emphasis should use {} instead of {}", target_marker, marker),
                                         fix: None,
                                         severity: Severity::Warning,
                                     });
@@ -178,7 +152,6 @@ impl Rule for MD049EmphasisStyle {
                 }
                 walk_paragraphs(ast, ctx, self, &mut warnings);
             }
-            // For explicit asterisk/underscore config, enforce globally
             EmphasisStyle::Asterisk | EmphasisStyle::Underscore => {
                 let mut emphasis_nodes = vec![];
                 self.collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
@@ -209,7 +182,6 @@ impl Rule for MD049EmphasisStyle {
         let mut edits = vec![];
         match self.style {
             EmphasisStyle::Consistent => {
-                // Per-paragraph fix
                 fn walk_paragraphs<'a>(
                     node: &'a Node,
                     ctx: &LintContext,
@@ -231,35 +203,14 @@ impl Rule for MD049EmphasisStyle {
                                     }
                                 }
                             }
-                            let asterisk_count = emphasis_nodes.iter().filter(|(_, _, m, _, _, _)| *m == '*').count();
-                            let underscore_count = emphasis_nodes.iter().filter(|(_, _, m, _, _, _)| *m == '_').count();
-                            if asterisk_count == 0 || underscore_count == 0 {
-                                // Only one style present, do not flag anything
+                            if emphasis_nodes.len() < 2 {
                                 return;
                             }
-                            let target_style = if asterisk_count > underscore_count {
-                                EmphasisStyle::Asterisk
-                            } else if underscore_count > asterisk_count {
-                                EmphasisStyle::Underscore
-                            } else {
-                                for (_, _, m, _, _, _) in &emphasis_nodes {
-                                    if *m == '*' {
-                                        return;
-                                    } else if *m == '_' {
-                                        return;
-                                    }
-                                }
-                                return;
-                            };
-                            let (wrong_marker, correct_marker) = match target_style {
-                                EmphasisStyle::Asterisk => ('_', '*'),
-                                EmphasisStyle::Underscore => ('*', '_'),
-                                EmphasisStyle::Consistent => return,
-                            };
-                            for (_, _, marker, _, start, end) in &emphasis_nodes {
-                                if *marker == wrong_marker {
-                                    edits.push((*start, correct_marker));
-                                    edits.push((*end - 1, correct_marker));
+                            let target_marker = emphasis_nodes[0].2;
+                            for (_, _, marker, _, start, end) in &emphasis_nodes[1..] {
+                                if *marker != target_marker {
+                                    edits.push((*start, target_marker));
+                                    edits.push((*end - 1, target_marker));
                                 }
                             }
                         }
@@ -294,7 +245,6 @@ impl Rule for MD049EmphasisStyle {
                 }
             }
         }
-        // Apply edits in reverse order
         let mut result = ctx.content.to_string();
         edits.sort_by(|a, b| b.0.cmp(&a.0));
         for (offset, marker) in edits {
