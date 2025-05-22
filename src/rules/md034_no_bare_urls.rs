@@ -480,7 +480,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         if !result.is_empty() {
-            println!("MD034 warnings: {:#?}", result);
+            log::debug!("MD034 warnings: {:#?}", result);
         }
         assert!(result.is_empty(), "Multiple badges and links on one line should not be flagged as bare URLs");
     }

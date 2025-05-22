@@ -349,12 +349,12 @@ line-length = 222
         fs::write(&config_path, config_content).unwrap();
         let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
         // DEBUG: Print all rule keys and their value keys
-        eprintln!(
+        log::debug!(
             "[DEBUG] All rules loaded: {:?}",
             sourced.rules.keys().collect::<Vec<_>>()
         );
         for (rule, cfg) in &sourced.rules {
-            eprintln!(
+            log::debug!(
                 "[DEBUG] Rule '{}' value keys: {:?}",
                 rule,
                 cfg.values.keys().collect::<Vec<_>>()
@@ -1281,7 +1281,7 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                                 _ => unreachable!(), // Should not happen due to outer match
                             }
                         } else {
-                            eprintln!(
+                            log::warn!(
                                 "[WARN] Expected array for global key '{}' in {}, found {}",
                                 key,
                                 path,
@@ -1302,7 +1302,7 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                                 None,
                             );
                         } else {
-                            eprintln!(
+                            log::warn!(
                                 "[WARN] Expected boolean for global key '{}' in {}, found {}",
                                 key,
                                 path,
@@ -1313,7 +1313,7 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                     _ => {
                         // Add to unknown_keys for potential validation later
                         // fragment.unknown_keys.push(("[global]".to_string(), key.to_string()));
-                        eprintln!(
+                        log::warn!(
                             "[WARN] Unknown key in [global] section of {}: {}",
                             path, key
                         );
@@ -1350,21 +1350,21 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                         Some(toml::Value::Datetime(*formatted.value()))
                     }
                     Some(toml_edit::Value::Array(_)) => {
-                        eprintln!(
+                        log::warn!(
                                 "[WARN] Skipping array value for key '{}.{}' in {}. Array conversion not yet fully implemented in parser.",
                                 norm_rule_name, norm_rk, path
                             );
                         None
                     }
                     Some(toml_edit::Value::InlineTable(_)) => {
-                        eprintln!(
+                        log::warn!(
                                 "[WARN] Skipping inline table value for key '{}.{}' in {}. Table conversion not yet fully implemented in parser.",
                                 norm_rule_name, norm_rk, path
                             );
                         None
                     }
                     None => {
-                        eprintln!(
+                        log::warn!(
                                 "[WARN] Skipping non-value item for key '{}.{}' in {}. Expected simple value.",
                                 norm_rule_name, norm_rk, path
                             );
@@ -1379,7 +1379,7 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                 }
             }
         } else if item.is_value() {
-            eprintln!(
+            log::warn!(
                 "[WARN] Ignoring top-level value key in {}: '{}'. Expected a table like [{}].",
                 path, key, key
             );

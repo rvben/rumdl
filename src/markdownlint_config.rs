@@ -25,7 +25,7 @@ pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String
             .map_err(|e| format!("Failed to parse config as JSON or YAML: {}", e))
     };
     if let Err(ref err) = parse_result {
-        eprintln!("\x1b[31mError: Failed to parse configuration file '{}':\n  {}\n\nPlease ensure your JSON is valid. All keys and string values must be double-quoted.\x1b[0m", path, err);
+        log::error!("Failed to parse configuration file '{}': {}. Please ensure your JSON is valid. All keys and string values must be double-quoted.", path, err);
         std::process::exit(1);
     }
     parse_result
@@ -182,7 +182,7 @@ impl MarkdownlintConfig {
                             });
                     }
                 } else {
-                    eprintln!("\x1b[31mError: Could not convert value for rule key {:?} to rumdl's internal config format. This likely means the configuration value is invalid or not supported for this rule. Please check your markdownlint config.\x1b[0m", key);
+                    log::error!("Could not convert value for rule key {:?} to rumdl's internal config format. This likely means the configuration value is invalid or not supported for this rule. Please check your markdownlint config.", key);
                     std::process::exit(1);
                 }
             }

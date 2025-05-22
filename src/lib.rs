@@ -46,8 +46,7 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
                 warnings.extend(rule_warnings);
             }
             Err(e) => {
-                #[cfg(not(test))]
-                eprintln!("Error checking rule {}: {}", rule.name(), e);
+                log::error!("Error checking rule {}: {}", rule.name(), e);
                 return Err(e);
             }
         }
@@ -56,7 +55,7 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
         if _verbose {
             let rule_duration = _rule_start.elapsed();
             if rule_duration.as_millis() > 500 {
-                eprintln!("Rule {} took {:?}", rule.name(), rule_duration);
+                log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
             }
         }
     }
@@ -64,12 +63,12 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
     #[cfg(not(test))]
     if _verbose {
         let total_duration = _overall_start.elapsed();
-        eprintln!("Total lint time: {:?}", total_duration);
+        log::debug!("Total lint time: {:?}", total_duration);
     }
 
     #[cfg(all(debug_assertions, not(test)))]
     if !warnings.is_empty() {
-        eprintln!("Found {} warnings", warnings.len());
+        log::info!("Found {} warnings", warnings.len());
     }
 
     Ok(warnings)

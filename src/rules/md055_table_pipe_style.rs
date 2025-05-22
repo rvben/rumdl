@@ -497,7 +497,7 @@ mod tests {
         let result = rule.fix(&ctx).unwrap();
 
         // Output the actual result for debugging
-        println!(
+        log::info!(
             "Actual leading_and_trailing result:\n{}",
             result.replace('\n', "\\n")
         );
@@ -564,7 +564,7 @@ mod tests {
         let result = rule.fix(&ctx).unwrap();
 
         // Output the actual result for debugging
-        println!(
+        log::info!(
             "Actual result with invalid style:\n{}",
             result.replace('\n', "\\n")
         );
