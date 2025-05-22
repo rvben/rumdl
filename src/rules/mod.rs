@@ -15,7 +15,6 @@ pub mod md004_unordered_list_style;
 mod md005_list_indent;
 mod md006_start_bullets;
 mod md007_ul_indent;
-pub mod md008_ul_style;
 mod md009_trailing_spaces;
 mod md010_no_hard_tabs;
 mod md011_no_reversed_links;
@@ -64,7 +63,6 @@ pub use md004_unordered_list_style::UnorderedListStyle;
 pub use md005_list_indent::MD005ListIndent;
 pub use md006_start_bullets::MD006StartBullets;
 pub use md007_ul_indent::MD007ULIndent;
-pub use md008_ul_style::MD008ULStyle;
 pub use md009_trailing_spaces::MD009TrailingSpaces;
 pub use md010_no_hard_tabs::MD010NoHardTabs;
 pub use md011_no_reversed_links::MD011NoReversedLinks;
@@ -142,7 +140,6 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
         ("MD005", MD005ListIndent::from_config),
         ("MD006", MD006StartBullets::from_config),
         ("MD007", MD007ULIndent::from_config),
-        ("MD008", MD008ULStyle::from_config),
         ("MD009", MD009TrailingSpaces::from_config),
         ("MD010", MD010NoHardTabs::from_config),
         ("MD011", MD011NoReversedLinks::from_config),
