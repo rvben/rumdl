@@ -188,14 +188,10 @@ impl Rule for MD003HeadingStyle {
                 }
             };
 
-            // For Setext, levels 3+ must be ATX regardless of the target style
-            let expected_style = if level > 2
-                && (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2)
-            {
-                HeadingStyle::Atx
-            } else if (target_style == HeadingStyle::Setext1
-                || target_style == HeadingStyle::Setext2)
-                && level <= 2
+            // For markdownlint parity: when target style is Setext, all headings are expected to be Setext
+            // This will flag level 3+ as violations since they can't be represented as Setext
+            let expected_style = if target_style == HeadingStyle::Setext1
+                || target_style == HeadingStyle::Setext2
             {
                 if level == 1 {
                     HeadingStyle::Setext1
@@ -282,26 +278,21 @@ impl Rule for MD003HeadingStyle {
                         }
                     };
 
-                    // For Setext, levels 3+ must be ATX regardless of the target style
-                    let expected_style = if level > 2
-                        && (target_style == HeadingStyle::Setext1
-                            || target_style == HeadingStyle::Setext2)
+                    // For markdownlint parity: when target style is Setext, all headings are expected to be Setext
+                    // For level 3+, we can't actually convert to Setext, so leave as ATX but flag as violation
+                    let expected_style = if target_style == HeadingStyle::Setext1
+                        || target_style == HeadingStyle::Setext2
                     {
-                        HeadingStyle::Atx
-                    } else {
-                        // For Setext, use the appropriate style based on level
-                        if (target_style == HeadingStyle::Setext1
-                            || target_style == HeadingStyle::Setext2)
-                            && level <= 2
-                        {
-                            if level == 1 {
-                                HeadingStyle::Setext1
-                            } else {
-                                HeadingStyle::Setext2
-                            }
+                        if level > 2 {
+                            // Level 3+ can't be Setext, so keep as ATX but this will be flagged as violation
+                            HeadingStyle::Atx
+                        } else if level == 1 {
+                            HeadingStyle::Setext1
                         } else {
-                            target_style
+                            HeadingStyle::Setext2
                         }
+                    } else {
+                        target_style
                     };
 
                     // If this heading's style doesn't match the target, convert it

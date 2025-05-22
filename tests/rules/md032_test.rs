@@ -39,6 +39,77 @@ fn test_fix_missing_blank_lines() {
     assert_eq!(fixed, "Text\n\n* Item 1\n* Item 2\n\nMore text");
 }
 
+// CRITICAL REGRESSION TESTS: Emphasis text should NOT be detected as list markers
+
+#[test]
+fn test_emphasis_not_list_marker_simple() {
+    // This test covers the critical bug where **Problem: Permission errors**
+    // was incorrectly detected as a list item due to the * characters
+    let rule = MD032BlanksAroundLists;
+    let content = "**Problem: Permission errors**\n- On Windows: Run as administrator\n- On Mac/Linux: Use sudo";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the list items (lines 2-3) for missing blank line before,
+    // NOT the emphasis text on line 1
+    assert_eq!(result.len(), 1, "Should only detect one warning for the list missing blank line before");
+    assert_eq!(result[0].line, 2, "Warning should be on line 2 (first list item)");
+    assert!(result[0].message.contains("Lists should be surrounded by blank lines"));
+}
+
+#[test]
+fn test_emphasis_not_list_marker_multiple_stars() {
+    // Test various emphasis patterns that should NOT be detected as lists
+    let rule = MD032BlanksAroundLists;
+    let content = "**Bold text here**\n*Italic text*\n***Bold italic***\n\n- Actual list item\n- Another item\n\nMore text";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no warnings - the list is properly surrounded by blank lines
+    assert!(result.is_empty(), "Emphasis text should not be detected as list markers");
+}
+
+#[test]
+fn test_emphasis_followed_by_list_needs_blank() {
+    // This is the exact case from the parity corpus that was failing
+    let rule = MD032BlanksAroundLists;
+    let content = "**Problem: Permission errors**\n- On Windows: Run as administrator";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should flag that the list needs a blank line before it
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 2);
+
+    // Test the fix
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "**Problem: Permission errors**\n\n- On Windows: Run as administrator");
+}
+
+#[test]
+fn test_emphasis_patterns_not_lists() {
+    // Test various emphasis patterns that contain * or + characters
+    let rule = MD032BlanksAroundLists;
+    let content = "**API Parameters**\n*userId (string) - The user ID*\n\n+ This is a real list item\n+ Another real item\n\nMore text";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no warnings - emphasis is not a list, and the real list is properly spaced
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_heading_emphasis_not_list() {
+    // Test heading with emphasis that was causing false positives
+    let rule = MD032BlanksAroundLists;
+    let content = "## **Section Title**\n\nSome content\n\n- Real list item\n- Another item";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no warnings - neither heading emphasis nor properly spaced list should trigger
+    assert!(result.is_empty());
+}
+
 #[test]
 fn test_multiple_lists() {
     let rule = MD032BlanksAroundLists;

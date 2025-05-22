@@ -3,7 +3,7 @@
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::early_returns;
-use crate::utils::regex_cache;
+
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -11,8 +11,8 @@ use crate::lint_context::LintContext;
 use markdown::mdast::Node;
 
 lazy_static! {
-    // Simple pattern to quickly check if a line might contain a URL
-    static ref URL_QUICK_CHECK: Regex = Regex::new(r#"(?:https?|ftp)://"#).unwrap();
+    // Simple pattern to quickly check if a line might contain a URL or email
+    static ref URL_QUICK_CHECK: Regex = Regex::new(r#"(?:https?|ftp)://|@"#).unwrap();
 
     // Use fancy-regex for look-behind/look-ahead
     static ref URL_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftp)://[^
@@ -25,8 +25,8 @@ lazy_static! {
     // Updated to handle nested brackets in badge links like [![badge](img)](link)
     static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap();
 
-    // Pattern to match angle bracket link format
-    static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r#"<((?:https?|ftp)://[^>]+)>"#).unwrap();
+    // Pattern to match angle bracket link format (URLs and emails)
+    static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r#"<((?:https?|ftp)://[^>]+|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#).unwrap();
 
     // Pattern to match code fences
     static ref CODE_FENCE_RE: Regex = Regex::new(r#"^(`{3,}|~{3,})"#).unwrap();
@@ -41,8 +41,12 @@ lazy_static! {
     static ref MARKDOWN_IMAGE_PATTERN: Regex = Regex::new(r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap();
 
     // Add a simple regex for candidate URLs (no look-behind/look-ahead)
-    // Requires at least one dot in the domain to ensure proper URL structure
-    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://[^\s<>\[\]()\\'\"`]*\.[^\s<>\[\]()\\'\"`]+"#).unwrap();
+    // Matches URLs with proper domain structure (requires dot or is localhost)
+    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://(?:[^\s<>\[\]()\\'\"`]*\.)+[^\s<>\[\]()\\'\"`]+(?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?|(?:https?|ftp)://localhost(?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?|(?:https?|ftp)://(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
+
+    // Add regex for email addresses - matches markdownlint behavior
+    // Detects email addresses that should be autolinked like URLs
+    static ref EMAIL_REGEX: Regex = Regex::new(r#"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"#).unwrap();
 
     // Add regex for reference definitions
     static ref REFERENCE_DEF_RE: Regex = Regex::new(r"^\s*\[[^\]]+\]:\s*https?://\S+$").unwrap();
@@ -56,7 +60,8 @@ pub struct MD034NoBareUrls;
 
 impl MD034NoBareUrls {
     pub fn should_skip(&self, content: &str) -> bool {
-        !early_returns::has_urls(content)
+        // Skip if content has no URLs and no email addresses
+        !early_returns::has_urls(content) && !content.contains('@')
     }
 
 
@@ -155,6 +160,47 @@ impl MD034NoBareUrls {
                 fix: Some(Fix {
                     range: url_start..url_end,
                     replacement: format!("<{}>", &line[url_start..url_end]),
+                }),
+            });
+        }
+
+        // Check for email addresses - similar logic to URLs
+        for email_match in EMAIL_REGEX.find_iter(line) {
+            let email_start = email_match.start();
+            let email_end = email_match.end();
+            // Manual boundary check: not part of a larger word
+            let before = if email_start == 0 {
+                None
+            } else {
+                line.get(email_start - 1..email_start)
+            };
+            let after = line.get(email_end..email_end + 1);
+            let is_valid_boundary = before.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
+            }) && after.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
+            });
+            if !is_valid_boundary {
+                continue;
+            }
+            // Skip if this email is within a code span (using DocumentStructure)
+            if structure.is_in_code_span(line_idx + 1, email_start + 1) {
+                continue;
+            }
+            // Skip if email is within any excluded range (link/image dest)
+            let in_any_range = merged.iter().any(|(start, end)| email_start >= *start && email_end <= *end);
+            if in_any_range {
+                continue;
+            }
+            warnings.push(LintWarning {
+                rule_name: Some(self.name()),
+                line: line_idx + 1,
+                column: email_start + 1,
+                message: format!("Bare email address found: {}", &line[email_start..email_end]),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: email_start..email_end,
+                    replacement: format!("<{}>", &line[email_start..email_end]),
                 }),
             });
         }
@@ -320,41 +366,40 @@ impl Rule for MD034NoBareUrls {
             return Ok(content.to_string());
         }
 
-        // Convert warnings to edits
-        let mut edits: Vec<(usize, usize, String)> = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        // Group warnings by line number for easier processing
+        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
-        for warning in warnings {
-            let line_idx = warning.line - 1;
+        // Process warnings line by line (in reverse order to avoid offset issues)
+        let mut warnings_by_line: std::collections::BTreeMap<usize, Vec<&crate::rule::LintWarning>> = std::collections::BTreeMap::new();
+        for warning in &warnings {
+            warnings_by_line.entry(warning.line).or_insert_with(Vec::new).push(warning);
+        }
+
+        // Process lines in reverse order to avoid affecting line indices
+        for (line_num, line_warnings) in warnings_by_line.iter().rev() {
+            let line_idx = line_num - 1;
             if line_idx >= lines.len() {
                 continue;
             }
 
-            let line = lines[line_idx];
-            let col_idx = warning.column - 1;
+            // Sort warnings by column in reverse order (rightmost first)
+            let mut sorted_warnings = line_warnings.clone();
+            sorted_warnings.sort_by_key(|w| std::cmp::Reverse(w.column));
 
-            // Find the URL match at this position
-            if let Some(url_match) = SIMPLE_URL_REGEX.find_at(line, col_idx) {
-                // Calculate the actual byte offset in the content
-                let line_offset: usize = content.lines().take(line_idx).map(|l| l.len() + 1).sum();
-                let start = line_offset + url_match.start();
-                let end = line_offset + url_match.end();
-                let url = url_match.as_str();
-                edits.push((start, end, format!("<{}>", url)));
+            for warning in sorted_warnings {
+                if let Some(fix) = &warning.fix {
+                    let line = &mut lines[line_idx];
+                    let start = fix.range.start;
+                    let end = fix.range.end;
+
+                    if start <= line.len() && end <= line.len() && start < end {
+                        line.replace_range(start..end, &fix.replacement);
+                    }
+                }
             }
         }
 
-        // Sort edits by start offset (in reverse order to apply from end to start)
-        edits.sort_by_key(|e| std::cmp::Reverse(e.0));
-
-        let mut result = content.to_string();
-        for (start, end, replacement) in edits {
-            if start <= result.len() && end <= result.len() && start < end {
-                result.replace_range(start..end, &replacement);
-            }
-        }
-
-        Ok(result)
+        Ok(lines.join("\n"))
     }
 
     /// Get the category of this rule for selective processing
@@ -364,7 +409,7 @@ impl Rule for MD034NoBareUrls {
 
     /// Check if this rule should be skipped based on content
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        !regex_cache::contains_url(ctx.content)
+        self.should_skip(ctx.content)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

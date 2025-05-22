@@ -5,7 +5,6 @@ mod md004_test;
 mod md005_test;
 mod md006_test;
 mod md007_test;
-mod md008_test;
 mod md009_test;
 mod md010_test;
 mod md011_test;

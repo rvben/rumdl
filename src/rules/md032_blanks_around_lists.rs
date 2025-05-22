@@ -6,7 +6,7 @@ use regex::{Captures, Regex};
 use std::collections::VecDeque;
 
 lazy_static! {
-    static ref LIST_ITEM_START_REGEX: Regex = Regex::new(r"^([\t ]*)(?:([*+-])|(\d+)\.)([\t ]*)").unwrap();
+    static ref LIST_ITEM_START_REGEX: Regex = Regex::new(r"^([\t ]*)(?:([*+-])|(\d+)\.)(\s+|$)").unwrap();
     static ref BLOCKQUOTE_PREFIX_RE: Regex = Regex::new(r"^(\s*>)+(\s*)").unwrap();
     static ref BLANK_LINE_RE: Regex = Regex::new(r"^\s*$").unwrap();
 }
@@ -109,6 +109,7 @@ impl MD032BlanksAroundLists {
                  if let Some(first_item_content_indent) = get_content_start_column(&captures) {
                     let block_start_line_1 = current_line_idx_1;
                     let mut block_end_line_1 = current_line_idx_1;
+
                     // blockquote_prefix is already determined for the start line
 
                     let mut lookahead_idx_0 = current_line_idx_0 + 1;
@@ -151,6 +152,7 @@ impl MD032BlanksAroundLists {
                             break;
                         }
                     }
+
 
                     list_blocks.push((block_start_line_1, block_end_line_1, blockquote_prefix)); // Store prefix
                     current_line_idx_0 = block_end_line_1;
@@ -201,14 +203,14 @@ impl MD032BlanksAroundLists {
                 let prev_is_blank = is_blank_in_context(prev_line_str);
                 let prefixes_match = prev_prefix.trim() == prefix.trim();
 
-                // Compare trimmed prefixes
+                // Only require blank lines for content in the same context (same blockquote level)
                 if !is_prev_excluded && !prev_is_blank && prefixes_match {
                      warnings.push(LintWarning {
                         line: start_line,
                         column: 0,
                         severity: Severity::Error,
                         rule_name: Some(self.name()),
-                        message: format!("MD032/list-marker-space: List item on line {} should be preceded by a blank line.", start_line),
+                        message: format!("Lists should be surrounded by blank lines"),
                         fix: None,
                     });
                 }
@@ -223,14 +225,14 @@ impl MD032BlanksAroundLists {
                 let next_is_blank = is_blank_in_context(next_line_str);
                 let prefixes_match = next_prefix.trim() == prefix.trim();
 
-                 // Compare trimmed prefixes
+                 // Only require blank lines for content in the same context (same blockquote level)
                  if !is_next_excluded && !next_is_blank && prefixes_match {
                       warnings.push(LintWarning {
                          line: end_line,
                          column: 0,
                          severity: Severity::Error,
                          rule_name: Some(self.name()),
-                         message: format!("MD032/list-marker-space: List item on line {} should be followed by a blank line.", end_line),
+                         message: format!("Lists should be surrounded by blank lines"),
                          fix: None,
                      });
         }
@@ -257,6 +259,8 @@ impl Rule for MD032BlanksAroundLists {
         let list_blocks = self.find_md032_list_blocks(&lines, &structure);
 
         if list_blocks.is_empty() { return Ok(Vec::new()); }
+
+
 
         self.perform_checks(ctx, &structure, &lines, &list_blocks)
     }
@@ -339,11 +343,20 @@ impl Rule for MD032BlanksAroundLists {
 // Helper to determine the column where content starts after the marker
 fn get_content_start_column(captures: &Captures) -> Option<usize> {
     let indent_len = captures.get(1).map_or(0, |m| m.as_str().len());
-    let marker_char_len = captures.get(2).or_else(|| captures.get(3)).map_or(0, |m| m.as_str().len());
-    let marker_full_len = if captures.get(3).is_some() { marker_char_len + 1 } else { marker_char_len };
-    let _space_after_len = captures.get(4).map_or(0, |m| m.as_str().len()); // Keep underscore prefix as it's unused now
 
-    Some(indent_len + marker_full_len + 1)
+    // For unordered lists: capture group 2 has the marker (*+-)
+    // For ordered lists: capture group 3 has the number, dot is included in regex pattern
+    let marker_len = if let Some(unordered) = captures.get(2) {
+        unordered.as_str().len() // Just the marker character
+    } else if let Some(ordered) = captures.get(3) {
+        ordered.as_str().len() + 1 // Number + dot
+    } else {
+        return None; // Should not happen if regex matched
+    };
+
+    let space_after_len = captures.get(4).map_or(0, |m| m.as_str().len()); // Space after marker
+
+    Some(indent_len + marker_len + space_after_len)
 }
 
 // Calculates visual indentation, treating tabs as expanding to 4 spaces (common behavior)

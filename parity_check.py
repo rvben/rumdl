@@ -11,23 +11,27 @@ MARKDOWNLINT_BIN = "markdownlint"
 
 
 def run_rumdl(md_file):
-    # Create a temporary config file to match markdownlint defaults
+    # Create a temporary config file to match markdownlint defaults for MD013
     config_file = ".rumdl.toml"
     temp_config_file = ".rumdl.toml.temp_parity"
     backup_file = ".rumdl.toml.backup_parity"
     config_exists = os.path.exists(config_file)
 
     # Create temporary config with markdownlint-compatible settings
+    # Don't disable MD033 (unlike the main config) to match markdownlint behavior
     temp_config_content = """# Temporary parity check config
+
+[global]
+# Don't disable MD033 for parity check (main config disables it)
+# Don't disable any rules for parity - check everything markdownlint checks
+disable = []
+
 [MD013]
 line_length = 80
-code_blocks = true
+code-blocks = true
 tables = true
 headings = true
 strict = false
-
-# Enable MD033 (disabled in main config)
-# MD033 will be enabled by default since we don't disable it
 """
 
     try:
@@ -39,7 +43,8 @@ strict = false
         with open(temp_config_file, 'w') as f:
             f.write(temp_config_content)
 
-        cmd = f"{RUMDL_BIN} check '{md_file}' --output json --config {temp_config_file}"
+        # Use the temporary config that doesn't disable MD033
+        cmd = f"{RUMDL_BIN} check '{md_file}' -o json --config {temp_config_file}"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         if result.returncode != 0 and not result.stdout.strip():
             print(f"[rumdl] Error running on {md_file}: {result.stderr}")

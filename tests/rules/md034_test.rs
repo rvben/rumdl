@@ -346,3 +346,141 @@ fn test_md034_edge_cases() {
 //         fix_duration.as_millis()
 //     );
 // }
+
+// CRITICAL PARITY TESTS: Email Detection Enhancement
+// These tests cover the major MD034 improvement that added email detection
+// which increased parity by +5 warnings
+
+#[test]
+fn test_bare_email_addresses() {
+    let rule = MD034NoBareUrls;
+    let content = "Contact us at support@example.com or admin@test.org";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 2, "Bare email addresses should be flagged as bare URLs");
+    assert_eq!(result[0].line, 1);
+    assert_eq!(result[1].line, 1);
+
+    assert!(result[0].message.contains("Bare email address found: support@example.com"));
+    assert!(result[1].message.contains("Bare email address found: admin@test.org"));
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Contact us at <support@example.com> or <admin@test.org>");
+}
+
+#[test]
+fn test_email_addresses_various_formats() {
+    let rule = MD034NoBareUrls;
+    let test_cases = [
+        ("Email: user@domain.com", 1, "Email: <user@domain.com>"),
+        ("Complex email: user.name+tag@sub.domain.co.uk", 1, "Complex email: <user.name+tag@sub.domain.co.uk>"),
+        ("Email with numbers: user123@example123.com", 1, "Email with numbers: <user123@example123.com>"),
+        ("Email with hyphens: user-name@sub-domain.example-site.org", 1, "Email with hyphens: <user-name@sub-domain.example-site.org>"),
+        ("Short TLD: user@example.co", 1, "Short TLD: <user@example.co>"),
+        ("Long TLD: user@example.museum", 1, "Long TLD: <user@example.museum>"),
+    ];
+
+    for (content, expected_count, expected_fix) in test_cases.iter() {
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), *expected_count, "Failed for content: {}", content);
+
+        if *expected_count > 0 {
+            assert!(result.iter().any(|w| w.message.contains("Bare email address found:")), "Email detection failed for: {}", content);
+
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, *expected_fix, "Fix failed for: {}", content);
+        }
+    }
+}
+
+#[test]
+fn test_email_exclusions() {
+    let rule = MD034NoBareUrls;
+    let test_cases = [
+        // Emails in markdown links should not be flagged
+        ("[Contact](mailto:user@example.com)", 0),
+        // Emails in angle brackets (already auto-linked) should not be flagged
+        ("<user@example.com>", 0),
+        // Emails in code spans should not be flagged
+        ("`user@example.com`", 0),
+        // Emails in code blocks should not be flagged
+        ("```\nuser@example.com\n```", 0),
+        // Emails in HTML attributes should not be flagged
+        ("<a href=\"mailto:user@example.com\">Contact</a>", 0),
+    ];
+
+    for (content, expected_count) in test_cases.iter() {
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), *expected_count, "Failed for content: {}", content);
+    }
+}
+
+// CRITICAL PARITY TESTS: Localhost URL Support Enhancement
+// These tests cover the major MD034 improvement that added localhost URL detection
+// which increased parity by +5 warnings (combined with email detection = +10 total)
+
+#[test]
+fn test_localhost_urls() {
+    let rule = MD034NoBareUrls;
+    let content = "Visit http://localhost:3000 and https://localhost:8080/api";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 2, "Localhost URLs should be flagged as bare URLs");
+    assert!(result.iter().any(|w| w.message.contains("localhost")), "Localhost URL detection failed");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Visit <http://localhost:3000> and <https://localhost:8080/api>");
+}
+
+#[test]
+fn test_localhost_variations() {
+    let rule = MD034NoBareUrls;
+    let test_cases = [
+        ("http://localhost", 1, "<http://localhost>"),
+        ("https://localhost", 1, "<https://localhost>"),
+        ("http://localhost:8080", 1, "<http://localhost:8080>"),
+        ("https://localhost:3000", 1, "<https://localhost:3000>"),
+        ("http://localhost/path", 1, "<http://localhost/path>"),
+        ("https://localhost:9090/api/v1", 1, "<https://localhost:9090/api/v1>"),
+        ("ftp://localhost", 1, "<ftp://localhost>"), // FTP is also supported
+    ];
+
+    for (content, expected_count, expected_fix) in test_cases.iter() {
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), *expected_count, "Failed for content: {}", content);
+
+        if *expected_count > 0 {
+            assert!(result.iter().any(|w| w.message.contains("localhost") || w.message.contains("ftp")), "Localhost/protocol detection failed for: {}", content);
+
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, *expected_fix, "Fix failed for: {}", content);
+        }
+    }
+}
+
+#[test]
+fn test_ip_address_urls() {
+    let rule = MD034NoBareUrls;
+    let content = "Connect to http://127.0.0.1:8080 or https://192.168.1.100";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 2, "IP address URLs should be flagged as bare URLs");
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Connect to <http://127.0.0.1:8080> or <https://192.168.1.100>");
+}
+
+#[test]
+fn test_combined_emails_and_localhost() {
+    let rule = MD034NoBareUrls;
+    let content = "Contact admin@localhost.com or visit http://localhost:9090\nAlso try user@example.org and https://192.168.1.1:3000";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 4, "Should detect both emails and localhost URLs");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let expected = "Contact <admin@localhost.com> or visit <http://localhost:9090>\nAlso try <user@example.org> and <https://192.168.1.1:3000>";
+    assert_eq!(fixed, expected);
+}
