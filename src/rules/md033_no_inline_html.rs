@@ -131,23 +131,28 @@ impl Rule for MD033NoInlineHtml {
             if self.is_html_comment(trimmed) {
                 continue;
             }
-            // Only flag if the line starts with a block-level HTML tag (after optional whitespace)
-            if trimmed.starts_with('<') && trimmed.len() > 1 && trimmed.chars().nth(1).unwrap().is_ascii_alphabetic() {
-                // Extract tag name for debug
-                let tag = trimmed.trim_start_matches('<').trim_start_matches('/');
-                let _tag_name = tag
-                    .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
-                    .next()
-                    .unwrap_or("");
-                if Self::is_block_html_tag(trimmed) && !self.is_tag_allowed(trimmed) {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: line_num,
-                        column: 1,
-                        message: "Inline HTML".to_string(),
-                        severity: Severity::Warning,
-                        fix: None,
-                    });
+            // Flag if the line contains a block-level HTML tag (including indented ones)
+            if trimmed.starts_with('<') && trimmed.len() > 1 {
+                let second_char = trimmed.chars().nth(1).unwrap();
+                if second_char.is_ascii_alphabetic() || (second_char == '/' && trimmed.len() > 2 && trimmed.chars().nth(2).unwrap().is_ascii_alphabetic()) {
+                    // Extract tag name for debug
+                    let tag = trimmed.trim_start_matches('<').trim_start_matches('/');
+                    let _tag_name = tag
+                        .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+                        .next()
+                        .unwrap_or("");
+                    if Self::is_block_html_tag(trimmed) && !self.is_tag_allowed(trimmed) {
+                        // Calculate column position based on original line indentation
+                        let column = line.len() - trimmed.len() + 1;
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: line_num,
+                            column,
+                            message: "Inline HTML".to_string(),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
+                    }
                 }
             }
         }

@@ -18,7 +18,11 @@ fn test_bare_urls() {
     let content = "This is a bare URL: https://example.com/foobar";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "Autolinks should not be flagged as bare URLs");
+    assert_eq!(result.len(), 1, "Bare URLs should be flagged");
+    assert_eq!(result[0].line, 1);
+    assert_eq!(result[0].rule_name, Some("MD034"));
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "This is a bare URL: <https://example.com/foobar>");
 }
 
 #[test]
@@ -27,9 +31,9 @@ fn test_multiple_urls() {
     let content = "Visit https://example.com and http://another.com";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "Autolinks should not be flagged as bare URLs");
+    assert_eq!(result.len(), 2, "Bare URLs should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content);
+    assert_eq!(fixed, "Visit <https://example.com> and <http://another.com>");
 }
 
 #[test]
@@ -41,10 +45,10 @@ https://example.com
 https://outside.com";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // Only https://outside.com is an autolink, so not flagged
-    assert!(result.is_empty(), "Autolinks should not be flagged as bare URLs");
+    // Only https://outside.com should be flagged (URL in code block is ignored)
+    assert_eq!(result.len(), 1, "Bare URL outside code block should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content);
+    assert_eq!(fixed, "```\nhttps://example.com\n```\n<https://outside.com>");
 }
 
 #[test]
@@ -53,10 +57,10 @@ fn test_urls_in_inline_code() {
     let content = "`https://example.com`\nhttps://outside.com";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // https://outside.com is an autolink, not flagged
-    assert!(result.is_empty(), "Autolinks should not be flagged as bare URLs");
+    // https://outside.com should be flagged (URL in inline code is ignored)
+    assert_eq!(result.len(), 1, "Bare URL outside inline code should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content);
+    assert_eq!(fixed, "`https://example.com`\n<https://outside.com>");
 }
 
 #[test]
@@ -65,10 +69,10 @@ fn test_urls_in_markdown_links() {
     let content = "[Example](https://example.com)\nhttps://bare.com";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // https://bare.com is an autolink, not flagged
-    assert!(result.is_empty(), "Autolinks should not be flagged as bare URLs");
+    // https://bare.com should be flagged (URL in markdown link is ignored)
+    assert_eq!(result.len(), 1, "Bare URL should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content);
+    assert_eq!(fixed, "[Example](https://example.com)\n<https://bare.com>");
 }
 
 #[test]
@@ -88,9 +92,9 @@ fn test_complex_urls() {
     let content = "Visit https://example.com/path?param=value#fragment";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "Autolinks should not be flagged as bare URLs");
+    assert_eq!(result.len(), 1, "Bare URL should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content);
+    assert_eq!(fixed, "Visit <https://example.com/path?param=value#fragment>");
 }
 
 #[test]
@@ -101,9 +105,9 @@ fn test_multiple_protocols() {
     let debug_str = format!("test_multiple_protocols\nMD034 test content: {}\nMD034 full AST: {:#?}\n", content, ctx.ast);
     let _ = write("/tmp/md034_ast_debug.txt", debug_str);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Only ftp://files.com should be flagged as a bare URL");
+    assert_eq!(result.len(), 3, "All bare URLs should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "http://example.com\nhttps://secure.com\n<ftp://files.com>");
+    assert_eq!(fixed, "<http://example.com>\n<https://secure.com>\n<ftp://files.com>");
 }
 
 #[test]
@@ -114,9 +118,9 @@ fn test_mixed_content() {
     let debug_str = format!("test_mixed_content\nMD034 test content: {}\nMD034 full AST: {:#?}\n", content, ctx.ast);
     let _ = write("/tmp/md034_ast_debug.txt", debug_str);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "Autolinks should not be flagged as bare URLs");
+    assert_eq!(result.len(), 2, "Bare URLs should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content);
+    assert_eq!(fixed, "# Heading\nVisit <https://example.com>\n> Quote with <https://another.com>");
 }
 
 #[test]
@@ -167,57 +171,65 @@ fn debug_ast_multiple_urls() {
 fn test_md034_edge_cases() {
     let rule = MD034NoBareUrls;
     let cases = [
-        // URL inside inline code
+        // URL inside inline code - should not be flagged
         ("`https://example.com`", 0),
-        // URL inside code block
-        ("```
-https://example.com
-```", 0),
-        // Malformed URL
+        // URL inside code block - should not be flagged
+        ("```\nhttps://example.com\n```", 0),
+        // Malformed URL - should not be flagged
         ("This is not a URL: htp://example.com", 0),
-        // Custom scheme
+        // Custom scheme - should not be flagged (not http/https/ftp)
         ("custom://example.com", 0),
-        // URL with trailing period
-        ("See https://example.com.", 0),
-        // URL with space in the middle
+        // URL with trailing period - should be flagged
+        ("See https://example.com.", 1),
+        // URL with space in the middle - should not be flagged (invalid URL)
         ("https://example .com", 0),
-        // URL in blockquote
-        ("> https://example.com", 0),
-        // URL in list item
-        ("- https://example.com", 0),
-        // URL with non-ASCII character
-        ("https://exämple.com", 0),
-        // Valid http URL with non-standard port
-        ("http://example.com:8080", 0),
-        // Valid URL with query string and fragment
-        ("https://example.com/path?query=1#frag", 0),
-        // URL with missing scheme
+        // URL in blockquote - should be flagged
+        ("> https://example.com", 1),
+        // URL in list item - should be flagged
+        ("- https://example.com", 1),
+        // URL with non-ASCII character - should be flagged
+        ("https://exämple.com", 1),
+        // Valid http URL with non-standard port - should be flagged
+        ("http://example.com:8080", 1),
+        // Valid URL with query string and fragment - should be flagged
+        ("https://example.com/path?query=1#frag", 1),
+        // URL with missing scheme - should not be flagged
         ("www.example.com", 0),
-        // URL in table cell
-        ("| https://example.com |", 0),
-        // URL in heading
-        ("# https://example.com", 0),
-        // URL in reference definition
+        // URL in table cell - should be flagged
+        ("| https://example.com |", 1),
+        // URL in heading - should be flagged
+        ("# https://example.com", 1),
+        // URL in reference definition - should not be flagged
         ("[ref]: https://example.com", 0),
-        // URL in markdown image
+        // URL in markdown image - should not be flagged
         ("![alt](https://example.com/image.png)", 0),
-        // URL in markdown link
+        // URL in markdown link - should not be flagged
         ("[link](https://example.com)", 0),
-        // True bare URL with non-standard scheme
+        // True bare URL with non-standard scheme - should not be flagged (not http/https/ftp)
         ("foo://example.com", 0),
-        // True bare URL with typo in scheme
+        // True bare URL with typo in scheme - should not be flagged (invalid scheme)
         ("htps://example.com", 0),
-        // True bare URL with valid scheme but inside code span
+        // True bare URL with valid scheme but inside code span - should not be flagged
         ("`http://example.com`", 0),
-        // True bare URL with valid scheme and not in any special context (should be autolinked, so 0)
-        ("http://example.com", 0),
+        // True bare URL with valid scheme - should be flagged
+        ("http://example.com", 1),
     ];
     for (content, expected) in cases.iter() {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), *expected, "Failed for content: {}", content);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, *content, "Fix should not change content: {}", content);
+
+        // If we expect warnings, the fix should change the content
+        if *expected > 0 {
+            assert_ne!(fixed, *content, "Fix should change content with warnings: {}", content);
+            // The fixed version should have no warnings
+            let ctx_fixed = LintContext::new(&fixed);
+            let result_fixed = rule.check(&ctx_fixed).unwrap();
+            assert_eq!(result_fixed.len(), 0, "Fixed content should have no warnings: {}", fixed);
+        } else {
+            assert_eq!(fixed, *content, "Fix should not change content without warnings: {}", content);
+        }
     }
 }
 

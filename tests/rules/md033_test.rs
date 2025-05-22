@@ -109,7 +109,8 @@ fn test_multiline_html() {
     let content = "<div>\nMultiline\ncontent\n</div>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    // Now detects both opening and closing tags (improved behavior)
+    assert_eq!(result.len(), 2);
 }
 
 #[test]

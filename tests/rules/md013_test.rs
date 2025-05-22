@@ -24,7 +24,7 @@ fn test_invalid_line_length() {
 
 #[test]
 fn test_code_blocks() {
-    let rule = MD013LineLength::new(60, false, true, true, false);
+    let rule = MD013LineLength::new(60, true, true, true, false);
     let content = "```
 This is a code block line that is very very very very very very very long and should be flagged.
 ```";
@@ -111,7 +111,7 @@ This is a normal code line that is too long and should be flagged
 ```";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0); // All code block lines should be skipped
+    assert_eq!(result.len(), 1); // Only the line with spaces should be flagged (line without spaces is ignored)
 }
 
 #[test]
@@ -179,14 +179,15 @@ fn test_parity_line_containing_url_checked() {
 }
 
 #[test]
-fn test_parity_code_blocks_skipped() {
+fn test_parity_code_blocks_checked() {
     let rule = MD013LineLength::new(80, true, true, true, false);
     let content = "```
-// This is a very long line inside a code block that should not be flagged by MD013 even if it is over the limit.
+// This is a very long line inside a code block that should now be flagged by MD013 to match markdownlint behavior.
 ```";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty());
+    assert_eq!(result.len(), 1); // Code block line should be flagged (matches markdownlint)
+    assert_eq!(result[0].line, 2);
 }
 
 #[test]

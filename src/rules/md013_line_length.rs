@@ -26,8 +26,8 @@ impl Default for MD013LineLength {
     fn default() -> Self {
         Self {
             line_length: 80,
-            code_blocks: false,
-            tables: false,
+            code_blocks: true,
+            tables: true,
             headings: true,
             strict: false,
         }
@@ -151,7 +151,7 @@ impl Rule for MD013LineLength {
                 if self.headings && heading_lines_set.contains(&line_number) {
                     is_block = true;
                 }
-                if self.code_blocks && structure.is_in_code_block(line_number) {
+                if !self.code_blocks && structure.is_in_code_block(line_number) {
                     is_block = true;
                 }
                 if self.tables && Self::is_in_table(&lines, line_num) {
@@ -232,9 +232,9 @@ impl Rule for MD013LineLength {
                 .unwrap_or(80);
         let code_blocks =
             crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
-                .unwrap_or(false);
+                .unwrap_or(true);
         let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables")
-            .unwrap_or(false);
+            .unwrap_or(true);
         let headings = crate::config::get_rule_config_value::<bool>(config, "MD013", "headings")
             .unwrap_or(true);
         let strict = crate::config::get_rule_config_value::<bool>(config, "MD013", "strict")

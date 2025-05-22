@@ -435,24 +435,67 @@ impl DocumentStructure {
                 }
                 // Check for indented code block (simplified)
                 else if line.starts_with("    ") && !line.trim().is_empty() {
-                    // Find the end of the indented block
-                    let mut end_line = i;
-                    while end_line + 1 < lines.len()
-                        && (lines[end_line + 1].starts_with("    ")
-                            || lines[end_line + 1].trim().is_empty())
-                    {
-                        end_line += 1;
+                    // Don't treat indented HTML tags as code blocks
+                    let trimmed = line.trim_start();
+                    if trimmed.starts_with('<') && trimmed.len() > 1 {
+                        let second_char = trimmed.chars().nth(1).unwrap();
+                        if second_char.is_ascii_alphabetic() || (second_char == '/' && trimmed.len() > 2 && trimmed.chars().nth(2).unwrap().is_ascii_alphabetic()) {
+                            // This looks like an HTML tag, don't treat as code block
+                            // Skip this line and continue
+                        } else {
+                            // Not an HTML tag, process as potential code block
+                            let mut end_line = i;
+                            while end_line + 1 < lines.len()
+                                && (lines[end_line + 1].starts_with("    ")
+                                    || lines[end_line + 1].trim().is_empty())
+                            {
+                                // Check if the next indented line is also an HTML tag
+                                if lines[end_line + 1].starts_with("    ") {
+                                    let next_trimmed = lines[end_line + 1].trim_start();
+                                    if next_trimmed.starts_with('<') && next_trimmed.len() > 1 {
+                                        let next_second_char = next_trimmed.chars().nth(1).unwrap();
+                                        if next_second_char.is_ascii_alphabetic() || (next_second_char == '/' && next_trimmed.len() > 2 && next_trimmed.chars().nth(2).unwrap().is_ascii_alphabetic()) {
+                                            // Next line is also HTML, break the code block here
+                                            break;
+                                        }
+                                    }
+                                }
+                                end_line += 1;
+                            }
+
+                            // Only create code block if we found non-HTML content
+                            if end_line > i {
+                                code_blocks.push(CodeBlock {
+                                    start_line: i + 1,
+                                    end_line: end_line + 1,
+                                    language: None,
+                                    block_type: CodeBlockType::Indented,
+                                });
+
+                                // Skip to end of block
+                                i = end_line;
+                            }
+                        }
+                    } else {
+                        // Not an HTML tag, process as normal indented code block
+                        let mut end_line = i;
+                        while end_line + 1 < lines.len()
+                            && (lines[end_line + 1].starts_with("    ")
+                                || lines[end_line + 1].trim().is_empty())
+                        {
+                            end_line += 1;
+                        }
+
+                        code_blocks.push(CodeBlock {
+                            start_line: i + 1,
+                            end_line: end_line + 1,
+                            language: None,
+                            block_type: CodeBlockType::Indented,
+                        });
+
+                        // Skip to end of block
+                        i = end_line;
                     }
-
-                    code_blocks.push(CodeBlock {
-                        start_line: i + 1,
-                        end_line: end_line + 1,
-                        language: None,
-                        block_type: CodeBlockType::Indented,
-                    });
-
-                    // Skip to end of block
-                    i = end_line;
                 }
             } else {
                 // Check for fenced code block end - must start with the same fence character
