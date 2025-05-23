@@ -38,6 +38,7 @@ impl Rule for MD028NoBlanksBlockquote {
         let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
         let lines: Vec<&str> = ctx.content.lines().collect();
+
         for (i, &line) in lines.iter().enumerate() {
             if BlockquoteUtils::is_blockquote(line) {
                 let level = BlockquoteUtils::get_nesting_level(line);

@@ -77,53 +77,31 @@ impl Rule for MD049EmphasisStyle {
         let ast = &ctx.ast;
         match self.style {
             EmphasisStyle::Consistent => {
-                fn walk_paragraphs<'a>(
-                    node: &'a Node,
-                    ctx: &LintContext,
-                    rule: &MD049EmphasisStyle,
-                    warnings: &mut Vec<LintWarning>,
-                ) {
-                    match node {
-                        Node::Paragraph(par) => {
-                            let mut emphasis_nodes = vec![];
-                            for child in &par.children {
-                                if let Node::Emphasis(em) = child {
-                                    if let Some(pos) = &em.position {
-                                        let start = pos.start.offset;
-                                        let (line, col) = ctx.offset_to_line_col(start);
-                                        let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
-                                        let marker = line_str.chars().nth(col - 1).unwrap_or('*');
-                                        emphasis_nodes.push((line, col, marker, em));
-                                    }
-                                }
-                            }
-                            if emphasis_nodes.len() < 2 {
-                                return;
-                            }
-                            let target_marker = emphasis_nodes[0].2;
-                            for (_, (line, col, marker, _)) in emphasis_nodes.iter().enumerate().skip(1) {
-                                if *marker != target_marker {
-                                    warnings.push(LintWarning {
-                                        rule_name: Some(rule.name()),
-                                        line: *line,
-                                        column: *col,
-                                        message: format!("Emphasis should use {} instead of {}", target_marker, marker),
-                                        fix: None,
-                                        severity: Severity::Warning,
-                                    });
-                                }
-                            }
-                        }
-                        _ => {
-                            if let Some(children) = node.children() {
-                                for child in children {
-                                    walk_paragraphs(child, ctx, rule, warnings);
-                                }
-                            }
-                        }
+                // Collect all emphasis nodes from the entire document
+                let mut emphasis_nodes = vec![];
+                self.collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
+
+                // If we have less than 2 emphasis nodes, no need to check consistency
+                if emphasis_nodes.len() < 2 {
+                    return Ok(warnings);
+                }
+
+                // Use the first emphasis marker found as the target style
+                let target_marker = emphasis_nodes[0].2;
+
+                // Check all subsequent emphasis nodes for consistency
+                for (line, col, marker, _) in emphasis_nodes.iter().skip(1) {
+                    if *marker != target_marker {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: *line,
+                            column: *col,
+                            message: format!("Emphasis should use {} instead of {}", target_marker, marker),
+                            fix: None,
+                            severity: Severity::Warning,
+                        });
                     }
                 }
-                walk_paragraphs(ast, ctx, self, &mut warnings);
             }
             EmphasisStyle::Asterisk | EmphasisStyle::Underscore => {
                 let mut emphasis_nodes = vec![];
@@ -155,48 +133,29 @@ impl Rule for MD049EmphasisStyle {
         let mut edits = vec![];
         match self.style {
             EmphasisStyle::Consistent => {
-                fn walk_paragraphs<'a>(
-                    node: &'a Node,
-                    ctx: &LintContext,
-                    rule: &MD049EmphasisStyle,
-                    edits: &mut Vec<(usize, char)>,
-                ) {
-                    match node {
-                        Node::Paragraph(par) => {
-                            let mut emphasis_nodes = vec![];
-                            for child in &par.children {
-                                if let Node::Emphasis(em) = child {
-                                    if let Some(pos) = &em.position {
-                                        let start = pos.start.offset;
-                                        let end = pos.end.offset;
-                                        let (line, col) = ctx.offset_to_line_col(start);
-                                        let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
-                                        let marker = line_str.chars().nth(col - 1).unwrap_or('*');
-                                        emphasis_nodes.push((line, col, marker, em, start, end));
-                                    }
-                                }
-                            }
-                            if emphasis_nodes.len() < 2 {
-                                return;
-                            }
-                            let target_marker = emphasis_nodes[0].2;
-                            for (_, _, marker, _, start, end) in &emphasis_nodes[1..] {
-                                if *marker != target_marker {
-                                    edits.push((*start, target_marker));
-                                    edits.push((*end - 1, target_marker));
-                                }
-                            }
-                        }
-                        _ => {
-                            if let Some(children) = node.children() {
-                                for child in children {
-                                    walk_paragraphs(child, ctx, rule, edits);
-                                }
-                            }
+                // Collect all emphasis nodes from the entire document
+                let mut emphasis_nodes = vec![];
+                self.collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
+
+                // If we have less than 2 emphasis nodes, nothing to fix
+                if emphasis_nodes.len() < 2 {
+                    return Ok(ctx.content.to_string());
+                }
+
+                // Use the first emphasis marker found as the target style
+                let target_marker = emphasis_nodes[0].2;
+
+                // Fix all subsequent emphasis nodes that don't match the target style
+                for (_, _, marker, em) in emphasis_nodes.iter().skip(1) {
+                    if *marker != target_marker {
+                        if let Some(pos) = &em.position {
+                            let start = pos.start.offset;
+                            let end = pos.end.offset;
+                            edits.push((start, target_marker));
+                            edits.push((end - 1, target_marker));
                         }
                     }
                 }
-                walk_paragraphs(ast, ctx, self, &mut edits);
             }
             EmphasisStyle::Asterisk | EmphasisStyle::Underscore => {
                 let mut emphasis_nodes = vec![];
