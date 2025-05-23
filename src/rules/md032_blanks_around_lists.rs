@@ -210,7 +210,7 @@ impl MD032BlanksAroundLists {
                         column: 0,
                         severity: Severity::Error,
                         rule_name: Some(self.name()),
-                        message: format!("Lists should be surrounded by blank lines"),
+                        message: format!("Lists should be preceded by a blank line"),
                         fix: None,
                     });
                 }
@@ -232,7 +232,7 @@ impl MD032BlanksAroundLists {
                          column: 0,
                          severity: Severity::Error,
                          rule_name: Some(self.name()),
-                         message: format!("Lists should be surrounded by blank lines"),
+                         message: format!("Lists should be followed by a blank line"),
                          fix: None,
                      });
         }

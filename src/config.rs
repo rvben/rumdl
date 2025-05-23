@@ -294,8 +294,8 @@ respect-gitignore = true
 
         fs::write(&config_path, content).unwrap();
 
-        // Load the config using the new sourced loader
-        let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
+        // Load the config with skip_auto_discovery to avoid environment config files
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into(); // Convert to plain config for assertions
 
         // Check global settings
@@ -304,6 +304,7 @@ respect-gitignore = true
             config.global.enable,
             vec!["MD001".to_string(), "MD004".to_string()]
         );
+        // Should now contain only the configured pattern since auto-discovery is disabled
         assert_eq!(config.global.include, vec!["docs/*.md".to_string()]);
         assert_eq!(config.global.exclude, vec!["node_modules".to_string()]);
         assert!(config.global.respect_gitignore);
@@ -327,8 +328,8 @@ respect_gitignore = true
 
         fs::write(&config_path, content).unwrap();
 
-        // Load the config using the new sourced loader
-        let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
+        // Load the config with skip_auto_discovery to avoid environment config files
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into(); // Convert to plain config for assertions
 
         // Check settings were correctly loaded
@@ -347,7 +348,8 @@ line_length = 111
 line-length = 222
 "#;
         fs::write(&config_path, config_content).unwrap();
-        let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
+        // Load the config with skip_auto_discovery to avoid environment config files
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         // DEBUG: Print all rule keys and their value keys
         log::debug!(
             "[DEBUG] All rules loaded: {:?}",
@@ -364,7 +366,7 @@ line-length = 222
             .rules
             .get("MD013")
             .expect("MD013 rule config should exist");
-        // Both keys should be normalized to 'line-length', with the last one winning
+        // Now we should only get the explicitly configured key
         let keys: Vec<_> = rule_cfg.values.keys().cloned().collect();
         assert_eq!(keys, vec!["line-length"]);
         let val = &rule_cfg.values["line-length"].value;
@@ -392,7 +394,8 @@ line-length = 102
 line-length = 103
 "#;
         fs::write(&config_path, config_content).unwrap();
-        let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
+        // Load the config with skip_auto_discovery to avoid environment config files
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.clone().into();
         // Only the last section should win, and be present
         let rule_cfg = sourced
@@ -417,7 +420,8 @@ line_length = 201
 line-length = 202
 "#;
         fs::write(&config_path, config_content).unwrap();
-        let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
+        // Load the config with skip_auto_discovery to avoid environment config files
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.clone().into();
         let rule_cfg = sourced
             .rules
@@ -445,7 +449,8 @@ bar = 2
 line-length = 303
 "#;
         fs::write(&config_path, config_content).unwrap();
-        let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
+        // Load the config with skip_auto_discovery to avoid environment config files
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.clone().into();
         // MD999 should not be present
         assert!(!sourced.rules.contains_key("MD999"));
@@ -750,8 +755,8 @@ impl SourcedConfig {
             }
         }
 
-        // Only perform auto-discovery if not skipped (--no-config not specified)
-        if !skip_auto_discovery {
+        // Only perform auto-discovery if not skipped AND no explicit config path provided
+        if !skip_auto_discovery && config_path.is_none() {
             // 2. Discover and load default files: pyproject.toml first
             if std::path::Path::new("pyproject.toml").exists() {
                 log::debug!("[rumdl-config] Found pyproject.toml in current directory");

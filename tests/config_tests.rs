@@ -28,7 +28,7 @@ tables = true
 
     // Test loading the config using the full path
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_result = rumdl::config::SourcedConfig::load(Some(config_path_str), None);
+    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
     assert!(
         sourced_result.is_ok(),
         "SourcedConfig loading should succeed. Error: {:?}",
@@ -61,7 +61,7 @@ tables = true
 #[test]
 fn test_load_nonexistent_config() {
     // Test loading a nonexistent config file using SourcedConfig::load
-    let sourced_result = rumdl::config::SourcedConfig::load(Some("nonexistent_config.toml"), None);
+    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some("nonexistent_config.toml"), None, true);
     assert!(
         sourced_result.is_err(),
         "Loading nonexistent config should fail"
@@ -135,7 +135,7 @@ fn test_create_default_config() {
     );
 
     // Load the created config using SourcedConfig::load
-    let sourced_result = rumdl::config::SourcedConfig::load(Some(config_path_str), None);
+    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
     assert!(
         sourced_result.is_ok(),
         "Loading created config should succeed: {:?}",
@@ -165,7 +165,7 @@ style = "asterisk"
 
     // Load the config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load(Some(config_path_str), None)
+    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load sourced config");
     // Convert to Config for rule application logic
     let config: Config = sourced_config.into();
@@ -245,7 +245,7 @@ style = "backtick"
 
     // Load the config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load(Some(config_path_str), None)
+    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load sourced config");
     // Convert to Config for rule verification
     let config: Config = sourced_config.into();
@@ -279,7 +279,7 @@ disable = ["MD013" # Missing closing bracket
 
     // Attempt to load the invalid config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_result = rumdl::config::SourcedConfig::load(Some(config_path_str), None);
+    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
     assert!(
         sourced_result.is_err(),
         "Loading invalid config should fail"
@@ -313,7 +313,7 @@ style = "dash"
 
     // Load config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load(Some(config_path_str), None)
+    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load integration config");
     let config: Config = sourced_config.into(); // Convert for use
 
@@ -356,7 +356,7 @@ fn test_config_validation_unknown_rule() {
     let config_path = temp_dir.path().join("unknown_rule.toml");
     let config_content = r#"[UNKNOWN_RULE]"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None)
+    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
         .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
@@ -371,7 +371,7 @@ fn test_config_validation_unknown_option() {
     let config_content = r#"[MD013]
 unknown_opt = true"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None)
+    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
         .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
@@ -387,7 +387,7 @@ fn test_config_validation_type_mismatch() {
     let config_content = r#"[MD013]
 line_length = "not a number""#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None)
+    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
         .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
@@ -403,7 +403,7 @@ fn test_config_validation_unknown_global_option() {
     let config_content = r#"[global]
 unknown_global = true"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None)
+    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
         .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
@@ -444,7 +444,7 @@ indent = 2
 
     // Load the config using the explicit path to the temp file
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load(Some(config_path_str), None)
+    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load sourced config from explicit path");
 
     let config: Config = sourced_config.into(); // Convert to plain config for assertions

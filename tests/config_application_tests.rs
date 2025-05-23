@@ -306,8 +306,8 @@ line_length = 20
     fs::write(&config_path, config_content_1).expect("Failed to write config 1");
 
     let config_path_str = config_path.to_str().expect("Path is valid UTF-8");
-    // Load using SourcedConfig::load
-    let sourced_config_1 = rumdl::config::SourcedConfig::load(Some(config_path_str), None)
+    // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
+    let sourced_config_1 = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load config 1");
     let config_1: Config = sourced_config_1.into(); // Convert
 
@@ -356,8 +356,8 @@ line_length = 20 # Set a low limit to trigger it
 "#;
     fs::write(&config_path, config_content_2).expect("Failed to write config 2");
 
-    // Load using SourcedConfig::load
-    let sourced_config_2 = rumdl::config::SourcedConfig::load(Some(config_path_str), None)
+    // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
+    let sourced_config_2 = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load config 2");
     let config_2: Config = sourced_config_2.into(); // Convert
 
@@ -418,8 +418,8 @@ headings = false
     fs::write(&config_path, config_content).expect("Failed to write config");
 
     let config_path_str = config_path.to_str().expect("Path is valid UTF-8");
-    // Load using SourcedConfig::load
-    let sourced_config = rumdl::config::SourcedConfig::load(Some(config_path_str), None)
+    // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
+    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load config");
     let config: Config = sourced_config.into(); // Convert
 

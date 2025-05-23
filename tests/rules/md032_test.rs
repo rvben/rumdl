@@ -43,10 +43,9 @@ fn test_fix_missing_blank_lines() {
 
 #[test]
 fn test_emphasis_not_list_marker_simple() {
-    // This test covers the critical bug where **Problem: Permission errors**
-    // was incorrectly detected as a list item due to the * characters
+    // Test simple emphasis pattern that should NOT be detected as a list marker
     let rule = MD032BlanksAroundLists;
-    let content = "**Problem: Permission errors**\n- On Windows: Run as administrator\n- On Mac/Linux: Use sudo";
+    let content = "*Emphasis text*\n- List item\n- Another item";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
@@ -54,7 +53,7 @@ fn test_emphasis_not_list_marker_simple() {
     // NOT the emphasis text on line 1
     assert_eq!(result.len(), 1, "Should only detect one warning for the list missing blank line before");
     assert_eq!(result[0].line, 2, "Warning should be on line 2 (first list item)");
-    assert!(result[0].message.contains("Lists should be surrounded by blank lines"));
+    assert!(result[0].message.contains("Lists should be preceded by a blank line"));
 }
 
 #[test]

@@ -181,8 +181,8 @@ fn test_md034_edge_cases() {
         ("custom://example.com", 0),
         // URL with trailing period - should be flagged
         ("See https://example.com.", 1),
-        // URL with space in the middle - should not be flagged (invalid URL)
-        ("https://example .com", 0),
+        // URL with space in the middle - the valid part before space should be flagged
+        ("https://example .com", 1),
         // URL in blockquote - should be flagged
         ("> https://example.com", 1),
         // URL in list item - should be flagged

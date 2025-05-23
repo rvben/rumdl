@@ -27,7 +27,7 @@ impl Default for MD013LineLength {
         Self {
             line_length: 80,
             code_blocks: true,
-            tables: false,
+            tables: true,
             headings: true,
             strict: false,
         }

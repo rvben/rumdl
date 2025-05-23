@@ -114,12 +114,13 @@ fn test_md025_closing_hashes() {
 #[test]
 fn test_md025_setext_headings() {
     let rule = MD025SingleTitle::default();
-    // Setext headings (using === or ---) aren't detected by this rule
-    // since it only looks for # style headings
+    // Setext headings (using === or ---) are now detected by this rule
+    // Multiple level-1 setext headings should be flagged
     let content = "Title 1\n=======\n\nTitle 2\n=======\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty());
+    assert_eq!(result.len(), 1); // Second title should be flagged
+    assert_eq!(result[0].line, 4); // "Title 2" line
 }
 
 #[test]

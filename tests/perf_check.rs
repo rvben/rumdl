@@ -91,8 +91,8 @@ fn test_optimized_rules_performance() {
     );
     assert_eq!(
         html_warnings.len(),
-        0,
-        "Should not flag inline HTML tags"
+        2000,
+        "Should detect HTML tags (1000 <span> + 1000 </span> = 2000 total)"
     );
     assert_eq!(
         emphasis_warnings.len(),

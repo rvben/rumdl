@@ -24,10 +24,6 @@ pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String
             .or_else(|_| serde_yaml::from_str(&content))
             .map_err(|e| format!("Failed to parse config as JSON or YAML: {}", e))
     };
-    if let Err(ref err) = parse_result {
-        log::error!("Failed to parse configuration file '{}': {}. Please ensure your JSON is valid. All keys and string values must be double-quoted.", path, err);
-        std::process::exit(1);
-    }
     parse_result
 }
 

@@ -223,12 +223,11 @@ Link to [non-existent heading](#nowhere)
 "#;
     fs::write(&markdown_path, markdown_content).unwrap();
 
-    // Run rumdl on the file using the dummy config
+    // Run rumdl on the file using --no-config to get default behavior
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
     let assert = cmd
         .arg(&markdown_path)
-        .arg("--config") // Specify dummy config
-        .arg(&config_path)
+        .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
 
     let output = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
@@ -241,13 +240,12 @@ Link to [non-existent heading](#nowhere)
     assert!(output.contains("MD042"));
     assert!(output.contains("MD051"));
 
-    // Now with fix, using dummy config
+    // Now with fix, using --no-config
     let mut fix_cmd = Command::cargo_bin("rumdl").unwrap();
     let fix_assert = fix_cmd
         .arg("--fix")
         .arg(&markdown_path)
-        .arg("--config") // Specify dummy config
-        .arg(&config_path)
+        .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
 
     let fix_output = String::from_utf8(fix_assert.get_output().stdout.clone()).unwrap();
@@ -300,12 +298,11 @@ fn test_cli_options() {
 "#;
     fs::write(&markdown_path, markdown_content).unwrap();
 
-    // Test with default output format (using dummy config)
+    // Test with default output format (using --no-config)
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
     let assert = cmd
         .arg(&markdown_path)
-        .arg("--config") // Specify dummy config
-        .arg(&config_path)
+        .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
     let default_output = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
@@ -319,14 +316,13 @@ fn test_cli_options() {
         assert!(stderr.contains("Deprecation warning"));
     }
 
-    // Test with disabled rules (still using dummy config, disable via CLI)
+    // Test with disabled rules (using --no-config and disable via CLI)
     let mut disabled_cmd = Command::cargo_bin("rumdl").unwrap();
     let disabled_assert = disabled_cmd
         .arg("--disable")
-        .arg("MD022,MD033")
+        .arg("MD022,MD033,MD032") // Also disable MD032 since the test content triggers it
         .arg(&markdown_path)
-        .arg("--config") // Specify dummy config
-        .arg(&config_path)
+        .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
     let disabled_output = String::from_utf8(disabled_assert.get_output().stdout.clone()).unwrap();
     let disabled_code = disabled_assert.get_output().status.code().unwrap_or(-1);
@@ -334,17 +330,17 @@ fn test_cli_options() {
     assert!(disabled_code == 0, "Expected exit code 0 (no issues found), got {}. Output: {}", disabled_code, disabled_output);
     assert!(!disabled_output.contains("MD022"));
     assert!(!disabled_output.contains("MD033"));
+    assert!(!disabled_output.contains("MD032")); // Also check MD032 is disabled
     // MD030 should NOT be reported for *Bad item, because it is not a valid list item per CommonMark/markdownlint
     assert!(!disabled_output.contains("MD030"));
 
-    // Test with enabled rules (still using dummy config, enable via CLI)
+    // Test with enabled rules (using --no-config and enable via CLI)
     let mut enabled_cmd = Command::cargo_bin("rumdl").unwrap();
     let enabled_assert = enabled_cmd
         .arg("--enable")
         .arg("MD030") // Only enable MD030
         .arg(&markdown_path)
-        .arg("--config") // Specify dummy config
-        .arg(&config_path)
+        .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
     let enabled_output = String::from_utf8(enabled_assert.get_output().stdout.clone()).unwrap();
     enabled_assert.code(0); // Expect success if no MD030 issues
@@ -352,14 +348,13 @@ fn test_cli_options() {
     assert!(!enabled_output.contains("MD033"));
     // assert!(enabled_output.contains("MD030")); // Should NOT be present for *Bad item
 
-    // Test default run on options_test.md (using dummy config)
+    // Test default run on options_test.md (using --no-config)
     let options_test_path = temp_dir.path().join("options_test.md");
     fs::write(&options_test_path, "# Test\n\n<div>HTML</div>\n").unwrap();
     let mut default_cmd_options = Command::cargo_bin("rumdl").unwrap();
     let default_assert_options = default_cmd_options
         .arg(&options_test_path)
-        .arg("--config") // Specify dummy config
-        .arg(&config_path)
+        .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
     let default_output_options =
         String::from_utf8(default_assert_options.get_output().stdout.clone()).unwrap();
