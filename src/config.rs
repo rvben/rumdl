@@ -736,7 +736,11 @@ impl SourcedConfig {
                     sourced_config.loaded_files.push(path_str.clone());
                     loaded_toml_or_pyproject = true;
                 }
-            } else if MARKDOWNLINT_FILENAMES.contains(&filename) {
+            } else if MARKDOWNLINT_FILENAMES.contains(&filename)
+                || path_str.ends_with(".json")
+                || path_str.ends_with(".jsonc")
+                || path_str.ends_with(".yaml")
+                || path_str.ends_with(".yml") {
                 // Parse as markdownlint config (JSON/YAML)
                 let fragment = load_from_markdownlint(&path_str)?;
                 sourced_config.merge(fragment);
