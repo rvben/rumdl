@@ -41,8 +41,8 @@ lazy_static! {
     static ref MARKDOWN_IMAGE_PATTERN: Regex = Regex::new(r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap();
 
     // Add a simple regex for candidate URLs (no look-behind/look-ahead)
-    // Matches URLs with proper domain structure (requires dot or is localhost)
-    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://(?:[^\s<>\[\]()\\'\"`]*\.)+[^\s<>\[\]()\\'\"`]+(?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?|(?:https?|ftp)://localhost(?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?|(?:https?|ftp)://(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
+    // Updated to match markdownlint's behavior: URLs can have domains without dots
+    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://[^\s<>\[\]()\\'\"`]+(?:\.[^\s<>\[\]()\\'\"`]+)*(?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
 
     // Add regex for email addresses - matches markdownlint behavior
     // Detects email addresses that should be autolinked like URLs

@@ -70,7 +70,6 @@ impl Rule for MD012NoMultipleBlanks {
         let mut warnings = Vec::new();
 
         let mut blank_count = 0;
-
         let mut blank_start = 0;
 
         let lines: Vec<&str> = content.lines().collect();
@@ -90,25 +89,31 @@ impl Rule for MD012NoMultipleBlanks {
                 blank_count += 1;
             } else {
                 if blank_count > self.maximum {
+                    // Generate warnings for each excess blank line to match markdownlint behavior
                     let location = if blank_start == 0 {
                         "at start of file"
                     } else {
                         "between content"
                     };
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        severity: Severity::Warning,
-                        message: format!(
-                            "Multiple consecutive blank lines {} ({} > {})",
-                            location, blank_count, self.maximum
-                        ),
-                        line: blank_start + 1,
-                        column: 1,
-                        fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(blank_start + 1, 1),
-                            replacement: "\n".repeat(self.maximum),
-                        }),
-                    });
+
+                    // Report warnings starting from the (maximum+1)th blank line
+                    for i in self.maximum..blank_count {
+                        let excess_line = blank_start + i + 1; // +1 for 1-indexed lines
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            severity: Severity::Warning,
+                            message: format!(
+                                "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                                location, self.maximum, blank_count
+                            ),
+                            line: excess_line,
+                            column: 1,
+                            fix: Some(Fix {
+                                range: _line_index.line_col_to_byte_range(excess_line, 1),
+                                replacement: String::new(), // Remove the excess line
+                            }),
+                        });
+                    }
                 }
                 blank_count = 0;
             }
@@ -116,20 +121,24 @@ impl Rule for MD012NoMultipleBlanks {
 
         // Check for trailing blank lines
         if blank_count > self.maximum {
-            warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                severity: Severity::Warning,
-                message: format!(
-                    "Multiple consecutive blank lines at end of file ({} > {})",
-                    blank_count, self.maximum
-                ),
-                line: blank_start + 1,
-                column: 1,
-                fix: Some(Fix {
-                    range: _line_index.line_col_to_byte_range(blank_start + 1, 1),
-                    replacement: "\n".repeat(self.maximum),
-                }),
-            });
+            let location = "at end of file";
+            for i in self.maximum..blank_count {
+                let excess_line = blank_start + i + 1;
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    severity: Severity::Warning,
+                    message: format!(
+                        "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                        location, self.maximum, blank_count
+                    ),
+                    line: excess_line,
+                    column: 1,
+                    fix: Some(Fix {
+                        range: _line_index.line_col_to_byte_range(excess_line, 1),
+                        replacement: String::new(),
+                    }),
+                });
+            }
         }
 
         Ok(warnings)

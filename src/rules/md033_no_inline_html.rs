@@ -78,11 +78,11 @@ impl MD033NoInlineHtml {
     fn is_likely_type_annotation(&self, tag: &str) -> bool {
         // Common programming type names that are often used in generics
         const COMMON_TYPES: &[&str] = &[
-            "object", "boolean", "string", "number", "any", "void", "null", "undefined",
+            "string", "number", "any", "void", "null", "undefined",
             "array", "promise", "function", "error", "date", "regexp", "symbol",
             "bigint", "map", "set", "weakmap", "weakset", "iterator", "generator",
             "t", "u", "v", "k", "e", // Common single-letter type parameters
-            "userobject", "userdata", "apiresponse", "config", "options", "params",
+            "userdata", "apiresponse", "config", "options", "params",
             "result", "response", "request", "data", "item", "element", "node",
         ];
 
@@ -124,6 +124,88 @@ impl MD033NoInlineHtml {
             .unwrap_or("");
         BLOCK_TAGS.contains(&tag_name.to_ascii_lowercase().as_str())
     }
+
+    /// Find HTML tags that span multiple lines
+    fn find_multiline_html_tags(
+        &self,
+        content: &str,
+        structure: &DocumentStructure,
+        warnings: &mut Vec<LintWarning>,
+    ) {
+        // Simple approach: use regex to find patterns like <tagname and then look for closing >
+        lazy_static::lazy_static! {
+            static ref INCOMPLETE_TAG_START: regex::Regex = regex::Regex::new(r"(?i)<[a-zA-Z][^>]*$").unwrap();
+        }
+
+        let lines: Vec<&str> = content.lines().collect();
+
+        for (i, line) in lines.iter().enumerate() {
+            let line_num = i + 1;
+
+            // Skip code blocks and empty lines
+            if line.trim().is_empty() || structure.is_in_code_block(line_num) {
+                continue;
+            }
+
+            // Look for incomplete HTML tags at the end of the line
+            if let Some(incomplete_match) = INCOMPLETE_TAG_START.find(line) {
+                let start_column = incomplete_match.start() + 1; // 1-indexed
+
+                // Build the complete tag by looking at subsequent lines
+                let mut complete_tag = incomplete_match.as_str().to_string();
+                let mut found_end = false;
+
+                // Look for the closing > in subsequent lines (limit search to 10 lines)
+                for j in (i + 1)..std::cmp::min(lines.len(), i + 11) {
+                    let next_line_num = j + 1;
+
+                    // Stop if we hit a code block
+                    if structure.is_in_code_block(next_line_num) {
+                        break;
+                    }
+
+                    complete_tag.push(' '); // Add space to normalize whitespace
+                    complete_tag.push_str(lines[j].trim());
+
+                    if lines[j].contains('>') {
+                        found_end = true;
+                        break;
+                    }
+                }
+
+                if found_end {
+                    // Extract just the tag part (up to the first >)
+                    if let Some(end_pos) = complete_tag.find('>') {
+                        let final_tag = &complete_tag[0..=end_pos];
+
+                        // Apply the same filters as single-line tags
+                        if !self.is_html_comment(final_tag)
+                            && !self.is_likely_type_annotation(final_tag)
+                            && !self.is_email_address(final_tag)
+                            && !self.is_tag_allowed(final_tag)
+                            && HTML_TAG_FINDER.is_match(final_tag)
+                        {
+                            // Check for duplicates (avoid flagging the same position twice)
+                            let already_warned = warnings.iter().any(|w| {
+                                w.line == line_num && w.column == start_column
+                            });
+
+                            if !already_warned {
+                                warnings.push(LintWarning {
+                                    rule_name: Some(self.name()),
+                                    line: line_num,
+                                    column: start_column,
+                                    message: "Inline HTML".to_string(),
+                                    severity: Severity::Warning,
+                                    fix: None,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Rule for MD033NoInlineHtml {
@@ -157,6 +239,7 @@ impl Rule for MD033NoInlineHtml {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = ctx.content.lines().collect();
 
+        // First pass: find single-line HTML tags
         for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1;
 
@@ -210,6 +293,9 @@ impl Rule for MD033NoInlineHtml {
                 });
             }
         }
+
+        // Second pass: find multi-line HTML tags
+        self.find_multiline_html_tags(ctx.content, structure, &mut warnings);
 
         Ok(warnings)
     }

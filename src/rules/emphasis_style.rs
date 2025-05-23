@@ -5,7 +5,7 @@ use std::fmt;
 /// The style for emphasis (MD049)
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default, Hash)]
 pub enum EmphasisStyle {
-    /// Consistent with the first emphasis style found
+    /// Consistent with the most prevalent emphasis style found (or first found if tied)
     #[default]
     Consistent,
     /// Asterisk style (*)

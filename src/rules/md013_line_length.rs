@@ -27,7 +27,7 @@ impl Default for MD013LineLength {
         Self {
             line_length: 80,
             code_blocks: true,
-            tables: true,
+            tables: false,
             headings: true,
             strict: false,
         }
@@ -234,7 +234,7 @@ impl Rule for MD013LineLength {
             crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
                 .unwrap_or(true);
         let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables")
-            .unwrap_or(true);
+            .unwrap_or(false);
         let headings = crate::config::get_rule_config_value::<bool>(config, "MD013", "headings")
             .unwrap_or(true);
         let strict = crate::config::get_rule_config_value::<bool>(config, "MD013", "strict")
