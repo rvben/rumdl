@@ -473,8 +473,8 @@ indent = 2
 
 #[cfg(test)]
 mod config_file_parsing_tests {
-    use super::*;
-    use rumdl::config::{ConfigError, SourcedConfig};
+
+    use rumdl::config::SourcedConfig;
     use std::fs;
     use tempfile::tempdir;
 

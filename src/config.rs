@@ -12,7 +12,6 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use toml_edit::DocumentMut;
-use std::env;
 use log;
 
 lazy_static! {

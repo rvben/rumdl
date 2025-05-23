@@ -50,12 +50,11 @@
 /// Consistent list markers improve readability and reduce distraction, especially in large documents or when collaborating with others. This rule helps enforce a uniform style across all unordered lists.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::DocumentStructureExtensions;
+use crate::LintContext;
 use lazy_static::lazy_static;
+use markdown::mdast::{ListItem, Node};
 use regex::Regex;
 use toml;
-use crate::lint_context::LintContext;
-use markdown::mdast::{Node, List, ListItem};
-use log::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnorderedListStyle {
@@ -137,38 +136,25 @@ impl MD004UnorderedListStyle {
 
     // Helper: check if a line is inside a code block
     fn is_in_code_block(line_num: usize, ctx: &LintContext) -> bool {
-        // Simple scan for ``` or ~~~
+        let content = ctx.content;
         let mut in_code_block = false;
-        for (i, line) in ctx.content.lines().enumerate() {
-            if i + 1 > line_num { break; }
-            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+        let mut in_front_matter = false;
+        for (i, line) in content.lines().enumerate() {
+            if FRONT_MATTER_DELIM.is_match(line) {
+                in_front_matter = !in_front_matter;
+                continue;
+            }
+            if in_front_matter && i + 1 == line_num {
+                return true;
+            }
+            if line.starts_with("```") || line.starts_with("~~~") {
                 in_code_block = !in_code_block;
             }
-        }
-        in_code_block
-    }
-
-    fn check_run(&self, run: &[(usize, char, String, usize)], ctx: &LintContext, warnings: &mut Vec<LintWarning>) {
-        if self.style != UnorderedListStyle::Consistent {
-            return;
-        }
-        if run.len() < 2 { return; }
-        let target_marker = run[0].1;
-        debug!("MD004: Checking run with target_marker='{}', run={:?}", target_marker, run.iter().map(|(off, m, ind, bq)| format!("(off={}, m='{}', ind='{}', bq={})", off, m, ind, bq)).collect::<Vec<_>>());
-        for &(offset, marker, _, _) in &run[1..] {
-            if marker != target_marker {
-                let (line, col) = ctx.offset_to_line_col(offset);
-                debug!("MD004: Warning at line {}, col {}: marker '{}' != target_marker '{}'", line, col, marker, target_marker);
-                warnings.push(LintWarning {
-                    line,
-                    column: col,
-                    message: format!("marker '{}' does not match expected style '{}'", marker, target_marker),
-                    severity: Severity::Warning,
-                    rule_name: Some(self.name()),
-                    fix: None,
-                });
+            if i + 1 == line_num {
+                return in_code_block || in_front_matter;
             }
         }
+        false
     }
 }
 
@@ -189,8 +175,6 @@ impl Rule for MD004UnorderedListStyle {
         let mut first_marker: Option<char> = None;
 
         for (i, line) in content.lines().enumerate() {
-            let line_num = i + 1;
-
             // Handle front matter
             if FRONT_MATTER_DELIM.is_match(line) {
                 in_front_matter = !in_front_matter;
@@ -329,8 +313,8 @@ impl Rule for MD004UnorderedListStyle {
                             // Find the marker with the highest count; tie-breaker: first in run
                             let mut max_count = 0;
                             let mut target_marker = item_info[run_start].1;
-                            let mut first_marker = item_info[run_start].1;
-                            for (i, (_, marker, _, _, _)) in item_info[run_start..run_end].iter().enumerate() {
+                            let first_marker = item_info[run_start].1;
+                            for (_, (_, marker, _, _, _)) in item_info[run_start..run_end].iter().enumerate() {
                                 let count = *counts.get(marker).unwrap_or(&0);
                                 if count > max_count {
                                     max_count = count;
@@ -338,7 +322,6 @@ impl Rule for MD004UnorderedListStyle {
                                 }
                             }
                             // If there is a tie, use the first marker in the run
-                            let mut tied = false;
                             let mut tie_count = 0;
                             for count in counts.values() {
                                 if *count == max_count {

@@ -126,7 +126,7 @@ impl Rule for MD007ULIndent {
 
         // Recompute logical nesting for each unordered list item
         let mut prev_items: Vec<(usize, usize, usize)> = Vec::new(); // (blockquote_depth, indent, nesting_level)
-        for (i, line) in lines.iter_mut().enumerate() {
+        for (_, line) in lines.iter_mut().enumerate() {
             let orig_line = line.clone();
             // Inline blockquote prefix parsing (since parse_blockquote_prefix is private)
             let mut rest = orig_line.as_str();

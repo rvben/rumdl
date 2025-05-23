@@ -115,7 +115,7 @@ impl MD034NoBareUrls {
         excluded_ranges.sort_by_key(|r| r.0);
         let mut merged: Vec<(usize, usize)> = Vec::new();
         for (start, end) in excluded_ranges {
-            if let Some((last_start, last_end)) = merged.last_mut() {
+            if let Some((_, last_end)) = merged.last_mut() {
                 if *last_end >= start {
                     *last_end = (*last_end).max(end);
                     continue;

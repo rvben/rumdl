@@ -9,7 +9,6 @@ use crate::rules::list_utils::ListType;
 use regex::Regex;
 use lazy_static::lazy_static;
 use toml;
-use markdown::mdast::{List, Node};
 
 lazy_static! {
     // Matches indentation, marker, and whitespace after marker

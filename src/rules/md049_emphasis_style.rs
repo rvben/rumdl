@@ -1,8 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::lint_context::LintContext;
-use markdown::mdast::{Node, Emphasis, Link, Image, Code};
-use std::fmt::Write as _;
+use markdown::mdast::{Node, Emphasis};
 
 /// Rule MD049: Emphasis style
 ///
@@ -62,32 +61,6 @@ impl MD049EmphasisStyle {
             }
         }
     }
-
-    // Determine the target style based on config and content
-    fn get_target_style(&self, emphasis_nodes: &[(usize, usize, char, &Emphasis)]) -> EmphasisStyle {
-        match self.style {
-            EmphasisStyle::Consistent => {
-                let asterisk_count = emphasis_nodes.iter().filter(|(_, _, m, _)| *m == '*').count();
-                let underscore_count = emphasis_nodes.iter().filter(|(_, _, m, _)| *m == '_').count();
-                if asterisk_count > underscore_count {
-                    EmphasisStyle::Asterisk
-                } else if underscore_count > asterisk_count {
-                    EmphasisStyle::Underscore
-                } else {
-                    // Tiebreaker: first found
-                    for (_, _, m, _) in emphasis_nodes {
-                        if *m == '*' {
-                            return EmphasisStyle::Asterisk;
-                        } else if *m == '_' {
-                            return EmphasisStyle::Underscore;
-                        }
-                    }
-                    EmphasisStyle::Asterisk // Default
-                }
-            }
-            style => style,
-        }
-    }
 }
 
 impl Rule for MD049EmphasisStyle {
@@ -128,7 +101,7 @@ impl Rule for MD049EmphasisStyle {
                                 return;
                             }
                             let target_marker = emphasis_nodes[0].2;
-                            for (i, (line, col, marker, _)) in emphasis_nodes.iter().enumerate().skip(1) {
+                            for (_, (line, col, marker, _)) in emphasis_nodes.iter().enumerate().skip(1) {
                                 if *marker != target_marker {
                                     warnings.push(LintWarning {
                                         rule_name: Some(rule.name()),

@@ -3,9 +3,8 @@
 //!
 //! See [docs/md033.md](../../docs/md033.md) for full documentation, configuration, and examples.
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
@@ -109,20 +108,6 @@ impl MD033NoInlineHtml {
         content.chars().all(|c| c.is_alphanumeric() || "@.-_+".contains(c)) &&
         content.split('@').count() == 2 &&
         content.split('@').all(|part| !part.is_empty())
-    }
-
-    // List of block-level HTML tags per CommonMark and markdownlint
-    fn is_block_html_tag(tag: &str) -> bool {
-        // List from CommonMark and markdownlint
-        const BLOCK_TAGS: &[&str] = &[
-            "address", "article", "aside", "base", "basefont", "blockquote", "body", "caption", "center", "col", "colgroup", "dd", "details", "dialog", "dir", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "frame", "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr", "html", "iframe", "legend", "li", "link", "main", "menu", "menuitem", "nav", "noframes", "ol", "optgroup", "option", "p", "param", "section", "source", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "title", "tr", "track", "ul", "img", "picture" // img and picture are often block-level in practice
-        ];
-        let tag = tag.trim_start_matches('<').trim_start_matches('/').trim();
-        let tag_name = tag
-            .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
-            .next()
-            .unwrap_or("");
-        BLOCK_TAGS.contains(&tag_name.to_ascii_lowercase().as_str())
     }
 
     /// Find HTML tags that span multiple lines
