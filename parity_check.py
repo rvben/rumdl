@@ -11,55 +11,17 @@ MARKDOWNLINT_BIN = "markdownlint"
 
 
 def run_rumdl(md_file):
-    # Create a temporary config file to match markdownlint defaults for MD013
-    config_file = ".rumdl.toml"
-    temp_config_file = ".rumdl.toml.temp_parity"
-    backup_file = ".rumdl.toml.backup_parity"
-    config_exists = os.path.exists(config_file)
-
-    # Create temporary config with markdownlint-compatible settings
-    # Don't disable MD033 (unlike the main config) to match markdownlint behavior
-    temp_config_content = """# Temporary parity check config
-
-[global]
-# Don't disable MD033 for parity check (main config disables it)
-# Don't disable any rules for parity - check everything markdownlint checks
-disable = []
-
-[MD013]
-line_length = 80
-code-blocks = true
-tables = true
-headings = true
-strict = false
-"""
-
+    # Use --no-config to ensure no config is loaded (use built-in defaults only)
+    cmd = f"{RUMDL_BIN} check '{md_file}' -o json --no-config"
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    if result.returncode != 0 and not result.stdout.strip():
+        print(f"[rumdl] Error running on {md_file}: {result.stderr}")
+        return []
     try:
-        # Backup existing config if it exists
-        if config_exists:
-            os.rename(config_file, backup_file)
-
-        # Write temporary config
-        with open(temp_config_file, 'w') as f:
-            f.write(temp_config_content)
-
-        # Use the temporary config that doesn't disable MD033
-        cmd = f"{RUMDL_BIN} check '{md_file}' -o json --config {temp_config_file}"
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        if result.returncode != 0 and not result.stdout.strip():
-            print(f"[rumdl] Error running on {md_file}: {result.stderr}")
-            return []
-        try:
-            return json.loads(result.stdout)
-        except Exception as e:
-            print(f"[rumdl] Failed to parse JSON for {md_file}: {e}")
-            return []
-    finally:
-        # Cleanup: remove temp config and restore original if it existed
-        if os.path.exists(temp_config_file):
-            os.remove(temp_config_file)
-        if config_exists:
-            os.rename(backup_file, config_file)
+        return json.loads(result.stdout)
+    except Exception as e:
+        print(f"[rumdl] Failed to parse JSON for {md_file}: {e}")
+        return []
 
 def run_markdownlint(md_file):
     cmd = ["npx", MARKDOWNLINT_BIN, str(md_file), "--json"]

@@ -138,7 +138,7 @@ impl Rule for MD025SingleTitle {
             }
         }
 
-        // Find all ATX level-1 headings not in code blocks or indented 4+ spaces
+        // Find all level-1 headings (both ATX and Setext) not in code blocks
         let lines: Vec<&str> = _ctx.content.lines().collect();
         let mut target_level_headings = Vec::new();
         for (i, &_line_num) in structure.heading_lines.iter().enumerate() {
@@ -153,38 +153,41 @@ impl Rule for MD025SingleTitle {
                 if idx >= lines.len() {
                     continue;
                 }
+
+                // Ignore if inside a fenced code block
+                if structure.is_in_code_block(idx + 1) {
+                    continue;
+                }
+
                 let line = lines[idx];
-                // Only consider ATX headings (not setext)
                 let trimmed = line.trim_start();
                 let leading_spaces = line.len() - trimmed.len();
+
                 // Ignore if indented 4+ spaces (code block)
                 if leading_spaces >= 4 {
                     continue;
                 }
-                // Only consider lines starting with '#' (ATX)
-                if !trimmed.starts_with('#') {
-                    continue;
-                }
-                // Ignore if inside a fenced code block (structure should already handle this, but double-check)
-                if structure.is_in_code_block(idx + 1) {
-                    continue;
-                }
+
+                // Accept both ATX and Setext headings (DocumentStructure already parsed them correctly)
                 target_level_headings.push(idx);
             }
         }
 
-        // If we already found a title in front matter, allow the first H1 in the content, flag subsequent ones
-        let start_index = 1;
-
-        // If we have any target level headings after accounting for front matter, warn as needed
-        if target_level_headings.len() > start_index {
-            for &line in &target_level_headings[start_index..] {
+        // If we have multiple target level headings, flag all subsequent ones (not the first)
+        if target_level_headings.len() > 1 {
+            // Skip the first heading, flag the rest
+            for &line in &target_level_headings[1..] {
                 // Skip if out of bounds
                 if line >= lines.len() {
                     continue;
                 }
                 let line_content = lines[line];
-                let col = line_content.find('#').unwrap_or(0);
+                // For ATX headings, find the '#' position; for Setext, use column 1
+                let col = if line_content.trim_start().starts_with('#') {
+                    line_content.find('#').unwrap_or(0)
+                } else {
+                    0 // Setext headings start at column 1
+                };
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     message: format!(
@@ -199,7 +202,11 @@ impl Rule for MD025SingleTitle {
                         replacement: format!(
                             "{} {}",
                             "#".repeat(self.level + 1),
-                            &line_content[(col + self.level)..]
+                            if line_content.trim_start().starts_with('#') {
+                                &line_content[(col + self.level)..]
+                            } else {
+                                line_content.trim() // For Setext, use the whole line
+                            }
                         ),
                     }),
                 });
@@ -216,7 +223,7 @@ impl Rule for MD025SingleTitle {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || !ctx.content.contains('#')
+        ctx.content.is_empty() || (!ctx.content.contains('#') && !ctx.content.contains('=') && !ctx.content.contains('-'))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -813,9 +813,9 @@ build-backend = \"setuptools.build_meta\"
             Some(Commands::Check(args)) => {
                 // If --no-config is set, skip config loading
                 if cli.no_config {
-                    run_check(args, None);
+                    run_check(args, None, cli.no_config);
                 } else {
-                    run_check(args, cli.config.as_deref());
+                    run_check(args, cli.config.as_deref(), cli.no_config);
                 }
             }
             Some(Commands::Rule { rule }) => {
@@ -908,7 +908,7 @@ build-backend = \"setuptools.build_meta\"
                     if let Some((section_part, field_part)) = key.split_once('.') {
                         // 1. Load the full SourcedConfig once
                         let sourced =
-                            match rumdl_config::SourcedConfig::load(cli.config.as_deref(), None) {
+                            match rumdl_config::SourcedConfig::load_with_discovery(cli.config.as_deref(), None, cli.no_config) {
                                 Ok(s) => s,
                                 Err(e) => {
                                     eprintln!("{}: {}", "Config error".red().bold(), e);
@@ -1054,7 +1054,7 @@ build-backend = \"setuptools.build_meta\"
                     let sourced_reg = if *defaults {
                         rumdl_config::SourcedConfig::default()
                     } else {
-                        match rumdl_config::SourcedConfig::load(cli.config.as_deref(), None) {
+                        match rumdl_config::SourcedConfig::load_with_discovery(cli.config.as_deref(), None, cli.no_config) {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("{}: {}", "Config error".red().bold(), e);
@@ -1078,7 +1078,7 @@ build-backend = \"setuptools.build_meta\"
                         rumdl_config::SourcedConfig::default()
                     } else {
                         // Reload config if not defaults (necessary because we exited early in 'get' case)
-                        match rumdl_config::SourcedConfig::load(cli.config.as_deref(), None) {
+                        match rumdl_config::SourcedConfig::load_with_discovery(cli.config.as_deref(), None, cli.no_config) {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("{}: {}", "Config error".red().bold(), e);
@@ -1129,7 +1129,7 @@ build-backend = \"setuptools.build_meta\"
                         output: "text".to_string(),
                     };
                     eprintln!("{}: Deprecation warning: Running 'rumdl .' or 'rumdl [PATHS...]' without a subcommand is deprecated and will be removed in a future release. Please use 'rumdl check .' instead.", "[rumdl]".yellow().bold());
-                    run_check(&args, cli.config.as_deref());
+                    run_check(&args, cli.config.as_deref(), cli.no_config);
                 } else {
                     eprintln!(
                 "{}: No files or directories specified. Please provide at least one path to lint.",
@@ -1148,9 +1148,13 @@ build-backend = \"setuptools.build_meta\"
     }
 }
 
-fn run_check(args: &CheckArgs, global_config_path: Option<&str>) {
+fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool) {
     // 1. Load sourced config (for provenance and validation)
-    let sourced = match rumdl_config::SourcedConfig::load(global_config_path, None) {
+    let sourced = match rumdl_config::SourcedConfig::load_with_discovery(
+        global_config_path,
+        None,
+        no_config
+    ) {
         Ok(sourced) => sourced,
         Err(e) => {
             // Syntax error or type mismatch: fail and exit

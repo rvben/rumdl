@@ -672,10 +672,24 @@ impl SourcedConfig {
         config_path: Option<&str>,
         cli_overrides: Option<&SourcedGlobalConfig>,
     ) -> Result<Self, ConfigError> {
+        Self::load_with_discovery(config_path, cli_overrides, false)
+    }
+
+    /// Load and merge configurations from files and CLI overrides.
+    /// If skip_auto_discovery is true, only explicit config paths are loaded.
+    pub fn load_with_discovery(
+        config_path: Option<&str>,
+        cli_overrides: Option<&SourcedGlobalConfig>,
+        skip_auto_discovery: bool,
+    ) -> Result<Self, ConfigError> {
         use std::env;
         log::debug!("[rumdl-config] Current working directory: {:?}", env::current_dir());
         if config_path.is_none() {
-            log::debug!("[rumdl-config] No explicit config_path provided, will search default locations");
+            if skip_auto_discovery {
+                log::debug!("[rumdl-config] Skipping auto-discovery due to --no-config flag");
+            } else {
+                log::debug!("[rumdl-config] No explicit config_path provided, will search default locations");
+            }
         } else {
             log::debug!("[rumdl-config] Explicit config_path provided: {:?}", config_path);
         }
@@ -734,7 +748,10 @@ impl SourcedConfig {
                 sourced_config.loaded_files.push(path_str.clone());
                 loaded_toml_or_pyproject = true;
             }
-        } else {
+        }
+
+        // Only perform auto-discovery if not skipped (--no-config not specified)
+        if !skip_auto_discovery {
             // 2. Discover and load default files: pyproject.toml first
             if std::path::Path::new("pyproject.toml").exists() {
                 log::debug!("[rumdl-config] Found pyproject.toml in current directory");
@@ -773,20 +790,20 @@ impl SourcedConfig {
                     log::debug!("[rumdl-config] {} not found in current directory", filename);
                 }
             }
-        }
 
-        // 4. Markdownlint config fallback if no TOML/pyproject config was loaded
-        if !loaded_toml_or_pyproject {
-            for filename in MARKDOWNLINT_CONFIG_FILES {
-                if std::path::Path::new(filename).exists() {
-                    match load_from_markdownlint(filename) {
-                        Ok(fragment) => {
-                            sourced_config.merge(fragment);
-                            sourced_config.loaded_files.push(filename.to_string());
-                            break; // Load only the first one found
-                        }
-                        Err(_e) => {
-                            // Log error but continue (it's just a fallback)
+            // 4. Markdownlint config fallback if no TOML/pyproject config was loaded
+            if !loaded_toml_or_pyproject {
+                for filename in MARKDOWNLINT_CONFIG_FILES {
+                    if std::path::Path::new(filename).exists() {
+                        match load_from_markdownlint(filename) {
+                            Ok(fragment) => {
+                                sourced_config.merge(fragment);
+                                sourced_config.loaded_files.push(filename.to_string());
+                                break; // Load only the first one found
+                            }
+                            Err(_e) => {
+                                // Log error but continue (it's just a fallback)
+                            }
                         }
                     }
                 }

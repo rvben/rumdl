@@ -1021,44 +1021,144 @@ impl DocumentStructure {
         }
     }
 
-    /// Detect HTML blocks (block-level HTML regions)
+    /// Detect HTML blocks (block-level HTML regions) according to CommonMark spec
     fn detect_html_blocks(&mut self, content: &str) {
         let lines: Vec<&str> = content.lines().collect();
         self.in_html_block = vec![false; lines.len()];
-        let mut in_block_html = false;
-        let mut block_html_end_pat = String::new();
+
         let mut i = 0;
         while i < lines.len() {
             let line = lines[i];
             let trimmed = line.trim_start();
-            if in_block_html {
-                self.in_html_block[i] = true;
-                // End block if closing tag or blank line
-                if trimmed.starts_with(&block_html_end_pat) || trimmed.is_empty() {
-                    in_block_html = false;
-                }
+
+            // Skip lines already in code blocks
+            if self.is_in_code_block(i + 1) {
                 i += 1;
                 continue;
             }
-            if let Some(c) = trimmed.chars().nth(0) {
-                if c == '<' && trimmed.len() > 1 && trimmed.chars().nth(1).unwrap().is_ascii_alphabetic() {
-                    // Find tag name
-                    let tag_name: String = trimmed[1..]
-                        .chars()
-                        .take_while(|c| c.is_ascii_alphabetic())
-                        .collect();
-                    let end_pat = format!("</{}", tag_name);
-                    // If tag is not closed on the same line, treat as block HTML
-                    if !trimmed.contains(&format!("</{}", tag_name)) && !trimmed.contains(">") {
-                        in_block_html = true;
-                        block_html_end_pat = end_pat.clone();
-                        self.in_html_block[i] = true;
-                        i += 1;
-                        continue;
+
+            // Check for HTML block start conditions (simplified version of CommonMark)
+            if self.is_html_block_start(trimmed) {
+                let start_line = i;
+
+                // Find the end of the HTML block
+                let end_line = self.find_html_block_end(&lines, start_line);
+
+                // Mark all lines in the block as HTML
+                for line_idx in start_line..=end_line {
+                    if line_idx < self.in_html_block.len() {
+                        self.in_html_block[line_idx] = true;
                     }
                 }
+
+                // Skip to after the block
+                i = end_line + 1;
+            } else {
+                i += 1;
             }
-            i += 1;
+        }
+    }
+
+    /// Check if a line starts an HTML block
+    fn is_html_block_start(&self, trimmed: &str) -> bool {
+        if trimmed.is_empty() || !trimmed.starts_with('<') {
+            return false;
+        }
+
+        // Extract tag name
+        let mut chars = trimmed[1..].chars();
+        let mut tag_name = String::new();
+
+        // Handle closing tags
+        let is_closing = chars.as_str().starts_with('/');
+        if is_closing {
+            chars.next(); // Skip the '/'
+        }
+
+        // Extract tag name
+        for ch in chars {
+            if ch.is_ascii_alphabetic() || ch == '-' {
+                tag_name.push(ch);
+            } else {
+                break;
+            }
+        }
+
+        if tag_name.is_empty() {
+            return false;
+        }
+
+        // List of HTML block elements (based on CommonMark and markdownlint)
+        const BLOCK_ELEMENTS: &[&str] = &[
+            "address", "article", "aside", "base", "basefont", "blockquote", "body",
+            "caption", "center", "col", "colgroup", "dd", "details", "dialog", "dir",
+            "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+            "frame", "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
+            "hr", "html", "iframe", "legend", "li", "link", "main", "menu", "menuitem",
+            "nav", "noframes", "ol", "optgroup", "option", "p", "param", "section",
+            "source", "summary", "table", "tbody", "td", "tfoot", "th", "thead",
+            "title", "tr", "track", "ul", "img", "picture"
+        ];
+
+        BLOCK_ELEMENTS.contains(&tag_name.to_ascii_lowercase().as_str())
+    }
+
+    /// Find the end line of an HTML block starting at start_line
+    fn find_html_block_end(&self, lines: &[&str], start_line: usize) -> usize {
+        let start_trimmed = lines[start_line].trim_start();
+
+        // Extract the tag name from the start line
+        let tag_name = self.extract_tag_name(start_trimmed);
+
+        // Look for the closing tag or blank line
+        for i in (start_line + 1)..lines.len() {
+            let line = lines[i];
+            let trimmed = line.trim();
+
+            // HTML block ends on blank line
+            if trimmed.is_empty() {
+                return i - 1; // Don't include the blank line
+            }
+
+            // HTML block ends when we find the matching closing tag
+            if let Some(ref tag) = tag_name {
+                let closing_tag = format!("</{}", tag);
+                if trimmed.contains(&closing_tag) {
+                    return i;
+                }
+            }
+        }
+
+        // If no end found, block continues to end of document
+        lines.len() - 1
+    }
+
+    /// Extract tag name from an HTML line
+    fn extract_tag_name(&self, trimmed: &str) -> Option<String> {
+        if !trimmed.starts_with('<') {
+            return None;
+        }
+
+        let mut chars = trimmed[1..].chars();
+
+        // Skip closing tag indicator
+        if chars.as_str().starts_with('/') {
+            chars.next();
+        }
+
+        let mut tag_name = String::new();
+        for ch in chars {
+            if ch.is_ascii_alphabetic() || ch == '-' {
+                tag_name.push(ch);
+            } else {
+                break;
+            }
+        }
+
+        if tag_name.is_empty() {
+            None
+        } else {
+            Some(tag_name.to_ascii_lowercase())
         }
     }
 

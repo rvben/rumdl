@@ -73,6 +73,44 @@ impl MD033NoInlineHtml {
         tag.starts_with("<!--") && tag.ends_with("-->")
     }
 
+    // Check if a tag is likely a programming type annotation rather than HTML
+    #[inline]
+    fn is_likely_type_annotation(&self, tag: &str) -> bool {
+        // Common programming type names that are often used in generics
+        const COMMON_TYPES: &[&str] = &[
+            "object", "boolean", "string", "number", "any", "void", "null", "undefined",
+            "array", "promise", "function", "error", "date", "regexp", "symbol",
+            "bigint", "map", "set", "weakmap", "weakset", "iterator", "generator",
+            "t", "u", "v", "k", "e", // Common single-letter type parameters
+            "userobject", "userdata", "apiresponse", "config", "options", "params",
+            "result", "response", "request", "data", "item", "element", "node",
+        ];
+
+        let tag_content = tag.trim_start_matches('<').trim_end_matches('>').trim_start_matches('/');
+        let tag_name = tag_content
+            .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+            .next()
+            .unwrap_or("");
+
+        // Check if it's a simple tag (no attributes) with a common type name
+        if !tag_content.contains(' ') && !tag_content.contains('=') {
+            COMMON_TYPES.contains(&tag_name.to_ascii_lowercase().as_str())
+        } else {
+            false
+        }
+    }
+
+    // Check if a tag is actually an email address in angle brackets
+    #[inline]
+    fn is_email_address(&self, tag: &str) -> bool {
+        let content = tag.trim_start_matches('<').trim_end_matches('>');
+        // Simple email pattern: contains @ and has reasonable structure
+        content.contains('@') &&
+        content.chars().all(|c| c.is_alphanumeric() || "@.-_+".contains(c)) &&
+        content.split('@').count() == 2 &&
+        content.split('@').all(|part| !part.is_empty())
+    }
+
     // List of block-level HTML tags per CommonMark and markdownlint
     fn is_block_html_tag(tag: &str) -> bool {
         // List from CommonMark and markdownlint
@@ -118,44 +156,61 @@ impl Rule for MD033NoInlineHtml {
 
         let mut warnings = Vec::new();
         let lines: Vec<&str> = ctx.content.lines().collect();
+
         for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1;
-            let trimmed = line.trim_start();
+
             if line.trim().is_empty() {
                 continue;
             }
             if structure.is_in_code_block(line_num) {
                 continue;
             }
-            // Skip HTML comments
-            if self.is_html_comment(trimmed) {
-                continue;
-            }
-            // Flag if the line contains a block-level HTML tag (including indented ones)
-            if trimmed.starts_with('<') && trimmed.len() > 1 {
-                let second_char = trimmed.chars().nth(1).unwrap();
-                if second_char.is_ascii_alphabetic() || (second_char == '/' && trimmed.len() > 2 && trimmed.chars().nth(2).unwrap().is_ascii_alphabetic()) {
-                    // Extract tag name for debug
-                    let tag = trimmed.trim_start_matches('<').trim_start_matches('/');
-                    let _tag_name = tag
-                        .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
-                        .next()
-                        .unwrap_or("");
-                    if Self::is_block_html_tag(trimmed) && !self.is_tag_allowed(trimmed) {
-                        // Calculate column position based on original line indentation
-                        let column = line.len() - trimmed.len() + 1;
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num,
-                            column,
-                            message: "Inline HTML".to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    }
+
+            // Find all HTML tags in the line using regex
+            for tag_match in HTML_TAG_FINDER.find_iter(line) {
+                let tag = tag_match.as_str();
+
+                // Skip HTML comments
+                if self.is_html_comment(tag) {
+                    continue;
                 }
+
+                // Skip likely programming type annotations
+                if self.is_likely_type_annotation(tag) {
+                    continue;
+                }
+
+                // Skip email addresses in angle brackets
+                if self.is_email_address(tag) {
+                    continue;
+                }
+
+                // Skip tags inside code spans
+                let tag_start_col = tag_match.start() + 1; // 1-indexed
+                if structure.is_in_code_span(line_num, tag_start_col) {
+                    continue;
+                }
+
+                // Skip allowed tags
+                if self.is_tag_allowed(tag) {
+                    continue;
+                }
+
+                // Calculate column position (1-indexed)
+                let column = tag_match.start() + 1;
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: line_num,
+                    column,
+                    message: "Inline HTML".to_string(),
+                    severity: Severity::Warning,
+                    fix: None,
+                });
             }
         }
+
         Ok(warnings)
     }
 
@@ -231,9 +286,10 @@ mod tests {
         let content = "<div>Some content</div>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Only one warning for the block-level tag at line start
-        assert_eq!(result.len(), 1);
+        // Now detects both opening and closing tags
+        assert_eq!(result.len(), 2);
         assert_eq!(result[0].message, "Inline HTML");
+        assert_eq!(result[1].message, "Inline HTML");
     }
 
     #[test]
@@ -242,8 +298,8 @@ mod tests {
         let content = "<DiV>Some <B>content</B></dIv>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Only one warning for the block-level tag at line start
-        assert_eq!(result.len(), 1);
+        // Now detects all four tags: <DiV>, <B>, </B>, </dIv>
+        assert_eq!(result.len(), 4);
         assert_eq!(result[0].message, "Inline HTML");
     }
 
@@ -253,13 +309,13 @@ mod tests {
         let content = "<div>Allowed</div><p>Not allowed</p><br/>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // No warnings for allowed or inline tags
-        assert_eq!(result.len(), 0);
+        // Only <p> and </p> should be flagged (div and br are allowed)
+        assert_eq!(result.len(), 2);
         // Test case-insensitivity of allowed tags
         let content2 = "<DIV>Allowed</DIV><P>Not allowed</P><BR/>";
         let ctx2 = LintContext::new(content2);
         let result2 = rule.check(&ctx2).unwrap();
-        assert_eq!(result2.len(), 0);
+        assert_eq!(result2.len(), 2); // Only <P> and </P> flagged
     }
 
     #[test]
@@ -268,34 +324,27 @@ mod tests {
         let content = "<!-- This is a comment --> <p>Not a comment</p>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // No warnings for inline tags after comments
-        assert_eq!(result.len(), 0);
+        // Should detect <p> and </p> tags (comments are skipped)
+        assert_eq!(result.len(), 2);
     }
 
     #[test]
     fn test_md033_tags_in_links() {
         let rule = MD033NoInlineHtml::default();
-        let content = "[Link](http://example.com/<div>)"; // Simplistic case for the improved check
+        let content = "[Link](http://example.com/<div>)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "Tags within link destinations should be skipped"
-        );
+        // The <div> in the URL should be detected as HTML (not skipped)
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Inline HTML");
 
         let content2 = "[Link <a>text</a>](url)";
         let ctx2 = LintContext::new(content2);
         let result2 = rule.check(&ctx2).unwrap();
-        // TODO: Currently, the structure.links check might incorrectly skip tags in link text
-        // Asserting current behavior (0 warnings) until DocumentStructure is refined.
-        assert_eq!(
-            result2.len(),
-            0,
-            "Tags within link text currently skipped due to broad link range check"
-        );
-        // assert_eq!(result2.len(), 2, "Tags within link text should be flagged");
-        // assert!(result2[0].message.contains("<a>"));
-        // assert!(result2[1].message.contains("</a>"));
+        // Should detect <a> and </a> tags in link text
+        assert_eq!(result2.len(), 2);
+        assert_eq!(result2[0].message, "Inline HTML");
+        assert_eq!(result2[1].message, "Inline HTML");
     }
 
     #[test]
@@ -304,7 +353,7 @@ mod tests {
         let content = "Text with <div> and <br/> tags.";
         let ctx = LintContext::new(content);
         let fixed_content = rule.fix(&ctx).unwrap();
-        // No fix for block-level tags; output should be unchanged
+        // No fix for HTML tags; output should be unchanged
         assert_eq!(fixed_content, content);
     }
 
@@ -314,9 +363,10 @@ mod tests {
         let content = "```html\n<div>Code</div>\n```\n<div>Not code</div>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Only one warning for the block-level tag outside the code block
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].line, 4); // Should only flag the one outside the code block
+        // Should detect both opening and closing tags outside the code block
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 4); // <div> outside code block
+        assert_eq!(result[1].line, 4); // </div> outside code block
         assert_eq!(result[0].message, "Inline HTML");
     }
 
@@ -326,7 +376,8 @@ mod tests {
         let content = "Text with `<p>in code</p>` span. <br/> Not in span.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // No warnings for inline tags inside code spans
-        assert_eq!(result.len(), 0);
+        // Should detect <br/> outside code span, but not tags inside code span
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Inline HTML");
     }
 }
