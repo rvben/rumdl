@@ -341,8 +341,37 @@ impl Rule for MD026NoTrailingPunctuation {
         "Trailing punctuation in heading"
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+
+        // Early returns for performance
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for ATX headings (#) or potential setext headings (lines followed by = or -)
+        let has_headings = content.contains('#') || {
+            let lines: Vec<&str> = content.lines().collect();
+            lines.windows(2).any(|pair| {
+                !pair[0].trim().is_empty() &&
+                (pair[1].trim().chars().all(|c| c == '=' || c == '-') && pair[1].trim().len() > 0)
+            })
+        };
+
+        if !has_headings {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for any punctuation we care about
+        if !content.chars().any(|c| self.punctuation.contains(c)) {
+            return Ok(Vec::new());
+        }
+
+        // Use fallback pattern - try to use shared structure if available
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
         self.check_with_structure(ctx, &structure)
     }
@@ -430,5 +459,18 @@ impl Rule for MD026NoTrailingPunctuation {
             crate::config::get_rule_config_value::<String>(config, "MD026", "punctuation")
                 .unwrap_or_else(|| ".,;:!?".to_string());
         Box::new(MD026NoTrailingPunctuation::new(Some(punctuation)))
+    }
+}
+
+impl crate::utils::document_structure::DocumentStructureExtensions for MD026NoTrailingPunctuation {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &crate::utils::document_structure::DocumentStructure,
+    ) -> bool {
+        let content = ctx.content;
+        !content.is_empty()
+            && !structure.heading_lines.is_empty()
+            && content.chars().any(|c| self.punctuation.contains(c))
     }
 }

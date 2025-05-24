@@ -368,6 +368,13 @@ impl Rule for MD034NoBareUrls {
         // Use line-based detection to properly distinguish between bare URLs and autolinks
         // AST-based approach doesn't work because CommonMark parser converts bare URLs to links
         let content = ctx.content;
+
+        // Early return for empty content or content without URLs or emails
+        if content.is_empty() || (!content.contains("http://") && !content.contains("https://") && !content.contains("ftp://") && !content.contains('@')) {
+            return Ok(Vec::new());
+        }
+
+        // Fallback path: create structure manually (should rarely be used)
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
         self.check_with_structure(ctx, &structure)
     }
@@ -434,11 +441,27 @@ impl Rule for MD034NoBareUrls {
         self
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
         Box::new(MD034NoBareUrls)
+    }
+}
+
+impl crate::utils::document_structure::DocumentStructureExtensions for MD034NoBareUrls {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &crate::utils::document_structure::DocumentStructure,
+    ) -> bool {
+        // This rule is only relevant if there might be URLs in the content
+        let content = ctx.content;
+        !content.is_empty() && (content.contains("http://") || content.contains("https://") || content.contains("ftp://"))
     }
 }
 

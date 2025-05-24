@@ -333,6 +333,10 @@ impl Rule for MD002FirstHeadingH1 {
         self
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
         map.insert("level".to_string(), toml::Value::Integer(self.level as i64));

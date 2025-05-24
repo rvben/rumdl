@@ -138,114 +138,28 @@ impl Rule for MD046CodeBlockStyle {
         "Code blocks should use a consistent style"
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        if content.is_empty() {
+        // Early return for empty content
+        if ctx.content.is_empty() {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Determine target style
-        let target_style = match self.style {
-            CodeBlockStyle::Consistent => {
-                self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced)
-            }
-            _ => self.style,
-        };
-
-        // Track code block states for proper detection
-        let mut in_fenced_block = false;
-        let mut fenced_fence_type = None;
-
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
-
-            // Handle fenced code blocks
-            if !in_fenced_block && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
-                in_fenced_block = true;
-                fenced_fence_type = Some(if trimmed.starts_with("```") {
-                    "```"
-                } else {
-                    "~~~"
-                });
-
-                if target_style == CodeBlockStyle::Indented {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: 1,
-                        message: "Code block style should be indented".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: String::new(), // Remove the opening fence
-                        }),
-                    });
-                }
-            } else if in_fenced_block && fenced_fence_type.is_some() {
-                let fence = fenced_fence_type.unwrap();
-                if trimmed.starts_with(fence) {
-                    in_fenced_block = false;
-                    fenced_fence_type = None;
-
-                    if target_style == CodeBlockStyle::Indented {
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: i + 1,
-                            column: 1,
-                            message: "Code block style should be indented".to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(i + 1, 1),
-                                replacement: String::new(), // Remove the closing fence
-                            }),
-                        });
-                    }
-                } else if target_style == CodeBlockStyle::Indented {
-                    // This is content within a fenced block that should be indented
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: 1,
-                        message: "Code block style should be indented".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: "    ".to_string() + trimmed, // Add indentation
-                        }),
-                    });
-                }
-            } else if self.is_indented_code_block(&lines, i)
-                && target_style == CodeBlockStyle::Fenced
-            {
-                // This is an indented code block that should be fenced
-
-                // Check if we need to start a new fenced block
-                let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1);
-                let _next_line_is_indented =
-                    i < lines.len() - 1 && self.is_indented_code_block(&lines, i + 1);
-
-                if !prev_line_is_indented {
-                    // Start of a new indented block
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: 1,
-                        message: "Code block style should be fenced".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: "```\n".to_string() + line.trim_start(),
-                        }),
-                    });
-                }
-            }
+        // Quick check for code blocks before processing
+        if !ctx.content.contains("```") && !ctx.content.contains("~~~") && !ctx.content.contains("    ") {
+            return Ok(Vec::new());
         }
 
-        Ok(warnings)
+        // Try optimized path first, fallback to regular method
+        let structure = DocumentStructure::new(ctx.content);
+        if self.has_relevant_elements(ctx, &structure) {
+            return self.check_with_structure(ctx, &structure);
+        }
+
+        Ok(Vec::new())
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -492,7 +406,7 @@ impl Rule for MD046CodeBlockStyle {
                 && (line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~"))
             {
                 if target_style == CodeBlockStyle::Indented {
-                    // Add warning for fenced block that should be indented
+                    // Add warning for opening fence
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: i + 1,
@@ -504,24 +418,58 @@ impl Rule for MD046CodeBlockStyle {
                             replacement: String::new(), // Remove the opening fence
                         }),
                     });
-                }
 
-                // Mark this block as processed
-                processed_blocks.insert(i_1based);
+                    // Find closing fence and add warnings for all lines in the fenced block
+                    let mut j = i + 1;
+                    while j < lines.len() {
+                        if lines[j].trim_start().starts_with("```")
+                            || lines[j].trim_start().starts_with("~~~")
+                        {
+                            // Add warnings for content lines and closing fence
+                            for k in i + 1..=j {
+                                warnings.push(LintWarning {
+                                    rule_name: Some(self.name()),
+                                    line: k + 1,
+                                    column: 1,
+                                    message: "Code block style should be indented".to_string(),
+                                    severity: Severity::Warning,
+                                    fix: Some(Fix {
+                                        range: line_index.line_col_to_byte_range(k + 1, 1),
+                                        replacement: if k == j {
+                                            String::new() // Remove closing fence
+                                        } else {
+                                            format!("    {}", lines[k].trim_start()) // Convert content to indented
+                                        },
+                                    }),
+                                });
+                            }
 
-                // Find closing fence
-                let mut j = i + 1;
-                while j < lines.len() {
-                    if lines[j].trim_start().starts_with("```")
-                        || lines[j].trim_start().starts_with("~~~")
-                    {
-                        // Mark all lines in between as processed
-                        for k in i + 1..=j {
-                            processed_blocks.insert(k + 1);
+                            // Mark all lines in the fenced block as processed
+                            for k in i..=j {
+                                processed_blocks.insert(k + 1);
+                            }
+                            break;
                         }
-                        break;
+                        j += 1;
                     }
-                    j += 1;
+                } else {
+                    // Mark this block as processed (for non-indented target styles)
+                    processed_blocks.insert(i_1based);
+
+                    // Find closing fence to mark all lines as processed
+                    let mut j = i + 1;
+                    while j < lines.len() {
+                        if lines[j].trim_start().starts_with("```")
+                            || lines[j].trim_start().starts_with("~~~")
+                        {
+                            // Mark all lines in between as processed
+                            for k in i + 1..=j {
+                                processed_blocks.insert(k + 1);
+                            }
+                            break;
+                        }
+                        j += 1;
+                    }
                 }
             }
             // Check for indented code blocks

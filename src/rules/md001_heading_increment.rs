@@ -76,77 +76,14 @@ impl Rule for MD001HeadingIncrement {
             return Ok(vec![]);
         }
 
-        let structure = DocumentStructure::new(content);
-        if structure.heading_lines.is_empty() {
+        // Quick check for headings
+        if !content.contains('#') && !content.contains("===") && !content.contains("---") {
             return Ok(vec![]);
         }
 
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
-        let mut prev_level = 0;
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Process headings using pre-computed heading information
-        for i in 0..structure.heading_lines.len() {
-            let line_num = structure.heading_lines[i];
-            let level = structure.heading_levels[i];
-
-            // Check if this heading level is more than one level deeper than the previous
-            if prev_level > 0 && level > prev_level + 1 {
-                let adjusted_line_num = line_num - 1; // Convert 1-indexed to 0-indexed
-                let indentation = if adjusted_line_num < lines.len() {
-                    HeadingUtils::get_indentation(lines[adjusted_line_num])
-                } else {
-                    0
-                };
-
-                // Get the heading text
-                let heading_text = if adjusted_line_num < lines.len() {
-                    lines[adjusted_line_num]
-                        .trim_start()
-                        .trim_start_matches('#')
-                        .trim()
-                        .to_string()
-                } else {
-                    String::new()
-                };
-
-                // Determine heading style
-                let style = if adjusted_line_num + 1 < lines.len()
-                    && (lines[adjusted_line_num + 1].trim().starts_with('=')
-                        || lines[adjusted_line_num + 1].trim().starts_with('-'))
-                {
-                    if lines[adjusted_line_num + 1].trim().starts_with('=') {
-                        HeadingStyle::Setext1
-                    } else {
-                        HeadingStyle::Setext2
-                    }
-                } else {
-                    HeadingStyle::Atx
-                };
-
-                // Create a fix with the correct heading level
-                let fixed_level = prev_level + 1;
-                let replacement =
-                    HeadingUtils::convert_heading_style(&heading_text, fixed_level as u32, style);
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num,
-                    column: indentation + 1,
-                    message: format!("Heading level should be {} for this level", prev_level + 1),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num, indentation + 1),
-                        replacement: format!("{}{}", " ".repeat(indentation), replacement),
-                    }),
-                });
-            }
-
-            prev_level = level;
-        }
-
-        Ok(warnings)
+        // Fallback path: create structure manually (should rarely be used)
+        let structure = DocumentStructure::new(content);
+        self.check_with_structure(ctx, &structure)
     }
 
     /// Optimized check using document structure
@@ -310,6 +247,10 @@ impl Rule for MD001HeadingIncrement {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
     }
 
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>

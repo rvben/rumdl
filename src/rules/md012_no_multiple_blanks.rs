@@ -63,16 +63,35 @@ impl Rule for MD012NoMultipleBlanks {
         "Multiple consecutive blank lines"
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for consecutive newlines or potential whitespace-only lines before processing
+        // Look for multiple consecutive lines that could be blank (empty or whitespace-only)
+        let lines: Vec<&str> = content.lines().collect();
+        let has_potential_blanks = lines.windows(2).any(|pair| {
+            pair[0].trim().is_empty() && pair[1].trim().is_empty()
+        });
+
+        if !has_potential_blanks {
+            return Ok(Vec::new());
+        }
+
         let _line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
 
         let mut blank_count = 0;
         let mut blank_start = 0;
-
-        let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, &line) in lines.iter().enumerate() {
             // Skip code blocks and front matter
@@ -253,5 +272,16 @@ impl Rule for MD012NoMultipleBlanks {
         let maximum =
             crate::config::get_rule_config_value::<usize>(config, "MD012", "maximum").unwrap_or(1);
         Box::new(MD012NoMultipleBlanks::new(maximum))
+    }
+}
+
+impl crate::utils::document_structure::DocumentStructureExtensions for MD012NoMultipleBlanks {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _structure: &crate::utils::document_structure::DocumentStructure,
+    ) -> bool {
+        // MD012 checks for consecutive blank lines, so it's relevant for any non-empty content
+        !ctx.content.is_empty()
     }
 }

@@ -5,11 +5,11 @@ lazy_static! {
     // Pattern to match blockquote lines
     static ref BLOCKQUOTE_LINE: Regex = Regex::new(r"^(\s*)>\s?(.*)$").unwrap();
 
-    // Pattern to match empty blockquote lines
-    static ref EMPTY_BLOCKQUOTE_LINE: Regex = Regex::new(r"^(\s*)>\s*$").unwrap();
+    // Pattern to match empty blockquote lines (> with no space or content)
+    static ref EMPTY_BLOCKQUOTE_LINE: Regex = Regex::new(r"^(\s*)>$").unwrap();
 
-    // Pattern to match nested empty blockquote lines
-    static ref NESTED_EMPTY_BLOCKQUOTE_LINE: Regex = Regex::new(r"^(\s*)>+\s*$").unwrap();
+    // Pattern to match nested empty blockquote lines (>> with no space or content)
+    static ref NESTED_EMPTY_BLOCKQUOTE_LINE: Regex = Regex::new(r"^(\s*)>+$").unwrap();
 
     // Pattern to match blockquote lines with no space after >
     static ref BLOCKQUOTE_NO_SPACE: Regex = Regex::new(r"^(\s*)>([^\s].*)$").unwrap();
@@ -32,12 +32,12 @@ impl BlockquoteUtils {
 
     /// Check if a line is an empty blockquote (> with no content)
     pub fn is_empty_blockquote(line: &str) -> bool {
-        // Check for simple empty blockquote
+        // Check for simple empty blockquote (> with no space)
         if EMPTY_BLOCKQUOTE_LINE.is_match(line) {
             return true;
         }
 
-        // Check for nested empty blockquote
+        // Check for nested empty blockquote (>> with no space)
         if NESTED_EMPTY_BLOCKQUOTE_LINE.is_match(line) {
             return true;
         }
@@ -46,6 +46,22 @@ impl BlockquoteUtils {
         if BLOCKQUOTE_LINE.is_match(line) {
             let content = Self::extract_content(line);
             return content.trim().is_empty();
+        }
+
+        false
+    }
+
+    /// Check if an empty blockquote line needs fixing for MD028
+    /// This is more restrictive than is_empty_blockquote - only flags lines that actually need fixing
+    pub fn needs_md028_fix(line: &str) -> bool {
+        // Only flag blockquotes that have NO space after the > marker
+        // Lines with a single space ("> ") are already correct and don't need fixing
+        if EMPTY_BLOCKQUOTE_LINE.is_match(line) {
+            return true;
+        }
+
+        if NESTED_EMPTY_BLOCKQUOTE_LINE.is_match(line) {
+            return true;
         }
 
         false

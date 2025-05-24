@@ -46,7 +46,7 @@ This is a line that would normally exceed the default line length limit, but we'
 
 <!-- Some comment -->
 
-    # Indented heading (MD023 violation)
+  # Indented heading (MD023 violation)
 "#;
     fs::write(&markdown_path, markdown_content).unwrap();
 

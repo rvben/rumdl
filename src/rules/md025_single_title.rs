@@ -48,6 +48,18 @@ impl Rule for MD025SingleTitle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for headings
+        if !content.contains('#') && !content.contains('=') && !content.contains('-') {
+            return Ok(Vec::new());
+        }
+
+        // Fallback path: create structure manually (should rarely be used)
         let structure = DocumentStructure::new(content);
         self.check_with_structure(ctx, &structure)
     }
@@ -228,6 +240,10 @@ impl Rule for MD025SingleTitle {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {

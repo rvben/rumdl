@@ -1388,11 +1388,11 @@ fn process_file(
     // Fix issues if requested
     let mut warnings_fixed = 0;
     if _fix {
-        // Skip rules that don't have fixes
+        // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
         for rule in rules {
             if all_warnings
                 .iter()
-                .any(|w| w.rule_name == Some(rule.name()) && w.fix.is_some())
+                .any(|w| w.rule_name == Some(rule.name()))
             {
                 let ctx = LintContext::new(&content);
                 match rule.fix(&ctx) {
@@ -1402,7 +1402,7 @@ fn process_file(
                             // Apply fixes for this rule - we consider all warnings for the rule fixed
                             warnings_fixed += all_warnings
                                 .iter()
-                                .filter(|w| w.rule_name == Some(rule.name()) && w.fix.is_some())
+                                .filter(|w| w.rule_name == Some(rule.name()))
                                 .count();
                         }
                     }

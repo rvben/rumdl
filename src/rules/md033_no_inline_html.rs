@@ -310,6 +310,10 @@ impl Rule for MD033NoInlineHtml {
         self
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let allowed_vec: Vec<toml::Value> = self
             .allowed

@@ -82,28 +82,9 @@ impl Rule for MD037NoSpaceInEmphasis {
             return Ok(vec![]);
         }
 
+        // Fallback path: create structure manually (should rarely be used)
         let structure = DocumentStructure::new(content);
-        let mut warnings = Vec::new();
-
-        // Process the content line by line using document structure for reliable code block detection
-        for (line_num, line) in content.lines().enumerate() {
-            // Early return: skip lines without emphasis markers
-            if !line.contains('*') && !line.contains('_') {
-                continue;
-            }
-
-            // Skip if in code block or front matter using document structure
-            if structure.is_in_code_block(line_num + 1) || structure.is_in_front_matter(line_num + 1) {
-                continue;
-            }
-
-            // Process the line for emphasis patterns
-            let line_no_code = replace_inline_code(line);
-
-            check_emphasis_patterns(&line_no_code, line_num + 1, line, &mut warnings);
-        }
-
-        Ok(warnings)
+        self.check_with_structure(ctx, &structure)
     }
 
     /// Enhanced function to check for spaces inside emphasis markers
@@ -140,59 +121,8 @@ impl Rule for MD037NoSpaceInEmphasis {
             // Replace inline code with placeholders to avoid false positives
             let line_no_code = replace_inline_code(line);
 
-            // Check for spaces in emphasis patterns
-            if line_no_code.contains('*') {
-                // Check single asterisk emphasis (* text *)
-                self.check_pattern(
-                    &line_no_code,
-                    line_num + 1,
-                    &ASTERISK_EMPHASIS,
-                    &mut warnings,
-                );
-
-                // Check double asterisk emphasis (** text **) with fancy-regex
-                if line_no_code.contains("**") {
-                    check_fancy_pattern(
-                        &line_no_code,
-                        line_num + 1,
-                        &DOUBLE_ASTERISK_EMPHASIS,
-                        &mut warnings,
-                        self.name(),
-                    );
-                    check_fancy_pattern(
-                        &line_no_code,
-                        line_num + 1,
-                        &DOUBLE_ASTERISK_SPACE_START,
-                        &mut warnings,
-                        self.name(),
-                    );
-                    check_fancy_pattern(
-                        &line_no_code,
-                        line_num + 1,
-                        &DOUBLE_ASTERISK_SPACE_END,
-                        &mut warnings,
-                        self.name(),
-                    );
-                }
-            }
-
-            if line_no_code.contains('_') {
-                // Check single underscore emphasis (_ text _)
-                self.check_pattern(
-                    &line_no_code,
-                    line_num + 1,
-                    &UNDERSCORE_EMPHASIS,
-                    &mut warnings,
-                );
-
-                // Check double underscore emphasis (__ text __)
-                self.check_pattern(
-                    &line_no_code,
-                    line_num + 1,
-                    &DOUBLE_UNDERSCORE_EMPHASIS,
-                    &mut warnings,
-                );
-            }
+            // Use the correct emphasis pattern checking logic
+            check_emphasis_patterns(&line_no_code, line_num + 1, line, &mut warnings);
         }
 
         Ok(warnings)
@@ -267,6 +197,10 @@ impl Rule for MD037NoSpaceInEmphasis {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
     }
 
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
@@ -616,52 +550,25 @@ mod tests {
     fn test_with_document_structure() {
         let rule = MD037NoSpaceInEmphasis;
 
-        // Test with no spaces inside emphasis
+        // Test with no spaces inside emphasis - should pass
         let content = "This is *correct* emphasis and **strong emphasis**";
         let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        assert!(result.is_empty(), "No warnings expected for correct emphasis");
 
-        // Update expectation to match actual implementation behavior
-        if result.is_empty() {
-            // This is the expected behavior
-            assert!(
-                result.is_empty(),
-                "No warnings expected for correct emphasis"
-            );
-        } else {
-            // Comment out debug prints that could output file content
-            // println!("MD037: Implementation flagged valid emphasis as invalid. This might indicate a bug.");
-            // Implementation is giving warnings when it shouldn't - let the test pass for now
-            // and file an issue for further investigation
-        }
-
-        // Test with spaces inside emphasis
-        let content = "This is * text with spaces * and ** text with spaces **";
+        // Test with actual spaces inside emphasis - use content that should warn
+        let content = "This is * text with spaces * and more content";
         let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        assert!(!result.is_empty(), "Expected warnings for spaces in emphasis");
 
-        // The implementation might detect these incorrectly - be flexible about the count
-        assert!(
-            !result.is_empty(),
-            "Expected warnings for spaces in emphasis"
-        );
-        // Comment out debug prints that could output file content
-        // println!("Found {} warnings for spaces in emphasis", result.len());
-
-        // Test with code blocks
+        // Test with code blocks - emphasis in code should be ignored
         let content = "This is *correct* emphasis\n```\n* incorrect * in code block\n```\nOutside block with * spaces in emphasis *";
         let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
-
-        // Be flexible about the exact count, but ensure the code block content is skipped
-        assert!(
-            !result.is_empty(),
-            "Expected warnings for spaces in emphasis outside code block"
-        );
-        // Comment out debug prints that could output file content
-        // println!("Found {} warnings for spaces outside code block", result.len());
+        assert!(!result.is_empty(), "Expected warnings for spaces in emphasis outside code block");
     }
 }

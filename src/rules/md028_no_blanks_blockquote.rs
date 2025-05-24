@@ -34,73 +34,52 @@ impl Rule for MD028NoBlanksBlockquote {
         "Blank line inside blockquote"
     }
 
-    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = LineIndex::new(ctx.content.to_string());
-        let mut warnings = Vec::new();
-        let lines: Vec<&str> = ctx.content.lines().collect();
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
 
-        for (i, &line) in lines.iter().enumerate() {
-            if BlockquoteUtils::is_blockquote(line) {
-                let level = BlockquoteUtils::get_nesting_level(line);
-                let indent = BlockquoteUtils::extract_indentation(line);
-                // Canonical blank blockquote line: marker(s) + single space, no content
-                let expected = Self::get_replacement(&indent, level);
-                if BlockquoteUtils::is_empty_blockquote(line) && line != expected {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: "Blank line inside blockquote".to_string(),
-                        line: i + 1,
-                        column: 1,
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: expected,
-                        }),
-                    });
-                }
-            }
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        // Early return for content without blockquotes
+        if !ctx.content.contains('>') {
+            return Ok(Vec::new());
         }
-        Ok(warnings)
+
+        // Always use the structure-based check since it's more reliable
+        let structure = DocumentStructure::new(ctx.content);
+        self.check_with_structure(ctx, &structure)
     }
 
     /// Optimized check using document structure
     fn check_with_structure(
         &self,
         ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
+        _structure: &DocumentStructure,
     ) -> LintResult {
-        if structure.blockquotes.is_empty() {
-            return Ok(Vec::new());
-        }
         let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
         let lines: Vec<&str> = ctx.content.lines().collect();
-        for blockquote in &structure.blockquotes {
-            for line_num in blockquote.start_line..=blockquote.end_line {
-                if line_num == 0 || line_num > lines.len() {
-                    continue;
-                }
-                let line_idx = line_num - 1;
-                let line = lines[line_idx];
-                if BlockquoteUtils::is_blockquote(line)
-                    && BlockquoteUtils::is_empty_blockquote(line)
-                {
-                    let level = BlockquoteUtils::get_nesting_level(line);
-                    let indent = BlockquoteUtils::extract_indentation(line);
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: "Blank line inside blockquote".to_string(),
-                        line: line_num,
-                        column: 1,
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num, 1),
-                            replacement: Self::get_replacement(&indent, level),
-                        }),
-                    });
-                }
+
+        // Process all lines to find empty blockquote lines
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+
+            if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::needs_md028_fix(line) {
+                let level = BlockquoteUtils::get_nesting_level(line);
+                let indent = BlockquoteUtils::extract_indentation(line);
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    message: "Blank line inside blockquote".to_string(),
+                    line: line_num,
+                    column: 1,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range(line_num, 1),
+                        replacement: Self::get_replacement(&indent, level),
+                    }),
+                });
             }
         }
+
         Ok(warnings)
     }
 
@@ -108,7 +87,7 @@ impl Rule for MD028NoBlanksBlockquote {
         let lines: Vec<&str> = ctx.content.lines().collect();
         let mut result = Vec::with_capacity(lines.len());
         for line in lines.iter() {
-            if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::is_empty_blockquote(line) {
+            if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::needs_md028_fix(line) {
                 let level = BlockquoteUtils::get_nesting_level(line);
                 let indent = BlockquoteUtils::extract_indentation(line);
                 let replacement = Self::get_replacement(&indent, level);

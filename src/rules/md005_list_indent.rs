@@ -743,11 +743,15 @@ impl Rule for MD005ListIndent {
         self
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         None
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {

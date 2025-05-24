@@ -167,7 +167,21 @@ impl Rule for MD004UnorderedListStyle {
         "Use consistent style for unordered list markers"
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn check(&self, ctx: &LintContext) -> LintResult {
+        // Early returns for performance
+        if ctx.content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for any list markers before processing
+        if !ctx.content.contains(|c: char| c == '*' || c == '-' || c == '+') {
+            return Ok(Vec::new());
+        }
+
         let mut warnings = Vec::new();
         let content = &ctx.content;
         let mut in_code_block = false;

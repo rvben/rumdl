@@ -74,6 +74,13 @@ impl Rule for MD018NoMissingSpaceAtx {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+
+        // Early return for empty content or content without ATX headings
+        if content.is_empty() || !content.contains('#') {
+            return Ok(Vec::new());
+        }
+
+        // Fallback path: create structure manually (should rarely be used)
         let structure = DocumentStructure::new(content);
         self.check_with_structure(ctx, &structure)
     }
@@ -169,6 +176,10 @@ impl Rule for MD018NoMissingSpaceAtx {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
     }
 
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
