@@ -8,6 +8,8 @@ use crate::rule::MarkdownAst;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::panic;
+use log::warn;
 
 /// Cache for parsed AST nodes
 #[derive(Debug)]
@@ -88,15 +90,69 @@ pub fn clear_ast_cache() {
 
 /// Parse Markdown content into an AST
 pub fn parse_markdown_ast(content: &str) -> MarkdownAst {
-    // Use the markdown crate to parse the content
-    markdown::to_mdast(content, &markdown::ParseOptions::default())
-        .unwrap_or_else(|_| {
-            // Fallback to an empty root node if parsing fails
+    // Check for problematic patterns that cause the markdown crate to panic
+    if content_has_problematic_lists(content) {
+        warn!("Detected problematic list patterns, skipping AST parsing");
+        return MarkdownAst::Root(markdown::mdast::Root {
+            children: vec![],
+            position: None,
+        });
+    }
+
+    // Try to parse AST, but handle panics from the markdown crate
+    match panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        markdown::to_mdast(content, &markdown::ParseOptions::default())
+    })) {
+        Ok(Ok(ast)) => {
+            // Successfully parsed AST
+            ast
+        }
+        Ok(Err(err)) => {
+            // Parsing failed with an error
+            warn!("Failed to parse markdown AST in ast_utils: {:?}", err);
             MarkdownAst::Root(markdown::mdast::Root {
                 children: vec![],
                 position: None,
             })
-        })
+        }
+        Err(_) => {
+            // Parsing panicked
+            warn!("Markdown AST parsing panicked in ast_utils, falling back to empty AST");
+            MarkdownAst::Root(markdown::mdast::Root {
+                children: vec![],
+                position: None,
+            })
+        }
+    }
+}
+
+/// Check if content contains patterns that cause the markdown crate to panic
+fn content_has_problematic_lists(content: &str) -> bool {
+    let lines: Vec<&str> = content.lines().collect();
+
+    // Look for mixed list markers in consecutive lines (which causes the panic)
+    for window in lines.windows(3) {
+        if window.len() >= 2 {
+            let line1 = window[0].trim_start();
+            let line2 = window[1].trim_start();
+
+            // Check if both lines are list items with different markers
+            let is_list1 = line1.starts_with("* ") || line1.starts_with("+ ") || line1.starts_with("- ");
+            let is_list2 = line2.starts_with("* ") || line2.starts_with("+ ") || line2.starts_with("- ");
+
+            if is_list1 && is_list2 {
+                let marker1 = line1.chars().next().unwrap_or(' ');
+                let marker2 = line2.chars().next().unwrap_or(' ');
+
+                // If different markers, this could cause a panic
+                if marker1 != marker2 {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 /// Check if AST contains specific node types

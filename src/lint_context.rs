@@ -1,4 +1,6 @@
 use markdown::{mdast::Node, to_mdast, ParseOptions};
+use std::panic;
+use log::warn;
 
 pub struct LintContext<'a> {
     pub content: &'a str,
@@ -8,12 +10,53 @@ pub struct LintContext<'a> {
 
 impl<'a> LintContext<'a> {
     pub fn new(content: &'a str) -> Self {
-        let ast = to_mdast(content, &ParseOptions::gfm()).unwrap_or_else(|_| {
-            Node::Root(markdown::mdast::Root {
+        // Check for problematic patterns that cause the markdown crate to panic
+        if content_has_problematic_lists(content) {
+            warn!("Detected problematic list patterns in LintContext, skipping AST parsing");
+            let ast = Node::Root(markdown::mdast::Root {
                 children: vec![],
                 position: None,
-            })
-        });
+            });
+
+            let mut line_offsets = vec![0];
+            for (i, c) in content.char_indices() {
+                if c == '\n' {
+                    line_offsets.push(i + 1);
+                }
+            }
+            return Self {
+                content,
+                ast,
+                line_offsets,
+            };
+        }
+
+        // Try to parse AST, but handle panics from the markdown crate
+        let ast = match panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            to_mdast(content, &ParseOptions::gfm())
+        })) {
+            Ok(Ok(ast)) => {
+                // Successfully parsed AST
+                ast
+            }
+            Ok(Err(err)) => {
+                // Parsing failed with an error
+                warn!("Failed to parse markdown AST: {:?}", err);
+                Node::Root(markdown::mdast::Root {
+                    children: vec![],
+                    position: None,
+                })
+            }
+            Err(_) => {
+                // Parsing panicked
+                warn!("Markdown AST parsing panicked, falling back to empty AST");
+                Node::Root(markdown::mdast::Root {
+                    children: vec![],
+                    position: None,
+                })
+            }
+        };
+
         let mut line_offsets = vec![0];
         for (i, c) in content.char_indices() {
             if c == '\n' {
@@ -41,6 +84,35 @@ impl<'a> LintContext<'a> {
             }
         }
     }
+}
+
+/// Check if content contains patterns that cause the markdown crate to panic
+fn content_has_problematic_lists(content: &str) -> bool {
+    let lines: Vec<&str> = content.lines().collect();
+
+    // Look for mixed list markers in consecutive lines (which causes the panic)
+    for window in lines.windows(3) {
+        if window.len() >= 2 {
+            let line1 = window[0].trim_start();
+            let line2 = window[1].trim_start();
+
+            // Check if both lines are list items with different markers
+            let is_list1 = line1.starts_with("* ") || line1.starts_with("+ ") || line1.starts_with("- ");
+            let is_list2 = line2.starts_with("* ") || line2.starts_with("+ ") || line2.starts_with("- ");
+
+            if is_list1 && is_list2 {
+                let marker1 = line1.chars().next().unwrap_or(' ');
+                let marker2 = line2.chars().next().unwrap_or(' ');
+
+                // If different markers, this could cause a panic
+                if marker1 != marker2 {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
