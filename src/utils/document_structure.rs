@@ -177,6 +177,16 @@ pub struct Image {
     pub reference_id: Option<String>,
 }
 
+// Cached regex patterns for performance
+lazy_static! {
+    // Quick check patterns
+    static ref CONTAINS_ATX_HEADING: Regex = Regex::new(r"(?m)^(\s*)#{1,6}").unwrap();
+    static ref CONTAINS_SETEXT_UNDERLINE: Regex = Regex::new(r"(?m)^(\s*)(=+|-+)\s*$").unwrap();
+    static ref CONTAINS_LIST_MARKERS: Regex = Regex::new(r"(?m)^(\s*)([*+-]|\d+\.)").unwrap();
+    static ref CONTAINS_BLOCKQUOTE: Regex = Regex::new(r"(?m)^(\s*)>").unwrap();
+    static ref CONTAINS_HTML_BLOCK: Regex = Regex::new(r"(?m)^(\s*)<[a-zA-Z]").unwrap();
+}
+
 impl DocumentStructure {
     /// Create a new DocumentStructure by analyzing the document content
     pub fn new(content: &str) -> Self {
@@ -219,6 +229,15 @@ impl DocumentStructure {
             return;
         }
 
+        // Initialize line-based bitmaps early to avoid index errors
+        let lines: Vec<&str> = content.lines().collect();
+        self.in_code_span = vec![Vec::new(); lines.len()];
+        for (i, line) in lines.iter().enumerate() {
+            self.in_code_span[i] = vec![false; line.len() + 1]; // +1 for 1-indexed columns
+        }
+        self.in_blockquote = vec![false; lines.len()];
+        self.in_html_block = vec![false; lines.len()];
+
         // Detect front matter FIRST (needed before heading detection)
         self.detect_front_matter(content);
 
@@ -232,31 +251,59 @@ impl DocumentStructure {
         // Populate fenced code block starts and ends
         self.populate_fenced_code_blocks();
 
-        // OPTIMIZATION 4: Detect blockquotes (before code spans and links)
-        self.detect_blockquotes(content);
+        // Quick checks to skip expensive operations if not needed
+        let has_blockquote_markers = CONTAINS_BLOCKQUOTE.is_match(content);
+        let has_html_blocks = CONTAINS_HTML_BLOCK.is_match(content);
+        let has_backticks = content.contains('`');
+        let has_brackets = content.contains('[');
+        let has_headings = CONTAINS_ATX_HEADING.is_match(content) || CONTAINS_SETEXT_UNDERLINE.is_match(content);
+        // More comprehensive list detection to handle edge cases
+        let has_list_markers = CONTAINS_LIST_MARKERS.is_match(content) ||
+                              content.contains("- ") || content.contains("* ") || content.contains("+ ") ||
+                              content.contains("1. ") || content.contains("2. ") || content.contains("3. ") ||
+                              content.contains("4. ") || content.contains("5. ") || content.contains("6. ") ||
+                              content.contains("7. ") || content.contains("8. ") || content.contains("9. ") ||
+                              content.contains("10. ") || content.contains("11. ") || content.contains("12. ");
 
-        // Detect HTML blocks (block-level HTML regions)
-        self.detect_html_blocks(content);
+        // OPTIMIZATION 4: Detect blockquotes only if needed
+        if has_blockquote_markers {
+            self.detect_blockquotes(content);
+        }
 
-        // OPTIMIZATION 1: Detect inline code spans
-        self.detect_code_spans(content);
+        // Detect HTML blocks only if needed
+        if has_html_blocks {
+            self.detect_html_blocks(content);
+        }
 
-        // OPTIMIZATION 2: Detect links and images
-        self.detect_links_and_images(content);
+        // OPTIMIZATION 1: Detect inline code spans only if needed
+        if has_backticks {
+            self.detect_code_spans(content);
+        }
 
-        // Detect headings after front matter is processed
-        self.detect_headings(content);
+        // OPTIMIZATION 2: Detect links and images only if needed
+        if has_brackets {
+            self.detect_links_and_images(content);
+        }
 
-        // OPTIMIZATION 3: Detect lists with detailed information
-        self.detect_list_items(content);
+        // Detect headings only if needed
+        if has_headings {
+            self.detect_headings(content);
+        }
 
-        // Check for URLs
-        self.has_urls = content.contains("http://")
-            || content.contains("https://")
-            || content.contains("ftp://");
+        // OPTIMIZATION 3: Detect lists only if needed
+        if has_list_markers {
+            self.detect_list_items(content);
+        }
 
-        // Check for HTML tags
-        self.has_html = content.contains('<') && (content.contains("</") || content.contains("/>"));
+        // Check for URLs only if needed
+        if content.contains("http://") || content.contains("https://") || content.contains("ftp://") {
+            self.has_urls = true;
+        }
+
+        // Check for HTML tags only if needed
+        if has_html_blocks && (content.contains("</") || content.contains("/>")) {
+            self.has_html = true;
+        }
     }
 
     /// Compute a bitmap of code block regions for fast lookups
@@ -632,11 +679,7 @@ impl DocumentStructure {
 
         let lines: Vec<&str> = content.lines().collect();
 
-        // Initialize in_code_span bitmap
-        self.in_code_span = vec![Vec::new(); lines.len()];
-        for (i, line) in lines.iter().enumerate() {
-            self.in_code_span[i] = vec![false; line.len() + 1]; // +1 for 1-indexed columns
-        }
+        // Note: in_code_span bitmap is already initialized in analyze() method
 
         for (line_num, line) in lines.iter().enumerate() {
             // Skip lines in code blocks
@@ -978,8 +1021,7 @@ impl DocumentStructure {
 
         let lines: Vec<&str> = content.lines().collect();
 
-        // Initialize the blockquote bitmap
-        self.in_blockquote = vec![false; lines.len()];
+        // Note: in_blockquote bitmap is already initialized in analyze() method
 
         let mut in_blockquote = false;
         let mut start_line = 0;
@@ -1024,7 +1066,7 @@ impl DocumentStructure {
     /// Detect HTML blocks (block-level HTML regions) according to CommonMark spec
     fn detect_html_blocks(&mut self, content: &str) {
         let lines: Vec<&str> = content.lines().collect();
-        self.in_html_block = vec![false; lines.len()];
+        // Note: in_html_block bitmap is already initialized in analyze() method
 
         let mut i = 0;
         while i < lines.len() {

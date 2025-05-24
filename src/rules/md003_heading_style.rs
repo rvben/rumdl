@@ -160,64 +160,9 @@ impl Rule for MD003HeadingStyle {
             return Ok(Vec::new());
         }
 
-        let mut result = Vec::new();
-
-        // Create DocumentStructure and use it for heading info
+        // Fallback path: create structure manually (should rarely be used)
         let structure = DocumentStructure::new(content);
-        let target_style = self.get_target_style(content, Some(&structure));
-
-        let lines: Vec<&str> = content.lines().collect();
-        for (idx, &line_num) in structure.heading_lines.iter().enumerate() {
-            let level = structure.heading_levels[idx];
-            let region = structure.heading_regions[idx];
-            // Determine the current style of the heading
-            let style = if region.0 != region.1 {
-                // Setext heading (has an underline)
-                if level == 1 {
-                    HeadingStyle::Setext1
-                } else {
-                    HeadingStyle::Setext2
-                }
-            } else {
-                // ATX heading
-                let line = lines.get(line_num - 1).map_or("", |v| *v);
-                if line.trim().ends_with('#') {
-                    HeadingStyle::AtxClosed
-                } else {
-                    HeadingStyle::Atx
-                }
-            };
-
-            // For markdownlint parity: when target style is Setext, all headings are expected to be Setext
-            // This will flag level 3+ as violations since they can't be represented as Setext
-            let expected_style = if target_style == HeadingStyle::Setext1
-                || target_style == HeadingStyle::Setext2
-            {
-                if level == 1 {
-                    HeadingStyle::Setext1
-                } else {
-                    HeadingStyle::Setext2
-                }
-            } else {
-                target_style
-            };
-
-            if style != expected_style {
-                result.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num,
-                    column: 1,
-                    message: format!(
-                        "Heading style should be {:?} (found {:?})",
-                        expected_style, style
-                    ),
-                    severity: Severity::Warning,
-                    fix: None,
-                });
-            }
-        }
-
-        Ok(result)
+        self.check_with_structure(ctx, &structure)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -468,6 +413,10 @@ impl Rule for MD003HeadingStyle {
         self
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
         map.insert(
@@ -485,6 +434,17 @@ impl Rule for MD003HeadingStyle {
             .and_then(|s| HeadingStyle::from_str(&s).ok())
             .unwrap_or(HeadingStyle::Consistent);
         Box::new(MD003HeadingStyle::new(style))
+    }
+}
+
+impl crate::utils::document_structure::DocumentStructureExtensions for MD003HeadingStyle {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &crate::utils::document_structure::DocumentStructure,
+    ) -> bool {
+        // This rule is only relevant if there are headings
+        !doc_structure.heading_lines.is_empty()
     }
 }
 

@@ -88,7 +88,12 @@ impl Rule for MD038NoSpaceInCode {
             return Ok(vec![]);
         }
 
-        // Create document structure for processing
+        // Early return if no code spans possible
+        if !content.contains('`') {
+            return Ok(vec![]);
+        }
+
+        // Fallback path: create structure manually (should rarely be used)
         let structure = DocumentStructure::new(content);
 
         // If no code spans, return early
@@ -225,6 +230,10 @@ impl Rule for MD038NoSpaceInCode {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
     }
 
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>

@@ -1,5 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::document_structure::DocumentStructure;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::regex_cache::*;
 use std::collections::HashSet;
 
@@ -23,34 +23,26 @@ impl MD051LinkFragments {
         Self
     }
 
-    fn extract_headings(&self, content: &str) -> HashSet<String> {
+    /// Extract headings from pre-computed DocumentStructure data
+    fn extract_headings_from_structure(&self, content: &str, structure: &DocumentStructure) -> HashSet<String> {
         let mut headings = HashSet::new();
 
         // Early return: if no headings at all, skip processing
-        if !content.contains('#') && !content.contains('=') && !content.contains('-') {
+        if structure.heading_lines.is_empty() {
             return headings;
         }
 
         let lines: Vec<&str> = content.lines().collect();
-        let mut in_code_block = false;
         let mut in_toc = false;
 
-        for (i, line) in lines.iter().enumerate() {
-            // Early return: skip empty lines
-            if line.trim().is_empty() {
+        // Process each heading using pre-computed data from DocumentStructure
+        for &line_num in &structure.heading_lines {
+            let line_idx = line_num - 1; // Convert from 1-indexed to 0-indexed
+            if line_idx >= lines.len() {
                 continue;
             }
 
-            // Check for code fence
-            if CODE_FENCE_REGEX.is_match(line) {
-                in_code_block = !in_code_block;
-                continue;
-            }
-
-            // Skip if in code block
-            if in_code_block {
-                continue;
-            }
+            let line = lines[line_idx];
 
             // Check for TOC section
             if TOC_SECTION_START.is_match(line) {
@@ -68,11 +60,6 @@ impl MD051LinkFragments {
                 continue;
             }
 
-            // Early return: skip lines that can't be headings
-            if !line.trim().starts_with('#') && (i + 1 >= lines.len() || (!lines[i + 1].trim().starts_with('=') && !lines[i + 1].trim().starts_with('-'))) {
-                continue;
-            }
-
             // Check for ATX heading
             if let Some(cap) = ATX_HEADING_WITH_CAPTURE.captures(line) {
                 if let Some(heading_text) = cap.get(2) {
@@ -84,8 +71,8 @@ impl MD051LinkFragments {
             }
 
             // Check for setext heading (only check if next line exists)
-            if i + 1 < lines.len() {
-                let combined = format!("{}\n{}", line, lines[i + 1]);
+            if line_idx + 1 < lines.len() {
+                let combined = format!("{}\n{}", line, lines[line_idx + 1]);
                 if let Ok(Some(cap)) = SETEXT_HEADING_WITH_CAPTURE.captures(&combined) {
                     if let Some(heading_text) = cap.get(1) {
                         let heading = heading_text.as_str().trim();
@@ -157,9 +144,26 @@ impl Rule for MD051LinkFragments {
             return Ok(Vec::new());
         }
 
+        // Fallback path: create structure manually (should rarely be used)
         let structure = DocumentStructure::new(content);
+        self.check_with_structure(ctx, &structure)
+    }
+
+    /// Optimized check using pre-computed document structure
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
+        let content = ctx.content;
+
+        // Early return: if no links at all, skip processing
+        if !content.contains('[') || !content.contains('#') {
+            return Ok(Vec::new());
+        }
+
         let mut warnings = Vec::new();
-        let headings = self.extract_headings(content);
+        let headings = self.extract_headings_from_structure(content, structure);
         let mut in_toc_section = false;
 
         for (line_num, line) in content.lines().enumerate() {
@@ -231,10 +235,25 @@ impl Rule for MD051LinkFragments {
         self
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
         Box::new(MD051LinkFragments::new())
+    }
+}
+
+impl DocumentStructureExtensions for MD051LinkFragments {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
+        // This rule is only relevant if there are both headings and links
+        !doc_structure.heading_lines.is_empty() && !doc_structure.links.is_empty()
     }
 }

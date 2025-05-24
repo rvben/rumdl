@@ -1,7 +1,7 @@
 use toml;
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::document_structure::DocumentStructure;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Default)]
@@ -30,11 +30,35 @@ impl Rule for MD024NoDuplicateHeading {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Fallback path: create structure manually (should rarely be used)
         let structure = DocumentStructure::new(content);
+        self.check_with_structure(ctx, &structure)
+    }
+
+    /// Optimized check using pre-computed document structure
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
+        let content = ctx.content;
+
+        // Early return if no headings
+        if structure.heading_lines.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let lines: Vec<&str> = content.lines().collect();
         let mut warnings = Vec::new();
         let mut seen_headings: HashSet<String> = HashSet::new();
         let mut seen_headings_per_level: HashMap<u32, HashSet<String>> = HashMap::new();
+
         for (i, &line_num) in structure.heading_lines.iter().enumerate() {
             // Skip headings in front matter
             if structure.is_in_front_matter(line_num) {
@@ -107,6 +131,10 @@ impl Rule for MD024NoDuplicateHeading {
         self
     }
 
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
         map.insert(
@@ -137,5 +165,16 @@ impl Rule for MD024NoDuplicateHeading {
             allow_different_nesting,
             siblings_only,
         ))
+    }
+}
+
+impl DocumentStructureExtensions for MD024NoDuplicateHeading {
+    fn has_relevant_elements(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
+        // This rule is only relevant if there are headings
+        !doc_structure.heading_lines.is_empty()
     }
 }

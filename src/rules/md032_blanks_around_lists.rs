@@ -1,6 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::document_structure_from_str;
-use crate::utils::document_structure::DocumentStructure;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 use std::collections::VecDeque;
@@ -252,17 +252,51 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let structure = document_structure_from_str(ctx.content);
-        let lines: Vec<&str> = ctx.content.lines().collect();
-        if lines.is_empty() { return Ok(Vec::new()); }
+        let content = ctx.content;
+
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for list markers
+        if !content.contains('-') && !content.contains('*') && !content.contains('+') && !content.chars().any(|c| c.is_numeric()) {
+            return Ok(Vec::new());
+        }
+
+        let structure = document_structure_from_str(content);
+        let lines: Vec<&str> = content.lines().collect();
 
         let list_blocks = self.find_md032_list_blocks(&lines, &structure);
 
-        if list_blocks.is_empty() { return Ok(Vec::new()); }
-
-
+        if list_blocks.is_empty() {
+            return Ok(Vec::new());
+        }
 
         self.perform_checks(ctx, &structure, &lines, &list_blocks)
+    }
+
+    /// Optimized check using pre-computed document structure
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
+        let content = ctx.content;
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Early return for empty content
+        if lines.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let list_blocks = self.find_md032_list_blocks(&lines, structure);
+
+        if list_blocks.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        self.perform_checks(ctx, structure, &lines, &list_blocks)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -337,6 +371,38 @@ impl Rule for MD032BlanksAroundLists {
         Self: Sized,
     {
         Box::new(Self)
+    }
+
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+}
+
+impl DocumentStructureExtensions for MD032BlanksAroundLists {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        doc_structure: &DocumentStructure,
+    ) -> bool {
+        let content = ctx.content;
+
+        // Early return for empty content
+        if content.is_empty() {
+            return false;
+        }
+
+        // Quick check for list markers
+        if !content.contains('-') && !content.contains('*') && !content.contains('+') && !content.chars().any(|c| c.is_numeric()) {
+            return false;
+        }
+
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Use MD032's own sophisticated list detection to check for list blocks
+        let list_blocks = self.find_md032_list_blocks(&lines, doc_structure);
+
+        // This rule is relevant if we found any list blocks
+        !list_blocks.is_empty()
     }
 }
 

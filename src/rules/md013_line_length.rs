@@ -2,7 +2,7 @@
 ///
 /// See [docs/md013.md](../../docs/md013.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::document_structure::DocumentStructure;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -119,13 +119,31 @@ impl Rule for MD013LineLength {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let mut warnings = Vec::new();
+
+        // Early return for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Fallback path: create structure manually (should rarely be used)
         let structure = DocumentStructure::new(content);
+        self.check_with_structure(ctx, &structure)
+    }
+
+    /// Optimized check using pre-computed document structure
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> LintResult {
+        let content = ctx.content;
+        let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
         // Create a quick lookup set for heading lines
         let heading_lines_set: std::collections::HashSet<usize> =
             structure.heading_lines.iter().cloned().collect();
+
         // Create a quick lookup for setext headings (where start_line != end_line in regions)
         let _setext_lines_set: std::collections::HashSet<usize> = structure
             .heading_regions
@@ -133,6 +151,7 @@ impl Rule for MD013LineLength {
             .filter(|(start, end)| start != end)
             .flat_map(|(start, end)| (*start..=*end).collect::<Vec<usize>>())
             .collect();
+
         // Create a quick lookup set for list item lines (including continuations)
         let _list_lines_set: std::collections::HashSet<usize> =
             structure.list_lines.iter().cloned().collect();
@@ -168,7 +187,7 @@ impl Rule for MD013LineLength {
                 }
 
                 // Skip lines that are only a URL, image ref, or link ref
-                if self.should_ignore_line(line, &lines, line_num, &structure) {
+                if self.should_ignore_line(line, &lines, line_num, structure) {
                     continue;
                 }
             }
@@ -205,6 +224,10 @@ impl Rule for MD013LineLength {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -246,5 +269,16 @@ impl Rule for MD013LineLength {
             headings,
             strict,
         ))
+    }
+}
+
+impl DocumentStructureExtensions for MD013LineLength {
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> bool {
+        // This rule always applies unless content is empty
+        !ctx.content.is_empty()
     }
 }
