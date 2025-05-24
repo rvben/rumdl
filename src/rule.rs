@@ -11,6 +11,9 @@ use serde::Serialize;
 use crate::lint_context::LintContext;
 use crate::utils::document_structure::DocumentStructure;
 
+// Import markdown AST for shared parsing
+pub use markdown::mdast::Node as MarkdownAst;
+
 // Macro to implement box_clone for Rule implementors
 #[macro_export]
 macro_rules! impl_rule_clone {
@@ -93,6 +96,27 @@ pub trait Rule: DynClone + Send + Sync {
         self.check(ctx)
     }
 
+    /// AST-based check method for rules that can benefit from shared AST parsing
+    /// By default, calls the regular check method if not overridden
+    fn check_with_ast(
+        &self,
+        ctx: &LintContext,
+        _ast: &MarkdownAst,
+    ) -> LintResult {
+        self.check(ctx)
+    }
+
+    /// Combined check method using both document structure and AST
+    /// By default, calls the regular check method if not overridden
+    fn check_with_structure_and_ast(
+        &self,
+        ctx: &LintContext,
+        _structure: &DocumentStructure,
+        _ast: &MarkdownAst,
+    ) -> LintResult {
+        self.check(ctx)
+    }
+
     /// Check if this rule should quickly skip processing based on content
     fn should_skip(&self, _ctx: &LintContext) -> bool {
         false
@@ -103,9 +127,23 @@ pub trait Rule: DynClone + Send + Sync {
         RuleCategory::Other // Default implementation returns Other
     }
 
+    /// Check if this rule can benefit from AST parsing
+    fn uses_ast(&self) -> bool {
+        false
+    }
+
+    /// Check if this rule can benefit from document structure
+    fn uses_document_structure(&self) -> bool {
+        false
+    }
+
     fn as_any(&self) -> &dyn std::any::Any;
 
     fn as_maybe_document_structure(&self) -> Option<&dyn MaybeDocumentStructure> {
+        None
+    }
+
+    fn as_maybe_ast(&self) -> Option<&dyn MaybeAst> {
         None
     }
 
@@ -254,4 +292,46 @@ impl MaybeDocumentStructure for dyn Rule {
     ) -> Option<LintResult> {
         None
     }
+}
+
+// Helper trait for dynamic dispatch to check_with_ast
+pub trait MaybeAst {
+    fn check_with_ast_opt(
+        &self,
+        ctx: &LintContext,
+        ast: &MarkdownAst,
+    ) -> Option<LintResult>;
+}
+
+impl<T> MaybeAst for T
+where
+    T: Rule + AstExtensions + 'static,
+{
+    fn check_with_ast_opt(
+        &self,
+        ctx: &LintContext,
+        ast: &MarkdownAst,
+    ) -> Option<LintResult> {
+        if self.has_relevant_ast_elements(ctx, ast) {
+            Some(self.check_with_ast(ctx, ast))
+        } else {
+            None
+        }
+    }
+}
+
+impl MaybeAst for dyn Rule {
+    fn check_with_ast_opt(
+        &self,
+        _ctx: &LintContext,
+        _ast: &MarkdownAst,
+    ) -> Option<LintResult> {
+        None
+    }
+}
+
+/// Extension trait for rules that use AST
+pub trait AstExtensions {
+    /// Check if the AST contains relevant elements for this rule
+    fn has_relevant_ast_elements(&self, ctx: &LintContext, ast: &MarkdownAst) -> bool;
 }

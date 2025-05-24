@@ -209,21 +209,35 @@ pub enum ConfigError {
 }
 
 /// Get a rule-specific configuration value
+/// Automatically tries both the original key and normalized variants (kebab-case ↔ snake_case)
+/// for better markdownlint compatibility
 pub fn get_rule_config_value<T: serde::de::DeserializeOwned>(
     config: &Config,
     rule_name: &str,
     key: &str,
 ) -> Option<T> {
-    let norm_key = normalize_key(key);
     let norm_rule_name = rule_name.to_ascii_uppercase(); // Use uppercase for lookup
-    config
-        .rules
-        .get(&norm_rule_name)
-        .and_then(|rule_config| rule_config.values.get(&norm_key))
-        .and_then(|value| {
-            let result = T::deserialize(value.clone()).ok();
-            result
-        })
+
+    let rule_config = config.rules.get(&norm_rule_name)?;
+
+    // Try multiple key variants to support both underscore and kebab-case formats
+    let key_variants = [
+        key.to_string(),                              // Original key as provided
+        normalize_key(key),                           // Normalized key (lowercase, kebab-case)
+        key.replace('-', "_"),                        // Convert kebab-case to snake_case
+        key.replace('_', "-"),                        // Convert snake_case to kebab-case
+    ];
+
+    // Try each variant until we find a match
+    for variant in &key_variants {
+        if let Some(value) = rule_config.values.get(variant) {
+            if let Ok(result) = T::deserialize(value.clone()) {
+                return Some(result);
+            }
+        }
+    }
+
+    None
 }
 
 /// Generate default rumdl configuration for pyproject.toml
@@ -904,16 +918,52 @@ impl RuleRegistry {
         self.rule_schemas.keys().cloned().collect()
     }
 
-    /// Get valid config keys for a rule
+    /// Get the valid configuration keys for a rule, including both original and normalized variants
     pub fn config_keys_for(&self, rule: &str) -> Option<std::collections::BTreeSet<String>> {
-        self.rule_schemas
-            .get(rule)
-            .map(|m| m.keys().cloned().collect())
+        self.rule_schemas.get(rule).map(|schema| {
+            let mut all_keys = std::collections::BTreeSet::new();
+
+            // Add original keys from schema
+            for key in schema.keys() {
+                all_keys.insert(key.clone());
+            }
+
+            // Add normalized variants for markdownlint compatibility
+            for key in schema.keys() {
+                // Add kebab-case variant
+                all_keys.insert(key.replace('_', "-"));
+                // Add snake_case variant
+                all_keys.insert(key.replace('-', "_"));
+                // Add normalized variant
+                all_keys.insert(normalize_key(key));
+            }
+
+            all_keys
+        })
     }
 
-    /// Get the expected TOML value for a rule's config key (for type checking)
+    /// Get the expected value type for a rule's configuration key, trying variants
     pub fn expected_value_for(&self, rule: &str, key: &str) -> Option<&toml::Value> {
-        self.rule_schemas.get(rule).and_then(|m| m.get(key))
+        if let Some(schema) = self.rule_schemas.get(rule) {
+            // Try the original key first
+            if let Some(value) = schema.get(key) {
+                return Some(value);
+            }
+
+            // Try key variants
+            let key_variants = [
+                key.replace('-', "_"),              // Convert kebab-case to snake_case
+                key.replace('_', "-"),              // Convert snake_case to kebab-case
+                normalize_key(key),                 // Normalized key (lowercase, kebab-case)
+            ];
+
+            for variant in &key_variants {
+                if let Some(value) = schema.get(variant) {
+                    return Some(value);
+                }
+            }
+        }
+        None
     }
 }
 

@@ -11,6 +11,7 @@ use std::path::Path;
 use std::process;
 use std::sync::Arc;
 use std::time::Instant;
+use memmap2::Mmap;
 
 use rumdl::config as rumdl_config;
 use rumdl::lint_context::LintContext;
@@ -20,6 +21,31 @@ use rumdl::rules::code_fence_utils::CodeFenceStyle;
 use rumdl::rules::strong_style::StrongStyle;
 use rumdl_config::normalize_key;
 use rumdl_config::ConfigSource;
+use rumdl::rules::all_rules;
+
+/// Threshold for using memory-mapped I/O (1MB)
+const MMAP_THRESHOLD: u64 = 1024 * 1024;
+
+/// Efficiently read file content using memory mapping for large files
+fn read_file_efficiently(path: &Path) -> Result<String, Box<dyn Error>> {
+    // Get file metadata first
+    let metadata = fs::metadata(path)?;
+    let file_size = metadata.len();
+
+    if file_size > MMAP_THRESHOLD {
+        // Use memory mapping for large files
+        let file = fs::File::open(path)?;
+        let mmap = unsafe { Mmap::map(&file)? };
+
+        // Convert to string - this is still a copy but more efficient for large files
+        String::from_utf8(mmap.to_vec())
+            .map_err(|e| format!("Invalid UTF-8 in file {}: {}", path.display(), e).into())
+    } else {
+        // Use regular reading for small files
+        fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read file {}: {}", path.display(), e).into())
+    }
+}
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -1356,8 +1382,8 @@ fn process_file(
         println!("Processing file: {}", file_path);
     }
 
-    // Read file content
-    let mut content = match std::fs::read_to_string(file_path) {
+    // Read file content efficiently
+    let mut content = match read_file_efficiently(Path::new(file_path)) {
         Ok(content) => content,
         Err(e) => {
             if !quiet {
@@ -1507,15 +1533,21 @@ fn process_file_collect_warnings(
     verbose: bool,
     quiet: bool,
 ) -> Vec<rumdl::rule::LintWarning> {
-    use std::time::Instant;
-    let _start_time = Instant::now();
     if verbose && !quiet {
         println!("Processing file: {}", file_path);
     }
-    let content = match std::fs::read_to_string(file_path) {
+
+    // Read file content efficiently
+    let content = match read_file_efficiently(Path::new(file_path)) {
         Ok(content) => content,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            if !quiet {
+                eprintln!("Error reading file {}: {}", file_path, e);
+            }
+            return Vec::new();
+        }
     };
+
     std::env::set_var("RUMDL_FILE_PATH", file_path);
     let warnings_result = rumdl::lint(&content, rules, verbose);
     std::env::remove_var("RUMDL_FILE_PATH");

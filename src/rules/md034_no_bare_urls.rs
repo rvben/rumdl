@@ -1,7 +1,7 @@
 /// Rule MD034: No bare URLs
 ///
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity, MarkdownAst, AstExtensions, MaybeAst};
 use crate::utils::early_returns;
 
 use fancy_regex::Regex as FancyRegex;
@@ -379,6 +379,21 @@ impl Rule for MD034NoBareUrls {
         self.check_with_structure(ctx, &structure)
     }
 
+    fn check_with_ast(&self, ctx: &LintContext, ast: &MarkdownAst) -> LintResult {
+        // Use AST-based detection for better accuracy
+        let mut warnings = Vec::new();
+        self.find_bare_urls_in_ast(ast, false, ctx.content, &mut warnings, ctx);
+        Ok(warnings)
+    }
+
+    fn uses_ast(&self) -> bool {
+        true
+    }
+
+    fn uses_document_structure(&self) -> bool {
+        true
+    }
+
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
         if self.should_skip(content) {
@@ -445,6 +460,10 @@ impl Rule for MD034NoBareUrls {
         Some(self)
     }
 
+    fn as_maybe_ast(&self) -> Option<&dyn MaybeAst> {
+        Some(self)
+    }
+
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
@@ -462,6 +481,14 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD034NoBa
         // This rule is only relevant if there might be URLs in the content
         let content = ctx.content;
         !content.is_empty() && (content.contains("http://") || content.contains("https://") || content.contains("ftp://"))
+    }
+}
+
+impl AstExtensions for MD034NoBareUrls {
+    fn has_relevant_ast_elements(&self, ctx: &LintContext, ast: &MarkdownAst) -> bool {
+        // Check if AST contains text nodes (where bare URLs would be)
+        use crate::utils::ast_utils::ast_contains_node_type;
+        !self.should_skip(ctx.content) && ast_contains_node_type(ast, "text")
     }
 }
 

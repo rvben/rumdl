@@ -22,6 +22,87 @@
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+/// Global regex cache for dynamic patterns
+#[derive(Debug)]
+pub struct RegexCache {
+    cache: HashMap<String, Arc<Regex>>,
+    fancy_cache: HashMap<String, Arc<FancyRegex>>,
+    usage_stats: HashMap<String, u64>,
+}
+
+impl RegexCache {
+    pub fn new() -> Self {
+        Self {
+            cache: HashMap::new(),
+            fancy_cache: HashMap::new(),
+            usage_stats: HashMap::new(),
+        }
+    }
+
+    /// Get or compile a regex pattern
+    pub fn get_regex(&mut self, pattern: &str) -> Result<Arc<Regex>, regex::Error> {
+        if let Some(regex) = self.cache.get(pattern) {
+            *self.usage_stats.entry(pattern.to_string()).or_insert(0) += 1;
+            return Ok(regex.clone());
+        }
+
+        let regex = Arc::new(Regex::new(pattern)?);
+        self.cache.insert(pattern.to_string(), regex.clone());
+        *self.usage_stats.entry(pattern.to_string()).or_insert(0) += 1;
+        Ok(regex)
+    }
+
+    /// Get or compile a fancy regex pattern
+    pub fn get_fancy_regex(&mut self, pattern: &str) -> Result<Arc<FancyRegex>, fancy_regex::Error> {
+        if let Some(regex) = self.fancy_cache.get(pattern) {
+            *self.usage_stats.entry(pattern.to_string()).or_insert(0) += 1;
+            return Ok(regex.clone());
+        }
+
+        let regex = Arc::new(FancyRegex::new(pattern)?);
+        self.fancy_cache.insert(pattern.to_string(), regex.clone());
+        *self.usage_stats.entry(pattern.to_string()).or_insert(0) += 1;
+        Ok(regex)
+    }
+
+    /// Get cache statistics
+    pub fn get_stats(&self) -> HashMap<String, u64> {
+        self.usage_stats.clone()
+    }
+
+    /// Clear cache (useful for testing)
+    pub fn clear(&mut self) {
+        self.cache.clear();
+        self.fancy_cache.clear();
+        self.usage_stats.clear();
+    }
+}
+
+lazy_static! {
+    /// Global regex cache instance
+    static ref GLOBAL_REGEX_CACHE: Arc<Mutex<RegexCache>> = Arc::new(Mutex::new(RegexCache::new()));
+}
+
+/// Get a regex from the global cache
+pub fn get_cached_regex(pattern: &str) -> Result<Arc<Regex>, regex::Error> {
+    let mut cache = GLOBAL_REGEX_CACHE.lock().unwrap();
+    cache.get_regex(pattern)
+}
+
+/// Get a fancy regex from the global cache
+pub fn get_cached_fancy_regex(pattern: &str) -> Result<Arc<FancyRegex>, fancy_regex::Error> {
+    let mut cache = GLOBAL_REGEX_CACHE.lock().unwrap();
+    cache.get_fancy_regex(pattern)
+}
+
+/// Get cache usage statistics
+pub fn get_cache_stats() -> HashMap<String, u64> {
+    let cache = GLOBAL_REGEX_CACHE.lock().unwrap();
+    cache.get_stats()
+}
 
 /// Macro for defining a lazily-initialized, cached regex pattern.
 /// Use this for ad-hoc regexes that are not already defined in this module.
@@ -38,6 +119,22 @@ macro_rules! regex_lazy {
             static ref REGEX: regex::Regex = regex::Regex::new($pattern).unwrap();
         }
         &*REGEX
+    }};
+}
+
+/// Macro for getting regex from global cache
+#[macro_export]
+macro_rules! regex_cached {
+    ($pattern:expr) => {{
+        $crate::utils::regex_cache::get_cached_regex($pattern).expect("Failed to compile regex")
+    }};
+}
+
+/// Macro for getting fancy regex from global cache
+#[macro_export]
+macro_rules! fancy_regex_cached {
+    ($pattern:expr) => {{
+        $crate::utils::regex_cache::get_cached_fancy_regex($pattern).expect("Failed to compile fancy regex")
     }};
 }
 

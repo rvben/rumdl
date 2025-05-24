@@ -1,7 +1,7 @@
 /// Rule MD013: Line length
 ///
 /// See [docs/md013.md](../../docs/md013.md) for full documentation, configuration, and examples.
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -230,10 +230,14 @@ impl Rule for MD013LineLength {
         Some(self)
     }
 
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Whitespace
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
         map.insert(
-            "line-length".to_string(),
+            "line_length".to_string(),
             toml::Value::Integer(self.line_length as i64),
         );
         map.insert(
@@ -243,6 +247,7 @@ impl Rule for MD013LineLength {
         map.insert("tables".to_string(), toml::Value::Boolean(self.tables));
         map.insert("headings".to_string(), toml::Value::Boolean(self.headings));
         map.insert("strict".to_string(), toml::Value::Boolean(self.strict));
+
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -250,18 +255,22 @@ impl Rule for MD013LineLength {
     where
         Self: Sized,
     {
-        let line_length =
-            crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length")
-                .unwrap_or(80);
-        let code_blocks =
-            crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
-                .unwrap_or(true);
+        // get_rule_config_value now automatically tries both underscore and kebab-case variants
+        let line_length = crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length")
+            .unwrap_or(80);
+
+        let code_blocks = crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
+            .unwrap_or(true);
+
         let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables")
             .unwrap_or(false);
+
         let headings = crate::config::get_rule_config_value::<bool>(config, "MD013", "headings")
             .unwrap_or(true);
+
         let strict = crate::config::get_rule_config_value::<bool>(config, "MD013", "strict")
             .unwrap_or(false);
+
         Box::new(MD013LineLength::new(
             line_length,
             code_blocks,

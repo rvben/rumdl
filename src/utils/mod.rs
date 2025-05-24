@@ -2,6 +2,7 @@
 //! Shared utilities for rumdl, including document structure analysis, code block handling, regex helpers, and string extensions.
 //! Provides reusable traits and functions for rule implementations and core linter logic.
 
+pub mod ast_utils;
 pub mod code_block_utils;
 pub mod document_structure;
 pub mod early_returns;
@@ -9,7 +10,9 @@ pub mod element_cache;
 pub mod markdown_elements;
 pub mod range_utils;
 pub mod regex_cache;
+pub mod string_interner;
 
+pub use ast_utils::AstCache;
 pub use code_block_utils::CodeBlockUtils;
 pub use document_structure::DocumentStructure;
 pub use markdown_elements::{ElementQuality, ElementType, MarkdownElement, MarkdownElements};

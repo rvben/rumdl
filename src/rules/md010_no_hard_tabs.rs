@@ -3,9 +3,12 @@
 /// See [docs/md010.md](../../docs/md010.md) for full documentation, configuration, and examples.
 use crate::utils::range_utils::LineIndex;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::ops::Range;
+use toml;
 
 lazy_static! {
     // Pattern to detect HTML comments (start and end tags separately)
@@ -206,6 +209,14 @@ impl Rule for MD010NoHardTabs {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Whitespace
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        Some(("MD010".to_string(), toml::Value::Table(toml::Table::new())))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>

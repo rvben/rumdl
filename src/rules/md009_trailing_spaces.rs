@@ -1,12 +1,22 @@
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
-
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-
+use crate::utils::regex_cache::get_cached_regex;
+use lazy_static::lazy_static;
+use regex::Regex;
+use std::collections::HashMap;
 use toml;
 
 /// Rule MD009: Trailing spaces
 ///
 /// See [docs/md009.md](../../docs/md009.md) for full documentation, configuration, and examples.
+
+lazy_static! {
+    // Use cached regex patterns for better performance
+    static ref FENCED_CODE_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"^(\s*)```").unwrap();
+    static ref ALTERNATE_FENCED_CODE_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"^(\s*)~~~").unwrap();
+    static ref BLOCKQUOTE_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"^\s*>\s*$").unwrap();
+}
 
 #[derive(Debug, Clone)]
 pub struct MD009TrailingSpaces {
@@ -211,6 +221,10 @@ impl Rule for MD009TrailingSpaces {
         self
     }
 
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Whitespace
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
         map.insert(
@@ -218,6 +232,7 @@ impl Rule for MD009TrailingSpaces {
             toml::Value::Integer(self.br_spaces as i64),
         );
         map.insert("strict".to_string(), toml::Value::Boolean(self.strict));
+
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -225,10 +240,13 @@ impl Rule for MD009TrailingSpaces {
     where
         Self: Sized,
     {
-        let br_spaces =
-            crate::config::get_rule_config_value::<u32>(config, "MD009", "br_spaces").unwrap_or(2);
+        // get_rule_config_value now automatically tries both underscore and kebab-case variants
+        let br_spaces = crate::config::get_rule_config_value::<u32>(config, "MD009", "br_spaces")
+            .unwrap_or(2);
+
         let strict = crate::config::get_rule_config_value::<bool>(config, "MD009", "strict")
             .unwrap_or(false);
+
         let br_spaces_usize = br_spaces as usize;
         Box::new(MD009TrailingSpaces::new(br_spaces_usize, strict))
     }
