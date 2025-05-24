@@ -13,27 +13,25 @@ use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use toml;
+use std::sync::{Arc, Mutex};
 
-// Thread-local cache for file existence checks to avoid redundant filesystem operations
-thread_local! {
-    static FILE_EXISTENCE_CACHE: RefCell<HashMap<PathBuf, bool>> = RefCell::new(HashMap::new());
+// Thread-safe cache for file existence checks to avoid redundant filesystem operations
+lazy_static! {
+    static ref FILE_EXISTENCE_CACHE: Arc<Mutex<HashMap<PathBuf, bool>>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
 // Reset the file existence cache (typically between rule runs)
 fn reset_file_existence_cache() {
-    FILE_EXISTENCE_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
+    let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
+    cache.clear();
 }
 
 // Check if a file exists with caching
 fn file_exists_with_cache(path: &Path) -> bool {
-    FILE_EXISTENCE_CACHE.with(|cache| {
-        let mut cache_ref = cache.borrow_mut();
-        *cache_ref
-            .entry(path.to_path_buf())
-            .or_insert_with(|| path.exists())
-    })
+    let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
+    *cache
+        .entry(path.to_path_buf())
+        .or_insert_with(|| path.exists())
 }
 
 lazy_static! {
@@ -70,7 +68,7 @@ lazy_static! {
 #[derive(Clone)]
 pub struct MD057ExistingRelativeLinks {
     /// Base directory for resolving relative links
-    base_path: RefCell<Option<PathBuf>>,
+    base_path: Arc<Mutex<Option<PathBuf>>>,
     /// Skip checking media files
     skip_media_files: bool,
 }
@@ -78,7 +76,7 @@ pub struct MD057ExistingRelativeLinks {
 impl Default for MD057ExistingRelativeLinks {
     fn default() -> Self {
         Self {
-            base_path: RefCell::new(None),
+            base_path: Arc::new(Mutex::new(None)),
             skip_media_files: true,
         }
     }
@@ -99,7 +97,7 @@ impl MD057ExistingRelativeLinks {
             Some(path.to_path_buf())
         };
 
-        *self.base_path.borrow_mut() = dir_path;
+        *self.base_path.lock().unwrap() = dir_path;
         self
     }
 
@@ -160,7 +158,8 @@ impl MD057ExistingRelativeLinks {
     /// Resolve a relative link against the base path
     fn resolve_link_path(&self, link: &str) -> Option<PathBuf> {
         self.base_path
-            .borrow()
+            .lock()
+            .unwrap()
             .as_ref()
             .map(|base_path| base_path.join(link))
     }
@@ -289,8 +288,8 @@ impl Rule for MD057ExistingRelativeLinks {
         let mut warnings = Vec::new();
 
         // Check if we have a base path
-        let base_path = if self.base_path.borrow().is_some() {
-            self.base_path.borrow().clone()
+        let base_path = if self.base_path.lock().unwrap().is_some() {
+            self.base_path.lock().unwrap().clone()
         } else {
             // Try to determine the base path from the file being processed
             if let Ok(file_path) = env::var("RUMDL_FILE_PATH") {
@@ -352,7 +351,7 @@ impl Rule for MD057ExistingRelativeLinks {
             crate::config::get_rule_config_value::<bool>(config, "MD057", "skip_media_files")
                 .unwrap_or(true);
         Box::new(MD057ExistingRelativeLinks {
-            base_path: RefCell::new(None),
+            base_path: Arc::new(Mutex::new(None)),
             skip_media_files,
         })
     }

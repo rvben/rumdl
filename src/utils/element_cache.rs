@@ -1,7 +1,7 @@
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
 lazy_static! {
     // Efficient regex patterns
@@ -455,9 +455,9 @@ impl ElementCache {
     }
 }
 
-// Thread-local cache for sharing across rules
-thread_local! {
-    static ELEMENT_CACHE: RefCell<Option<ElementCache>> = const { RefCell::new(None) };
+// Global cache for sharing across threads
+lazy_static! {
+    static ref ELEMENT_CACHE: Arc<Mutex<Option<ElementCache>>> = Arc::new(Mutex::new(None));
 }
 
 /// Get or create element cache for document content
@@ -465,46 +465,46 @@ pub fn get_element_cache(content: &str) -> ElementCache {
     // Try to get existing cache
     let mut needs_new_cache = false;
 
-    ELEMENT_CACHE.with(|cache| {
-        let cache_ref = cache.borrow_mut();
+    {
+        let cache_guard = ELEMENT_CACHE.lock().unwrap();
 
         // If cache exists and content matches, return it
-        if let Some(existing_cache) = &*cache_ref {
+        if let Some(existing_cache) = &*cache_guard {
             if let Some(cached_content) = &existing_cache.content {
                 if cached_content == content {
-                    return; // Keep existing cache
+                    return existing_cache.clone(); // Keep existing cache
                 }
             }
         }
 
         // Content doesn't match, need new cache
         needs_new_cache = true;
-    });
+    }
 
     if needs_new_cache {
         // Create new cache
         let new_cache = ElementCache::new(content);
 
-        // Store in thread-local
-        ELEMENT_CACHE.with(|cache| {
-            *cache.borrow_mut() = Some(new_cache);
-        });
-    }
+        // Store in global cache
+        {
+            let mut cache_guard = ELEMENT_CACHE.lock().unwrap();
+            *cache_guard = Some(new_cache.clone());
+        }
 
-    // Return clone of cache
-    ELEMENT_CACHE.with(|cache| {
-        cache
-            .borrow()
+        new_cache
+    } else {
+        // Return clone of cache
+        let cache_guard = ELEMENT_CACHE.lock().unwrap();
+        cache_guard
             .clone()
             .unwrap_or_else(|| ElementCache::new(content))
-    })
+    }
 }
 
 /// Reset the element cache
 pub fn reset_element_cache() {
-    ELEMENT_CACHE.with(|cache| {
-        *cache.borrow_mut() = None;
-    });
+    let mut cache_guard = ELEMENT_CACHE.lock().unwrap();
+    *cache_guard = None;
 }
 
 #[cfg(test)]

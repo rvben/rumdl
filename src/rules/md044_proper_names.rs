@@ -7,6 +7,8 @@ use fancy_regex::Regex;
 use lazy_static::lazy_static;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+use toml;
 
 lazy_static! {
 }
@@ -69,21 +71,23 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 ///
 #[derive(Clone)]
 pub struct MD044ProperNames {
-    names: HashSet<String>,
-    code_blocks_excluded: bool,
-    // Cache for compiled regexes
-    regex_cache: RefCell<HashMap<String, Regex>>,
-    // Cache for content hash to warnings
-    content_cache: RefCell<HashMap<u64, Vec<WarningPosition>>>,
+    names: Vec<String>,
+    code_blocks: bool,
+    html_comments: bool,
+    // Use Arc<Mutex<>> for thread safety
+    regex_cache: Arc<Mutex<HashMap<String, Regex>>>,
+    // Cache for name violations by content hash
+    content_cache: Arc<Mutex<HashMap<u64, Vec<WarningPosition>>>>,
 }
 
 impl MD044ProperNames {
-    pub fn new(names: Vec<String>, code_blocks_excluded: bool) -> Self {
+    pub fn new(names: Vec<String>, code_blocks: bool) -> Self {
         Self {
-            names: names.into_iter().collect(),
-            code_blocks_excluded,
-            regex_cache: RefCell::new(HashMap::new()),
-            content_cache: RefCell::new(HashMap::new()),
+            names,
+            code_blocks,
+            html_comments: true, // Default to checking HTML comments
+            regex_cache: Arc::new(Mutex::new(HashMap::new())),
+            content_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -114,7 +118,7 @@ impl MD044ProperNames {
     // Get compiled regex from cache or compile it
     fn get_compiled_regex(&self, name: &str) -> Regex {
         let pattern = self.create_safe_pattern(name);
-        let mut cache = self.regex_cache.borrow_mut();
+        let mut cache = self.regex_cache.lock().unwrap();
 
         // Use entry API for cleaner cache logic
         cache
@@ -153,7 +157,7 @@ impl MD044ProperNames {
         let hash = fast_hash(content);
         {
             // Use a separate scope for borrowing to minimize lock time
-            let cache = self.content_cache.borrow();
+            let cache = self.content_cache.lock().unwrap();
             if let Some(cached) = cache.get(&hash) {
                 return cached.clone();
             }
@@ -176,7 +180,7 @@ impl MD044ProperNames {
                 continue;
             }
 
-            if self.code_blocks_excluded && self.is_code_block(line, in_code_block) {
+            if self.code_blocks && self.is_code_block(line, in_code_block) {
                 continue;
             }
 
@@ -223,7 +227,8 @@ impl MD044ProperNames {
 
         // Store in cache
         self.content_cache
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .insert(hash, violations.clone());
         violations
     }

@@ -2,12 +2,14 @@ use clap::{Args, Parser, Subcommand};
 use colored::*;
 use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process;
+use std::sync::Arc;
 use std::time::Instant;
 
 use rumdl::config as rumdl_config;
@@ -1236,33 +1238,77 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
 
     let start_time = Instant::now();
 
-    // Process files sequentially
-    let mut has_issues = false;
-    let mut files_with_issues = 0;
-    let mut total_issues = 0;
-    let mut total_issues_fixed = 0;
-    let mut total_fixable_issues = 0;
-    let mut total_files_processed = 0;
+    // Choose processing strategy based on file count and fix mode
+    let use_parallel = file_paths.len() > 1 && !args._fix; // Don't parallelize fixes due to file I/O conflicts
 
-    for file_path in &file_paths {
-        let (file_has_issues, issues_found, issues_fixed, fixable_issues) = process_file(
-            file_path,
-            &enabled_rules,
-            args._fix,
-            args.verbose,
-            args.quiet,
-        );
+    let (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed) = if use_parallel {
+        // Parallel processing for multiple files without fixes
+        let enabled_rules_arc = Arc::new(enabled_rules);
 
-        total_files_processed += 1;
-        total_issues_fixed += issues_fixed;
-        total_fixable_issues += fixable_issues;
+        let results: Vec<_> = file_paths
+            .par_iter()
+            .map(|file_path| {
+                process_file(
+                    file_path,
+                    &enabled_rules_arc,
+                    args._fix,
+                    args.verbose,
+                    args.quiet,
+                )
+            })
+            .collect();
 
-        if file_has_issues {
-            has_issues = true;
-            files_with_issues += 1;
-            total_issues += issues_found;
+        // Aggregate results
+        let mut has_issues = false;
+        let mut files_with_issues = 0;
+        let mut total_issues = 0;
+        let mut total_issues_fixed = 0;
+        let mut total_fixable_issues = 0;
+        let total_files_processed = results.len();
+
+        for (file_has_issues, issues_found, issues_fixed, fixable_issues) in results {
+            total_issues_fixed += issues_fixed;
+            total_fixable_issues += fixable_issues;
+
+            if file_has_issues {
+                has_issues = true;
+                files_with_issues += 1;
+                total_issues += issues_found;
+            }
         }
-    }
+
+        (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed)
+    } else {
+        // Sequential processing for single files or when fixing
+        let mut has_issues = false;
+        let mut files_with_issues = 0;
+        let mut total_issues = 0;
+        let mut total_issues_fixed = 0;
+        let mut total_fixable_issues = 0;
+        let mut total_files_processed = 0;
+
+        for file_path in &file_paths {
+            let (file_has_issues, issues_found, issues_fixed, fixable_issues) = process_file(
+                file_path,
+                &enabled_rules,
+                args._fix,
+                args.verbose,
+                args.quiet,
+            );
+
+            total_files_processed += 1;
+            total_issues_fixed += issues_fixed;
+            total_fixable_issues += fixable_issues;
+
+            if file_has_issues {
+                has_issues = true;
+                files_with_issues += 1;
+                total_issues += issues_found;
+            }
+        }
+
+        (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed)
+    };
 
     let duration = start_time.elapsed();
     let duration_ms = duration.as_secs() * 1000 + duration.subsec_millis() as u64;
@@ -1320,7 +1366,11 @@ fn process_file(
             return (false, 0, 0, 0);
         }
     };
-    let _read_time = start_time.elapsed();
+
+    // Early content analysis for ultra-fast skip decisions
+    if content.is_empty() {
+        return (false, 0, 0, 0);
+    }
 
     let lint_start = Instant::now();
     // Set the environment variable for the file path

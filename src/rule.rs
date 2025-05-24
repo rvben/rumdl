@@ -77,7 +77,7 @@ pub enum RuleCategory {
 }
 
 /// Remove marker /// TRAIT_MARKER_V1
-pub trait Rule: DynClone {
+pub trait Rule: DynClone + Send + Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn check(&self, ctx: &LintContext) -> LintResult;
