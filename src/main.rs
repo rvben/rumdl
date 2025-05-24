@@ -139,6 +139,15 @@ enum Commands {
         #[arg(long, help = "Output format (e.g. toml, json)")]
         output: Option<String>,
     },
+    /// Start the Language Server Protocol server
+    Server {
+        /// TCP port to listen on (for debugging, default is stdio)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Enable verbose logging
+        #[arg(short, long)]
+        verbose: bool,
+    },
     /// Show version information
     Version,
 }
@@ -1133,6 +1142,37 @@ build-backend = \"setuptools.build_meta\"
                         print_config_with_provenance(&final_sourced_to_print);
                     }
                 }
+            }
+            Some(Commands::Server { port, verbose }) => {
+                // Setup logging for the LSP server
+                if *verbose {
+                    env_logger::Builder::from_default_env()
+                        .filter_level(log::LevelFilter::Debug)
+                        .init();
+                } else {
+                    env_logger::Builder::from_default_env()
+                        .filter_level(log::LevelFilter::Info)
+                        .init();
+                }
+
+                // Start the LSP server
+                let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+
+                runtime.block_on(async {
+                    if let Some(port) = port {
+                        // TCP mode for debugging
+                        if let Err(e) = rumdl::lsp::start_tcp_server(*port).await {
+                            eprintln!("Failed to start LSP server on port {}: {}", port, e);
+                            std::process::exit(1);
+                        }
+                    } else {
+                        // Standard LSP mode over stdio
+                        if let Err(e) = rumdl::lsp::start_server().await {
+                            eprintln!("Failed to start LSP server: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                });
             }
             Some(Commands::Version) => {
                 // Use clap's version info

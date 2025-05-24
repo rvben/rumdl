@@ -1,6 +1,7 @@
 pub mod config;
 pub mod init;
 pub mod lint_context;
+pub mod lsp;
 pub mod markdownlint_config;
 pub mod profiling;
 pub mod rule;
