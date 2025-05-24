@@ -5,10 +5,8 @@ use crate::utils::regex_cache::*;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex;
 use lazy_static::lazy_static;
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use toml;
 
 lazy_static! {
 }
@@ -73,6 +71,7 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 pub struct MD044ProperNames {
     names: Vec<String>,
     code_blocks: bool,
+    #[allow(dead_code)] // TODO: Implement HTML comment checking in future
     html_comments: bool,
     // Use Arc<Mutex<>> for thread safety
     regex_cache: Arc<Mutex<HashMap<String, Regex>>>,

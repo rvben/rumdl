@@ -1,15 +1,10 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
 use crate::utils::regex_cache::get_cached_regex;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::HashMap;
 use toml;
 
-/// Rule MD009: Trailing spaces
-///
-/// See [docs/md009.md](../../docs/md009.md) for full documentation, configuration, and examples.
 
 lazy_static! {
     // Use cached regex patterns for better performance

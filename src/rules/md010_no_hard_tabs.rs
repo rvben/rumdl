@@ -4,10 +4,8 @@
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::ops::Range;
 use toml;
 
 lazy_static! {

@@ -2,7 +2,6 @@
 //! Fast-path checks and early return utilities for rule implementations in rumdl.
 //! Provides helpers to quickly skip rules based on content analysis.
 
-use super::regex_cache;
 use crate::rule::LintResult;
 
 /// Trait for implementing early returns in rules

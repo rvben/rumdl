@@ -21,7 +21,6 @@ use rumdl::rules::code_fence_utils::CodeFenceStyle;
 use rumdl::rules::strong_style::StrongStyle;
 use rumdl_config::normalize_key;
 use rumdl_config::ConfigSource;
-use rumdl::rules::all_rules;
 
 /// Threshold for using memory-mapped I/O (1MB)
 const MMAP_THRESHOLD: u64 = 1024 * 1024;

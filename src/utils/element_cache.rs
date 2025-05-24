@@ -463,8 +463,6 @@ lazy_static! {
 /// Get or create element cache for document content
 pub fn get_element_cache(content: &str) -> ElementCache {
     // Try to get existing cache
-    let mut needs_new_cache = false;
-
     {
         let cache_guard = ELEMENT_CACHE.lock().unwrap();
 
@@ -476,29 +474,18 @@ pub fn get_element_cache(content: &str) -> ElementCache {
                 }
             }
         }
-
-        // Content doesn't match, need new cache
-        needs_new_cache = true;
     }
 
-    if needs_new_cache {
-        // Create new cache
-        let new_cache = ElementCache::new(content);
+    // Content doesn't match, create new cache
+    let new_cache = ElementCache::new(content);
 
-        // Store in global cache
-        {
-            let mut cache_guard = ELEMENT_CACHE.lock().unwrap();
-            *cache_guard = Some(new_cache.clone());
-        }
-
-        new_cache
-    } else {
-        // Return clone of cache
-        let cache_guard = ELEMENT_CACHE.lock().unwrap();
-        cache_guard
-            .clone()
-            .unwrap_or_else(|| ElementCache::new(content))
+    // Store in global cache
+    {
+        let mut cache_guard = ELEMENT_CACHE.lock().unwrap();
+        *cache_guard = Some(new_cache.clone());
     }
+
+    new_cache
 }
 
 /// Reset the element cache

@@ -8,7 +8,6 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use crate::utils::element_cache::ElementCache;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};

@@ -127,8 +127,8 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
         .collect();
 
     // Calculate skipped rules count before consuming applicable_rules
-    let total_rules = rules.len();
-    let applicable_count = applicable_rules.len();
+    let _total_rules = rules.len();
+    let _applicable_count = applicable_rules.len();
 
     // Parse DocumentStructure once
     let structure = DocumentStructure::new(content);
@@ -181,9 +181,9 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
 
     #[cfg(not(test))]
     if _verbose {
-        let skipped_rules = total_rules - applicable_count;
+        let skipped_rules = _total_rules - _applicable_count;
         if skipped_rules > 0 {
-            log::debug!("Skipped {} of {} rules based on content analysis", skipped_rules, total_rules);
+            log::debug!("Skipped {} of {} rules based on content analysis", skipped_rules, _total_rules);
         }
         if ast.is_some() {
             log::debug!("Used shared AST for {} rules", ast_rules_count);

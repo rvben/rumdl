@@ -1,7 +1,7 @@
 /// Rule MD013: Line length
 ///
 /// See [docs/md013.md](../../docs/md013.md) for full documentation, configuration, and examples.
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
 use regex::Regex;
