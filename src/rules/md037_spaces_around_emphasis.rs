@@ -3,32 +3,16 @@
 /// See [docs/md037.md](../../docs/md037.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::regex_cache::*;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    // Improved code block detection patterns
-    static ref FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)```(?:[^`\r\n]*)$").unwrap();
-    static ref FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)```\s*$").unwrap();
-    static ref ALTERNATE_FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)~~~(?:[^~\r\n]*)$").unwrap();
-    static ref ALTERNATE_FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)~~~\s*$").unwrap();
-    static ref INDENTED_CODE_BLOCK: Regex = Regex::new(r"^(\s{4,})").unwrap();
-
     // Front matter detection
     static ref FRONT_MATTER_DELIM: Regex = Regex::new(r"^---\s*$").unwrap();
 
-    // Enhanced emphasis patterns with better handling of edge cases
-    static ref ASTERISK_EMPHASIS: Regex = Regex::new(r"(\*)\s+([^*\s][^*]*?)\s+(\*)|(\*)\s+([^*\s][^*]*?)(\*)|(\*)[^*\s]([^*]*?)\s+(\*)").unwrap();
-    static ref UNDERSCORE_EMPHASIS: Regex = Regex::new(r"(_)\s+([^_\s][^_]*?)\s+(_)|(_)\s+([^_\s][^_]*?)(_)|(_)[^_\s]([^_]*?)\s+(_)").unwrap();
-    static ref DOUBLE_UNDERSCORE_EMPHASIS: Regex = Regex::new(r"(__)\s+([^_\s][^_]*?)\s+(__)|(__)\s+([^_\s][^_]*?)(__)|(__)[^_\s]([^_]*?)\s+(__)").unwrap();
-
-    // Use fancy-regex for more advanced patterns
-    static ref DOUBLE_ASTERISK_EMPHASIS: FancyRegex = FancyRegex::new(r"\*\*\s+([^*]+?)\s+\*\*").unwrap();
-    static ref DOUBLE_ASTERISK_SPACE_START: FancyRegex = FancyRegex::new(r"\*\*\s+([^*]+?)\*\*").unwrap();
-    static ref DOUBLE_ASTERISK_SPACE_END: FancyRegex = FancyRegex::new(r"\*\*([^*]+?)\s+\*\*").unwrap();
-
-    // Detect potential unbalanced emphasis without using look-behind/ahead
+    // Detection patterns for valid content that should not be treated as emphasis errors
     static ref UNBALANCED_ASTERISK: Regex = Regex::new(r"\*([^*]+)$|^([^*]*)\*").unwrap();
     static ref UNBALANCED_DOUBLE_ASTERISK: Regex = Regex::new(r"\*\*([^*]+)$|^([^*]*)\*\*").unwrap();
     static ref UNBALANCED_UNDERSCORE: Regex = Regex::new(r"_([^_]+)$|^([^_]*)_").unwrap();
@@ -54,83 +38,6 @@ lazy_static! {
     static ref MULTI_LINE_EMPHASIS_END: Regex = Regex::new(r"^(.*?)(\*\*|\*|__|_)").unwrap();
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-enum CodeBlockState {
-    None,
-    InFrontMatter,
-    InFencedCodeBlock,
-    InTildeFencedCodeBlock,
-    InIndentedCodeBlock,
-}
-
-impl CodeBlockState {
-    fn new() -> Self {
-        CodeBlockState::None
-    }
-
-    fn is_in_code_block(&self, _line: &str) -> bool {
-        match self {
-            CodeBlockState::None => false,
-            CodeBlockState::InFrontMatter => false,
-            CodeBlockState::InFencedCodeBlock => true,
-            CodeBlockState::InTildeFencedCodeBlock => true,
-            CodeBlockState::InIndentedCodeBlock => true,
-        }
-    }
-
-    fn update(&mut self, line: &str) {
-        // Front matter
-        if FRONT_MATTER_DELIM.is_match(line) {
-            *self = match self {
-                CodeBlockState::None => CodeBlockState::InFrontMatter,
-                CodeBlockState::InFrontMatter => CodeBlockState::None,
-                _ => *self,
-            };
-            return;
-        }
-        // Fenced code block (backticks)
-        if FENCED_CODE_BLOCK_START.is_match(line) {
-            *self = match self {
-                CodeBlockState::None => CodeBlockState::InFencedCodeBlock,
-                CodeBlockState::InFencedCodeBlock => CodeBlockState::None,
-                _ => *self,
-            };
-            return;
-        }
-        if FENCED_CODE_BLOCK_END.is_match(line) {
-            *self = match self {
-                CodeBlockState::InFencedCodeBlock => CodeBlockState::None,
-                _ => *self,
-            };
-            return;
-        }
-        // Fenced code block (tildes)
-        if ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line) {
-            *self = match self {
-                CodeBlockState::None => CodeBlockState::InTildeFencedCodeBlock,
-                CodeBlockState::InTildeFencedCodeBlock => CodeBlockState::None,
-                _ => *self,
-            };
-            return;
-        }
-        if ALTERNATE_FENCED_CODE_BLOCK_END.is_match(line) {
-            *self = match self {
-                CodeBlockState::InTildeFencedCodeBlock => CodeBlockState::None,
-                _ => *self,
-            };
-            return;
-        }
-        // Indented code block (only if not in a fenced block)
-        if INDENTED_CODE_BLOCK.is_match(line) {
-            if let CodeBlockState::None = self {
-                *self = CodeBlockState::InIndentedCodeBlock;
-            }
-        } else if let CodeBlockState::InIndentedCodeBlock = self {
-            // End indented code block if line is not indented
-            *self = CodeBlockState::None;
-        }
-    }
-}
 
 // Enhanced inline code replacement to handle nested backticks
 fn replace_inline_code(line: &str) -> String {
@@ -170,26 +77,23 @@ impl Rule for MD037NoSpaceInEmphasis {
         let content = ctx.content;
         let _timer = crate::profiling::ScopedTimer::new("MD037_check");
 
-        // Early return if the content is empty or has no emphasis characters
-        if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
+        // Early return: if no emphasis markers at all, skip processing
+        if !has_emphasis_markers(content) {
             return Ok(vec![]);
         }
 
+        let structure = DocumentStructure::new(content);
         let mut warnings = Vec::new();
-        let mut state = CodeBlockState::new();
 
-        // Process the content line by line to track code blocks
+        // Process the content line by line using document structure for reliable code block detection
         for (line_num, line) in content.lines().enumerate() {
-            // Update code block state
-            state.update(line);
-
-            // Skip if in code block or front matter
-            if state.is_in_code_block(line) {
+            // Early return: skip lines without emphasis markers
+            if !line.contains('*') && !line.contains('_') {
                 continue;
             }
 
-            // Skip if the line doesn't contain any emphasis markers
-            if !line.contains('*') && !line.contains('_') {
+            // Skip if in code block or front matter using document structure
+            if structure.is_in_code_block(line_num + 1) || structure.is_in_front_matter(line_num + 1) {
                 continue;
             }
 

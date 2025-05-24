@@ -59,12 +59,11 @@ lazy_static! {
 pub struct MD034NoBareUrls;
 
 impl MD034NoBareUrls {
+    #[inline]
     pub fn should_skip(&self, content: &str) -> bool {
         // Skip if content has no URLs and no email addresses
         !early_returns::has_urls(content) && !content.contains('@')
     }
-
-
 
     // Find all bare URLs in a line, using DocumentStructure for code span detection
     fn find_bare_urls_with_structure(
@@ -75,6 +74,11 @@ impl MD034NoBareUrls {
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
 
+        // Early return: empty lines
+        if line.trim().is_empty() {
+            return warnings;
+        }
+
         // Fast path - check if line potentially contains a URL
         if !URL_QUICK_CHECK.is_match(line) {
             return warnings;
@@ -82,6 +86,11 @@ impl MD034NoBareUrls {
 
         // Skip lines that consist only of a badge link
         if BADGE_LINK_LINE.is_match(line) {
+            return warnings;
+        }
+
+        // Early return: skip reference definitions
+        if REFERENCE_DEF_RE.is_match(line) {
             return warnings;
         }
 
@@ -214,20 +223,29 @@ impl MD034NoBareUrls {
         structure: &crate::utils::document_structure::DocumentStructure,
     ) -> LintResult {
         let content = ctx.content;
+
+        // Early return: skip if no URLs or emails
         if self.should_skip(content) {
             return Ok(vec![]);
         }
 
         let mut warnings = Vec::new();
         for (i, line) in content.lines().enumerate() {
+            // Early return: skip empty lines
+            if line.trim().is_empty() {
+                continue;
+            }
+
             // Skip lines in code blocks
             if structure.is_in_code_block(i + 1) {
                 continue;
             }
-            // Skip reference link definitions
+
+            // Skip reference link definitions (moved here for efficiency)
             if REFERENCE_DEF_RE.is_match(line) {
                 continue;
             }
+
             warnings.extend(self.find_bare_urls_with_structure(line, i, structure));
         }
         Ok(warnings)

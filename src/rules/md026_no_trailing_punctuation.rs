@@ -5,7 +5,9 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::RwLock;
 
 lazy_static! {
     // Match ATX headings (with or without closing hashes)
@@ -22,6 +24,9 @@ lazy_static! {
 
     // Pattern for setext heading underlines (= or -)
     static ref SETEXT_UNDERLINE_RE: Regex = Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
+
+    // Regex cache for punctuation patterns
+    static ref PUNCTUATION_REGEX_CACHE: RwLock<HashMap<String, Regex>> = RwLock::new(HashMap::new());
 }
 
 /// Rule MD026: Trailing punctuation in heading
@@ -46,14 +51,32 @@ impl MD026NoTrailingPunctuation {
     }
 
     fn get_punctuation_regex(&self) -> Result<Regex, regex::Error> {
+        // Check cache first
+        {
+            let cache = PUNCTUATION_REGEX_CACHE.read().unwrap();
+            if let Some(cached_regex) = cache.get(&self.punctuation) {
+                return Ok(cached_regex.clone());
+            }
+        }
+
+        // Compile and cache the regex
         let pattern = format!(r"([{}]+)$", regex::escape(&self.punctuation));
-        Regex::new(&pattern)
+        let regex = Regex::new(&pattern)?;
+
+        {
+            let mut cache = PUNCTUATION_REGEX_CACHE.write().unwrap();
+            cache.insert(self.punctuation.clone(), regex.clone());
+        }
+
+        Ok(regex)
     }
 
+    #[inline]
     fn has_trailing_punctuation(&self, text: &str, re: &Regex) -> bool {
         re.is_match(text.trim())
     }
 
+    #[inline]
     fn get_line_byte_range(&self, content: &str, line_num: usize) -> Range<usize> {
         let mut start_pos = 0;
 
@@ -75,6 +98,7 @@ impl MD026NoTrailingPunctuation {
     }
 
     // Extract the heading text from an ATX heading
+    #[inline]
     fn extract_atx_heading_text(&self, line: &str) -> Option<String> {
         // Check for indented headings first (1-3 spaces)
         if let Some(captures) = INDENTED_HEADING_RE.captures(line) {
@@ -195,6 +219,7 @@ impl MD026NoTrailingPunctuation {
 
     // Check if a line is a deeply indented heading (4+ spaces)
     // These are treated as code blocks in Markdown
+    #[inline]
     fn is_deeply_indented_heading(&self, line: &str) -> bool {
         line.starts_with("    ") && line.trim_start().starts_with('#')
     }
@@ -205,7 +230,14 @@ impl MD026NoTrailingPunctuation {
         structure: &crate::utils::document_structure::DocumentStructure,
     ) -> LintResult {
         let content = ctx.content;
-        if content.is_empty() {
+
+        // Early return: if no content or no headings
+        if content.is_empty() || structure.heading_lines.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Early return: quick check if content contains any punctuation we care about
+        if !content.chars().any(|c| self.punctuation.contains(c)) {
             return Ok(Vec::new());
         }
 

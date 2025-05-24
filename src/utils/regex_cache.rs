@@ -56,6 +56,10 @@ lazy_static! {
     pub static ref SETEXT_HEADING_REGEX: Regex = Regex::new(r"^(\s*)[^\s]+.*\n(\s*)(=+|-+)\s*$").unwrap();
     pub static ref TRAILING_PUNCTUATION_REGEX: Regex = Regex::new(r"[.,:;!?]$").unwrap();
 
+    // ATX heading patterns for MD051 and other rules
+    pub static ref ATX_HEADING_WITH_CAPTURE: Regex = Regex::new(r"^(#{1,6})\s+(.+?)(?:\s+#*\s*)?$").unwrap();
+    pub static ref SETEXT_HEADING_WITH_CAPTURE: FancyRegex = FancyRegex::new(r"^([^\n]+)\n([=\-])\2+\s*$").unwrap();
+
     // List patterns
     pub static ref UNORDERED_LIST_MARKER_REGEX: Regex = Regex::new(r"^(\s*)([*+-])(\s+)").unwrap();
     pub static ref ORDERED_LIST_MARKER_REGEX: Regex = Regex::new(r"^(\s*)(\d+)([.)])(\s+)").unwrap();
@@ -65,19 +69,39 @@ lazy_static! {
     pub static ref FENCED_CODE_BLOCK_START_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)(.*)$").unwrap();
     pub static ref FENCED_CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)(\s*)$").unwrap();
     pub static ref INDENTED_CODE_BLOCK_REGEX: Regex = Regex::new(r"^(\s{4,})(.*)$").unwrap();
+    pub static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
 
     // Emphasis patterns
     pub static ref EMPHASIS_REGEX: FancyRegex = FancyRegex::new(r"(\s|^)(\*{1,2}|_{1,2})(?=\S)(.+?)(?<=\S)(\2)(\s|$)").unwrap();
     pub static ref SPACE_IN_EMPHASIS_REGEX: FancyRegex = FancyRegex::new(r"(\*|_)(\s+)(.+?)(\s+)(\1)").unwrap();
 
+    // MD037 specific emphasis patterns
+    pub static ref ASTERISK_EMPHASIS: Regex = Regex::new(r"(\*)\s+([^*\s][^*]*?)\s+(\*)|(\*)\s+([^*\s][^*]*?)(\*)|(\*)[^*\s]([^*]*?)\s+(\*)").unwrap();
+    pub static ref UNDERSCORE_EMPHASIS: Regex = Regex::new(r"(_)\s+([^_\s][^_]*?)\s+(_)|(_)\s+([^_\s][^_]*?)(_)|(_)[^_\s]([^_]*?)\s+(_)").unwrap();
+    pub static ref DOUBLE_UNDERSCORE_EMPHASIS: Regex = Regex::new(r"(__)\s+([^_\s][^_]*?)\s+(__)|(__)\s+([^_\s][^_]*?)(__)|(__)[^_\s]([^_]*?)\s+(__)").unwrap();
+    pub static ref DOUBLE_ASTERISK_EMPHASIS: FancyRegex = FancyRegex::new(r"\*\*\s+([^*]+?)\s+\*\*").unwrap();
+    pub static ref DOUBLE_ASTERISK_SPACE_START: FancyRegex = FancyRegex::new(r"\*\*\s+([^*]+?)\*\*").unwrap();
+    pub static ref DOUBLE_ASTERISK_SPACE_END: FancyRegex = FancyRegex::new(r"\*\*([^*]+?)\s+\*\*").unwrap();
+
+    // Code block patterns
+    pub static ref FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)```(?:[^`\r\n]*)$").unwrap();
+    pub static ref FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)```\s*$").unwrap();
+    pub static ref ALTERNATE_FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)~~~(?:[^~\r\n]*)$").unwrap();
+    pub static ref ALTERNATE_FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)~~~\s*$").unwrap();
+    pub static ref INDENTED_CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s{4,})").unwrap();
+
     // HTML patterns
     pub static ref HTML_TAG_REGEX: Regex = Regex::new(r"<([a-zA-Z][^>]*)>").unwrap();
     pub static ref HTML_SELF_CLOSING_TAG_REGEX: Regex = Regex::new(r"<([a-zA-Z][^>]*/)>").unwrap();
+    pub static ref HTML_TAG_FINDER: Regex = Regex::new("(?i)</?[a-zA-Z][^>]*>").unwrap();
+    pub static ref HTML_TAG_QUICK_CHECK: Regex = Regex::new("(?i)</?[a-zA-Z]").unwrap();
 
-    // Link patterns
-    pub static ref LINK_REFERENCE_DEFINITION_REGEX: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*(.+)$").unwrap();
+    // Link patterns for MD051 and other rules
+    pub static ref LINK_REFERENCE_DEFINITION_REGEX: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap();
     pub static ref INLINE_LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
     pub static ref LINK_TEXT_REGEX: Regex = Regex::new(r"\[([^\]]*)\]").unwrap();
+    pub static ref LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]*)\]\((?:([^)]+))?#([^)]+)\)").unwrap();
+    pub static ref EXTERNAL_URL_REGEX: FancyRegex = FancyRegex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap();
 
     // Image patterns
     pub static ref IMAGE_REGEX: Regex = Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
@@ -88,6 +112,20 @@ lazy_static! {
 
     // Front matter patterns
     pub static ref FRONT_MATTER_REGEX: Regex = Regex::new(r"^---\n.*?\n---\n").unwrap();
+
+    // MD051 specific patterns
+    pub static ref INLINE_CODE_REGEX: FancyRegex = FancyRegex::new(r"`[^`]+`").unwrap();
+    pub static ref BOLD_ASTERISK_REGEX: Regex = Regex::new(r"\*\*(.+?)\*\*").unwrap();
+    pub static ref BOLD_UNDERSCORE_REGEX: Regex = Regex::new(r"__(.+?)__").unwrap();
+    pub static ref ITALIC_ASTERISK_REGEX: Regex = Regex::new(r"\*([^*]+?)\*").unwrap();
+    pub static ref ITALIC_UNDERSCORE_REGEX: Regex = Regex::new(r"_([^_]+?)_").unwrap();
+    pub static ref LINK_TEXT_FULL_REGEX: FancyRegex = FancyRegex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap();
+    pub static ref STRIKETHROUGH_REGEX: Regex = Regex::new(r"~~(.+?)~~").unwrap();
+    pub static ref MULTIPLE_HYPHENS: Regex = Regex::new(r"-{2,}").unwrap();
+    pub static ref TOC_SECTION_START: Regex = Regex::new(r"^#+\s*(?:Table of Contents|Contents|TOC)\s*$").unwrap();
+
+    // Blockquote patterns
+    pub static ref BLOCKQUOTE_PREFIX_RE: Regex = Regex::new(r"^(\s*>+\s*)").unwrap();
 }
 
 /// Utility functions for quick content checks

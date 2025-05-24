@@ -1,5 +1,6 @@
 use crate::utils::fast_hash;
 use crate::utils::range_utils::LineIndex;
+use crate::utils::regex_cache::*;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex;
@@ -8,8 +9,6 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 lazy_static! {
-    static ref CODE_BLOCK_FENCE: regex::Regex = regex::Regex::new(r"^```").unwrap();
-    static ref INDENTED_CODE_BLOCK: regex::Regex = regex::Regex::new(r"^    ").unwrap();
 }
 
 type WarningPosition = (usize, usize, String); // (line, column, found_name)
@@ -90,7 +89,7 @@ impl MD044ProperNames {
 
     // Helper method for checking code blocks
     fn is_code_block(&self, line: &str, in_code_block: bool) -> bool {
-        in_code_block || INDENTED_CODE_BLOCK.is_match(line)
+        in_code_block || INDENTED_CODE_BLOCK_PATTERN.is_match(line)
     }
 
     // Create a regex-safe version of the name for word boundary matches
@@ -134,6 +133,22 @@ impl MD044ProperNames {
 
     // Find all name violations in the content and return positions
     fn find_name_violations(&self, content: &str) -> Vec<WarningPosition> {
+        // Early return: if no names configured or content is empty
+        if self.names.is_empty() || content.is_empty() {
+            return Vec::new();
+        }
+
+        // Early return: quick check if any of the configured names might be in content
+        let content_lower = content.to_lowercase();
+        let has_potential_matches = self.names.iter().any(|name| {
+            let name_lower = name.to_lowercase();
+            content_lower.contains(&name_lower) || content_lower.contains(&name_lower.replace('.', ""))
+        });
+
+        if !has_potential_matches {
+            return Vec::new();
+        }
+
         // Check if we have cached results
         let hash = fast_hash(content);
         {
@@ -156,12 +171,23 @@ impl MD044ProperNames {
 
         for (line_num, line) in content.lines().enumerate() {
             // Handle code blocks (using standard regex for simple fence matching)
-            if CODE_BLOCK_FENCE.is_match(line.trim_start()) {
+            if CODE_FENCE_REGEX.is_match(line.trim_start()) {
                 in_code_block = !in_code_block;
                 continue;
             }
 
             if self.code_blocks_excluded && self.is_code_block(line, in_code_block) {
+                continue;
+            }
+
+            // Early return: skip lines that don't contain any potential matches
+            let line_lower = line.to_lowercase();
+            let has_line_matches = self.names.iter().any(|name| {
+                let name_lower = name.to_lowercase();
+                line_lower.contains(&name_lower) || line_lower.contains(&name_lower.replace('.', ""))
+            });
+
+            if !has_line_matches {
                 continue;
             }
 

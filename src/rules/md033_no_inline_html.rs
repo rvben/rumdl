@@ -5,26 +5,16 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::regex_cache::*;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
 
 lazy_static! {
-    // Refined regex patterns with better performance characteristics
-    // Make HTML_TAG_FINDER case-insensitive
-    static ref HTML_TAG_FINDER: Regex = Regex::new("(?i)</?[a-zA-Z][^>]*>").unwrap();
-
-    // Pattern to quickly check for HTML tag presence (much faster than the full pattern)
-    static ref HTML_TAG_QUICK_CHECK: Regex = Regex::new("(?i)</?[a-zA-Z]").unwrap();
-
-    // Code fence patterns - using basic string patterns for fast detection
-    static ref CODE_FENCE_START: Regex = Regex::new(r"^(```|~~~)").unwrap();
-
-    // HTML/Markdown comment pattern
+    // HTML/Markdown comment pattern (specific to MD033)
     static ref HTML_COMMENT_PATTERN: Regex = Regex::new(r"<!--.*?-->").unwrap();
-
-    // Removed HTML_TAG_PATTERN as it seemed redundant with HTML_TAG_FINDER
 }
+
 
 #[derive(Clone)]
 pub struct MD033NoInlineHtml {
@@ -117,6 +107,11 @@ impl MD033NoInlineHtml {
         structure: &DocumentStructure,
         warnings: &mut Vec<LintWarning>,
     ) {
+        // Early return: if content has no incomplete tags at line ends, skip processing
+        if !content.contains('<') || !content.lines().any(|line| line.trim_end().ends_with('<')) {
+            return;
+        }
+
         // Simple approach: use regex to find patterns like <tagname and then look for closing >
         lazy_static::lazy_static! {
             static ref INCOMPLETE_TAG_START: regex::Regex = regex::Regex::new(r"(?i)<[a-zA-Z][^>]*$").unwrap();
@@ -129,6 +124,11 @@ impl MD033NoInlineHtml {
 
             // Skip code blocks and empty lines
             if line.trim().is_empty() || structure.is_in_code_block(line_num) {
+                continue;
+            }
+
+            // Early return: skip lines that don't end with incomplete tags
+            if !line.contains('<') {
                 continue;
             }
 
@@ -214,15 +214,20 @@ impl Rule for MD033NoInlineHtml {
         ctx: &crate::lint_context::LintContext,
         structure: &DocumentStructure,
     ) -> LintResult {
-        if ctx.content.is_empty()
-            || !ctx.content.contains('<')
-            || !HTML_TAG_QUICK_CHECK.is_match(ctx.content)
-        {
+        let content = ctx.content;
+
+        // Early return: if no HTML tags at all, skip processing
+        if content.is_empty() || !has_html_tags(content) {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for HTML tag pattern before expensive processing
+        if !HTML_TAG_QUICK_CHECK.is_match(content) {
             return Ok(Vec::new());
         }
 
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines: Vec<&str> = content.lines().collect();
 
         // First pass: find single-line HTML tags
         for (i, line) in lines.iter().enumerate() {
@@ -297,9 +302,8 @@ impl Rule for MD033NoInlineHtml {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty()
-            || !ctx.content.contains('<')
-            || !HTML_TAG_QUICK_CHECK.is_match(ctx.content)
+        let content = ctx.content;
+        content.is_empty() || !has_html_tags(content)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -1,30 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
-use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::*;
 use std::collections::HashSet;
-
-lazy_static! {
-    static ref ATX_HEADING_REGEX: Regex = Regex::new(r"^(#{1,6})\s+(.+?)(?:\s+#*\s*)?$").unwrap();
-    static ref SETEXT_HEADING_REGEX: FancyRegex =
-        FancyRegex::new(r"^([^\n]+)\n([=\-])\2+\s*$").unwrap();
-    static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
-    static ref TOC_SECTION_START: Regex =
-        Regex::new(r"^#+\s*(?:Table of Contents|Contents|TOC)\s*$").unwrap();
-    static ref MULTIPLE_HYPHENS: Regex = Regex::new(r"-{2,}").unwrap();
-    static ref LINK_REGEX: FancyRegex =
-        FancyRegex::new(r"(?<!\\)\[([^\]]*)\]\((?:([^)]+))?#([^)]+)\)").unwrap();
-    static ref EXTERNAL_URL_REGEX: FancyRegex =
-        FancyRegex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap();
-    static ref INLINE_CODE_REGEX: FancyRegex = FancyRegex::new(r"`[^`]+`").unwrap();
-    static ref BOLD_ASTERISK_REGEX: Regex = Regex::new(r"\*\*(.+?)\*\*").unwrap();
-    static ref BOLD_UNDERSCORE_REGEX: Regex = Regex::new(r"__(.+?)__").unwrap();
-    static ref ITALIC_ASTERISK_REGEX: Regex = Regex::new(r"\*([^*]+?)\*").unwrap();
-    static ref ITALIC_UNDERSCORE_REGEX: Regex = Regex::new(r"_([^_]+?)_").unwrap();
-    static ref LINK_TEXT_REGEX: FancyRegex = FancyRegex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap();
-    static ref STRIKETHROUGH_REGEX: Regex = Regex::new(r"~~(.+?)~~").unwrap();
-}
 
 /// Rule MD051: Link fragments should match document headings
 ///
@@ -48,48 +25,72 @@ impl MD051LinkFragments {
 
     fn extract_headings(&self, content: &str) -> HashSet<String> {
         let mut headings = HashSet::new();
-        let mut in_code_block = false;
-        let mut code_fence_marker = String::new();
+
+        // Early return: if no headings at all, skip processing
+        if !content.contains('#') && !content.contains('=') && !content.contains('-') {
+            return headings;
+        }
 
         let lines: Vec<&str> = content.lines().collect();
+        let mut in_code_block = false;
+        let mut in_toc = false;
 
         for (i, line) in lines.iter().enumerate() {
-            // Handle code block boundaries
-            if let Some(cap) = CODE_FENCE_REGEX.captures(line) {
-                let marker = cap[0].to_string();
-                if !in_code_block {
-                    in_code_block = true;
-                    code_fence_marker = marker;
-                } else if line.trim().starts_with(&code_fence_marker) {
-                    in_code_block = false;
-                    code_fence_marker.clear();
-                }
+            // Early return: skip empty lines
+            if line.trim().is_empty() {
                 continue;
             }
 
-            // Skip lines in code blocks
+            // Check for code fence
+            if CODE_FENCE_REGEX.is_match(line) {
+                in_code_block = !in_code_block;
+                continue;
+            }
+
+            // Skip if in code block
             if in_code_block {
                 continue;
             }
 
-            // Process ATX headings
-            if let Some(cap) = ATX_HEADING_REGEX.captures(line) {
-                let heading_text = cap.get(2).unwrap().as_str();
-                let fragment = self.heading_to_fragment(heading_text);
-                headings.insert(fragment.to_lowercase());
+            // Check for TOC section
+            if TOC_SECTION_START.is_match(line) {
+                in_toc = true;
                 continue;
             }
 
-            // Process Setext headings
-            if i < lines.len() - 1 {
-                let next_line = lines[i + 1];
-                if !line.is_empty() && !next_line.is_empty() {
-                    let trimmed_next = next_line.trim();
-                    if (trimmed_next.starts_with('=') && trimmed_next.chars().all(|c| c == '='))
-                        || (trimmed_next.starts_with('-') && trimmed_next.chars().all(|c| c == '-'))
-                    {
-                        let fragment = self.heading_to_fragment(line.trim());
-                        headings.insert(fragment.to_lowercase());
+            // If we were in TOC and hit another heading, we're out of TOC
+            if in_toc && line.trim().starts_with('#') {
+                in_toc = false;
+            }
+
+            // Skip if in TOC
+            if in_toc {
+                continue;
+            }
+
+            // Early return: skip lines that can't be headings
+            if !line.trim().starts_with('#') && (i + 1 >= lines.len() || (!lines[i + 1].trim().starts_with('=') && !lines[i + 1].trim().starts_with('-'))) {
+                continue;
+            }
+
+            // Check for ATX heading
+            if let Some(cap) = ATX_HEADING_WITH_CAPTURE.captures(line) {
+                if let Some(heading_text) = cap.get(2) {
+                    let heading = heading_text.as_str().trim();
+                    let fragment = self.heading_to_fragment(heading);
+                    headings.insert(fragment);
+                }
+                continue;
+            }
+
+            // Check for setext heading (only check if next line exists)
+            if i + 1 < lines.len() {
+                let combined = format!("{}\n{}", line, lines[i + 1]);
+                if let Ok(Some(cap)) = SETEXT_HEADING_WITH_CAPTURE.captures(&combined) {
+                    if let Some(heading_text) = cap.get(1) {
+                        let heading = heading_text.as_str().trim();
+                        let fragment = self.heading_to_fragment(heading);
+                        headings.insert(fragment);
                     }
                 }
             }
@@ -106,51 +107,18 @@ impl MD051LinkFragments {
     fn heading_to_fragment(&self, heading: &str) -> String {
         let mut stripped = heading.to_string();
 
-        // Handle code spans more thoroughly
-        if let Ok(captures) = INLINE_CODE_REGEX
-            .captures_iter(&stripped.clone())
-            .collect::<Result<Vec<_>, _>>()
-        {
-            for cap in captures {
-                if let Some(code_match) = cap.get(0) {
-                    // Extract the code content (without the backticks)
-                    let code_text = &code_match.as_str()[1..code_match.as_str().len() - 1];
-                    // Replace the entire code span with just the text
-                    stripped = stripped.replace(code_match.as_str(), code_text);
-                }
-            }
-        }
+        // Remove links but keep the link text: [text](url) -> text
+        stripped = INLINE_LINK_REGEX.replace_all(&stripped, "$1").to_string();
 
-        // Manual approach for nested formatting
-        // First, handle bold formatting with capture groups
+        // Remove emphasis and bold formatting more comprehensively
         stripped = BOLD_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = BOLD_UNDERSCORE_REGEX
-            .replace_all(&stripped, "$1")
-            .to_string();
-
-        // Then handle italic formatting
-        stripped = ITALIC_ASTERISK_REGEX
-            .replace_all(&stripped, "$1")
-            .to_string();
-        stripped = ITALIC_UNDERSCORE_REGEX
-            .replace_all(&stripped, "$1")
-            .to_string();
-
-        // Handle links more thoroughly
-        if let Ok(captures) = LINK_TEXT_REGEX
-            .captures_iter(&stripped.clone())
-            .collect::<Result<Vec<_>, _>>()
-        {
-            for cap in captures {
-                if let (Some(full_match), Some(text_match)) = (cap.get(0), cap.get(1)) {
-                    // Replace the entire link with just the link text
-                    stripped = stripped.replace(full_match.as_str(), text_match.as_str());
-                }
-            }
-        }
-
-        // Remove strikethrough
+        stripped = BOLD_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = ITALIC_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = ITALIC_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
         stripped = STRIKETHROUGH_REGEX.replace_all(&stripped, "$1").to_string();
+
+        // Remove code spans by replacing with their content (simplified)
+        stripped = stripped.replace("`", "");
 
         // Convert to lowercase and replace spaces/non-alphanumeric chars with hyphens
         let fragment = stripped
@@ -183,12 +151,23 @@ impl Rule for MD051LinkFragments {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+
+        // Early return: if no links at all, skip processing
+        if !content.contains('[') || !content.contains('#') {
+            return Ok(Vec::new());
+        }
+
         let structure = DocumentStructure::new(content);
         let mut warnings = Vec::new();
         let headings = self.extract_headings(content);
         let mut in_toc_section = false;
 
         for (line_num, line) in content.lines().enumerate() {
+            // Early return: skip lines without links or fragments
+            if !line.contains('[') || !line.contains('#') {
+                continue;
+            }
+
             // Check if we're entering a TOC section
             if TOC_SECTION_START.is_match(line) {
                 in_toc_section = true;
@@ -205,17 +184,10 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
-            // Only check for links if line contains a link
-            if !line.contains('[') || !line.contains(')') {
-                continue;
-            }
-
             // Use regex to find all links with fragments
-            if let Ok(caps) = LINK_REGEX
-                .captures_iter(line)
-                .collect::<Result<Vec<_>, _>>()
-            {
-                for cap in caps {
+            let mut link_iter = LINK_REGEX.captures_iter(line);
+            while let Some(cap_result) = link_iter.next() {
+                if let Ok(cap) = cap_result {
                     let full_match = cap.get(0).unwrap();
                     let url = cap.get(2).map(|m| m.as_str()).unwrap_or("");
                     let fragment = cap.get(3).map(|m| m.as_str()).unwrap_or("");
@@ -251,9 +223,8 @@ impl Rule for MD051LinkFragments {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
         // No automatic fix for missing fragments, just return content as-is
-        Ok(content.to_string())
+        Ok(ctx.content.to_owned())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

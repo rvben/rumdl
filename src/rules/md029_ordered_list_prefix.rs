@@ -40,12 +40,14 @@ impl MD029OrderedListPrefix {
         Self { style }
     }
 
+    #[inline]
     fn get_list_number(line: &str) -> Option<usize> {
         LIST_NUMBER_REGEX
             .captures(line)
             .and_then(|cap| cap[1].parse::<usize>().ok())
     }
 
+    #[inline]
     fn get_expected_number(&self, index: usize) -> usize {
         match self.style {
             ListStyle::One => 1,
@@ -55,6 +57,7 @@ impl MD029OrderedListPrefix {
         }
     }
 
+    #[inline]
     fn fix_line(&self, line: &str, expected_num: usize) -> String {
         FIX_LINE_REGEX
             .replace(line, format!("${{1}}{}{}", expected_num, "$2"))
@@ -73,11 +76,29 @@ impl Rule for MD029OrderedListPrefix {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+
+        // Early return: if no content or no ordered lists
+        if content.is_empty() || !content.contains('.') {
+            return Ok(Vec::new());
+        }
+
+        // Early return: quick check for ordered list patterns
+        if !ORDERED_LIST_ITEM_REGEX.is_match(content) {
+            return Ok(Vec::new());
+        }
+
         let mut warnings = Vec::new();
         let mut in_code_block = false;
         let mut indent_stack: Vec<(usize, usize)> = Vec::new(); // (indent, index)
         let lines: Vec<&str> = content.lines().collect();
         for (line_num, line) in lines.iter().enumerate() {
+            // Early return: skip empty lines
+            if line.trim().is_empty() {
+                // Blank line breaks the list
+                indent_stack.clear();
+                continue;
+            }
+
             if line.trim().starts_with("```") {
                 in_code_block = !in_code_block;
                 continue;
@@ -85,6 +106,14 @@ impl Rule for MD029OrderedListPrefix {
             if in_code_block {
                 continue;
             }
+
+            // Early return: skip lines that don't contain digits (optimization)
+            if !line.chars().any(|c| c.is_ascii_digit()) {
+                // Non-list, non-blank line breaks the list
+                indent_stack.clear();
+                continue;
+            }
+
             if Self::get_list_number(line).is_some() {
                 let indent = line.chars().take_while(|c| c.is_whitespace()).count();
                 // Pop stack if current indent is less than stack top
