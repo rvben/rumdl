@@ -49,6 +49,14 @@ impl Rule for MD042NoEmptyLinks {
 
                 if text.trim().is_empty() || url.trim().is_empty() {
                     let full_match = cap.get(0).unwrap();
+                    let replacement = if text.trim().is_empty() && url.trim().is_empty() {
+                        "[Link text](https://example.com)".to_string()
+                    } else if text.trim().is_empty() {
+                        format!("[Link text]({})", url)
+                    } else {
+                        format!("[{}](https://example.com)", text)
+                    };
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message: format!("Empty link found: [{}]({})", text, url),
@@ -58,7 +66,7 @@ impl Rule for MD042NoEmptyLinks {
                         fix: Some(Fix {
                             range: line_index
                                 .line_col_to_byte_range(line_num + 1, full_match.start() + 1),
-                            replacement: String::new(), // Remove empty link
+                            replacement,
                         }),
                     });
                 }
@@ -87,6 +95,14 @@ impl Rule for MD042NoEmptyLinks {
         let empty_links = structure.get_empty_links();
 
         for link in empty_links {
+            let replacement = if link.text.trim().is_empty() && link.url.trim().is_empty() {
+                "[Link text](https://example.com)".to_string()
+            } else if link.text.trim().is_empty() {
+                format!("[Link text]({})", link.url)
+            } else {
+                format!("[{}](https://example.com)", link.text)
+            };
+
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message: format!("Empty link found: [{}]({})", link.text, link.url),
@@ -95,7 +111,7 @@ impl Rule for MD042NoEmptyLinks {
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: line_index.line_col_to_byte_range(link.line, link.start_col),
-                    replacement: String::new(), // Remove empty link
+                    replacement,
                 }),
             });
         }
@@ -115,9 +131,17 @@ impl Rule for MD042NoEmptyLinks {
             let text = caps.get(1).map_or("", |m| m.as_str());
             let url = caps.get(2).map_or("", |m| m.as_str());
 
-            if text.trim().is_empty() || url.trim().is_empty() {
-                String::new()
+            if text.trim().is_empty() && url.trim().is_empty() {
+                // Both text and URL are empty - provide placeholder
+                "[Link text](https://example.com)".to_string()
+            } else if text.trim().is_empty() {
+                // Only text is empty - provide placeholder text
+                format!("[Link text]({})", url)
+            } else if url.trim().is_empty() {
+                // Only URL is empty - provide placeholder URL
+                format!("[{}](https://example.com)", text)
             } else {
+                // Neither is empty - keep as is
                 caps[0].to_string()
             }
         });

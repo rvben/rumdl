@@ -19,7 +19,7 @@ fn test_empty_link_text() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "");
+    assert_eq!(fixed, "[Link text](https://example.com)");
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn test_empty_link_url() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "");
+    assert_eq!(fixed, "[Link text](https://example.com)");
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn test_empty_link_both() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "");
+    assert_eq!(fixed, "[Link text](https://example.com)");
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn test_multiple_empty_links() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, " and  and ");
+    assert_eq!(fixed, "[Link](https://example.com) and [Link text](https://example.com) and [Link text](url)");
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn test_whitespace_only_links() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "");
+    assert_eq!(fixed, "[Link text](https://example.com)");
 }
 
 #[test]
@@ -76,6 +76,6 @@ fn test_mixed_valid_and_empty_links() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "[Valid](https://example.com) and  and [Another](./path)"
+        "[Valid](https://example.com) and [Link text](https://example.com) and [Another](./path)"
     );
 }

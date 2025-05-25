@@ -163,7 +163,18 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
 
         match result {
             Ok(rule_warnings) => {
-                warnings.extend(rule_warnings);
+                // Filter out warnings for rules disabled via comments
+                let filtered_warnings: Vec<_> = rule_warnings
+                    .into_iter()
+                    .filter(|warning| {
+                        !crate::rule::is_rule_disabled_at_line(
+                            content,
+                            rule.name(),
+                            warning.line.saturating_sub(1), // Convert to 0-based line index
+                        )
+                    })
+                    .collect();
+                warnings.extend(filtered_warnings);
             }
             Err(e) => {
                 log::error!("Error checking rule {}: {}", rule.name(), e);
