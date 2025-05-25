@@ -40,7 +40,8 @@
     - [Configuration in pyproject.toml](#configuration-in-pyprojecttoml)
     - [Configuration Output](#configuration-output)
       - [Effective Configuration (`rumdl config`)](#effective-configuration-rumdl-config)
-      - [Defaults Only (`rumdl config --defaults`)](#defaults-only-rumdl-config---defaults)
+      - [Example output](#example-output)
+    - [Defaults Only (`rumdl config --defaults`)](#defaults-only-rumdl-config---defaults)
   - [Output Style](#output-style)
     - [Output Format](#output-format)
   - [Development](#development)
@@ -346,9 +347,10 @@ Both kebab-case (`line-length`, `ignore-gitignore`) and snake_case (`line_length
 
 #### Effective Configuration (`rumdl config`)
 
-The `rumdl config` command prints the **full effective configuration** (defaults + all overrides), showing every key and its value, annotated with the source of each value. The output is colorized and the `[from ...]` annotation is globally aligned for easy scanning.
+The `rumdl config` command prints the **full effective configuration** (defaults + all overrides), showing every key and its value, annotated with the source of each value.
+The output is colorized and the `[from ...]` annotation is globally aligned for easy scanning.
 
-**Example output:**
+#### Example output
 
 ```text
 [global]
@@ -370,7 +372,7 @@ The `rumdl config` command prints the **full effective configuration** (defaults
   - Yellow: default
 - The `[from ...]` column is aligned across all sections.
 
-#### Defaults Only (`rumdl config --defaults`)
+### Defaults Only (`rumdl config --defaults`)
 
 The `--defaults` flag prints only the default configuration as TOML, suitable for copy-paste or reference:
 

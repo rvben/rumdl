@@ -339,9 +339,9 @@ fn find_markdown_files(
     walk_builder.types(types);
     // -----------------------------------------
 
-    // Determine if running in discovery mode (e.g., "rumdl ." or "rumdl check .")
+    // Determine if running in discovery mode (e.g., "rumdl ." or "rumdl check ." or "rumdl check")
     // Adjusted to handle both legacy and subcommand paths
-    let is_discovery_mode = paths == ["."];
+    let is_discovery_mode = paths.is_empty() || paths == ["."];
 
     // --- Determine Effective Include/Exclude Patterns ---
 

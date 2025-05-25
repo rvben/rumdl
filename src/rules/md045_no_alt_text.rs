@@ -1,7 +1,12 @@
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use lazy_static::lazy_static;
 use regex::Regex;
+
+lazy_static! {
+    static ref IMAGE_REGEX: Regex = Regex::new(r"!\[([^\]]*)\](\([^)]+\))").unwrap();
+}
 
 /// Rule MD045: Images should have alt text
 ///
@@ -38,10 +43,8 @@ impl Rule for MD045NoAltText {
 
         let mut warnings = Vec::new();
 
-        let image_regex = Regex::new(r"!\[([^\]]*)\](\([^)]+\))").unwrap();
-
         for (line_num, line) in content.lines().enumerate() {
-            for cap in image_regex.captures_iter(line) {
+            for cap in IMAGE_REGEX.captures_iter(line) {
                 let alt_text = cap.get(1).map_or("", |m| m.as_str());
                 if alt_text.trim().is_empty() {
                     let full_match = cap.get(0).unwrap();
@@ -72,9 +75,7 @@ impl Rule for MD045NoAltText {
         let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
-        let image_regex = Regex::new(r"!\[([^\]]*)\](\([^)]+\))").unwrap();
-
-        let result = image_regex.replace_all(content, |caps: &regex::Captures| {
+        let result = IMAGE_REGEX.replace_all(content, |caps: &regex::Captures| {
             let alt_text = caps.get(1).map_or("", |m| m.as_str());
             let _url_part = caps.get(2).map_or("", |m| m.as_str());
 

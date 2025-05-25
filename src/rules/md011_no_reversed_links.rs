@@ -2,7 +2,14 @@
 ///
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use lazy_static::lazy_static;
 use regex::Regex;
+
+lazy_static! {
+    static ref REVERSED_LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|(\([^)]+\))\[([^\]]+)\]").unwrap();
+    static ref REVERSED_LINK_CHECK_REGEX: Regex = Regex::new(r"\(([^)]+)\)\[([^\]]+)\]").unwrap();
+    static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)").unwrap();
+}
 
 #[derive(Clone)]
 pub struct MD011NoReversedLinks;
@@ -10,12 +17,11 @@ pub struct MD011NoReversedLinks;
 impl MD011NoReversedLinks {
     fn find_reversed_links(content: &str) -> Vec<(usize, usize, String, String)> {
         let mut results = Vec::new();
-        let re = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|(\([^)]+\))\[([^\]]+)\]").unwrap();
         let mut line_start = 0;
         let mut current_line = 1;
 
         for line in content.lines() {
-            for cap in re.captures_iter(line) {
+            for cap in REVERSED_LINK_REGEX.captures_iter(line) {
                 if cap.get(3).is_some() {
                     // Found reversed link syntax (text)[url]
                     let text = cap[3].trim_matches('(').trim_matches(')');
@@ -41,7 +47,7 @@ impl MD011NoReversedLinks {
         let mut current_pos = 0;
 
         for line in content.lines() {
-            if line.trim().starts_with("```") || line.trim().starts_with("~~~") {
+            if CODE_FENCE_REGEX.is_match(line) {
                 in_code_block = !in_code_block;
             }
             current_pos += line.len() + 1;
@@ -69,8 +75,7 @@ impl Rule for MD011NoReversedLinks {
         let mut line_start = 0;
 
         for (line_num, line) in content.lines().enumerate() {
-            let re = Regex::new(r"\(([^)]+)\)\[([^\]]+)\]").unwrap();
-            for cap in re.captures_iter(line) {
+            for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
                 let column = line_start + cap.get(0).unwrap().start() + 1;
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),

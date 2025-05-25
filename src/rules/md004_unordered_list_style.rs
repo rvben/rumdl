@@ -78,6 +78,7 @@ lazy_static! {
     static ref CODE_BLOCK_START: Regex = Regex::new(r"^\s*(```|~~~)").unwrap();
     static ref CODE_BLOCK_END: Regex = Regex::new(r"^\s*(```|~~~)\s*$").unwrap();
     static ref FRONT_MATTER_DELIM: Regex = Regex::new(r"^---\s*$").unwrap();
+    static ref ORDERED_LIST_REGEX: Regex = Regex::new(r"^\s*\d+[.)]").unwrap();
 }
 
 /// Rule MD004: Unordered list style
@@ -208,7 +209,7 @@ impl Rule for MD004UnorderedListStyle {
             }
 
             // Skip ordered list items
-            if Regex::new(r"^\s*\d+[.)]").unwrap().is_match(line) {
+            if ORDERED_LIST_REGEX.is_match(line) {
                 continue;
             }
 
