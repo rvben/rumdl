@@ -1283,24 +1283,6 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
         return;
     }
 
-    // Confirm with the user if we're fixing a large number of files
-    if args._fix && file_paths.len() > 10 && !args.quiet {
-        println!(
-            "You are about to fix {} files. This will modify files in-place.",
-            file_paths.len()
-        );
-        print!("Continue? [y/N] ");
-        io::stdout().flush().unwrap();
-
-        let mut answer = String::new();
-        io::stdin().read_line(&mut answer).unwrap();
-
-        if !answer.trim().eq_ignore_ascii_case("y") {
-            println!("Aborted.");
-            return;
-        }
-    }
-
     let start_time = Instant::now();
 
     // Choose processing strategy based on file count and fix mode
