@@ -9,6 +9,7 @@ lazy_static! {
     static ref ALTERNATE_FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)~~~(?:[^~\r\n]*)$").unwrap();
     static ref ALTERNATE_FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)~~~\s*$").unwrap();
     static ref INDENTED_CODE_BLOCK: Regex = Regex::new(r"^(\s{4,})").unwrap();
+    static ref LIST_ITEM_RE: Regex = Regex::new(r"^(\s*)([*+-]|\d+[.)])(\s*)(.*)$").unwrap();
 }
 
 /// Utility functions for detecting and handling code blocks in Markdown documents
@@ -174,10 +175,6 @@ impl CodeBlockUtils {
             } else if !in_code_block[i] {
                 // Check for indented code blocks only if not already marked
                 // Do not mark as code block if the line is a list item
-                lazy_static! {
-                    static ref LIST_ITEM_RE: Regex =
-                        Regex::new(r"^(\s*)([*+-]|\d+[.)])(\s*)(.*)$").unwrap();
-                }
                 if (line.starts_with("    ") || INDENTED_CODE_BLOCK.is_match(line))
                     && !LIST_ITEM_RE.is_match(line)
                 {

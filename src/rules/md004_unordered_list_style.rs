@@ -48,11 +48,10 @@
 /// ## Rationale
 ///
 /// Consistent list markers improve readability and reduce distraction, especially in large documents or when collaborating with others. This rule helps enforce a uniform style across all unordered lists.
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::DocumentStructureExtensions;
 use crate::LintContext;
 use lazy_static::lazy_static;
-use markdown::mdast::{ListItem, Node};
 use regex::Regex;
 use toml;
 
@@ -72,8 +71,8 @@ impl Default for UnorderedListStyle {
 
 lazy_static! {
     static ref UNORDERED_LIST_REGEX: Regex = Regex::new(
-        // Match unordered list items: optional whitespace, marker, space, then content or end of line
-        r"^(?P<indent>\s*)(?P<marker>[*+-])(?P<after>\s+)(?P<content>.*?)$"
+        // Match unordered list items: optional whitespace, optional blockquote prefix, marker, space, then content or end of line
+        r"^(?P<indent>\s*)(?P<blockquote>(?:>\s*)*)(?P<marker>[*+-])(?P<after>\s+)(?P<content>.*?)$"
     ).unwrap();
     static ref CODE_BLOCK_START: Regex = Regex::new(r"^\s*(```|~~~)").unwrap();
     static ref CODE_BLOCK_END: Regex = Regex::new(r"^\s*(```|~~~)\s*$").unwrap();
@@ -96,67 +95,7 @@ impl MD004UnorderedListStyle {
         }
     }
 
-    // Helper: extract marker, indentation, and blockquote prefix for a ListItem
-    fn extract_marker_indent_bq(li: &ListItem, ctx: &LintContext) -> Option<(usize, char, String, usize)> {
-        let pos = li.position.as_ref()?;
-        let line_num = pos.start.line;
-        if line_num == 0 {
-            return None;
-        }
-        let mut line_start_offset = 0usize;
-        let mut lines = ctx.content.lines();
-        for _ in 1..line_num {
-            line_start_offset += lines.next()?.len();
-            line_start_offset += 1;
-        }
-        let line = lines.next()?;
-        let mut indent = String::new();
-        let mut bq_prefix = 0;
-        let mut marker = None;
-        let mut i = 0;
-        let chars: Vec<_> = line.chars().collect();
-        while i < chars.len() {
-            if chars[i] == ' ' || chars[i] == '\t' {
-                indent.push(chars[i]);
-                i += 1;
-            } else if chars[i] == '>' {
-                bq_prefix += 1;
-                i += 1;
-                if i < chars.len() && chars[i] == ' ' {
-                    i += 1;
-                }
-            } else {
-                break;
-            }
-        }
-        if i < chars.len() && (chars[i] == '*' || chars[i] == '-' || chars[i] == '+') {
-            marker = Some((line_start_offset + i, chars[i]));
-        }
-        marker.map(|(offset, marker)| (offset, marker, indent, bq_prefix))
-    }
 
-    // Helper: check if a line is inside a code block
-    fn is_in_code_block(line_num: usize, ctx: &LintContext) -> bool {
-        let content = ctx.content;
-        let mut in_code_block = false;
-        let mut in_front_matter = false;
-        for (i, line) in content.lines().enumerate() {
-            if FRONT_MATTER_DELIM.is_match(line) {
-                in_front_matter = !in_front_matter;
-                continue;
-            }
-            if in_front_matter && i + 1 == line_num {
-                return true;
-            }
-            if line.starts_with("```") || line.starts_with("~~~") {
-                in_code_block = !in_code_block;
-            }
-            if i + 1 == line_num {
-                return in_code_block || in_front_matter;
-            }
-        }
-        false
-    }
 }
 
 impl Rule for MD004UnorderedListStyle {
@@ -216,8 +155,11 @@ impl Rule for MD004UnorderedListStyle {
             // Check for unordered list items
             if let Some(caps) = UNORDERED_LIST_REGEX.captures(line) {
                 let indent = caps.name("indent").map(|m| m.as_str().to_string()).unwrap_or_default();
+                let blockquote = caps.name("blockquote").map(|m| m.as_str().to_string()).unwrap_or_default();
                 let marker = caps.name("marker").unwrap().as_str().chars().next().unwrap();
-                let offset = content[..content.lines().take(i).map(|l| l.len() + 1).sum::<usize>()].len() + indent.len();
+                // Calculate byte offset to the marker character
+                let line_start_offset: usize = content.lines().take(i).map(|l| l.len() + 1).sum();
+                let offset = line_start_offset + indent.len() + blockquote.len();
 
                 match self.style {
                     UnorderedListStyle::Consistent => {
@@ -231,7 +173,10 @@ impl Rule for MD004UnorderedListStyle {
                                     message: format!("marker '{}' does not match expected style '{}'", marker, first),
                                     severity: Severity::Warning,
                                     rule_name: Some(self.name()),
-                                    fix: None,
+                                    fix: Some(Fix {
+                                        range: offset..offset + 1,
+                                        replacement: first.to_string(),
+                                    }),
                                 });
                             }
                         } else {
@@ -255,7 +200,10 @@ impl Rule for MD004UnorderedListStyle {
                                 message: format!("marker '{}' does not match expected style '{}'", marker, target_marker),
                                 severity: Severity::Warning,
                                 rule_name: Some(self.name()),
-                                fix: None,
+                                fix: Some(Fix {
+                                    range: offset..offset + 1,
+                                    replacement: target_marker.to_string(),
+                                }),
                             });
                         }
                     }
@@ -267,124 +215,121 @@ impl Rule for MD004UnorderedListStyle {
     }
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
-        let ast = &ctx.ast;
-        let mut edits = vec![];
-        fn walk_fix(node: &Node, rule: &MD004UnorderedListStyle, ctx: &LintContext, edits: &mut Vec<(usize, char)>) {
-            if let Node::List(list) = node {
-                if list.ordered { return; }
-                let mut item_info = vec![];
-                let front_matter_lines = {
-                    let mut in_front_matter = false;
-                    let mut skip_lines = std::collections::HashSet::new();
-                    for (i, line) in ctx.content.lines().enumerate() {
-                        if FRONT_MATTER_DELIM.is_match(line) {
-                            in_front_matter = !in_front_matter;
-                            skip_lines.insert(i + 1);
-                            continue;
-                        }
-                        if in_front_matter {
-                            skip_lines.insert(i + 1);
-                        }
-                    }
-                    skip_lines
-                };
-                for item in &list.children {
-                    if let Node::ListItem(li) = item {
-                        if let Some(pos) = li.position.as_ref() {
-                            let line_num = pos.start.line;
-                            if front_matter_lines.contains(&line_num) {
-                                continue;
-                            }
-                            if MD004UnorderedListStyle::is_in_code_block(line_num, ctx) {
-                                continue;
-                            }
-                        }
-                        if let Some((offset, marker, indent, bq_prefix)) = MD004UnorderedListStyle::extract_marker_indent_bq(li, ctx) {
-                            item_info.push((offset, marker, indent, bq_prefix, li));
-                        }
-                    }
+        // Use the same regex-based approach as check() for consistency
+        let content = &ctx.content;
+        let mut result = content.to_string();
+        let mut in_code_block = false;
+        let mut in_front_matter = false;
+        let mut edits = Vec::new();
+        let mut first_marker: Option<char> = None;
+
+        // First pass: find the first marker for consistent mode
+        if matches!(self.style, UnorderedListStyle::Consistent) {
+            let mut temp_in_code_block = false;
+            let mut temp_in_front_matter = false;
+
+            for line in content.lines() {
+                // Handle front matter
+                if FRONT_MATTER_DELIM.is_match(line) {
+                    temp_in_front_matter = !temp_in_front_matter;
+                    continue;
                 }
-                if item_info.is_empty() { return; }
-                match rule.style {
+                if temp_in_front_matter {
+                    continue;
+                }
+
+                // Handle code blocks
+                if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+                    temp_in_code_block = !temp_in_code_block;
+                    continue;
+                }
+                if temp_in_code_block {
+                    continue;
+                }
+
+                // Skip ordered list items
+                if ORDERED_LIST_REGEX.is_match(line) {
+                    continue;
+                }
+
+                // Find first unordered list marker
+                if let Some(caps) = UNORDERED_LIST_REGEX.captures(line) {
+                    let marker = caps.name("marker").unwrap().as_str().chars().next().unwrap();
+                    first_marker = Some(marker);
+                    break;
+                }
+            }
+        }
+
+        // Second pass: apply fixes
+        for (i, line) in content.lines().enumerate() {
+            // Handle front matter
+            if FRONT_MATTER_DELIM.is_match(line) {
+                in_front_matter = !in_front_matter;
+                continue;
+            }
+            if in_front_matter {
+                continue;
+            }
+
+            // Handle code blocks
+            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+                in_code_block = !in_code_block;
+                continue;
+            }
+            if in_code_block {
+                continue;
+            }
+
+            // Skip ordered list items
+            if ORDERED_LIST_REGEX.is_match(line) {
+                continue;
+            }
+
+            // Check for unordered list items
+            if let Some(caps) = UNORDERED_LIST_REGEX.captures(line) {
+                let indent = caps.name("indent").map(|m| m.as_str().to_string()).unwrap_or_default();
+                let blockquote = caps.name("blockquote").map(|m| m.as_str().to_string()).unwrap_or_default();
+                let marker = caps.name("marker").unwrap().as_str().chars().next().unwrap();
+                // Calculate byte offset to the marker character
+                let line_start_offset: usize = content.lines().take(i).map(|l| l.len() + 1).sum();
+                let offset = line_start_offset + indent.len() + blockquote.len();
+
+                match self.style {
                     UnorderedListStyle::Consistent => {
-                        // Group into contiguous runs by indent and bq_prefix (not marker)
-                        let mut run_start = 0;
-                        while run_start < item_info.len() {
-                            let (_, _, start_indent, start_bq, _) = &item_info[run_start];
-                            let mut run_end = run_start + 1;
-                            while run_end < item_info.len() {
-                                let (_, _, indent, bq, _) = &item_info[run_end];
-                                if indent != start_indent || bq != start_bq {
-                                    break;
-                                }
-                                run_end += 1;
-                            }
-                            // Determine most prevalent marker in the run
-                            let mut counts = std::collections::HashMap::new();
-                            for i in run_start..run_end {
-                                let (_, marker, _, _, _) = &item_info[i];
-                                *counts.entry(marker).or_insert(0) += 1;
-                            }
-                            // Find the marker with the highest count; tie-breaker: first in run
-                            let mut max_count = 0;
-                            let mut target_marker = item_info[run_start].1;
-                            let first_marker = item_info[run_start].1;
-                            for (_, (_, marker, _, _, _)) in item_info[run_start..run_end].iter().enumerate() {
-                                let count = *counts.get(marker).unwrap_or(&0);
-                                if count > max_count {
-                                    max_count = count;
-                                    target_marker = *marker;
-                                }
-                            }
-                            // If there is a tie, use the first marker in the run
-                            let mut tie_count = 0;
-                            for count in counts.values() {
-                                if *count == max_count {
-                                    tie_count += 1;
-                                }
-                            }
-                            if tie_count > 1 {
-                                target_marker = first_marker;
-                            }
-                            for i in run_start..run_end {
-                                let (offset, marker, _, _, _) = &item_info[i];
-                                if *marker != target_marker {
-                                    edits.push((*offset, target_marker));
-                                }
-                            }
-                            run_start = run_end;
-                        }
-                    }
-                    // Explicit style: fix every unordered list item
-                    UnorderedListStyle::Asterisk | UnorderedListStyle::Dash | UnorderedListStyle::Plus => {
-                        let target_marker = match rule.style {
-                            UnorderedListStyle::Asterisk => '*',
-                            UnorderedListStyle::Dash => '-',
-                            UnorderedListStyle::Plus => '+',
-                            _ => unreachable!(),
-                        };
-                        for (offset, marker, _indent, _bq_prefix, _li) in &item_info {
-                            if *marker != target_marker {
-                                edits.push((*offset, target_marker));
+                        if let Some(first) = first_marker {
+                            if marker != first {
+                                edits.push((offset, first));
                             }
                         }
-                    }
-                }
-            }
-            if let Some(children) = node.children() {
-                for child in children {
-                    walk_fix(child, rule, ctx, edits);
+                    },
+                    UnorderedListStyle::Asterisk => {
+                        if marker != '*' {
+                            edits.push((offset, '*'));
+                        }
+                    },
+                    UnorderedListStyle::Dash => {
+                        if marker != '-' {
+                            edits.push((offset, '-'));
+                        }
+                    },
+                    UnorderedListStyle::Plus => {
+                        if marker != '+' {
+                            edits.push((offset, '+'));
+                        }
+                    },
                 }
             }
         }
-        walk_fix(ast, self, ctx, &mut edits);
-        let mut result = ctx.content.to_string();
+
+        // Apply edits in reverse order to maintain correct offsets
         edits.sort_by(|a, b| b.0.cmp(&a.0));
-        for (offset, marker) in edits {
+        for (offset, target_marker) in edits {
             if offset < result.len() {
-                result.replace_range(offset..offset + 1, &marker.to_string());
+                result.replace_range(offset..offset + 1, &target_marker.to_string());
             }
         }
+
         Ok(result)
     }
 

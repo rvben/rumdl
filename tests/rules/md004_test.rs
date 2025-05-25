@@ -44,7 +44,7 @@ fn test_fix_consistent() {
     let ctx = LintContext::new(content);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content);
+    assert_eq!(fixed, "* Item 1\n* Item 2\n* Item 3");
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn test_check_mixed_indentation() {
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Current implementation flags the dash marker that doesn't match the asterisk style
+    // Flags the dash marker that doesn't match the first marker (asterisk)
     assert_eq!(warnings.len(), 1);
 }
 
@@ -136,7 +136,7 @@ fn test_fix_consistent_first_marker_plus() {
     let ctx = LintContext::new(content);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content);
+    assert_eq!(fixed, "+ Item 1\n+ Item 2\n+ Item 3");
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn test_fix_consistent_first_marker_dash() {
     let ctx = LintContext::new(content);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content);
+    assert_eq!(fixed, "- Item 1\n- Item 2\n- Item 3");
 }
 
 #[test]
@@ -212,10 +212,10 @@ fn test_md004_deeply_nested() {
     );
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&ctx).unwrap();
-    // Current implementation flags mixed markers (+ and - don't match the first marker *)
+    // Flags mixed markers (+ and - don't match the first marker *)
     assert_eq!(result.len(), 3); // + on line 2, - on line 3, + on line 4
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, ctx.content);
+    assert_eq!(fixed, "* Level 1\n  * Level 2\n    * Level 3\n      * Level 4\n  * Back to 2\n* Level 1\n");
 }
 
 #[test]
@@ -225,10 +225,10 @@ fn test_md004_mixed_content() {
     );
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&ctx).unwrap();
-    // Current implementation flags the + marker that doesn't match the first marker *
+    // Flags the + marker that doesn't match the first marker *
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, ctx.content);
+    assert_eq!(fixed, "# Heading\n\n* Item 1\n  Some text\n  * Nested with text\n    More text\n* Item 2\n");
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn test_md004_blockquotes() {
     let ctx = LintContext::new("* Item 1\n> * Quoted item\n> + Another quoted item\n* Item 2\n");
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 1); // Should flag the + marker that doesn't match asterisk style
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "* Item 1\n> * Quoted item\n> * Another quoted item\n* Item 2\n");
 }
@@ -279,10 +279,10 @@ fn test_md004_list_continuations() {
     );
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&ctx).unwrap();
-    // Current implementation flags the + marker that doesn't match the first marker *
+    // Flags the + marker that doesn't match the first marker *
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, ctx.content);
+    assert_eq!(fixed, "* Item 1\n  Continuation 1\n  * Nested item\n    Continuation 2\n* Item 2\n");
 }
 
 #[test]
@@ -294,7 +294,7 @@ fn test_md004_mixed_ordered_unordered() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, ctx.content);
+    assert_eq!(fixed, "1. Ordered item\n   * Unordered sub-item\n   * Another sub-item\n2. Ordered item\n");
 }
 
 #[test]
@@ -331,10 +331,10 @@ fn test_nested_list_complexity() {
     let content = "* Item 1\n  - Item 2\n    + Item 3\n  - Item 5\n* Item 6\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // Current implementation flags mixed markers (- and + don't match the first marker *)
+    // Flags mixed markers (- and + don't match the first marker *)
     assert_eq!(result.len(), 3); // - on line 2, + on line 3, - on line 4
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, ctx.content);
+    assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3\n  * Item 5\n* Item 6\n");
 }
 
 #[test]

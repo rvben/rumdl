@@ -12,6 +12,7 @@ lazy_static! {
     static ref FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*$").unwrap();
     static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
     static ref INDENTED_CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s{4,})").unwrap();
+    static ref HTML_TAG_REGEX: Regex = Regex::new(r"<[^>]*>").unwrap();
 
     // Single line emphasis patterns
     static ref SINGLE_LINE_ASTERISK_EMPHASIS: Regex = Regex::new(r"^\s*\*([^*\n]+)\*\s*$").unwrap();
@@ -367,7 +368,7 @@ impl HeadingUtils {
     /// Convert a heading text to a valid ID for fragment links
     pub fn heading_to_fragment(text: &str) -> String {
         // Remove any HTML tags
-        let text_no_html = regex::Regex::new(r"<[^>]*>").unwrap().replace_all(text, "");
+        let text_no_html = HTML_TAG_REGEX.replace_all(text, "");
 
         // Convert to lowercase and trim
         let text_lower = text_no_html.trim().to_lowercase();
