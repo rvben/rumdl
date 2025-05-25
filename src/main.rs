@@ -19,6 +19,7 @@ use rumdl::rule::Rule;
 use rumdl::rules::code_block_utils::CodeBlockStyle;
 use rumdl::rules::code_fence_utils::CodeFenceStyle;
 use rumdl::rules::strong_style::StrongStyle;
+
 use rumdl_config::normalize_key;
 use rumdl_config::ConfigSource;
 
@@ -628,7 +629,7 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
         Box::new(MD033NoInlineHtml::default()),
         Box::new(MD034NoBareUrls {}),
         Box::new(MD035HRStyle::default()),
-        Box::new(MD036NoEmphasisAsHeading {}),
+        Box::new(MD036NoEmphasisAsHeading::new(".,;:!?".to_string())),
         Box::new(MD037NoSpaceInEmphasis),
         Box::new(MD038NoSpaceInCode::default()),
         Box::new(MD039NoSpaceInLinks),
@@ -890,7 +891,7 @@ build-backend = \"setuptools.build_meta\"
                     Box::new(MD033NoInlineHtml::default()),
                     Box::new(MD034NoBareUrls {}),
                     Box::new(MD035HRStyle::default()),
-                    Box::new(MD036NoEmphasisAsHeading {}),
+                    Box::new(MD036NoEmphasisAsHeading::new(".,;:!?".to_string())),
                     Box::new(MD037NoSpaceInEmphasis),
                     Box::new(MD038NoSpaceInCode::default()),
                     Box::new(MD039NoSpaceInLinks),

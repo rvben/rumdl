@@ -24,9 +24,18 @@ lazy_static! {
 
 /// Rule MD036: Emphasis used instead of a heading
 #[derive(Clone)]
-pub struct MD036NoEmphasisAsHeading;
+pub struct MD036NoEmphasisAsHeading {
+    /// Punctuation characters to remove from the end of headings when converting from emphasis
+    /// Default: ".,;:!?" - removes common trailing punctuation
+    /// Set to empty string to preserve all punctuation
+    punctuation: String,
+}
 
 impl MD036NoEmphasisAsHeading {
+    pub fn new(punctuation: String) -> Self {
+        Self { punctuation }
+    }
+
     fn is_entire_line_emphasized(
         line: &str,
         content: &str,
@@ -76,10 +85,17 @@ impl MD036NoEmphasisAsHeading {
         None
     }
 
-    fn get_heading_for_emphasis(level: usize, text: &str) -> String {
+    fn get_heading_for_emphasis(&self, level: usize, text: &str) -> String {
         let prefix = "#".repeat(level);
+        // Remove trailing punctuation based on configuration
+        let text = if self.punctuation.is_empty() {
+            text.trim()
+        } else {
+            let chars_to_remove: Vec<char> = self.punctuation.chars().collect();
+            text.trim().trim_end_matches(&chars_to_remove[..])
+        };
+
         // Split long text into multiple lines if needed
-        let text = text.trim();
         if text.len() > 80 {
             let words = text.split_whitespace();
             let mut current_line = String::new();
@@ -149,7 +165,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(i + 1, 1),
-                        replacement: Self::get_heading_for_emphasis(level, &text),
+                        replacement: self.get_heading_for_emphasis(level, &text),
                     }),
                 });
             }
@@ -172,7 +188,7 @@ impl Rule for MD036NoEmphasisAsHeading {
         for i in 0..lines.len() {
             let line = lines[i];
             if let Some((level, text)) = Self::is_entire_line_emphasized(line, content, i) {
-                result.push_str(&Self::get_heading_for_emphasis(level, &text));
+                result.push_str(&self.get_heading_for_emphasis(level, &text));
             } else {
                 result.push_str(line);
             }
@@ -192,10 +208,22 @@ impl Rule for MD036NoEmphasisAsHeading {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert(
+            "punctuation".to_string(),
+            toml::Value::String(self.punctuation.clone()),
+        );
+        Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD036NoEmphasisAsHeading)
+        let punctuation = crate::config::get_rule_config_value::<String>(config, "MD036", "punctuation")
+            .unwrap_or_else(|| ".,;:!?".to_string());
+
+        Box::new(MD036NoEmphasisAsHeading::new(punctuation))
     }
 }

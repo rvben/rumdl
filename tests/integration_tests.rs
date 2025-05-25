@@ -9,7 +9,7 @@ fn test_md036_for_emphasis_only_lines() {
 
     let ctx = LintContext::new(content);
     // Apply MD036 (NoEmphasisOnlyFirst) fix
-    let md036 = MD036NoEmphasisAsHeading {};
+    let md036 = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let fixed_md036 = md036.fix(&ctx).unwrap();
 
     // The emphasis should be converted to a proper heading
