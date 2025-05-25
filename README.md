@@ -362,6 +362,7 @@ The `rumdl config` command prints the **full effective configuration** (defaults
   code_blocks        = true                           [from .rumdl.toml]
   ...
 ```
+
 - **Keys** are cyan, **values** are yellow, and the `[from ...]` annotation is colored by source:
   - Green: CLI
   - Blue: `.rumdl.toml`
