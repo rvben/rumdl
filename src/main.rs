@@ -141,9 +141,12 @@ enum Commands {
     },
     /// Start the Language Server Protocol server
     Server {
-        /// TCP port to listen on (for debugging, default is stdio)
+        /// TCP port to listen on (for debugging)
         #[arg(long)]
         port: Option<u16>,
+        /// Use stdio for communication (default)
+        #[arg(long)]
+        stdio: bool,
         /// Enable verbose logging
         #[arg(short, long)]
         verbose: bool,
@@ -1143,7 +1146,7 @@ build-backend = \"setuptools.build_meta\"
                     }
                 }
             }
-            Some(Commands::Server { port, verbose }) => {
+            Some(Commands::Server { port, stdio, verbose }) => {
                 // Setup logging for the LSP server
                 if *verbose {
                     env_logger::Builder::from_default_env()
@@ -1166,7 +1169,9 @@ build-backend = \"setuptools.build_meta\"
                             std::process::exit(1);
                         }
                     } else {
-                        // Standard LSP mode over stdio
+                        // Standard LSP mode over stdio (default behavior)
+                        // Note: stdio flag is for explicit documentation, behavior is the same
+                        let _ = stdio; // Suppress unused variable warning
                         if let Err(e) = rumdl::lsp::start_server().await {
                             eprintln!("Failed to start LSP server: {}", e);
                             std::process::exit(1);
