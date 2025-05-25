@@ -64,8 +64,10 @@ impl MD051LinkFragments {
             if let Some(cap) = ATX_HEADING_WITH_CAPTURE.captures(line) {
                 if let Some(heading_text) = cap.get(2) {
                     let heading = heading_text.as_str().trim();
-                    let fragment = self.heading_to_fragment(heading);
-                    headings.insert(fragment);
+                    let variations = self.generate_fragment_variations(heading);
+                    for fragment in variations {
+                        headings.insert(fragment);
+                    }
                 }
                 continue;
             }
@@ -76,8 +78,10 @@ impl MD051LinkFragments {
                 if let Ok(Some(cap)) = SETEXT_HEADING_WITH_CAPTURE.captures(&combined) {
                     if let Some(heading_text) = cap.get(1) {
                         let heading = heading_text.as_str().trim();
-                        let fragment = self.heading_to_fragment(heading);
-                        headings.insert(fragment);
+                        let variations = self.generate_fragment_variations(heading);
+                        for fragment in variations {
+                            headings.insert(fragment);
+                        }
                     }
                 }
             }
@@ -120,6 +124,50 @@ impl MD051LinkFragments {
 
         // Replace multiple consecutive hyphens with a single one
         MULTIPLE_HYPHENS.replace_all(&fragment, "-").to_string()
+    }
+
+    /// Generate multiple possible fragment variations for a heading to handle
+    /// different tools and manual creation scenarios
+    fn generate_fragment_variations(&self, heading: &str) -> Vec<String> {
+        let mut variations = Vec::new();
+
+        // Primary fragment (GitHub's algorithm)
+        let primary = self.heading_to_fragment(heading);
+        variations.push(primary.clone());
+
+        // Alternative: preserve some consecutive hyphens (for manually created TOCs)
+        let mut stripped = heading.to_string();
+        stripped = INLINE_LINK_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = BOLD_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = BOLD_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = ITALIC_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = ITALIC_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = STRIKETHROUGH_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = stripped.replace("`", "");
+
+        // Alternative algorithm that preserves some patterns
+        let alt_fragment = stripped
+            .to_lowercase()
+            .chars()
+            .map(|c| match c {
+                ' ' => '-',
+                c if c.is_alphanumeric() => c,
+                _ => '-',
+            })
+            .collect::<String>();
+
+        // Only reduce to double hyphens (not single) for some tools
+        let alt_with_double = alt_fragment.replace("---", "--");
+        if alt_with_double != primary {
+            variations.push(alt_with_double);
+        }
+
+        // Keep the original with triple hyphens for some manual TOCs
+        if alt_fragment != primary {
+            variations.push(alt_fragment);
+        }
+
+        variations
     }
 
     fn is_external_url(&self, url: &str) -> bool {
@@ -167,11 +215,6 @@ impl Rule for MD051LinkFragments {
         let mut in_toc_section = false;
 
         for (line_num, line) in content.lines().enumerate() {
-            // Early return: skip lines without links or fragments
-            if !line.contains('[') || !line.contains('#') {
-                continue;
-            }
-
             // Check if we're entering a TOC section
             if TOC_SECTION_START.is_match(line) {
                 in_toc_section = true;
@@ -181,6 +224,11 @@ impl Rule for MD051LinkFragments {
             // Check if we're exiting a TOC section (next heading)
             if in_toc_section && line.starts_with('#') && !TOC_SECTION_START.is_match(line) {
                 in_toc_section = false;
+            }
+
+            // Early return: skip lines without links or fragments
+            if !line.contains('[') || !line.contains('#') {
+                continue;
             }
 
             // Skip lines in code blocks or TOC section

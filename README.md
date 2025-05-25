@@ -41,7 +41,6 @@
     - [Configuration Output](#configuration-output)
       - [Effective Configuration (`rumdl config`)](#effective-configuration-rumdl-config)
       - [Defaults Only (`rumdl config --defaults`)](#defaults-only-rumdl-config---defaults)
-  - [Editor Integration (LSP)](#editor-integration-lsp)
   - [Output Style](#output-style)
     - [Output Format](#output-format)
   - [Development](#development)
@@ -387,40 +386,6 @@ line_length = 80
 code_blocks = true
 ...
 ```
-
-## Editor Integration (LSP)
-
-rumdl includes a built-in Language Server Protocol (LSP) implementation for real-time markdown linting in your favorite editor. Following [Ruff's approach](https://docs.astral.sh/ruff/editors/), the LSP server is built directly into the main `rumdl` binary.
-
-### Starting the LSP Server
-
-```bash
-# Standard mode (stdio) - default
-rumdl server
-
-# Explicit stdio mode
-rumdl server --stdio
-
-# Debug mode (TCP)
-rumdl server --port 8080 --verbose
-```
-
-### Supported Editors
-
-- **VS Code**: Use the official rumdl extension (coming soon)
-- **Neovim**: Configure with nvim-lspconfig
-- **Emacs**: Use with lsp-mode
-- **Sublime Text**: Use with LSP package
-- **Any LSP-compatible editor**
-
-For detailed setup instructions, see our [LSP Setup Guide](docs/lsp-setup.md).
-
-### LSP Features
-
-- **Real-time diagnostics** - See markdown linting errors as you type
-- **Code actions** - One-click fixes for violations (where available)
-- **Configuration support** - Respects your `.rumdl.toml` configuration
-- **Performance optimized** - Built in Rust with all our performance optimizations
 
 ## Output Style
 

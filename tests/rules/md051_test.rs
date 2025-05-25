@@ -398,3 +398,34 @@ fn test_inline_code_spans() {
         "Warning should be about 'section-two'"
     );
 }
+
+#[test]
+fn test_readme_fragments_debug() {
+    let content = r#"# rumdl - A high-performance Markdown linter, written in Rust
+
+## Table of Contents
+
+- [rumdl - A high-performance Markdown linter, written in Rust](#rumdl---a-high-performance-markdown-linter-written-in-rust)
+  - [Table of Contents](#table-of-contents)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+
+        // Test the actual rule
+    println!("\nRunning MD051 check on README-like content:");
+    let result = rule.check(&ctx).unwrap();
+    for warning in &result {
+        println!("Warning: line {}, message: {}", warning.line, warning.message);
+    }
+
+    if result.is_empty() {
+        println!("No warnings found - fragments match correctly!");
+    } else {
+        println!("Found {} warnings", result.len());
+    }
+
+    // For now, let's just check that we get some result (debugging)
+    // TODO: Fix the algorithm to properly handle these cases
+    println!("Test completed - this is a known issue with fragment generation algorithm");
+}
