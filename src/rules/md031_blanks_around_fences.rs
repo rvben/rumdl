@@ -97,6 +97,9 @@ impl Rule for MD031BlanksAroundFences {
         let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
 
+        // Check if original content ended with newline
+        let had_trailing_newline = content.ends_with('\n');
+
         let lines: Vec<&str> = content.lines().collect();
 
         let mut result = Vec::new();
@@ -139,7 +142,16 @@ impl Rule for MD031BlanksAroundFences {
             i += 1;
         }
 
-        Ok(result.join("\n"))
+        let fixed = result.join("\n");
+
+        // Preserve original trailing newline if it existed
+        let final_result = if had_trailing_newline && !fixed.ends_with('\n') {
+            format!("{}\n", fixed)
+        } else {
+            fixed
+        };
+
+        Ok(final_result)
     }
 
     /// Get the category of this rule for selective processing
@@ -297,5 +309,33 @@ mod tests {
             2,
             "Expected 2 warnings for missing blank lines before and after"
         );
+    }
+
+    #[test]
+    fn test_fix_preserves_trailing_newline() {
+        let rule = MD031BlanksAroundFences;
+
+        // Test content with trailing newline
+        let content = "Some text\n```\ncode\n```\nMore text\n";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should preserve the trailing newline
+        assert!(fixed.ends_with('\n'), "Fix should preserve trailing newline");
+        assert_eq!(fixed, "Some text\n\n```\ncode\n```\n\nMore text\n");
+    }
+
+    #[test]
+    fn test_fix_preserves_no_trailing_newline() {
+        let rule = MD031BlanksAroundFences;
+
+        // Test content without trailing newline
+        let content = "Some text\n```\ncode\n```\nMore text";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should not add trailing newline if original didn't have one
+        assert!(!fixed.ends_with('\n'), "Fix should not add trailing newline if original didn't have one");
+        assert_eq!(fixed, "Some text\n\n```\ncode\n```\n\nMore text");
     }
 }
