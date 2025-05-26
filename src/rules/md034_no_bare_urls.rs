@@ -365,13 +365,17 @@ impl MD034NoBareUrls {
                     if let Some(pos) = &image.position {
                         let offset = pos.start.offset + url_start;
                         let (line, column) = ctx.offset_to_line_col(offset);
+                        let url_text = &alt_str[url_start..url_end];
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             line,
                             column,
-                            message: format!("Bare URL found: {}", &alt_str[url_start..url_end]),
+                            message: format!("Bare URL found: {}", url_text),
                             severity: Severity::Warning,
-                            fix: None,
+                            fix: Some(Fix {
+                                range: offset..(offset + url_text.len()),
+                                replacement: format!("<{}>", url_text),
+                            }),
                         });
                     }
                 }

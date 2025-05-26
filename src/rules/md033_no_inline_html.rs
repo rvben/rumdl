@@ -230,6 +230,7 @@ impl Rule for MD033NoInlineHtml {
         let lines: Vec<&str> = content.lines().collect();
 
         // First pass: find single-line HTML tags
+        // To match markdownlint behavior, report one warning per HTML tag
         for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1;
 
@@ -270,13 +271,11 @@ impl Rule for MD033NoInlineHtml {
                     continue;
                 }
 
-                // Calculate column position (1-indexed)
-                let column = tag_match.start() + 1;
-
+                // Report each HTML tag individually (true markdownlint compatibility)
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: line_num,
-                    column,
+                    column: tag_match.start() + 1, // 1-indexed
                     message: "Inline HTML".to_string(),
                     severity: Severity::Warning,
                     fix: None,
@@ -365,10 +364,11 @@ mod tests {
         let content = "<div>Some content</div>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Now detects both opening and closing tags
-        assert_eq!(result.len(), 2);
+        // Reports one warning per HTML tag (true markdownlint compatibility)
+        assert_eq!(result.len(), 2); // <div> and </div>
         assert_eq!(result[0].message, "Inline HTML");
-        assert_eq!(result[1].message, "Inline HTML");
+        assert_eq!(result[0].column, 1); // <div> position
+        assert_eq!(result[1].column, 18); // </div> position
     }
 
     #[test]
@@ -377,9 +377,13 @@ mod tests {
         let content = "<DiV>Some <B>content</B></dIv>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Now detects all four tags: <DiV>, <B>, </B>, </dIv>
-        assert_eq!(result.len(), 4);
+        // Reports one warning per HTML tag (true markdownlint compatibility)
+        assert_eq!(result.len(), 4); // <DiV>, <B>, </B>, </dIv>
         assert_eq!(result[0].message, "Inline HTML");
+        assert_eq!(result[0].column, 1); // <DiV> position
+        assert_eq!(result[1].column, 11); // <B> position
+        assert_eq!(result[2].column, 21); // </B> position
+        assert_eq!(result[3].column, 25); // </dIv> position
     }
 
     #[test]
@@ -388,13 +392,18 @@ mod tests {
         let content = "<div>Allowed</div><p>Not allowed</p><br/>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Only <p> and </p> should be flagged (div and br are allowed)
+        // Only warnings for non-allowed tags (<p> and </p>, div and br are allowed)
         assert_eq!(result.len(), 2);
+        assert_eq!(result[0].column, 19); // Position of <p> tag
+        assert_eq!(result[1].column, 33); // Position of </p> tag
+
         // Test case-insensitivity of allowed tags
         let content2 = "<DIV>Allowed</DIV><P>Not allowed</P><BR/>";
         let ctx2 = LintContext::new(content2);
         let result2 = rule.check(&ctx2).unwrap();
-        assert_eq!(result2.len(), 2); // Only <P> and </P> flagged
+        assert_eq!(result2.len(), 2); // <P> and </P> flagged
+        assert_eq!(result2[0].column, 19); // Position of <P> tag
+        assert_eq!(result2[1].column, 33); // Position of </P> tag
     }
 
     #[test]
@@ -403,8 +412,10 @@ mod tests {
         let content = "<!-- This is a comment --> <p>Not a comment</p>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Should detect <p> and </p> tags (comments are skipped)
-        assert_eq!(result.len(), 2);
+        // Should detect warnings for HTML tags (comments are skipped)
+        assert_eq!(result.len(), 2); // <p> and </p>
+        assert_eq!(result[0].column, 28); // Position of <p> tag
+        assert_eq!(result[1].column, 44); // Position of </p> tag
     }
 
     #[test]
@@ -420,10 +431,11 @@ mod tests {
         let content2 = "[Link <a>text</a>](url)";
         let ctx2 = LintContext::new(content2);
         let result2 = rule.check(&ctx2).unwrap();
-        // Should detect <a> and </a> tags in link text
-        assert_eq!(result2.len(), 2);
+        // Reports one warning per HTML tag (true markdownlint compatibility)
+        assert_eq!(result2.len(), 2); // <a> and </a>
         assert_eq!(result2[0].message, "Inline HTML");
-        assert_eq!(result2[1].message, "Inline HTML");
+        assert_eq!(result2[0].column, 7); // Position of <a> tag
+        assert_eq!(result2[1].column, 14); // Position of </a> tag
     }
 
     #[test]
@@ -442,11 +454,13 @@ mod tests {
         let content = "```html\n<div>Code</div>\n```\n<div>Not code</div>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Should detect both opening and closing tags outside the code block
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].line, 4); // <div> outside code block
-        assert_eq!(result[1].line, 4); // </div> outside code block
+        // Reports one warning per HTML tag (true markdownlint compatibility)
+        assert_eq!(result.len(), 2); // <div> and </div> outside code block
+        assert_eq!(result[0].line, 4); // Line with HTML outside code block
+        assert_eq!(result[0].column, 1); // Position of <div> tag
         assert_eq!(result[0].message, "Inline HTML");
+        assert_eq!(result[1].line, 4); // Same line
+        assert_eq!(result[1].column, 14); // Position of </div> tag
     }
 
     #[test]

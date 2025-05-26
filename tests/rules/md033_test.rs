@@ -17,12 +17,12 @@ fn test_simple_html_tag() {
     let content = "Some <b>bold</b> text";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // Current implementation detects both opening and closing HTML tags
-    assert_eq!(result.len(), 2);
+    // Reports one warning per HTML tag (true markdownlint compatibility)
+    assert_eq!(result.len(), 2); // <b> and </b>
     assert_eq!(result[0].line, 1);
-    assert_eq!(result[0].column, 6); // <b>
+    assert_eq!(result[0].column, 6); // <b> tag
     assert_eq!(result[1].line, 1);
-    assert_eq!(result[1].column, 13); // </b>
+    assert_eq!(result[1].column, 13); // </b> tag
 }
 
 #[test]
@@ -79,8 +79,12 @@ fn test_multiple_tags() {
     let content = "<div><p>Nested</p></div>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // Current implementation detects all 4 HTML tags: <div>, <p>, </p>, </div>
-    assert_eq!(result.len(), 4);
+    // Reports one warning per HTML tag (true markdownlint compatibility)
+    assert_eq!(result.len(), 4); // <div>, <p>, </p>, </div>
+    assert_eq!(result[0].column, 1); // <div> tag
+    assert_eq!(result[1].column, 6); // <p> tag
+    assert_eq!(result[2].column, 15); // </p> tag
+    assert_eq!(result[3].column, 19); // </div> tag
 }
 
 #[test]
@@ -89,7 +93,10 @@ fn test_attributes() {
     let content = "<div class=\"test\" id=\"main\">Content</div>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
+    // Reports one warning per HTML tag (true markdownlint compatibility)
+    assert_eq!(result.len(), 2); // <div> and </div>
+    assert_eq!(result[0].column, 1); // <div> tag
+    assert_eq!(result[1].column, 36); // </div> tag
 }
 
 #[test]
@@ -98,7 +105,13 @@ fn test_mixed_content() {
     let content = "# Heading\n\n<div>HTML content</div>\n\n* List item\n\n<span>More HTML</span>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 4);
+    // Reports one warning per HTML tag (true markdownlint compatibility)
+    // Two lines with HTML: line 3 and line 7, each with 2 tags
+    assert_eq!(result.len(), 4); // <div>, </div>, <span>, </span>
+    assert_eq!(result[0].line, 3); // <div> line
+    assert_eq!(result[1].line, 3); // </div> line
+    assert_eq!(result[2].line, 7); // <span> line
+    assert_eq!(result[3].line, 7); // </span> line
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content);
 }
