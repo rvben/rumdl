@@ -3,7 +3,7 @@
 /// See [docs/md019.md](../../docs/md019.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_single_line_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -126,24 +126,32 @@ impl Rule for MD019NoMultipleSpaceAtx {
 
             // Check if this is an ATX heading with multiple spaces
             if self.is_atx_heading_with_multiple_spaces(line) {
-                let hashes = ATX_MULTIPLE_SPACE_PATTERN
-                    .captures(line)
-                    .unwrap()
-                    .get(1)
-                    .unwrap();
+                let captures = ATX_MULTIPLE_SPACE_PATTERN.captures(line).unwrap();
+                let hashes = captures.get(1).unwrap();
                 let spaces = self.count_spaces_after_hashes(line);
+
+                // Calculate precise range: highlight the extra spaces (all spaces after the first one)
+                let hash_end_col = hashes.end() + 1; // 1-indexed, position after hashes
+                let extra_spaces_start = hash_end_col + 1; // Skip the first (correct) space
+                let extra_spaces_len = spaces - 1; // Number of extra spaces
+
+                let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
+                    line_num,
+                    extra_spaces_start,
+                    extra_spaces_len
+                );
+
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!(
-                "Multiple spaces ({
-            }) after {} in ATX style heading",
+                    rule_name: Some(self.name()),
+                    message: format!(
+                        "Multiple spaces ({}) after {} in ATX style heading",
                         spaces,
                         "#".repeat(hashes.as_str().len())
                     ),
-                    line: line_num,
-                    column: hashes.end() + 1,
-                    end_line: line_num,
-                    end_column: line.len() + 1,
+                    line: start_line,
+                    column: start_col,
+                    end_line: end_line,
+                    end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(line_num, 1),

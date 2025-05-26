@@ -19,7 +19,7 @@ fn test_invalid_atx_headings() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
-    assert_eq!(result[0].column, 2);
+    assert_eq!(result[0].column, 3);
     assert_eq!(
         result[0].message,
         "Multiple spaces (2) after # in ATX style heading"

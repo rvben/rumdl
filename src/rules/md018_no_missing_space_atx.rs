@@ -3,6 +3,7 @@
 /// See [docs/md018.md](../../docs/md018.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::calculate_single_line_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -140,20 +141,31 @@ impl Rule for MD018NoMissingSpaceAtx {
 
             // Check if this is an ATX heading without space
             if self.is_atx_heading_without_space(line) {
-                let hashes = ATX_NO_SPACE_PATTERN.captures(line).unwrap().get(1).unwrap();
+                let captures = ATX_NO_SPACE_PATTERN.captures(line).unwrap();
+                let hashes = captures.get(1).unwrap();
+                let content_start = captures.get(2).unwrap();
+
+                // Calculate precise range: highlight from end of hashes to start of content
+                let hash_end_col = hashes.end() + 1; // 1-indexed
+                let content_start_col = content_start.start() + 1; // 1-indexed
+                let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
+                    line_num,
+                    hash_end_col,
+                    content_start_col - hash_end_col
+                );
+
                 let line_range = self.get_line_byte_range(content, line_num);
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!(
-                "No space after {
-            } in ATX style heading",
+                    rule_name: Some(self.name()),
+                    message: format!(
+                        "No space after {} in ATX style heading",
                         "#".repeat(hashes.as_str().len())
                     ),
-                    line: line_num,
-                    column: hashes.end() + 1,
-                    end_line: line_num,
-                    end_column: line.len() + 1,
+                    line: start_line,
+                    column: start_col,
+                    end_line: end_line,
+                    end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_range,

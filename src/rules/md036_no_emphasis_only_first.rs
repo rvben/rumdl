@@ -5,7 +5,7 @@
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::heading_utils::HeadingUtils;
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_emphasis_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -42,7 +42,8 @@ impl MD036NoEmphasisAsHeading {
         line: &str,
         content: &str,
         line_num: usize,
-    ) -> Option<(usize, String)> {
+    ) -> Option<(usize, String, usize, usize)> {
+        let original_line = line;
         let line = line.trim();
 
         // Fast path for empty lines and lines that don't contain emphasis markers
@@ -71,22 +72,34 @@ impl MD036NoEmphasisAsHeading {
         // Check specific patterns directly without additional requirements
         // Check for *emphasis* pattern (entire line)
         if let Some(caps) = RE_ASTERISK_SINGLE.captures(line) {
-            return Some((1, caps.get(1).unwrap().as_str().to_string()));
+            let full_match = caps.get(0).unwrap();
+            let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
+            let end_pos = start_pos + full_match.len();
+            return Some((1, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
         }
 
         // Check for _emphasis_ pattern (entire line)
         if let Some(caps) = RE_UNDERSCORE_SINGLE.captures(line) {
-            return Some((1, caps.get(1).unwrap().as_str().to_string()));
+            let full_match = caps.get(0).unwrap();
+            let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
+            let end_pos = start_pos + full_match.len();
+            return Some((1, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
         }
 
         // Check for **strong** pattern (entire line)
         if let Some(caps) = RE_ASTERISK_DOUBLE.captures(line) {
-            return Some((2, caps.get(1).unwrap().as_str().to_string()));
+            let full_match = caps.get(0).unwrap();
+            let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
+            let end_pos = start_pos + full_match.len();
+            return Some((2, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
         }
 
         // Check for __strong__ pattern (entire line)
         if let Some(caps) = RE_UNDERSCORE_DOUBLE.captures(line) {
-            return Some((2, caps.get(1).unwrap().as_str().to_string()));
+            let full_match = caps.get(0).unwrap();
+            let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
+            let end_pos = start_pos + full_match.len();
+            return Some((2, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
         }
 
         None
@@ -163,15 +176,16 @@ impl Rule for MD036NoEmphasisAsHeading {
                 continue;
             }
 
-            if let Some((level, text)) = Self::is_entire_line_emphasized(line, content, i) {
+            if let Some((level, text, start_pos, end_pos)) = Self::is_entire_line_emphasized(line, content, i) {
+                let (start_line, start_col, end_line, end_col) = calculate_emphasis_range(i + 1, line, start_pos, end_pos);
+
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: i + 1,
-                column: 1,
-                end_line: i + 1,
-                end_column: 1 + 1,
-                message: format!("Emphasis used instead of a heading: '{
-            }'", text),
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line: end_line,
+                    end_column: end_col,
+                    message: format!("Emphasis used instead of a heading: '{}'", text),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(i + 1, 1),
@@ -197,7 +211,7 @@ impl Rule for MD036NoEmphasisAsHeading {
 
         for i in 0..lines.len() {
             let line = lines[i];
-            if let Some((level, text)) = Self::is_entire_line_emphasized(line, content, i) {
+            if let Some((level, text, _start_pos, _end_pos)) = Self::is_entire_line_emphasized(line, content, i) {
                 result.push_str(&self.get_heading_for_emphasis(level, &text));
             } else {
                 result.push_str(line);

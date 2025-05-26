@@ -1,7 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingUtils;
 use crate::utils::document_structure::DocumentStructure;
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_heading_range};
 use crate::HeadingStyle;
 
 /// Rule MD001: Heading levels should only increment by one level at a time
@@ -147,14 +147,24 @@ impl Rule for MD001HeadingIncrement {
                 let replacement =
                     HeadingUtils::convert_heading_style(&heading_text, fixed_level as u32, style);
 
+                // Calculate precise range: highlight the entire heading
+                let line_content = if adjusted_line_num < lines.len() {
+                    lines[adjusted_line_num]
+                } else {
+                    ""
+                };
+                let (start_line, start_col, end_line, end_col) = calculate_heading_range(
+                    line_num,
+                    line_content
+                );
+
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: line_num,
-                column: indentation + 1,
-                end_line: line_num,
-                end_column: indentation + 1 + 1,
-                message: format!("Heading level should be {
-            } for this level", prev_level + 1),
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line: end_line,
+                    end_column: end_col,
+                    message: format!("Heading level should be {} for this level", prev_level + 1),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(line_num, indentation + 1),

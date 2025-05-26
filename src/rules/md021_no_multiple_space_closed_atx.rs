@@ -3,6 +3,7 @@
 /// See [docs/md021.md](../../docs/md021.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::calculate_single_line_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -165,7 +166,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
             // Check if line matches closed ATX pattern with multiple spaces
             if self.is_closed_atx_heading_with_multiple_spaces(line) {
                 let captures = CLOSED_ATX_MULTIPLE_SPACE_PATTERN.captures(line).unwrap();
-                let indentation = captures.get(1).unwrap();
+                let _indentation = captures.get(1).unwrap();
                 let opening_hashes = captures.get(2).unwrap();
                 let (start_spaces, end_spaces) = self.count_spaces(line);
 
@@ -192,13 +193,40 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
 
                 let line_range = self.get_line_byte_range(ctx.content, line_num);
 
+                // Calculate precise character range for the extra spaces
+                let start_col;
+                let length;
+
+                if start_spaces > 1 && end_spaces > 1 {
+                    // Highlight the extra spaces at the start (after opening hashes)
+                    let opening_hashes = captures.get(2).unwrap();
+                    start_col = opening_hashes.end() + 2; // After hash + first space
+                    length = start_spaces - 1; // Extra spaces only
+                } else if start_spaces > 1 {
+                    // Highlight the extra spaces after opening hashes
+                    let opening_hashes = captures.get(2).unwrap();
+                    start_col = opening_hashes.end() + 2; // After hash + first space
+                    length = start_spaces - 1; // Extra spaces only
+                } else {
+                    // Highlight the extra spaces before closing hashes
+                    let content = captures.get(4).unwrap();
+                    start_col = content.end() + 2; // After content + first space
+                    length = end_spaces - 1; // Extra spaces only
+                }
+
+                let (start_line, start_col_calc, end_line, end_col) = calculate_single_line_range(
+                    line_num,
+                    start_col,
+                    length
+                );
+
                 warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message,
-                line: line_num,
-                column: indentation.end() + 1,
-                end_line: line_num,
-                end_column: indentation.end() + 1 + 1,
+                line: start_line,
+                column: start_col_calc,
+                end_line: end_line,
+                end_column: end_col,
                 severity: Severity::Warning,
                 fix: Some(Fix {
                 range: line_range,

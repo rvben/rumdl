@@ -3,6 +3,7 @@
 /// See [docs/md020.md](../../docs/md020.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::calculate_single_line_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -169,35 +170,59 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
 
             // Check if line matches closed ATX pattern without space
             if self.is_closed_atx_heading_without_space(line) {
-                let captures = if let Some(c) = CLOSED_ATX_NO_SPACE_PATTERN.captures(line) {
-                    c
-                } else if let Some(c) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
-                    c
-                } else {
-                    CLOSED_ATX_NO_SPACE_END_PATTERN
-                        .captures(line)
-                        .unwrap_or_else(|| {
-                            // This shouldn't happen given the is_closed_atx_heading_without_space check,
-                            // but we'll handle it gracefully anyway
-                            CLOSED_ATX_NO_SPACE_PATTERN.captures(" # # ").unwrap()
-                        })
-                };
-
-                let indentation = captures.get(1).unwrap();
-                let opening_hashes = captures.get(2).unwrap();
                 let line_range = self.get_line_byte_range(_ctx.content, line_num);
 
-                warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!(
-                "Missing space inside hashes on closed ATX style heading with {
-            } hashes",
+
+                let mut start_col = 1;
+                let mut length = 1;
+                let mut message = String::new();
+
+                if let Some(captures) = CLOSED_ATX_NO_SPACE_PATTERN.captures(line) {
+                    // Missing space at both start and end: #Heading#
+                    let opening_hashes = captures.get(2).unwrap();
+                    message = format!(
+                        "Missing space inside hashes on closed ATX style heading with {} hashes",
                         opening_hashes.as_str().len()
-                    ),
-                    line: line_num,
-                    column: indentation.end() + 1,
-                    end_line: line_num,
-                    end_column: line.len() + 1,
+                    );
+                    // Highlight the position right after the opening hashes
+                    start_col = opening_hashes.end() + 1;
+                    length = 1;
+                } else if let Some(captures) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
+                    // Missing space at start: #Heading #
+                    let opening_hashes = captures.get(2).unwrap();
+                    message = format!(
+                        "Missing space after opening hashes on closed ATX style heading with {} hashes",
+                        opening_hashes.as_str().len()
+                    );
+                    // Highlight the position right after the opening hashes
+                    start_col = opening_hashes.end() + 1;
+                    length = 1;
+                } else if let Some(captures) = CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line) {
+                    // Missing space at end: # Heading#
+                    let content = captures.get(3).unwrap();
+                    let closing_hashes = captures.get(5).unwrap();
+                    message = format!(
+                        "Missing space before closing hashes on closed ATX style heading with {} hashes",
+                        closing_hashes.as_str().len()
+                    );
+                    // Highlight the position right before the closing hashes
+                    start_col = content.end() + 1;
+                    length = 1;
+                }
+
+                let (start_line, start_col_calc, end_line, end_col) = calculate_single_line_range(
+                    line_num,
+                    start_col,
+                    length
+                );
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    message,
+                    line: start_line,
+                    column: start_col_calc,
+                    end_line: end_line,
+                    end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_range,

@@ -2,6 +2,7 @@ use crate::rule::Rule;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::document_structure::DocumentStructure;
+use crate::utils::range_utils::calculate_heading_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -238,12 +239,25 @@ impl Rule for MD002FirstHeadingH1 {
                     }
                 },
             );
+
+            // Calculate precise range: highlight the entire first heading
+            let lines: Vec<&str> = content.lines().collect();
+            let line_content = if first_heading_line > 0 && first_heading_line <= lines.len() {
+                lines[first_heading_line - 1]
+            } else {
+                ""
+            };
+            let (start_line, start_col, end_line, end_col) = calculate_heading_range(
+                first_heading_line,
+                line_content
+            );
+
             result.push(LintWarning {
                 message,
-                line: first_heading_line,
-                column: 1,
-                end_line: first_heading_line,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 severity: Severity::Warning,
                 fix,
                 rule_name: Some(self.name()),
