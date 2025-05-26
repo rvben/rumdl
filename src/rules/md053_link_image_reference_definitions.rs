@@ -250,27 +250,37 @@ impl MD053LinkImageReferenceDefinitions {
         unused
     }
 
-    /// Helper method to clean up document structure after removing lines
-    fn clean_up_document_structure(&self, lines: &mut Vec<String>) {
-        // Clean up consecutive empty lines
-        let mut i = 1;
-        while i < lines.len() {
-            if lines[i].trim().is_empty() && lines[i - 1].trim().is_empty() {
-                lines.remove(i);
+    /// Clean up multiple consecutive blank lines that might be created after removing references
+    fn clean_up_blank_lines(&self, content: &str) -> String {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut result_lines = Vec::new();
+        let mut consecutive_blanks = 0;
+
+        for line in lines {
+            if line.trim().is_empty() {
+                consecutive_blanks += 1;
+                if consecutive_blanks <= 1 {
+                    // Allow up to 1 consecutive blank line
+                    result_lines.push(line);
+                }
             } else {
-                i += 1;
+                consecutive_blanks = 0;
+                result_lines.push(line);
             }
         }
 
-        // Remove trailing blank lines
-        while !lines.is_empty() && lines.last().unwrap().trim().is_empty() {
-            lines.pop();
+        // Remove leading and trailing blank lines
+        while !result_lines.is_empty() && result_lines[0].trim().is_empty() {
+            result_lines.remove(0);
+        }
+        while !result_lines.is_empty() && result_lines[result_lines.len() - 1].trim().is_empty() {
+            result_lines.pop();
         }
 
-        // Remove leading blank lines
-        while !lines.is_empty() && lines[0].trim().is_empty() {
-            lines.remove(0);
-        }
+        let result = result_lines.join("\n");
+
+        // Don't add trailing newlines - let the content determine its own ending
+        result
     }
 }
 
@@ -301,14 +311,14 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         let mut warnings = Vec::new();
 
         // Create warnings for unused references
-        for (definition, start, _) in unused_refs {
+        for (definition, start, _end) in unused_refs {
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 line: start + 1, // 1-indexed line numbers
                 column: 1,
                 message: format!("Unused link/image reference definition: [{}]", definition),
                 severity: Severity::Warning,
-                fix: None,
+                fix: None, // We'll handle fixes in the fix() method
             });
         }
 
@@ -324,7 +334,6 @@ impl Rule for MD053LinkImageReferenceDefinitions {
     /// 3. Cleaning up any formatting issues created by the removals
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        // Compute DocumentStructure once
         let doc_structure = DocumentStructure::new(content);
 
         // Find definitions and usages using DocumentStructure
@@ -334,34 +343,42 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         // Get unused references by comparing definitions and usages
         let unused_refs = self.get_unused_references(&definitions, &usages);
 
+        // If no unused references, return original content
         if unused_refs.is_empty() {
             return Ok(content.to_string());
         }
 
-        // Split the content into lines
-        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        // Collect all line ranges to remove (sort by start line descending)
+        let mut lines_to_remove: Vec<(usize, usize)> = unused_refs
+            .iter()
+            .map(|(_, start, end)| (*start, *end))
+            .collect();
+        lines_to_remove.sort_by(|a, b| b.0.cmp(&a.0)); // Sort descending by start line
 
-        // Create a set of line numbers to remove (unused references)
-        let mut to_remove = std::collections::HashSet::with_capacity(unused_refs.len() * 2);
-        for (_, start, end) in &unused_refs {
-            for line in *start..=*end {
-                to_remove.insert(line);
+        // Remove lines from end to beginning to preserve line numbers
+        let lines: Vec<&str> = content.lines().collect();
+        let mut result_lines: Vec<&str> = lines.clone();
+
+        for (start_line, end_line) in lines_to_remove {
+            // Remove lines from start_line to end_line (inclusive)
+            if start_line < result_lines.len() && end_line < result_lines.len() {
+                result_lines.drain(start_line..=end_line);
             }
         }
 
-        // Build the result, skipping unused definitions
-        let mut result = Vec::with_capacity(lines.len() - to_remove.len());
-        for (i, line) in lines.into_iter().enumerate() {
-            if !to_remove.contains(&i) {
-                result.push(line);
-            }
+        // Join the remaining lines
+        let mut result = result_lines.join("\n");
+
+        // Preserve original ending (with or without newline)
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
         }
 
-        // Clean up formatting issues created by removals
-        self.clean_up_document_structure(&mut result);
+        // Clean up multiple consecutive blank lines that might have been created
+        let cleaned = self.clean_up_blank_lines(&result);
 
-        Ok(result.join("\n"))
-    }
+        Ok(cleaned)
+        }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self

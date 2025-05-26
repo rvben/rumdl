@@ -11,6 +11,16 @@ lazy_static! {
     static ref URL_PATTERN: Regex = Regex::new(r"^https?://\S+$").unwrap();
     static ref IMAGE_REF_PATTERN: Regex = Regex::new(r"^!\[.*?\]\[.*?\]$" ).unwrap();
     static ref LINK_REF_PATTERN: Regex = Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap();
+
+    // Sentence splitting patterns
+    static ref SENTENCE_END: Regex = Regex::new(r"[.!?]\s+[A-Z]").unwrap();
+    static ref ABBREVIATION: Regex = Regex::new(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|i\.e|e\.g|Inc|Corp|Ltd|Co|St|Ave|Blvd|Rd|Ph\.D|M\.D|B\.A|M\.A|Ph\.D|U\.S|U\.K|U\.N|N\.Y|L\.A|D\.C)\.\s+[A-Z]").unwrap();
+    static ref DECIMAL_NUMBER: Regex = Regex::new(r"\d+\.\s*\d+").unwrap();
+    static ref LIST_ITEM: Regex = Regex::new(r"^\s*\d+\.\s+").unwrap();
+
+    // Link detection patterns
+    static ref INLINE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\(([^)]*)\)").unwrap();
+    static ref REFERENCE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\[([^\]]*)\]").unwrap();
 }
 
 #[derive(Clone)]
@@ -195,16 +205,74 @@ impl Rule for MD013LineLength {
             // Check line length
             let effective_length = line.len();
             if effective_length > self.line_length {
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: format!(
+                // Generate fix if we can safely modify the line
+                let fix = if !self.should_skip_line_for_fix(line, line_num, structure) {
+                    // First try trimming trailing whitespace
+                    let trimmed = line.trim_end();
+                    if trimmed.len() <= self.line_length && trimmed != line {
+                        let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
+                        let line_start = line_index.line_col_to_byte_range(line_number, 1).start;
+                        let line_end = if line_number < lines.len() {
+                            line_index.line_col_to_byte_range(line_number + 1, 1).start - 1
+                        } else {
+                            content.len()
+                        };
+                        Some(crate::rule::Fix {
+                            range: line_start..line_end,
+                            replacement: trimmed.to_string(),
+                        })
+                    } else if let Some((first_part, second_part)) = self.try_split_sentences(line, self.line_length) {
+                        // Try sentence splitting
+                        let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
+                        let line_start = line_index.line_col_to_byte_range(line_number, 1).start;
+                        let line_end = if line_number < lines.len() {
+                            line_index.line_col_to_byte_range(line_number + 1, 1).start - 1
+                        } else {
+                            content.len()
+                        };
+
+                        // Preserve indentation from original line
+                        let leading_whitespace = line.len() - line.trim_start().len();
+                        let indent = &line[..leading_whitespace];
+
+                        let replacement = format!("{}\n{}{}", first_part, indent, second_part);
+                        Some(crate::rule::Fix {
+                            range: line_start..line_end,
+                            replacement,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let message = if let Some(ref fix_obj) = fix {
+                    if fix_obj.replacement.contains('\n') {
+                        format!(
+                            "Line length {} exceeds {} characters (can split sentences)",
+                            effective_length, self.line_length
+                        )
+                    } else {
+                        format!(
+                            "Line length {} exceeds {} characters (can trim whitespace)",
+                            effective_length, self.line_length
+                        )
+                    }
+                } else {
+                    format!(
                         "Line length {} exceeds {} characters",
                         effective_length, self.line_length
-                    ),
+                    )
+                };
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    message,
                     line: line_number,
                     column: self.line_length + 1,
                     severity: Severity::Warning,
-                    fix: None,
+                    fix,
                 });
             }
         }
@@ -212,47 +280,29 @@ impl Rule for MD013LineLength {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let structure = DocumentStructure::new(content);
-        let lines: Vec<&str> = content.lines().collect();
-        let mut result = Vec::new();
-        let mut changed = false;
+        // Get all warnings with their fixes
+        let warnings = self.check(ctx)?;
 
-        for (line_num, &line) in lines.iter().enumerate() {
-            let _line_number = line_num + 1; // 1-based
+        // If no warnings, return original content
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
+        }
 
-            // Skip lines that shouldn't be fixed
-            if self.should_skip_line_for_fix(line, line_num, &structure) {
-                result.push(line.to_string());
-                continue;
-            }
+        // Collect all fixes and sort by range start (descending) to apply from end to beginning
+        let mut fixes: Vec<_> = warnings.iter()
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
+            .collect();
+        fixes.sort_by(|a, b| b.0.cmp(&a.0));
 
-            // Check if line exceeds length
-            if line.len() > self.line_length {
-                // Only fix trailing whitespace - don't attempt word wrapping
-                let trimmed = line.trim_end();
-                if trimmed.len() <= self.line_length && trimmed != line {
-                    result.push(trimmed.to_string());
-                    changed = true;
-                } else {
-                    // Can't fix this line safely - leave it unchanged
-                    result.push(line.to_string());
-                }
-            } else {
-                result.push(line.to_string());
+        // Apply fixes from end to beginning to preserve byte offsets
+        let mut result = ctx.content.to_string();
+        for (start, end, replacement) in fixes {
+            if start < result.len() && end <= result.len() && start <= end {
+                result.replace_range(start..end, replacement);
             }
         }
 
-        if changed {
-            // Preserve original line endings
-            if content.ends_with('\n') {
-                Ok(result.join("\n") + "\n")
-            } else {
-                Ok(result.join("\n"))
-            }
-        } else {
-            Ok(content.to_string())
-        }
+        Ok(result)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -315,6 +365,120 @@ impl Rule for MD013LineLength {
 }
 
 impl MD013LineLength {
+        /// Find sentence boundaries in a line, avoiding false positives
+    fn find_sentence_boundaries(&self, line: &str) -> Vec<usize> {
+        let mut boundaries = Vec::new();
+
+        // Find all potential sentence endings
+        for mat in SENTENCE_END.find_iter(line) {
+            // The regex matches "[.!?]\s+[A-Z]", so we want to split after the punctuation and space
+            // Find the position right before the capital letter
+            let match_text = mat.as_str();
+            let punct_and_space_len = match_text.len() - 1; // Everything except the capital letter
+            let split_pos = mat.start() + punct_and_space_len;
+
+            // Check if this is a false positive
+            let before = &line[..mat.start() + 1];
+
+            // Skip if it's an abbreviation
+            if ABBREVIATION.is_match(&line[..mat.end()]) {
+                continue;
+            }
+
+            // Skip if it's a decimal number
+            if DECIMAL_NUMBER.is_match(&line[..mat.end()]) {
+                continue;
+            }
+
+            // Skip if it's a numbered list item
+            if LIST_ITEM.is_match(line) && before.contains('.') && before.matches('.').count() == 1 {
+                continue;
+            }
+
+            // Skip if we're inside a link or code span
+            if self.is_inside_markdown_construct(line, mat.start()) {
+                continue;
+            }
+
+            boundaries.push(split_pos);
+        }
+
+        boundaries
+    }
+
+        /// Check if a position is inside a markdown construct (links, code spans, etc.)
+    fn is_inside_markdown_construct(&self, line: &str, pos: usize) -> bool {
+        let chars: Vec<char> = line.chars().collect();
+
+        // Check for code spans
+        let mut in_code = false;
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '`' {
+                // Count consecutive backticks
+                let mut _backtick_count = 0;
+                let _start = i;
+                while i < chars.len() && chars[i] == '`' {
+                    _backtick_count += 1;
+                    i += 1;
+                }
+
+                if in_code {
+                    // Look for matching closing backticks
+                    in_code = false; // Assume we found the closing
+                } else {
+                    // Opening backticks
+                    in_code = true;
+                }
+            } else {
+                if i == pos && in_code {
+                    return true;
+                }
+                i += 1;
+            }
+        }
+
+                // Check for links - look for complete [text](url) or [text][ref] patterns
+        for mat in INLINE_LINK.find_iter(line) {
+            if pos >= mat.start() && pos < mat.end() {
+                return true;
+            }
+        }
+
+        for mat in REFERENCE_LINK.find_iter(line) {
+            if pos >= mat.start() && pos < mat.end() {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Attempt to split a line at sentence boundaries
+    fn try_split_sentences(&self, line: &str, max_length: usize) -> Option<(String, String)> {
+        let boundaries = self.find_sentence_boundaries(line);
+
+        if boundaries.is_empty() {
+            return None;
+        }
+
+        // Find the best split point
+        for &boundary in &boundaries {
+            let first_part = line[..boundary].trim_end();
+            let second_part = line[boundary..].trim_start();
+
+            // Check if both parts would be within the limit
+            if first_part.len() <= max_length && second_part.len() <= max_length {
+                // Ensure the second part starts with a capital letter (sentence)
+                if second_part.chars().next().map_or(false, |c| c.is_uppercase()) {
+                    return Some((first_part.to_string(), second_part.to_string()));
+                }
+            }
+        }
+
+        None
+    }
+
     /// Check if a line should be skipped for fixing
     fn should_skip_line_for_fix(&self, line: &str, line_num: usize, structure: &DocumentStructure) -> bool {
         let line_number = line_num + 1; // 1-based
