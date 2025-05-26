@@ -133,40 +133,36 @@ impl Rule for MD042NoEmptyLinks {
             return Ok(content.to_string());
         }
 
-        // Group warnings by line number for easier processing
-        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        let mut result = content.to_string();
 
-        // Process warnings line by line (in reverse order to avoid offset issues)
-        let mut warnings_by_line: std::collections::BTreeMap<usize, Vec<&crate::rule::LintWarning>> = std::collections::BTreeMap::new();
-        for warning in &warnings {
-            warnings_by_line.entry(warning.line).or_insert_with(Vec::new).push(warning);
+        lazy_static! {
+            static ref EMPTY_LINK_REGEX: Regex = Regex::new(r"(?<!\!)\[([^\]]*)\]\(([^\)]*)\)").unwrap();
         }
 
-        // Process lines in reverse order to avoid affecting line indices
-        for (line_num, line_warnings) in warnings_by_line.iter().rev() {
-            let line_idx = line_num - 1;
-            if line_idx >= lines.len() {
-                continue;
-            }
+        // Apply fixes by replacing each empty link with the appropriate replacement
+        for warning in &warnings {
+            if let Some(fix) = &warning.fix {
+                // Find the specific link that matches this warning
+                for cap_result in EMPTY_LINK_REGEX.captures_iter(&result) {
+                    let cap = match cap_result {
+                        Ok(cap) => cap,
+                        Err(_) => continue,
+                    };
 
-            // Sort warnings by column in reverse order (rightmost first)
-            let mut sorted_warnings = line_warnings.clone();
-            sorted_warnings.sort_by_key(|w| std::cmp::Reverse(w.column));
+                    let full_match = cap.get(0).unwrap();
+                    let text = cap.get(1).map_or("", |m| m.as_str());
+                    let url = cap.get(2).map_or("", |m| m.as_str());
 
-            for warning in sorted_warnings {
-                if let Some(fix) = &warning.fix {
-                    let line = &mut lines[line_idx];
-                    let start = fix.range.start;
-                    let end = fix.range.end;
-
-                    if start <= line.len() && end <= line.len() && start < end {
-                        line.replace_range(start..end, &fix.replacement);
+                    // Check if this is an empty link that needs fixing
+                    if text.trim().is_empty() || url.trim().is_empty() {
+                        result = result.replacen(&full_match.as_str(), &fix.replacement, 1);
+                        break; // Only replace one at a time to avoid issues
                     }
                 }
             }
         }
 
-        Ok(lines.join("\n"))
+        Ok(result)
     }
 
     /// Get the category of this rule for selective processing

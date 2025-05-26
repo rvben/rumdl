@@ -219,7 +219,7 @@ impl Rule for MD013LineLength {
         let mut changed = false;
 
         for (line_num, &line) in lines.iter().enumerate() {
-            let line_number = line_num + 1; // 1-based
+            let _line_number = line_num + 1; // 1-based
 
             // Skip lines that shouldn't be fixed
             if self.should_skip_line_for_fix(line, line_num, &structure) {
@@ -229,10 +229,13 @@ impl Rule for MD013LineLength {
 
             // Check if line exceeds length
             if line.len() > self.line_length {
-                if let Some(fixed_line) = self.try_fix_line(line) {
-                    result.push(fixed_line);
+                // Only fix trailing whitespace - don't attempt word wrapping
+                let trimmed = line.trim_end();
+                if trimmed.len() <= self.line_length && trimmed != line {
+                    result.push(trimmed.to_string());
                     changed = true;
                 } else {
+                    // Can't fix this line safely - leave it unchanged
                     result.push(line.to_string());
                 }
             } else {
@@ -342,134 +345,6 @@ impl MD013LineLength {
         }
 
         false
-    }
-
-    /// Try to fix a line that's too long
-    fn try_fix_line(&self, line: &str) -> Option<String> {
-        // Fix 1: Remove trailing whitespace
-        let trimmed = line.trim_end();
-        if trimmed.len() <= self.line_length {
-            return Some(trimmed.to_string());
-        }
-
-        // Fix 2: Simple word wrapping for plain text (not in lists, blockquotes, etc.)
-        if self.can_word_wrap(line) {
-            return self.word_wrap_line(line);
-        }
-
-        // Can't fix this line safely
-        None
-    }
-
-    /// Check if a line can be safely word-wrapped
-    fn can_word_wrap(&self, line: &str) -> bool {
-        let trimmed = line.trim_start();
-
-        // Don't wrap lines that start with special markdown syntax
-        if trimmed.starts_with('#') ||      // Headings
-           trimmed.starts_with('>') ||      // Blockquotes
-           trimmed.starts_with('*') ||      // Lists
-           trimmed.starts_with('-') ||      // Lists or HR
-           trimmed.starts_with('+') ||      // Lists
-           trimmed.starts_with('|') ||      // Tables
-           trimmed.starts_with('[') ||      // Reference definitions
-           trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) // Numbered lists
-        {
-            return false;
-        }
-
-        // Don't wrap lines with inline code or links that might break
-        if trimmed.contains('`') || trimmed.contains('[') || trimmed.contains("](") {
-            return false;
-        }
-
-        // Only wrap if there are spaces to break on
-        trimmed.contains(' ')
-    }
-
-    /// Attempt to word-wrap a line
-    fn word_wrap_line(&self, line: &str) -> Option<String> {
-        let leading_whitespace = line.len() - line.trim_start().len();
-        let indent = " ".repeat(leading_whitespace);
-        let content = line.trim_start();
-
-        // Find the last space before the line length limit
-        let max_content_length = self.line_length.saturating_sub(leading_whitespace);
-
-        if let Some(break_pos) = content[..max_content_length.min(content.len())]
-            .rfind(' ')
-        {
-            let first_line = format!("{}{}", indent, &content[..break_pos]);
-            let remaining = content[break_pos + 1..].trim_start();
-
-            if !remaining.is_empty() {
-                // Only return the first line - let subsequent passes handle the rest
-                // This is safer than trying to wrap multiple lines at once
-                Some(format!("{}\n{}{}", first_line, indent, remaining))
-            } else {
-                Some(first_line)
-            }
-        } else {
-            None
-        }
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
-    fn category(&self) -> RuleCategory {
-        RuleCategory::Whitespace
-    }
-
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "line_length".to_string(),
-            toml::Value::Integer(self.line_length as i64),
-        );
-        map.insert(
-            "code_blocks".to_string(),
-            toml::Value::Boolean(self.code_blocks),
-        );
-        map.insert("tables".to_string(), toml::Value::Boolean(self.tables));
-        map.insert("headings".to_string(), toml::Value::Boolean(self.headings));
-        map.insert("strict".to_string(), toml::Value::Boolean(self.strict));
-
-        Some((self.name().to_string(), toml::Value::Table(map)))
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        // get_rule_config_value now automatically tries both underscore and kebab-case variants
-        let line_length = crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length")
-            .unwrap_or(80);
-
-        let code_blocks = crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
-            .unwrap_or(true);
-
-        let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables")
-            .unwrap_or(false);
-
-        let headings = crate::config::get_rule_config_value::<bool>(config, "MD013", "headings")
-            .unwrap_or(true);
-
-        let strict = crate::config::get_rule_config_value::<bool>(config, "MD013", "strict")
-            .unwrap_or(false);
-
-        Box::new(MD013LineLength::new(
-            line_length,
-            code_blocks,
-            tables,
-            headings,
-            strict,
-        ))
     }
 }
 
