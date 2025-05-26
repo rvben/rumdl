@@ -67,6 +67,34 @@ impl MD006StartBullets {
         }
         None
     }
+
+    /// Check if a list item is nested under a parent list item
+    fn is_nested_list_item(lines: &[&str], line_idx: usize) -> bool {
+        if let Some(current_indent) = Self::is_bullet_list_item(lines[line_idx]) {
+            // Look backwards for a parent list item with less indentation
+            for i in (0..line_idx).rev() {
+                let line = lines[i];
+
+                // Skip blank lines
+                if Self::is_blank_line(line) {
+                    continue;
+                }
+
+                // If we find a list item with less indentation, this is nested
+                if let Some(parent_indent) = Self::is_bullet_list_item(line) {
+                    if parent_indent < current_indent {
+                        return true;
+                    }
+                }
+
+                // If we hit non-list content, stop looking
+                if Self::is_bullet_list_item(line).is_none() {
+                    break;
+                }
+            }
+        }
+        false
+    }
 }
 
 impl Rule for MD006StartBullets {
@@ -116,6 +144,8 @@ impl Rule for MD006StartBullets {
                 Node::ListItem(ListItem {
                     position, children, ..
                 }) => {
+                    // Only flag top-level list items (depth == 1) that are indented
+                    // but make sure they're actually top-level and not nested sub-lists
                     if depth == 1 && !in_blockquote {
                         if let Some(pos) = position {
                             let line_idx = pos.start.line.saturating_sub(1);
@@ -123,17 +153,23 @@ impl Rule for MD006StartBullets {
                                 if let Some(cap) = BULLET_PATTERN.captures(line) {
                                     let indent = cap[1].len();
                                     if indent > 0 {
-                                        result.push(LintWarning {
-                                            rule_name: Some("MD006"),
-                                            severity: Severity::Warning,
-                                            line: line_idx + 1,
-                                            column: 1,
-                                            message: "Consider starting bulleted lists at the beginning of the line".to_string(),
-                                            fix: Some(Fix {
-                                                range: 0..indent,
-                                                replacement: "".to_string(),
-                                            }),
-                                        });
+                                        // Check if this is actually a nested list item
+                                        // by looking for a parent list item above it
+                                        let is_nested = MD006StartBullets::is_nested_list_item(lines, line_idx);
+
+                                        if !is_nested {
+                                            result.push(LintWarning {
+                                                rule_name: Some("MD006"),
+                                                severity: Severity::Warning,
+                                                line: line_idx + 1,
+                                                column: 1,
+                                                message: "Consider starting bulleted lists at the beginning of the line".to_string(),
+                                                fix: Some(Fix {
+                                                    range: 0..indent,
+                                                    replacement: "".to_string(),
+                                                }),
+                                            });
+                                        }
                                     }
                                 }
                             }
@@ -310,7 +346,7 @@ impl Rule for MD006StartBullets {
     }
 
     fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
+        None
     }
 
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>

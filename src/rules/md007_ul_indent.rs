@@ -99,104 +99,84 @@ impl Rule for MD007ULIndent {
         self.check(ctx)
     }
 
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+            fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let tab_str = " ".repeat(self.indent);
-        let mut lines: Vec<String> = content
-            .lines()
-            .map(|l| {
-                // Normalize leading tabs to spaces
-                let mut norm = String::new();
-                let mut chars = l.chars().peekable();
-                while let Some(&c) = chars.peek() {
-                    if c == '\t' {
-                        norm.push_str(&tab_str);
-                        chars.next();
-                    } else if c == ' ' {
-                        norm.push(' ');
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                norm.extend(chars);
-                norm
-            })
-            .collect();
 
-        // Recompute logical nesting for each unordered list item
-        let mut prev_items: Vec<(usize, usize, usize)> = Vec::new(); // (blockquote_depth, indent, nesting_level)
-        for (_, line) in lines.iter_mut().enumerate() {
-            let orig_line = line.clone();
-            // Inline blockquote prefix parsing (since parse_blockquote_prefix is private)
-            let mut rest = orig_line.as_str();
-            let mut blockquote_prefix = String::new();
-            let mut blockquote_depth = 0;
-            loop {
-                let trimmed = rest.trim_start();
-                if trimmed.starts_with('>') {
-                    // Find the '>' and a single optional space
-                    let after = &trimmed[1..];
-                    let mut chars = after.chars();
-                    let mut space_count = 0;
-                    if let Some(' ') = chars.next() {
-                        space_count = 1;
-                    }
-                    let (spaces, after_marker) = after.split_at(space_count);
-                    blockquote_prefix.push('>');
-                    blockquote_prefix.push_str(spaces);
-                    rest = after_marker;
-                    blockquote_depth += 1;
-                } else {
-                    break;
-                }
-            }
-            // Only process unordered list items outside code blocks
-            if rest.trim().is_empty() || rest.starts_with("```") || rest.starts_with("~~~") {
-                // Do NOT clear prev_items on blank lines; only skip processing
-                continue;
-            }
-            // Use the same regex as element_cache
-            let re = regex::Regex::new(r"^(?P<indent>[ ]*)(?P<marker>[*+-])(?P<after>[ ]+)(?P<content>.*)$").unwrap();
-            if let Some(caps) = re.captures(rest) {
-                let indent_str = caps.name("indent").map_or("", |m| m.as_str());
-                let marker = caps.name("marker").unwrap().as_str();
-                let after = caps.name("after").map_or(" ", |m| m.as_str());
-                let content = caps.name("content").map_or("", |m| m.as_str());
-                let indent = indent_str.len();
-                // Compute logical nesting level
-                let mut nesting_level = 0;
-                if let Some(&(_last_bq, last_indent, last_level)) = prev_items.iter().rev().find(|(bq, _, _)| *bq == blockquote_depth) {
-                    if indent > last_indent {
-                        nesting_level = last_level + 1;
-                    } else {
-                        for &(prev_bq, prev_indent, prev_level) in prev_items.iter().rev() {
-                            if prev_bq == blockquote_depth && prev_indent <= indent {
-                                nesting_level = prev_level;
-                                break;
-                            }
-                        }
-                    }
-                }
-                // Remove stack entries with indent >= current indent and same blockquote depth
-                while let Some(&(prev_bq, prev_indent, _)) = prev_items.last() {
-                    if prev_bq != blockquote_depth || prev_indent < indent {
-                        break;
-                    }
-                    prev_items.pop();
-                }
-                prev_items.push((blockquote_depth, indent, nesting_level));
-                // Reconstruct line with correct indentation
-                let correct_indent = " ".repeat(nesting_level * self.indent);
-                *line = format!("{}{}{}{}{}", blockquote_prefix, correct_indent, marker, after, content);
-            } else {
-                // Only clear prev_items if the line is not blank and not a list item
-                if !rest.trim().is_empty() {
-                    prev_items.clear();
-                }
+        // Get the warnings to know which lines need indentation fixing
+        let warnings = self.check(ctx)?;
+        let mut lines_to_fix: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for warning in &warnings {
+            lines_to_fix.insert(warning.line);
+        }
+
+        let element_cache = ElementCache::new(content);
+        let lines: Vec<&str> = content.lines().collect();
+        let mut result_lines: Vec<String> = Vec::new();
+
+        // Check if any list items have tabs that need normalization
+        let mut has_tabs = false;
+        for &line in &lines {
+            if line.contains('\t') && element_cache.get_list_items().iter().any(|item| item.line_number == lines.iter().position(|&l| l == line).unwrap_or(0) + 1) {
+                has_tabs = true;
+                break;
             }
         }
-        Ok(lines.join("\n"))
+
+        // If no warnings and no tabs to normalize, return original content
+        if warnings.is_empty() && !has_tabs {
+            return Ok(content.to_string());
+        }
+
+        for (line_idx, &line) in lines.iter().enumerate() {
+            let line_number = line_idx + 1;
+
+            // Check if this line is a list item
+            if let Some(item) = element_cache.get_list_items().iter().find(|item| item.line_number == line_number) {
+                if matches!(item.marker_type, ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus) {
+                    // Determine if we need to fix this line
+                    let needs_indentation_fix = lines_to_fix.contains(&line_number);
+                    let needs_tab_normalization = line.contains('\t');
+
+                    if needs_indentation_fix || needs_tab_normalization {
+                        let expected_indent = item.nesting_level * self.indent;
+
+                        // Reconstruct the line with correct indentation
+                        let marker_char = match item.marker_type {
+                            ListMarkerType::Asterisk => '*',
+                            ListMarkerType::Plus => '+',
+                            ListMarkerType::Minus => '-',
+                            _ => unreachable!(),
+                        };
+
+                        // Extract the content after the marker and space
+                        let re = regex::Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
+                        if let Some(caps) = re.captures(line) {
+                            let content_part = caps.get(4).map_or("", |m| m.as_str());
+                            let space_after_marker = caps.get(3).map_or(" ", |m| m.as_str());
+                            let correct_indent = " ".repeat(expected_indent);
+                            let fixed_line = format!("{}{}{}{}{}", item.blockquote_prefix, correct_indent, marker_char, space_after_marker, content_part);
+                            result_lines.push(fixed_line);
+                        } else {
+                            // Fallback: just use the original line
+                            result_lines.push(line.to_string());
+                        }
+                    } else {
+                        result_lines.push(line.to_string());
+                    }
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            } else {
+                result_lines.push(line.to_string());
+            }
+        }
+
+        let result = result_lines.join("\n");
+        if content.ends_with('\n') {
+            Ok(result + "\n")
+        } else {
+            Ok(result)
+        }
     }
 
     /// Get the category of this rule for selective processing

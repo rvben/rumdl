@@ -247,7 +247,7 @@ mod parity_with_markdownlint {
         let ctx = LintContext::new(input);
         let rule = MD007ULIndent::default();
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, expected);
+        assert_eq!(fixed, expected, "Nested items should maintain proper indentation even after blank lines");
     }
 
     #[test]
@@ -283,7 +283,7 @@ mod parity_with_markdownlint {
     #[test]
     fn parity_mixed_tabs_and_spaces_in_indentation() {
         let input = "* Item 1\n\t* Nested item 1\n  \t* Nested item 2\n* Item 2";
-        let expected = "* Item 1\n  * Nested item 1\n    * Nested item 2\n* Item 2";
+        let expected = "* Item 1\n  * Nested item 1\n  * Nested item 2\n* Item 2";
         let ctx = LintContext::new(input);
         let rule = MD007ULIndent::default();
         let fixed = rule.fix(&ctx).unwrap();

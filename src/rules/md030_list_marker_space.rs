@@ -185,8 +185,9 @@ impl Rule for MD030ListMarkerSpace {
         ))
     }
 
-    fn fix(&self, _ctx: &crate::lint_context::LintContext) -> Result<String, crate::rule::LintError> {
-        Err(crate::rule::LintError::FixFailed("Automatic fixing is not supported for MD030. See todos/md030_fix_strategy.md for details.".to_string()))
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, crate::rule::LintError> {
+        // MD030 is not fixable - return content unchanged
+        Ok(ctx.content.to_string())
     }
 }
 

@@ -284,13 +284,17 @@ impl MD034NoBareUrls {
                     if let Some(pos) = &text.position {
                         let offset = pos.start.offset + url_start;
                         let (line, column) = ctx.offset_to_line_col(offset);
+                        let url_text = &text_str[url_start..url_end];
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             line,
                             column,
-                            message: format!("Bare URL found: {}", &text_str[url_start..url_end]),
+                            message: format!("Bare URL found: {}", url_text),
                             severity: Severity::Warning,
-                            fix: None, // Fix not implemented yet
+                            fix: Some(Fix {
+                                range: offset..(offset + url_text.len()),
+                                replacement: format!("<{}>", url_text),
+                            }),
                         });
                     }
                 }
@@ -401,45 +405,30 @@ impl Rule for MD034NoBareUrls {
         }
 
         // Get all warnings first - only fix URLs that are actually flagged
-        let warnings = self.check(ctx)?;
+        // Use AST-based detection to match the main linting path (since uses_ast() returns true)
+        let ast = crate::utils::ast_utils::get_cached_ast(content);
+        let warnings = self.check_with_ast(ctx, &ast)?;
         if warnings.is_empty() {
             return Ok(content.to_string());
         }
 
-        // Group warnings by line number for easier processing
-        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        // Sort warnings by byte offset in reverse order (rightmost first) to avoid offset issues
+        let mut sorted_warnings = warnings.clone();
+        sorted_warnings.sort_by_key(|w| std::cmp::Reverse(w.fix.as_ref().map(|f| f.range.start).unwrap_or(0)));
 
-        // Process warnings line by line (in reverse order to avoid offset issues)
-        let mut warnings_by_line: std::collections::BTreeMap<usize, Vec<&crate::rule::LintWarning>> = std::collections::BTreeMap::new();
-        for warning in &warnings {
-            warnings_by_line.entry(warning.line).or_insert_with(Vec::new).push(warning);
-        }
+        let mut result = content.to_string();
+        for warning in sorted_warnings {
+            if let Some(fix) = &warning.fix {
+                let start = fix.range.start;
+                let end = fix.range.end;
 
-        // Process lines in reverse order to avoid affecting line indices
-        for (line_num, line_warnings) in warnings_by_line.iter().rev() {
-            let line_idx = line_num - 1;
-            if line_idx >= lines.len() {
-                continue;
-            }
-
-            // Sort warnings by column in reverse order (rightmost first)
-            let mut sorted_warnings = line_warnings.clone();
-            sorted_warnings.sort_by_key(|w| std::cmp::Reverse(w.column));
-
-            for warning in sorted_warnings {
-                if let Some(fix) = &warning.fix {
-                    let line = &mut lines[line_idx];
-                    let start = fix.range.start;
-                    let end = fix.range.end;
-
-                    if start <= line.len() && end <= line.len() && start < end {
-                        line.replace_range(start..end, &fix.replacement);
-                    }
+                if start <= result.len() && end <= result.len() && start < end {
+                    result.replace_range(start..end, &fix.replacement);
                 }
             }
         }
 
-        Ok(lines.join("\n"))
+        Ok(result)
     }
 
     /// Get the category of this rule for selective processing

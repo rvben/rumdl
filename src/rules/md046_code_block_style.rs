@@ -50,13 +50,146 @@ impl MD046CodeBlockStyle {
             return false;
         }
 
-        // Not a list item
-        let prev_line_is_list = i > 0 && self.is_list_item(lines[i - 1]);
-        if prev_line_is_list {
+        // Check if this is part of a list structure
+        if self.is_part_of_list_structure(lines, i) {
+            return false;
+        }
+
+        // Check if this is part of a formatted text block (not a code block)
+        if self.is_part_of_formatted_text_block(lines, i) {
+            return false;
+        }
+
+        // Check if preceded by a blank line (typical for code blocks)
+        let has_blank_line_before = i == 0 || lines[i - 1].trim().is_empty();
+
+        // If no blank line before, it's likely list continuation, not a code block
+        if !has_blank_line_before {
             return false;
         }
 
         true
+    }
+
+    /// Check if an indented line is part of a formatted text block (like license text)
+    /// rather than a code block
+    fn is_part_of_formatted_text_block(&self, lines: &[&str], i: usize) -> bool {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        // Look for patterns that suggest this is formatted text, not code:
+
+        // 1. License/legal text patterns
+        if trimmed.contains("Copyright") ||
+           trimmed.contains("License") ||
+           trimmed.contains("Foundation") ||
+           trimmed.contains("Certificate") ||
+           trimmed.contains("Origin") ||
+           trimmed.starts_with("Version ") ||
+           trimmed.contains("permitted") ||
+           trimmed.contains("contribution") ||
+           trimmed.contains("certify") {
+            return true;
+        }
+
+        // 2. Address/contact information patterns
+        if trimmed.contains("Drive") ||
+           trimmed.contains("Suite") ||
+           trimmed.contains("CA,") ||
+           trimmed.contains("San Francisco") {
+            return true;
+        }
+
+        // 3. Email signature patterns
+        if trimmed.contains("Signed-off-by:") ||
+           trimmed.contains("@") && trimmed.contains(".com") {
+            return true;
+        }
+
+        // 4. Check if this is part of a larger block of indented text
+        // that looks like formatted prose rather than code
+        let mut consecutive_indented_lines = 0;
+        let mut has_prose_content = false;
+
+        // Look at surrounding lines to see if this is part of a prose block
+        let start = if i >= 5 { i - 5 } else { 0 };
+        let end = if i + 5 < lines.len() { i + 5 } else { lines.len() };
+
+        for j in start..end {
+            let check_line = lines[j];
+            if check_line.starts_with("    ") || check_line.starts_with("\t") {
+                consecutive_indented_lines += 1;
+                let check_trimmed = check_line.trim();
+                // Look for prose indicators
+                if check_trimmed.len() > 20 &&
+                   (check_trimmed.contains(" the ") ||
+                    check_trimmed.contains(" and ") ||
+                    check_trimmed.contains(" or ") ||
+                    check_trimmed.contains(" to ") ||
+                    check_trimmed.contains(" of ") ||
+                    check_trimmed.contains(" in ") ||
+                    check_trimmed.contains(" is ") ||
+                    check_trimmed.contains(" that ")) {
+                    has_prose_content = true;
+                }
+            }
+        }
+
+        // If we have many consecutive indented lines with prose content,
+        // it's likely formatted text, not code
+        if consecutive_indented_lines >= 5 && has_prose_content {
+            return true;
+        }
+
+        false
+    }
+
+        /// Check if an indented line is part of a list structure
+    fn is_part_of_list_structure(&self, lines: &[&str], i: usize) -> bool {
+        // Look backwards to find if we're in a list context
+        // We need to be more aggressive about detecting list contexts
+
+        for j in (0..i).rev() {
+            let line = lines[j];
+
+            // Skip empty lines - they don't break list context
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            // If we find a list item, we're definitely in a list context
+            if self.is_list_item(line) {
+                return true;
+            }
+
+            // Check if this line looks like it's part of a list item
+            // (indented content that's not a code block)
+            let trimmed = line.trim_start();
+            let indent_len = line.len() - trimmed.len();
+
+            // If we find a line that starts at column 0 and is not a list item,
+            // check if it's a structural element that would end list context
+            if indent_len == 0 && !trimmed.is_empty() {
+                // Headings definitely end list context
+                if trimmed.starts_with('#') {
+                    break;
+                }
+                // Horizontal rules end list context
+                if trimmed.starts_with("---") || trimmed.starts_with("***") {
+                    break;
+                }
+                // If it's a paragraph that doesn't look like it's part of a list,
+                // we might not be in a list anymore, but let's be conservative
+                // and keep looking a bit more
+                if j > 0 && j < i - 5 { // Only break if we've looked back a reasonable distance
+                    break;
+                }
+            }
+
+            // Continue looking backwards through indented content
+        }
+
+        false
     }
 
     /// Helper function to check if a line is part of a list

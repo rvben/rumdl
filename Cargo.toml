@@ -60,7 +60,7 @@ seahash = "4.1"
 tower-lsp = "0.20"
 tokio = { version = "1.0", features = ["full"] }
 tokio-util = "0.7"
-tower = "0.4"
+tower = "0.5.2"
 tower-service = "0.3"
 env_logger = "0.11"
 
