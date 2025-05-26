@@ -100,6 +100,18 @@ impl MD033NoInlineHtml {
         content.split('@').all(|part| !part.is_empty())
     }
 
+    // Check if a tag is actually a URL in angle brackets
+    #[inline]
+    fn is_url_in_angle_brackets(&self, tag: &str) -> bool {
+        let content = tag.trim_start_matches('<').trim_end_matches('>');
+        // Check for common URL schemes
+        content.starts_with("http://") ||
+        content.starts_with("https://") ||
+        content.starts_with("ftp://") ||
+        content.starts_with("ftps://") ||
+        content.starts_with("mailto:")
+    }
+
     /// Find HTML tags that span multiple lines
     fn find_multiline_html_tags(
         &self,
@@ -167,6 +179,7 @@ impl MD033NoInlineHtml {
                         if !self.is_html_comment(final_tag)
                             && !self.is_likely_type_annotation(final_tag)
                             && !self.is_email_address(final_tag)
+                            && !self.is_url_in_angle_brackets(final_tag)
                             && !self.is_tag_allowed(final_tag)
                             && HTML_TAG_FINDER.is_match(final_tag)
                         {
@@ -257,6 +270,11 @@ impl Rule for MD033NoInlineHtml {
 
                 // Skip email addresses in angle brackets
                 if self.is_email_address(tag) {
+                    continue;
+                }
+
+                // Skip URLs in angle brackets
+                if self.is_url_in_angle_brackets(tag) {
                     continue;
                 }
 

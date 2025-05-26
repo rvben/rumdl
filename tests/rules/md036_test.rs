@@ -33,8 +33,6 @@ fn test_strong_only() {
     assert_eq!(fixed, "## Strong\n## Also strong");
 }
 
-
-
 #[test]
 fn test_multiple_emphasis() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
@@ -185,4 +183,26 @@ fn test_partial_emphasis() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
+}
+
+#[test]
+fn test_table_of_contents_labels() {
+    let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+    let content = "**Table of Contents**\n\n*Contents*\n\n__TOC__\n\n_Index_";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    // None of these should be flagged as they are legitimate TOC labels
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_table_of_contents_with_other_emphasis() {
+    let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+    let content = "**Table of Contents**\n\n**This should be a heading**\n\n*Contents*\n\n*This should also be a heading*";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    // Only the non-TOC emphasis should be flagged
+    assert_eq!(result.len(), 2);
+    assert!(result[0].message.contains("This should be a heading"));
+    assert!(result[1].message.contains("This should also be a heading"));
 }

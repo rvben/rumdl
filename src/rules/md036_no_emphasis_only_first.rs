@@ -20,6 +20,8 @@ lazy_static! {
     static ref FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
     static ref HEADING_MARKER: Regex = Regex::new(r"^#+\s").unwrap();
     static ref HEADING_WITH_EMPHASIS: Regex = Regex::new(r"^(#+\s+).*(?:\*\*|\*|__|_)").unwrap();
+    // Pattern to match common Table of Contents labels that should not be converted to headings
+    static ref TOC_LABEL_PATTERN: Regex = Regex::new(r"^\s*(?:\*\*|\*|__|_)(?:Table of Contents|Contents|TOC|Index)(?:\*\*|\*|__|_)\s*$").unwrap();
 }
 
 /// Rule MD036: Emphasis used instead of a heading
@@ -50,6 +52,11 @@ impl MD036NoEmphasisAsHeading {
 
         // Skip if line is already a heading (but not a heading with emphasis)
         if HEADING_MARKER.is_match(line) && !HEADING_WITH_EMPHASIS.is_match(line) {
+            return None;
+        }
+
+        // Skip if line is a Table of Contents label (common legitimate use of bold text)
+        if TOC_LABEL_PATTERN.is_match(line) {
             return None;
         }
 

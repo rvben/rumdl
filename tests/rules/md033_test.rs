@@ -249,3 +249,84 @@ fn test_markdown_comments() {
         "HTML comments should not be flagged as HTML tags"
     );
 }
+
+#[test]
+fn test_urls_in_angle_brackets() {
+    let rule = MD033NoInlineHtml::default();
+
+    // Test various URL schemes in angle brackets
+    let content = "Visit <https://example.com> or <http://test.org>\n\
+                   Download from <ftp://files.example.com/file.zip>\n\
+                   Secure transfer: <ftps://secure.example.com/data>\n\
+                   Contact us: <mailto:user@example.com>\n\
+                   Complex URL: <https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers>";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // URLs in angle brackets should not be flagged as HTML
+    assert!(
+        result.is_empty(),
+        "URLs in angle brackets should not be flagged as HTML tags"
+    );
+}
+
+#[test]
+fn test_mixed_urls_and_html() {
+    let rule = MD033NoInlineHtml::default();
+
+    // Test content with both URLs in angle brackets and real HTML tags
+    let content = "Visit <https://example.com> for more info.\n\
+                   This has <strong>real HTML</strong> tags.\n\
+                   Email us at <mailto:test@example.com> or use <em>emphasis</em>.";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the real HTML tags, not the URLs
+    assert_eq!(result.len(), 4); // <strong>, </strong>, <em>, </em>
+
+    // Verify the flagged tags are the HTML ones
+    let flagged_content: Vec<String> = result.iter()
+        .map(|w| {
+            let line_content = content.lines().nth(w.line - 1).unwrap();
+            let start = w.column - 1;
+            let tag_end = line_content[start..].find('>').unwrap() + start + 1;
+            line_content[start..tag_end].to_string()
+        })
+        .collect();
+
+    assert!(flagged_content.contains(&"<strong>".to_string()));
+    assert!(flagged_content.contains(&"</strong>".to_string()));
+    assert!(flagged_content.contains(&"<em>".to_string()));
+    assert!(flagged_content.contains(&"</em>".to_string()));
+
+    // Verify URLs are not in the flagged content
+    assert!(!flagged_content.iter().any(|tag| tag.contains("https://")));
+    assert!(!flagged_content.iter().any(|tag| tag.contains("mailto:")));
+}
+
+#[test]
+fn test_edge_case_urls() {
+    let rule = MD033NoInlineHtml::default();
+
+    // Test edge cases that might be confused
+    let content = "Not a URL: <notaurl>\n\
+                   Real URL: <https://example.com>\n\
+                   Fake tag: <https>\n\
+                   Real tag: <div>";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+        // Should flag <notaurl>, <https>, and <div> but not the real URL
+    assert_eq!(result.len(), 3);
+
+    let flagged_positions: Vec<(usize, usize)> = result.iter()
+        .map(|w| (w.line, w.column))
+        .collect();
+
+    // <notaurl> should be flagged (line 1)
+    assert!(flagged_positions.contains(&(1, 12)));
+    // <https> should be flagged (line 3) - not a valid URL
+    assert!(flagged_positions.contains(&(3, 11)));
+    // <div> should be flagged (line 4)
+    assert!(flagged_positions.contains(&(4, 11)));
+}
