@@ -49,14 +49,17 @@ impl Rule for MD031BlanksAroundFences {
                 // Check for blank line before fence
                 if i > 0 && !Self::is_empty_line(lines[i - 1]) {
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: 1,
-                        message: "No blank line before fenced code block".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: format!("\n{}", lines[i]),
+                rule_name: Some(self.name()),
+                line: i + 1,
+                column: 1,
+                end_line: i + 1,
+                end_column: 1 + 1,
+                message: "No blank line before fenced code block".to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: _line_index.line_col_to_byte_range(i + 1, 1),
+                replacement: format!("\n{
+            }", lines[i]),
                         }),
                     });
                 }
@@ -73,15 +76,18 @@ impl Rule for MD031BlanksAroundFences {
                     // Check for blank line after fence
                     if i + 1 < lines.len() && !Self::is_empty_line(lines[i + 1]) {
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: i + 1,
-                            column: 1,
-                            message: "No blank line after fenced code block".to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: _line_index
-                                    .line_col_to_byte_range(i + 1, lines[i].len() + 1),
-                                replacement: format!("{}\n", lines[i]),
+                rule_name: Some(self.name()),
+                line: i + 1,
+                column: 1,
+                end_line: i + 1,
+                end_column: 1 + 1,
+                message: "No blank line after fenced code block".to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: _line_index
+                .line_col_to_byte_range(i + 1, lines[i].len() + 1),
+                replacement: format!("{
+            }\n", lines[i]),
                             }),
                         });
                     }
@@ -188,14 +194,17 @@ impl Rule for MD031BlanksAroundFences {
             // Check for blank line before fence
             if line_num > 1 && !Self::is_empty_line(lines[line_num - 2]) {
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num,
-                    column: 1,
-                    message: "No blank line before fenced code block".to_string(),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num, 1),
-                        replacement: format!("\n{}", lines[line_num - 1]),
+                rule_name: Some(self.name()),
+                line: line_num,
+                column: 1,
+                end_line: line_num,
+                end_column: 1 + 1,
+                message: "No blank line before fenced code block".to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(line_num, 1),
+                replacement: format!("\n{
+            }", lines[line_num - 1]),
                     }),
                 });
             }
@@ -207,15 +216,18 @@ impl Rule for MD031BlanksAroundFences {
             // Check for blank line after fence
             if line_num < lines.len() && !Self::is_empty_line(lines[line_num]) {
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num,
-                    column: 1,
-                    message: "No blank line after fenced code block".to_string(),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index
-                            .line_col_to_byte_range(line_num, lines[line_num - 1].len() + 1),
-                        replacement: format!("{}\n", lines[line_num - 1]),
+                rule_name: Some(self.name()),
+                line: line_num,
+                column: 1,
+                end_line: line_num,
+                end_column: 1 + 1,
+                message: "No blank line after fenced code block".to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: line_index
+                .line_col_to_byte_range(line_num, lines[line_num - 1].len() + 1),
+                replacement: format!("{
+            }\n", lines[line_num - 1]),
                     }),
                 });
             }

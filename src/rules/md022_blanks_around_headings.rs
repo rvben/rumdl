@@ -651,15 +651,17 @@ impl Rule for MD022BlanksAroundHeadings {
                     let message = issues.join(" ");
 
                     result.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message,
-                        line: heading_display_line,
-                        column: 1,
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: 0..0, // Placeholder range - the actual fix is handled by the fix() method
-                            replacement: String::new(), // Placeholder - the actual fix is handled by the fix() method
-                        }),
+                rule_name: Some(self.name()),
+                message,
+                line: heading_display_line,
+                column: 1,
+                end_line: heading_display_line,
+                end_column: 1 + 1,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: 0..0, // Placeholder range - the actual fix is handled by the fix() method
+                replacement: String::new(), // Placeholder - the actual fix is handled by the fix() method
+            }),
                     });
                 }
 
@@ -831,15 +833,17 @@ impl Rule for MD022BlanksAroundHeadings {
                 // For fix, just insert the required number of newlines at the start of the heading (above)
                 // and after the heading (below). For simplicity, only provide a fix for the first issue.
                 result.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message,
-                    line: heading_line + 1, // Convert back to 1-indexed
-                    column: 1,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: 0..0, // Placeholder range - the actual fix is handled by the fix() method
-                        replacement: String::new(), // Placeholder - the actual fix is handled by the fix() method
-                    }),
+                rule_name: Some(self.name()),
+                message,
+                line: heading_line + 1, // Convert back to 1-indexed
+                column: 1,
+                end_line: heading_line + 1, // Convert back to 1-indexed,
+                end_column: 1 + 1,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: 0..0, // Placeholder range - the actual fix is handled by the fix() method
+                replacement: String::new(), // Placeholder - the actual fix is handled by the fix() method
+            }),
                 });
             }
 

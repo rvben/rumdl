@@ -54,6 +54,8 @@ fn test_warning_to_diagnostic_conversion() {
         message: "Test warning message".to_string(),
         line: 5,
         column: 10,
+        end_line: 5,
+        end_column: 15,
         severity: Severity::Warning,
         fix: None,
         rule_name: Some("MD001"),
@@ -69,8 +71,8 @@ fn test_warning_to_diagnostic_conversion() {
     // Check position conversion (LSP is 0-indexed, rumdl is 1-indexed)
     assert_eq!(diagnostic.range.start.line, 4); // 5 - 1
     assert_eq!(diagnostic.range.start.character, 9); // 10 - 1
-    assert_eq!(diagnostic.range.end.line, 4);
-    assert_eq!(diagnostic.range.end.character, 10); // start + 1
+    assert_eq!(diagnostic.range.end.line, 4); // 5 - 1
+    assert_eq!(diagnostic.range.end.character, 14); // 15 - 1 (end_column - 1)
 
     // Check rule code
     if let Some(NumberOrString::String(code)) = diagnostic.code {
@@ -87,6 +89,8 @@ fn test_warning_to_diagnostic_error_severity() {
         message: "Test error message".to_string(),
         line: 1,
         column: 1,
+        end_line: 1,
+        end_column: 5,
         severity: Severity::Error,
         fix: None,
         rule_name: Some("MD999"),
@@ -103,6 +107,8 @@ fn test_warning_to_code_action_with_fix() {
         message: "Line too long".to_string(),
         line: 3,
         column: 5,
+        end_line: 3,
+        end_column: 15,
         severity: Severity::Warning,
         fix: Some(Fix {
             range: 80..90,
@@ -141,6 +147,8 @@ fn test_warning_to_code_action_without_fix() {
         message: "No fix available".to_string(),
         line: 1,
         column: 1,
+        end_line: 1,
+        end_column: 5,
         severity: Severity::Warning,
         fix: None,
         rule_name: Some("MD001"),
@@ -526,6 +534,8 @@ mod edge_cases {
             message: "Test message".to_string(),
             line: 1,
             column: 1,
+            end_line: 1,
+            end_column: 5,
             severity: Severity::Warning,
             fix: None,
             rule_name: None,
@@ -542,6 +552,8 @@ mod edge_cases {
             message: "Test message".to_string(),
             line: 0,
             column: 0,
+            end_line: 0,
+            end_column: 5,
             severity: Severity::Warning,
             fix: None,
             rule_name: Some("MD001"),

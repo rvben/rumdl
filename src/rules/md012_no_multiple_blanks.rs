@@ -119,14 +119,17 @@ impl Rule for MD012NoMultipleBlanks {
                     for i in self.maximum..blank_count {
                         let excess_line = blank_start + i + 1; // +1 for 1-indexed lines
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            severity: Severity::Warning,
-                            message: format!(
-                                "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                rule_name: Some(self.name()),
+                severity: Severity::Warning,
+                message: format!(
+                "Multiple consecutive blank lines {
+            } (Expected: {}; Actual: {})",
                                 location, self.maximum, blank_count
                             ),
                             line: excess_line,
                             column: 1,
+                            end_line: excess_line,
+                            end_column: 1,
                             fix: Some(Fix {
                                 range: _line_index.line_col_to_byte_range(excess_line, 1),
                                 replacement: String::new(), // Remove the excess line
@@ -144,14 +147,17 @@ impl Rule for MD012NoMultipleBlanks {
             for i in self.maximum..blank_count {
                 let excess_line = blank_start + i + 1;
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    severity: Severity::Warning,
-                    message: format!(
-                        "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                rule_name: Some(self.name()),
+                severity: Severity::Warning,
+                message: format!(
+                "Multiple consecutive blank lines {
+            } (Expected: {}; Actual: {})",
                         location, self.maximum, blank_count
                     ),
                     line: excess_line,
                     column: 1,
+                    end_line: excess_line,
+                    end_column: 1,
                     fix: Some(Fix {
                         range: _line_index.line_col_to_byte_range(excess_line, 1),
                         replacement: String::new(),

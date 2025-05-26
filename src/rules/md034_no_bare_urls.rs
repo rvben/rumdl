@@ -3,6 +3,7 @@
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity, MarkdownAst, AstExtensions, MaybeAst};
 use crate::utils::early_returns;
+use crate::utils::range_utils::calculate_url_range;
 
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
@@ -160,10 +161,14 @@ impl MD034NoBareUrls {
             if in_any_range {
                 continue;
             }
+            let (start_line, start_col, end_line, end_col) =
+                calculate_url_range(line_idx + 1, line, url_start, url_end - url_start);
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_idx + 1,
-                column: url_start + 1,
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
                 message: format!("Bare URL found: {}", &line[url_start..url_end]),
                 severity: Severity::Warning,
                 fix: Some(Fix {
@@ -201,10 +206,14 @@ impl MD034NoBareUrls {
             if in_any_range {
                 continue;
             }
+            let (start_line, start_col, end_line, end_col) =
+                calculate_url_range(line_idx + 1, line, email_start, email_end - email_start);
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_idx + 1,
-                column: email_start + 1,
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
                 message: format!("Bare email address found: {}", &line[email_start..email_end]),
                 severity: Severity::Warning,
                 fix: Some(Fix {
@@ -287,11 +296,15 @@ impl MD034NoBareUrls {
                         let offset = pos.start.offset + url_start;
                         let (line, column) = ctx.offset_to_line_col(offset);
                         let url_text = &text_str[url_start..url_end];
+                        let (start_line, start_col, end_line, end_col) =
+                            (line, column, line, column + url_text.chars().count());
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line,
-                            column,
-                            message: format!("Bare URL found: {}", url_text),
+                rule_name: Some(self.name()),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                message: format!("Bare URL found: {}", url_text),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
@@ -323,11 +336,15 @@ impl MD034NoBareUrls {
                         let offset = pos.start.offset + email_start;
                         let (line, column) = ctx.offset_to_line_col(offset);
                         let email_text = &text_str[email_start..email_end];
+                        let (start_line, start_col, end_line, end_col) =
+                            (line, column, line, column + email_text.chars().count());
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line,
-                            column,
-                            message: format!("Bare email address found: {}", email_text),
+                rule_name: Some(self.name()),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                message: format!("Bare email address found: {}", email_text),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + email_text.len()),
@@ -366,11 +383,15 @@ impl MD034NoBareUrls {
                         let offset = pos.start.offset + url_start;
                         let (line, column) = ctx.offset_to_line_col(offset);
                         let url_text = &alt_str[url_start..url_end];
+                        let (start_line, start_col, end_line, end_col) =
+                            (line, column, line, column + url_text.chars().count());
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line,
-                            column,
-                            message: format!("Bare URL found: {}", url_text),
+                rule_name: Some(self.name()),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                message: format!("Bare URL found: {}", url_text),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),

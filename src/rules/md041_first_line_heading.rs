@@ -88,8 +88,11 @@ impl Rule for MD041FirstLineHeading {
                 rule_name: Some(self.name()),
                 line: first_line,
                 column: 1,
+                end_line: first_line,
+                end_column: 1 + 1,
                 message: format!(
-                    "First line in file should be a level {} heading",
+                "First line in file should be a level {
+            } heading",
                     self.level
                 ),
                 severity: Severity::Warning,

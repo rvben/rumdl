@@ -191,10 +191,13 @@ impl MD057ExistingRelativeLinks {
             // Check if the file exists (with caching to avoid filesystem calls)
             if !file_exists_with_cache(&resolved_path) {
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num,
-                    column,
-                    message: format!("Relative link '{}' does not exist", url),
+                rule_name: Some(self.name()),
+                line: line_num,
+                column,
+                end_line: line_num,
+                end_column: column + url.len(),
+                message: format!("Relative link '{
+            }' does not exist", url),
                     severity: Severity::Warning,
                     fix: None, // No automatic fix for missing files
                 });

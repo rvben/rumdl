@@ -201,13 +201,15 @@ impl Rule for MD025SingleTitle {
                     0 // Setext headings start at column 1
                 };
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: format!(
-                        "Multiple top-level headings (level {}) in the same document",
+                rule_name: Some(self.name()),
+                message: format!(
+                "Multiple top-level headings (level {}) in the same document",
                         self.level
                     ),
                     line: line + 1, // Convert back to 1-indexed
                     column: col + 1,
+                    end_line: line + 1,
+                    end_column: col + line_content.trim().len() + 1,
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(line + 1, col + 1),

@@ -103,15 +103,18 @@ impl Rule for MD050StrongStyle {
                     };
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: line_num + 1,
-                        column: m.start() + 1,
-                        message: message.to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
-                            replacement: match target_style {
-                                StrongStyle::Asterisk => format!("**{}**", text),
+                rule_name: Some(self.name()),
+                line: line_num + 1,
+                column: m.start() + 1,
+                end_line: line_num + 1,
+                end_column: m.start() + 1 + 1,
+                message: message.to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: _line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
+                replacement: match target_style {
+                StrongStyle::Asterisk => format!("**{
+            }**", text),
                                 StrongStyle::Underscore => format!("__{}__", text),
                                 StrongStyle::Consistent => unreachable!(),
                             },

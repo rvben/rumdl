@@ -252,15 +252,17 @@ impl Rule for MD039NoSpaceInLinks {
                 };
                 let (line, column) = ctx.offset_to_line_col(link_start);
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line,
-                    column,
-                    message: WARNING_MESSAGE.to_string(),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: link_start..link_start + original.len(),
-                        replacement: fixed,
-                    }),
+                rule_name: Some(self.name()),
+                line,
+                column,
+                end_line: line,
+                end_column: column + original.len(),
+                message: WARNING_MESSAGE.to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: link_start..link_start + original.len(),
+                replacement: fixed,
+            }),
                 });
             }
         }

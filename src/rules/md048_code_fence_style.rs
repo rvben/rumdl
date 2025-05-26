@@ -55,29 +55,33 @@ impl Rule for MD048CodeFenceStyle {
             let trimmed = line.trim_start();
             if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: "Code fence style should use tildes".to_string(),
-                    line: line_num + 1,
-                    column: line.len() - trimmed.len() + 1,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: _line_index
-                            .line_col_to_byte_range(line_num + 1, line.len() - trimmed.len() + 1),
-                        replacement: line.replace("```", "~~~"),
-                    }),
+                rule_name: Some(self.name()),
+                message: "Code fence style should use tildes".to_string(),
+                line: line_num + 1,
+                column: line.len() - trimmed.len() + 1,
+                end_line: line_num + 1,
+                end_column: line.len() - trimmed.len() + 1 + 1,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: _line_index
+                .line_col_to_byte_range(line_num + 1, line.len() - trimmed.len() + 1),
+                replacement: line.replace("```", "~~~"),
+            }),
                 });
             } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: "Code fence style should use backticks".to_string(),
-                    line: line_num + 1,
-                    column: line.len() - trimmed.len() + 1,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: _line_index
-                            .line_col_to_byte_range(line_num + 1, line.len() - trimmed.len() + 1),
-                        replacement: line.replace("~~~", "```"),
-                    }),
+                rule_name: Some(self.name()),
+                message: "Code fence style should use backticks".to_string(),
+                line: line_num + 1,
+                column: line.len() - trimmed.len() + 1,
+                end_line: line_num + 1,
+                end_column: line.len() - trimmed.len() + 1 + 1,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: _line_index
+                .line_col_to_byte_range(line_num + 1, line.len() - trimmed.len() + 1),
+                replacement: line.replace("~~~", "```"),
+            }),
                 });
             }
         }

@@ -67,15 +67,17 @@ impl Rule for MD028NoBlanksBlockquote {
                 let level = BlockquoteUtils::get_nesting_level(line);
                 let indent = BlockquoteUtils::extract_indentation(line);
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: "Blank line inside blockquote".to_string(),
-                    line: line_num,
-                    column: 1,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num, 1),
-                        replacement: Self::get_replacement(&indent, level),
-                    }),
+                rule_name: Some(self.name()),
+                message: "Blank line inside blockquote".to_string(),
+                line: line_num,
+                column: 1,
+                end_line: line_num,
+                end_column: 1 + 1,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(line_num, 1),
+                replacement: Self::get_replacement(&indent, level),
+            }),
                 });
             }
         }

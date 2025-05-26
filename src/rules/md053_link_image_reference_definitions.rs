@@ -316,7 +316,10 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                 rule_name: Some(self.name()),
                 line: start + 1, // 1-indexed line numbers
                 column: 1,
-                message: format!("Unused link/image reference definition: [{}]", definition),
+                end_line: start + 1, // 1-indexed line numbers,
+                end_column: 1 + 1,
+                message: format!("Unused link/image reference definition: [{
+            }]", definition),
                 severity: Severity::Warning,
                 fix: None, // We'll handle fixes in the fix() method
             });

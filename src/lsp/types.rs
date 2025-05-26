@@ -37,16 +37,25 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
         character: (warning.column.saturating_sub(1)) as u32,
     };
 
-    // For now, assume single character range - we can improve this later
+    // Use proper range from warning
     let end_position = Position {
-        line: start_position.line,
-        character: start_position.character + 1,
+        line: (warning.end_line.saturating_sub(1)) as u32,
+        character: (warning.end_column.saturating_sub(1)) as u32,
     };
 
     let severity = match warning.severity {
         crate::rule::Severity::Error => DiagnosticSeverity::ERROR,
         crate::rule::Severity::Warning => DiagnosticSeverity::WARNING,
     };
+
+    // Create clickable link to rule documentation
+    let code_description = warning.rule_name.as_ref().and_then(|rule_name| {
+        // Create a link to the rule documentation
+        Url::parse(&format!(
+            "https://github.com/rvben/rumdl/blob/main/docs/{}.md",
+            rule_name.to_lowercase()
+        )).ok().map(|href| CodeDescription { href })
+    });
 
     Diagnostic {
         range: Range {
@@ -59,7 +68,7 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
         message: warning.message.clone(),
         related_information: None,
         tags: None,
-        code_description: None,
+        code_description,
         data: None,
     }
 }

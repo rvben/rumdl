@@ -43,8 +43,10 @@ pub type LintResult = Result<Vec<LintWarning>, LintError>;
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct LintWarning {
     pub message: String,
-    pub line: usize,
-    pub column: usize,
+    pub line: usize,           // 1-indexed start line
+    pub column: usize,         // 1-indexed start column
+    pub end_line: usize,       // 1-indexed end line
+    pub end_column: usize,     // 1-indexed end column
     pub severity: Severity,
     pub fix: Option<Fix>,
     pub rule_name: Option<&'static str>,

@@ -193,15 +193,17 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                 let line_range = self.get_line_byte_range(ctx.content, line_num);
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message,
-                    line: line_num,
-                    column: indentation.end() + 1,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_range,
-                        replacement: self.fix_closed_atx_heading(line),
-                    }),
+                rule_name: Some(self.name()),
+                message,
+                line: line_num,
+                column: indentation.end() + 1,
+                end_line: line_num,
+                end_column: indentation.end() + 1 + 1,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: line_range,
+                replacement: self.fix_closed_atx_heading(line),
+            }),
                 });
             }
         }

@@ -309,14 +309,16 @@ impl MD029OrderedListPrefix {
 
                     if actual_num != expected_num {
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            message: format!(
-                                "Ordered list item number {} does not match style (expected {})",
+                rule_name: Some(self.name()),
+                message: format!(
+                "Ordered list item number {} does not match style (expected {})",
                                 actual_num,
                                 expected_num
                             ),
                             line: line_num + 1,
                             column: line.find(char::is_numeric).unwrap_or(0) + 1,
+                            end_line: line_num + 1,
+                            end_column: line.find(char::is_numeric).unwrap_or(0) + actual_num.to_string().len() + 1,
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: 0..0, // TODO: Replace with correct byte range if available

@@ -133,14 +133,17 @@ impl Rule for MD019NoMultipleSpaceAtx {
                     .unwrap();
                 let spaces = self.count_spaces_after_hashes(line);
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: format!(
-                        "Multiple spaces ({}) after {} in ATX style heading",
+                rule_name: Some(self.name()),
+                message: format!(
+                "Multiple spaces ({
+            }) after {} in ATX style heading",
                         spaces,
                         "#".repeat(hashes.as_str().len())
                     ),
                     line: line_num,
                     column: hashes.end() + 1,
+                    end_line: line_num,
+                    end_column: line.len() + 1,
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(line_num, 1),

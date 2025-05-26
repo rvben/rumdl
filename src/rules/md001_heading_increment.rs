@@ -148,10 +148,13 @@ impl Rule for MD001HeadingIncrement {
                     HeadingUtils::convert_heading_style(&heading_text, fixed_level as u32, style);
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num,
-                    column: indentation + 1,
-                    message: format!("Heading level should be {} for this level", prev_level + 1),
+                rule_name: Some(self.name()),
+                line: line_num,
+                column: indentation + 1,
+                end_line: line_num,
+                end_column: indentation + 1 + 1,
+                message: format!("Heading level should be {
+            } for this level", prev_level + 1),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(line_num, indentation + 1),

@@ -219,13 +219,16 @@ impl Rule for MD056TableColumnCount {
                         let fix_result = self.fix_table_row(lines[i], expected_count);
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            message: format!(
-                                "Table row has {} cells, but expected {}",
+                rule_name: Some(self.name()),
+                message: format!(
+                "Table row has {
+            } cells, but expected {}",
                                 count, expected_count
                             ),
                             line: i + 1,
                             column: 1,
+                            end_line: i + 1,
+                            end_column: lines[i].len() + 1,
                             severity: Severity::Warning,
                             fix: fix_result.map(|fixed_row| Fix {
                                 range: LineIndex::new(content.to_string())

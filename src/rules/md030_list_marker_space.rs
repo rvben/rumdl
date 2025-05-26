@@ -125,7 +125,9 @@ impl Rule for MD030ListMarkerSpace {
                         rule_name: Some(self.name()),
                         severity: Severity::Warning,
                         line: line_num,
-                        column: cap.get(1).map_or(0, |m| m.as_str().len()) + marker.len() + 1,
+                        column: cap.get(1).map_or(0, |m| m.start()) + 1,
+                        end_line: line_num,
+                        end_column: cap.get(1).map_or(0, |m| m.start()) + marker.len() + 2,
                         message: "Spaces after list markers".to_string(),
                         fix,
                     });

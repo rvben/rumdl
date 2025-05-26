@@ -275,11 +275,14 @@ impl Rule for MD044ProperNames {
             .filter_map(|(line, column, found_name)| {
                 self.get_proper_name_for(&found_name)
                     .map(|proper_name| LintWarning {
-                        rule_name: Some(self.name()),
-                        line,
-                        column,
-                        message: format!(
-                            "Proper name '{}' should be '{}'",
+                rule_name: Some(self.name()),
+                line,
+                column,
+                end_line: line,
+                end_column: column + found_name.len(),
+                message: format!(
+                "Proper name '{
+            }' should be '{}'",
                             found_name, proper_name
                         ),
                         severity: Severity::Warning,

@@ -326,11 +326,14 @@ impl Rule for MD003HeadingStyle {
                 };
 
                 result.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num, // Already 1-indexed
-                    column: 1,
-                    message: format!(
-                        "Heading style should be {:?}, found {:?}",
+                rule_name: Some(self.name()),
+                line: line_num, // Already 1-indexed
+                column: 1,
+                end_line: line_num, // Already 1-indexed,
+                end_column: 1 + 1,
+                message: format!(
+                "Heading style should be {:?
+            }, found {:?}",
                         expected_style, style
                     ),
                     severity: Severity::Warning,

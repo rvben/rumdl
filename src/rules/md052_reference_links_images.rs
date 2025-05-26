@@ -328,7 +328,10 @@ impl Rule for MD052ReferenceLinkImages {
                 rule_name: Some(self.name()),
                 line: line_num + 1,
                 column: col + 1,
-                message: format!("Reference '{}' not found", reference),
+                end_line: line_num + 1,
+                end_column: col + 1 + 1,
+                message: format!("Reference '{
+            }' not found", reference),
                 severity: Severity::Warning,
                 fix: None,
             });

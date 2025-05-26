@@ -63,10 +63,13 @@ impl Rule for MD042NoEmptyLinks {
                     };
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: format!("Empty link found: [{}]({})", text, url),
+                rule_name: Some(self.name()),
+                message: format!("Empty link found: [{
+            }]({})", text, url),
                         line: line_num + 1,
                         column: full_match.start() + 1,
+                        end_line: line_num + 1,
+                        end_column: full_match.end() + 1,
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: line_index
@@ -110,9 +113,12 @@ impl Rule for MD042NoEmptyLinks {
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                message: format!("Empty link found: [{}]({})", link.text, link.url),
+                message: format!("Empty link found: [{
+            }]({})", link.text, link.url),
                 line: link.line,
                 column: link.start_col,
+                end_line: link.line,
+                end_column: link.end_col,
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: line_index.line_col_to_byte_range(link.line, link.start_col),

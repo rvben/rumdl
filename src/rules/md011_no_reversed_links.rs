@@ -78,14 +78,16 @@ impl Rule for MD011NoReversedLinks {
             for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
                 let column = line_start + cap.get(0).unwrap().start() + 1;
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: "Reversed link syntax".to_string(),
-                    line: line_num + 1,
-                    column,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: (0..0), // TODO: Replace with correct byte range if available
-                        replacement: format!("[{}]({})", &cap[2], &cap[1]),
+                rule_name: Some(self.name()),
+                message: "Reversed link syntax".to_string(),
+                line: line_num + 1,
+                column,
+                end_line: line_num + 1,
+                end_column: column + cap.get(0).unwrap().len(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: (0..0), // TODO: Replace with correct byte range if available
+                replacement: format!("[{}]({})", &cap[2], &cap[1]),
                     }),
                 });
             }

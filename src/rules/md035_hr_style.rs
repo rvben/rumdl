@@ -124,12 +124,14 @@ impl Rule for MD035HRStyle {
 
                 if style_mismatch || has_indentation {
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: 1,
-                        message: if has_indentation {
-                            "Horizontal rule should not be indented".to_string()
-                        } else {
+                rule_name: Some(self.name()),
+                line: i + 1,
+                column: 1,
+                end_line: i + 1,
+                end_column: 1 + 1,
+                message: if has_indentation {
+                "Horizontal rule should not be indented".to_string()
+            } else {
                             format!("Horizontal rule style should be \"{}\"", expected_style)
                         },
                         severity: Severity::Warning,

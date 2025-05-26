@@ -112,10 +112,13 @@ impl Rule for MD049EmphasisStyle {
                         };
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: *line,
-                            column: *col,
-                            message: format!("Emphasis should use {} instead of {}", target_marker, marker),
+                rule_name: Some(self.name()),
+                line: *line,
+                column: *col,
+                end_line: *line,
+                end_column: *col + 1,
+                message: format!("Emphasis should use {
+            } instead of {}", target_marker, marker),
                             fix,
                             severity: Severity::Warning,
                         });
@@ -152,10 +155,13 @@ impl Rule for MD049EmphasisStyle {
                         };
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: *line,
-                            column: *col,
-                            message: format!("Emphasis should use {} instead of {}", correct_marker, wrong_marker),
+                rule_name: Some(self.name()),
+                line: *line,
+                column: *col,
+                end_line: *line,
+                end_column: *col + 1,
+                message: format!("Emphasis should use {
+            } instead of {}", correct_marker, wrong_marker),
                             fix,
                             severity: Severity::Warning,
                         });

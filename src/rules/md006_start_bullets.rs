@@ -159,15 +159,17 @@ impl Rule for MD006StartBullets {
 
                                         if !is_nested {
                                             result.push(LintWarning {
-                                                rule_name: Some("MD006"),
-                                                severity: Severity::Warning,
-                                                line: line_idx + 1,
-                                                column: 1,
-                                                message: "Consider starting bulleted lists at the beginning of the line".to_string(),
-                                                fix: Some(Fix {
-                                                    range: 0..indent,
-                                                    replacement: "".to_string(),
-                                                }),
+                rule_name: Some("MD006"),
+                severity: Severity::Warning,
+                line: line_idx + 1,
+                column: 1,
+                end_line: line_idx + 1,
+                end_column: 1 + 1,
+                message: "Consider starting bulleted lists at the beginning of the line".to_string(),
+                fix: Some(Fix {
+                range: 0..indent,
+                replacement: "".to_string(),
+            }),
                                             });
                                         }
                                     }
@@ -312,16 +314,18 @@ impl Rule for MD006StartBullets {
                         fixed_line.to_string()
                     };
                     result.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        severity: Severity::Warning,
-                        line: line_num,
-                        column: 1,
-                        message: "Consider starting bulleted lists at the beginning of the line"
-                            .to_string(),
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num, 1),
-                            replacement,
-                        }),
+                rule_name: Some(self.name()),
+                severity: Severity::Warning,
+                line: line_num,
+                column: 1,
+                end_line: line_num,
+                end_column: 1 + 1,
+                message: "Consider starting bulleted lists at the beginning of the line"
+                .to_string(),
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(line_num, 1),
+                replacement,
+            }),
                     });
                 }
             }

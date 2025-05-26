@@ -52,16 +52,18 @@ impl Rule for MD040FencedCodeLanguage {
                 if after_fence.is_empty() {
                     let _indent = line.len() - line.trim_start().len();
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: 1,
-                        message: "Fenced code blocks should have a language specified".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: if line.starts_with("```") {
-                                "```text".to_string()
-                            } else {
+                rule_name: Some(self.name()),
+                line: i + 1,
+                column: 1,
+                end_line: i + 1,
+                end_column: 1 + 1,
+                message: "Fenced code blocks should have a language specified".to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: _line_index.line_col_to_byte_range(i + 1, 1),
+                replacement: if line.starts_with("```") {
+                "```text".to_string()
+            } else {
                                 "~~~text".to_string()
                             },
                         }),
@@ -106,17 +108,19 @@ impl Rule for MD040FencedCodeLanguage {
                         };
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: block.start_line,
-                            column: 1,
-                            message: "Fenced code blocks should have a language specified"
-                                .to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(block.start_line, 1),
-                                replacement: if fence_line.starts_with("```") {
-                                    "```text".to_string()
-                                } else {
+                rule_name: Some(self.name()),
+                line: block.start_line,
+                column: 1,
+                end_line: block.start_line,
+                end_column: 1 + 1,
+                message: "Fenced code blocks should have a language specified"
+                .to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(block.start_line, 1),
+                replacement: if fence_line.starts_with("```") {
+                "```text".to_string()
+            } else {
                                     "~~~text".to_string()
                                 },
                             }),

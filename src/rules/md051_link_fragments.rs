@@ -257,11 +257,14 @@ impl Rule for MD051LinkFragments {
                     // Check if the fragment exists in headings
                     if !headings.contains(&fragment.to_lowercase()) {
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num + 1,
-                            column: full_match.start() + 1,
-                            message: format!(
-                                "Link fragment '#{}' does not exist in document headings.",
+                rule_name: Some(self.name()),
+                line: line_num + 1,
+                column: full_match.start() + 1,
+                end_line: line_num + 1,
+                end_column: full_match.start() + 1 + 1,
+                message: format!(
+                "Link fragment '#{
+            }' does not exist in document headings.",
                                 fragment
                             ),
                             severity: Severity::Warning,

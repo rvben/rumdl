@@ -224,14 +224,17 @@ impl MD032BlanksAroundLists {
                 // Only require blank lines for content in the same context (same blockquote level)
                 if !is_prev_excluded && !prev_is_blank && prefixes_match {
                      warnings.push(LintWarning {
-                        line: start_line,
-                        column: 0,
-                        severity: Severity::Error,
-                        rule_name: Some(self.name()),
-                        message: format!("Lists should be preceded by a blank line"),
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(start_line, 1),
-                            replacement: format!("{}\n{}", prefix, lines[start_line - 1]),
+                line: start_line,
+                column: 0,
+                end_line: start_line,
+                end_column: 0 + 1,
+                severity: Severity::Error,
+                rule_name: Some(self.name()),
+                message: format!("Lists should be preceded by a blank line"),
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(start_line, 1),
+                replacement: format!("{
+            }\n{}", prefix, lines[start_line - 1]),
                         }),
                     });
                 }
@@ -249,14 +252,17 @@ impl MD032BlanksAroundLists {
                  // Only require blank lines for content in the same context (same blockquote level)
                  if !is_next_excluded && !next_is_blank && prefixes_match {
                       warnings.push(LintWarning {
-                         line: end_line,
-                         column: 0,
-                         severity: Severity::Error,
-                         rule_name: Some(self.name()),
-                         message: format!("Lists should be followed by a blank line"),
-                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(end_line + 1, 1),
-                            replacement: format!("{}\n{}", prefix, lines[end_line]),
+                line: end_line,
+                column: 0,
+                end_line: end_line,
+                end_column: 0 + 1,
+                severity: Severity::Error,
+                rule_name: Some(self.name()),
+                message: format!("Lists should be followed by a blank line"),
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(end_line + 1, 1),
+                replacement: format!("{
+            }\n{}", prefix, lines[end_line]),
                         }),
                      });
         }

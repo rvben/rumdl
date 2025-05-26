@@ -386,11 +386,14 @@ impl Rule for MD055TablePipeStyle {
                 // Check if this row needs fixing
                 if current_style != target_style {
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: 1,
-                        message: format!(
-                            "Table pipe style should be {}",
+                rule_name: Some(self.name()),
+                line: i + 1,
+                column: 1,
+                end_line: i + 1,
+                end_column: 1 + 1,
+                message: format!(
+                "Table pipe style should be {
+            }",
                             target_style.replace('_', " ")
                         ),
                         severity: Severity::Warning,

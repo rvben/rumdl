@@ -547,15 +547,17 @@ impl Rule for MD046CodeBlockStyle {
                 if target_style == CodeBlockStyle::Indented {
                     // Add warning for opening fence
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: i + 1,
-                        column: 1,
-                        message: "Code block style should be indented".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: String::new(), // Remove the opening fence
-                        }),
+                rule_name: Some(self.name()),
+                line: i + 1,
+                column: 1,
+                end_line: i + 1,
+                end_column: 1 + 1,
+                message: "Code block style should be indented".to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(i + 1, 1),
+                replacement: String::new(), // Remove the opening fence
+            }),
                     });
 
                     // Find closing fence and add warnings for all lines in the fenced block
@@ -567,16 +569,18 @@ impl Rule for MD046CodeBlockStyle {
                             // Add warnings for content lines and closing fence
                             for k in i + 1..=j {
                                 warnings.push(LintWarning {
-                                    rule_name: Some(self.name()),
-                                    line: k + 1,
-                                    column: 1,
-                                    message: "Code block style should be indented".to_string(),
-                                    severity: Severity::Warning,
-                                    fix: Some(Fix {
-                                        range: line_index.line_col_to_byte_range(k + 1, 1),
-                                        replacement: if k == j {
-                                            String::new() // Remove closing fence
-                                        } else {
+                rule_name: Some(self.name()),
+                line: k + 1,
+                column: 1,
+                end_line: k + 1,
+                end_column: 1 + 1,
+                message: "Code block style should be indented".to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(k + 1, 1),
+                replacement: if k == j {
+                String::new() // Remove closing fence
+            } else {
                                             format!("    {}", lines[k].trim_start()) // Convert content to indented
                                         },
                                     }),
@@ -620,15 +624,17 @@ impl Rule for MD046CodeBlockStyle {
                     if !prev_line_is_indented {
                         // Add warning for indented block that should be fenced
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: i + 1,
-                            column: 1,
-                            message: "Code block style should be fenced".to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(i + 1, 1),
-                                replacement: "```\n".to_string() + line.trim_start(),
-                            }),
+                rule_name: Some(self.name()),
+                line: i + 1,
+                column: 1,
+                end_line: i + 1,
+                end_column: 1 + 1,
+                message: "Code block style should be fenced".to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(i + 1, 1),
+                replacement: "```\n".to_string() + line.trim_start(),
+            }),
                         });
                     }
                 }

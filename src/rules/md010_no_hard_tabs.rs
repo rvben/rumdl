@@ -160,15 +160,17 @@ impl Rule for MD010NoHardTabs {
                 };
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num + 1,
-                    column: pos + 1,
-                    message,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(line_num + 1, pos + 1),
-                        replacement: line.replace('\t', &" ".repeat(self.spaces_per_tab)),
-                    }),
+                rule_name: Some(self.name()),
+                line: line_num + 1,
+                column: pos + 1,
+                end_line: line_num + 1,
+                end_column: pos + 1 + 1,
+                message,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                range: _line_index.line_col_to_byte_range(line_num + 1, pos + 1),
+                replacement: line.replace('\t', &" ".repeat(self.spaces_per_tab)),
+            }),
                 });
             }
         }

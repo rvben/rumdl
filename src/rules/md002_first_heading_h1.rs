@@ -242,6 +242,8 @@ impl Rule for MD002FirstHeadingH1 {
                 message,
                 line: first_heading_line,
                 column: 1,
+                end_line: first_heading_line,
+                end_column: 1 + 1,
                 severity: Severity::Warning,
                 fix,
                 rule_name: Some(self.name()),

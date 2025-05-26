@@ -179,14 +179,16 @@ impl Rule for MD054LinkImageStyle {
                     if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.full
                     {
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num + 1,
-                            column: match_start_char + 1,
-                            message: "Link/image style 'full' is not consistent with document"
-                                .to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
+                rule_name: Some(self.name()),
+                line: line_num + 1,
+                column: match_start_char + 1,
+                end_line: line_num + 1,
+                end_column: match_start_char + 1 + 1,
+                message: "Link/image style 'full' is not consistent with document"
+                .to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            });
                     }
                     idx = match_end_char;
                     continue;
@@ -202,14 +204,16 @@ impl Rule for MD054LinkImageStyle {
                         && !self.collapsed
                     {
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num + 1,
-                            column: match_start_char + 1,
-                            message: "Link/image style 'collapsed' is not consistent with document"
-                                .to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
+                rule_name: Some(self.name()),
+                line: line_num + 1,
+                column: match_start_char + 1,
+                end_line: line_num + 1,
+                end_column: match_start_char + 1 + 1,
+                message: "Link/image style 'collapsed' is not consistent with document"
+                .to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            });
                     }
                     idx = match_end_char;
                     continue;
@@ -227,11 +231,14 @@ impl Rule for MD054LinkImageStyle {
                         let style = if text == url { "url_inline" } else { "inline" };
                         if !self.is_style_allowed(style) {
                             warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
-                                line: line_num + 1,
-                                column: match_start_char + 1,
-                                message: format!(
-                                    "Link/image style '{}' is not consistent with document",
+                rule_name: Some(self.name()),
+                line: line_num + 1,
+                column: match_start_char + 1,
+                end_line: line_num + 1,
+                end_column: match_start_char + 1 + 1,
+                message: format!(
+                "Link/image style '{
+            }' is not consistent with document",
                                     style
                                 ),
                                 severity: Severity::Warning,
@@ -253,14 +260,16 @@ impl Rule for MD054LinkImageStyle {
                         && !self.autolink
                     {
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num + 1,
-                            column: match_start_char + 1,
-                            message: "Link/image style 'autolink' is not consistent with document"
-                                .to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
+                rule_name: Some(self.name()),
+                line: line_num + 1,
+                column: match_start_char + 1,
+                end_line: line_num + 1,
+                end_column: match_start_char + 1 + 1,
+                message: "Link/image style 'autolink' is not consistent with document"
+                .to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            });
                     }
                     idx = match_end_char;
                     continue;
@@ -283,14 +292,16 @@ impl Rule for MD054LinkImageStyle {
                         && !self.shortcut
                     {
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num + 1,
-                            column: match_start_char + 1,
-                            message: "Link/image style 'shortcut' is not consistent with document"
-                                .to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
+                rule_name: Some(self.name()),
+                line: line_num + 1,
+                column: match_start_char + 1,
+                end_line: line_num + 1,
+                end_column: match_start_char + 1 + 1,
+                message: "Link/image style 'shortcut' is not consistent with document"
+                .to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            });
                     }
                     idx = match_end_char;
                     continue;

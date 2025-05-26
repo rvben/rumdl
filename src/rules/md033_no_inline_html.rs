@@ -5,6 +5,7 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::calculate_html_tag_range;
 use crate::utils::regex_cache::*;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -189,14 +190,18 @@ impl MD033NoInlineHtml {
                             });
 
                             if !already_warned {
+                                let (start_line, start_col, end_line, end_col) =
+                                    calculate_html_tag_range(line_num, line, incomplete_match.start(), incomplete_match.len());
                                 warnings.push(LintWarning {
-                                    rule_name: Some(self.name()),
-                                    line: line_num,
-                                    column: start_column,
-                                    message: "Inline HTML".to_string(),
-                                    severity: Severity::Warning,
-                                    fix: None,
-                                });
+                rule_name: Some(self.name()),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                message: "Inline HTML".to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            });
                             }
                         }
                     }
@@ -290,14 +295,18 @@ impl Rule for MD033NoInlineHtml {
                 }
 
                 // Report each HTML tag individually (true markdownlint compatibility)
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_html_tag_range(line_num, line, tag_match.start(), tag_match.len());
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: line_num,
-                    column: tag_match.start() + 1, // 1-indexed
-                    message: "Inline HTML".to_string(),
-                    severity: Severity::Warning,
-                    fix: None,
-                });
+                rule_name: Some(self.name()),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                message: "Inline HTML".to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            });
             }
         }
 

@@ -106,13 +106,15 @@ impl Rule for MD007ULIndent {
                     };
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: format!(
-                            "Incorrect indentation: expected {} spaces for nesting level {}, found {}",
+                rule_name: Some(self.name()),
+                message: format!(
+                "Incorrect indentation: expected {} spaces for nesting level {}, found {}",
                             expected_indent, item.nesting_level, item.indentation
                         ),
                         line: item.line_number,
                         column: item.blockquote_prefix.len() + item.indentation + 1, // correct column for marker
+                        end_line: item.line_number,
+                        end_column: item.blockquote_prefix.len() + item.indentation + 2,
                         severity: Severity::Warning,
                         fix,
                     });

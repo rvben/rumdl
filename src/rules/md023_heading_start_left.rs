@@ -66,12 +66,15 @@ impl Rule for MD023HeadingStartLeft {
 
                         // Add warning for the heading text line
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: start_line + 1, // Convert to 1-indexed
-                            column: 1,
-                            severity: Severity::Warning,
-                            message: format!(
-                                "Setext heading should not be indented by {} spaces",
+                rule_name: Some(self.name()),
+                line: start_line + 1, // Convert to 1-indexed
+                column: 1,
+                end_line: start_line + 1, // Convert to 1-indexed,
+                end_column: 1 + 1,
+                severity: Severity::Warning,
+                message: format!(
+                "Setext heading should not be indented by {
+            } spaces",
                                 indentation
                             ),
                             fix: Some(Fix {
@@ -85,16 +88,18 @@ impl Rule for MD023HeadingStartLeft {
                             lines[underline_line].len() - lines[underline_line].trim_start().len();
                         if underline_indentation > 0 {
                             warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
-                                line: underline_line + 1, // Convert to 1-indexed
-                                column: 1,
-                                severity: Severity::Warning,
-                                message: "Setext heading underline should not be indented"
-                                    .to_string(),
-                                fix: Some(Fix {
-                                    range: line_index.line_col_to_byte_range(underline_line + 1, 1),
-                                    replacement: underline_text.to_string(),
-                                }),
+                rule_name: Some(self.name()),
+                line: underline_line + 1, // Convert to 1-indexed
+                column: 1,
+                end_line: underline_line + 1, // Convert to 1-indexed,
+                end_column: 1 + 1,
+                severity: Severity::Warning,
+                message: "Setext heading underline should not be indented"
+                .to_string(),
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(underline_line + 1, 1),
+                replacement: underline_text.to_string(),
+            }),
                             });
                         }
                     }
@@ -128,12 +133,15 @@ impl Rule for MD023HeadingStartLeft {
                     };
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: start_line + 1, // Convert to 1-indexed
-                        column: 1,
-                        severity: Severity::Warning,
-                        message: format!(
-                            "Heading should not be indented by {} spaces",
+                rule_name: Some(self.name()),
+                line: start_line + 1, // Convert to 1-indexed
+                column: 1,
+                end_line: start_line + 1, // Convert to 1-indexed,
+                end_column: 1 + 1,
+                severity: Severity::Warning,
+                message: format!(
+                "Heading should not be indented by {
+            } spaces",
                             indentation
                         ),
                         fix: Some(Fix {
@@ -299,12 +307,15 @@ impl Rule for MD023HeadingStartLeft {
 
                         // Add warning for the heading text line
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: line_num, // Already 1-indexed from structure
-                            column: 1,
-                            severity: Severity::Warning,
-                            message: format!(
-                                "Setext heading should not be indented by {} spaces",
+                rule_name: Some(self.name()),
+                line: line_num, // Already 1-indexed from structure
+                column: 1,
+                end_line: line_num, // Already 1-indexed from structure,
+                end_column: 1 + 1,
+                severity: Severity::Warning,
+                message: format!(
+                "Setext heading should not be indented by {
+            } spaces",
                                 indentation
                             ),
                             fix: Some(Fix {
@@ -318,17 +329,19 @@ impl Rule for MD023HeadingStartLeft {
                             - lines[underline_line_idx].trim_start().len();
                         if underline_indentation > 0 {
                             warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
-                                line: underline_line_idx + 1, // Convert to 1-indexed
-                                column: 1,
-                                severity: Severity::Warning,
-                                message: "Setext heading underline should not be indented"
-                                    .to_string(),
-                                fix: Some(Fix {
-                                    range: line_index
-                                        .line_col_to_byte_range(underline_line_idx + 1, 1),
-                                    replacement: underline_text.to_string(),
-                                }),
+                rule_name: Some(self.name()),
+                line: underline_line_idx + 1, // Convert to 1-indexed
+                column: 1,
+                end_line: underline_line_idx + 1, // Convert to 1-indexed,
+                end_column: 1 + 1,
+                severity: Severity::Warning,
+                message: "Setext heading underline should not be indented"
+                .to_string(),
+                fix: Some(Fix {
+                range: line_index
+                .line_col_to_byte_range(underline_line_idx + 1, 1),
+                replacement: underline_text.to_string(),
+            }),
                             });
                         }
                     }
@@ -370,12 +383,15 @@ impl Rule for MD023HeadingStartLeft {
                     };
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: line_num, // Already 1-indexed from structure
-                        column: 1,
-                        severity: Severity::Warning,
-                        message: format!(
-                            "Heading should not be indented by {} spaces",
+                rule_name: Some(self.name()),
+                line: line_num, // Already 1-indexed from structure
+                column: 1,
+                end_line: line_num, // Already 1-indexed from structure,
+                end_column: 1 + 1,
+                severity: Severity::Warning,
+                message: format!(
+                "Heading should not be indented by {
+            } spaces",
                             indentation
                         ),
                         fix: Some(Fix {

@@ -261,10 +261,12 @@ fn check_fancy_pattern(
         let fixed_text = format!("{}{}{}", marker, content, marker);
 
         let warning = LintWarning {
-            rule_name: Some(rule_name),
-            message: format!("Spaces inside emphasis markers: '{}'", match_text),
+                rule_name: Some(rule_name),
+                message: format!("Spaces inside emphasis markers: '{}'", match_text),
             line: line_num,
             column: start + 1, // +1 because columns are 1-indexed
+            end_line: line_num,
+            end_column: end + 1,
             severity: Severity::Warning,
             fix: Some(Fix {
                 range: start..end,
@@ -525,9 +527,12 @@ impl MD037NoSpaceInEmphasis {
 
             let warning = LintWarning {
                 rule_name: Some(self.name()),
-                message: format!("Spaces inside emphasis markers: {:?}", match_text),
+                message: format!("Spaces inside emphasis markers: {:?
+            }", match_text),
                 line: line_num,
                 column: start_pos + 1, // +1 because columns are 1-indexed
+                end_line: line_num,
+                end_column: end_pos + 1,
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: start_pos..end_pos,

@@ -168,9 +168,11 @@ impl Rule for MD004UnorderedListStyle {
                             if marker != first {
                                 let (line, col) = ctx.offset_to_line_col(offset);
                                 warnings.push(LintWarning {
-                                    line,
-                                    column: col,
-                                    message: format!("marker '{}' does not match expected style '{}'", marker, first),
+                line,
+                column: col,
+                end_line: line,
+                end_column: col + 1,
+                message: format!("marker '{}' does not match expected style '{}'", marker, first),
                                     severity: Severity::Warning,
                                     rule_name: Some(self.name()),
                                     fix: Some(Fix {
@@ -195,9 +197,11 @@ impl Rule for MD004UnorderedListStyle {
                         if marker != target_marker {
                             let (line, col) = ctx.offset_to_line_col(offset);
                             warnings.push(LintWarning {
-                                line,
-                                column: col,
-                                message: format!("marker '{}' does not match expected style '{}'", marker, target_marker),
+                line,
+                column: col,
+                end_line: line,
+                end_column: col + 1,
+                message: format!("marker '{}' does not match expected style '{}'", marker, target_marker),
                                 severity: Severity::Warning,
                                 rule_name: Some(self.name()),
                                 fix: Some(Fix {

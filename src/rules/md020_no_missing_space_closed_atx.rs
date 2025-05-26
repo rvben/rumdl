@@ -188,13 +188,16 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                 let line_range = self.get_line_byte_range(_ctx.content, line_num);
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: format!(
-                        "Missing space inside hashes on closed ATX style heading with {} hashes",
+                rule_name: Some(self.name()),
+                message: format!(
+                "Missing space inside hashes on closed ATX style heading with {
+            } hashes",
                         opening_hashes.as_str().len()
                     ),
                     line: line_num,
                     column: indentation.end() + 1,
+                    end_line: line_num,
+                    end_column: line.len() + 1,
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_range,

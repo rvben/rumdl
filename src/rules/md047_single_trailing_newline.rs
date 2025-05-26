@@ -45,15 +45,17 @@ impl Rule for MD047SingleTrailingNewline {
                 message: String::from("File should end with a single newline character"),
                 line: last_line,
                 column: last_column,
+                end_line: last_line,
+                end_column: last_column + 1,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: line_index.line_col_to_byte_range(last_line, last_column),
-                    replacement: if has_trailing_newline {
-                        // If there are multiple newlines, fix by ensuring just one
-                        let trimmed = content.trim_end();
-                        if !trimmed.is_empty() {
-                            trimmed.to_string() + "\n"
-                        } else {
+                range: line_index.line_col_to_byte_range(last_line, last_column),
+                replacement: if has_trailing_newline {
+                // If there are multiple newlines, fix by ensuring just one
+                let trimmed = content.trim_end();
+                if !trimmed.is_empty() {
+                trimmed.to_string() + "\n"
+            } else {
                             // Handle the case where content is just whitespace and newlines
                             String::new()
                         }

@@ -288,11 +288,14 @@ impl MD026NoTrailingPunctuation {
                             let last_char = heading_text.trim().chars().last().unwrap_or(' ');
 
                             warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
-                                line: heading_line,
-                                column: 1,
-                                message: format!(
-                                    "Heading '{}' should not end with punctuation '{}'",
+                rule_name: Some(self.name()),
+                line: heading_line,
+                column: 1,
+                end_line: heading_line,
+                end_column: 1 + 1,
+                message: format!(
+                "Heading '{
+            }' should not end with punctuation '{}'",
                                     heading_text.trim(),
                                     last_char
                                 ),
@@ -310,11 +313,14 @@ impl MD026NoTrailingPunctuation {
                 if self.has_trailing_punctuation(lines[heading_line - 1], &re) {
                     let last_char = lines[heading_line - 1].trim().chars().last().unwrap_or(' ');
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: heading_line,
-                        column: 1,
-                        message: format!(
-                            "Heading '{}' should not end with punctuation '{}'",
+                rule_name: Some(self.name()),
+                line: heading_line,
+                column: 1,
+                end_line: heading_line,
+                end_column: 1 + 1,
+                message: format!(
+                "Heading '{
+            }' should not end with punctuation '{}'",
                             lines[heading_line - 1].trim(),
                             last_char
                         ),

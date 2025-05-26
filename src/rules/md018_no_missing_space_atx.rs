@@ -144,13 +144,16 @@ impl Rule for MD018NoMissingSpaceAtx {
                 let line_range = self.get_line_byte_range(content, line_num);
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: format!(
-                        "No space after {} in ATX style heading",
+                rule_name: Some(self.name()),
+                message: format!(
+                "No space after {
+            } in ATX style heading",
                         "#".repeat(hashes.as_str().len())
                     ),
                     line: line_num,
                     column: hashes.end() + 1,
+                    end_line: line_num,
+                    end_column: line.len() + 1,
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_range,

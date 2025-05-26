@@ -267,13 +267,15 @@ impl Rule for MD013LineLength {
                 };
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message,
-                    line: line_number,
-                    column: self.line_length + 1,
-                    severity: Severity::Warning,
-                    fix,
-                });
+                rule_name: Some(self.name()),
+                message,
+                line: line_number,
+                column: self.line_length + 1,
+                end_line: line_number,
+                end_column: self.line_length + 1 + 1,
+                severity: Severity::Warning,
+                fix,
+            });
             }
         }
         Ok(warnings)

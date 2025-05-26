@@ -165,10 +165,13 @@ impl Rule for MD036NoEmphasisAsHeading {
 
             if let Some((level, text)) = Self::is_entire_line_emphasized(line, content, i) {
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: i + 1,
-                    column: 1,
-                    message: format!("Emphasis used instead of a heading: '{}'", text),
+                rule_name: Some(self.name()),
+                line: i + 1,
+                column: 1,
+                end_line: i + 1,
+                end_column: 1 + 1,
+                message: format!("Emphasis used instead of a heading: '{
+            }'", text),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(i + 1, 1),
