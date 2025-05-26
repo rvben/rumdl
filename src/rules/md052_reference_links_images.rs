@@ -50,24 +50,54 @@ impl MD052ReferenceLinkImages {
     }
 
     /// Detect inline code spans in a line and return their ranges
-    fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
+    pub fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
         if !line.contains('`') {
             return Vec::new();
         }
 
         let mut spans = Vec::new();
-        let mut in_code = false;
-        let mut code_start = 0;
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
 
-        for (i, c) in line.chars().enumerate() {
-            if c == '`' {
-                if !in_code {
-                    code_start = i;
-                    in_code = true;
-                } else {
-                    spans.push((code_start, i + 1)); // Include the closing backtick
-                    in_code = false;
+        while i < chars.len() {
+            if chars[i] == '`' {
+                // Count consecutive backticks for opening sequence
+                let start = i;
+                let mut backtick_count = 0;
+                while i < chars.len() && chars[i] == '`' {
+                    backtick_count += 1;
+                    i += 1;
                 }
+
+                // Look for matching closing sequence
+                let mut j = i;
+                while j < chars.len() {
+                    if chars[j] == '`' {
+                        // Count consecutive backticks for potential closing sequence
+                        let mut close_count = 0;
+                        while j < chars.len() && chars[j] == '`' {
+                            close_count += 1;
+                            j += 1;
+                        }
+
+                        // If we found a matching sequence, create the span
+                        if close_count == backtick_count {
+                            spans.push((start, j));
+                            i = j; // Continue after this code span
+                            break;
+                        }
+                        // If not matching, continue looking
+                    } else {
+                        j += 1;
+                    }
+                }
+
+                // If no matching closing sequence found, treat as literal backticks
+                if j >= chars.len() {
+                    break;
+                }
+            } else {
+                i += 1;
             }
         }
 
@@ -75,7 +105,7 @@ impl MD052ReferenceLinkImages {
     }
 
     /// Check if a position is within an inline code span
-    fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
+    pub fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
         spans.iter().any(|&(start, end)| pos >= start && pos < end)
     }
 
