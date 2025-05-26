@@ -109,14 +109,25 @@ impl Rule for MD030ListMarkerSpace {
                     ListType::Unordered
                 };
                 let expected_spaces = self.get_expected_spaces(list_type, false); // single-line by default
-                if whitespace.contains('\t') || whitespace.len() > expected_spaces {
+                                if whitespace.contains('\t') || whitespace.len() > expected_spaces {
+                    // Generate the fix text
+                    let fix = if let Some(fixed_line) = self.try_fix_list_marker_spacing(line) {
+                        Some(crate::rule::Fix {
+                            range: crate::utils::range_utils::LineIndex::new(ctx.content.to_string())
+                                .line_col_to_byte_range(line_num, 1),
+                            replacement: fixed_line,
+                        })
+                    } else {
+                        None
+                    };
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         severity: Severity::Warning,
                         line: line_num,
                         column: cap.get(1).map_or(0, |m| m.as_str().len()) + marker.len() + 1,
                         message: "Spaces after list markers".to_string(),
-                        fix: None,
+                        fix,
                     });
                 }
             }
@@ -186,8 +197,160 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, crate::rule::LintError> {
-        // MD030 is not fixable - return content unchanged
-        Ok(ctx.content.to_string())
+        let content = ctx.content;
+        let structure = crate::utils::document_structure::DocumentStructure::new(content);
+        let lines: Vec<&str> = content.lines().collect();
+        let mut result_lines = Vec::new();
+        let mut in_fenced_code_block = false;
+        let mut fenced_code_block_delim = "";
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+            let trimmed = line.trim_start();
+
+            // Detect fenced code blocks
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                let fence = &trimmed[..3];
+                if !in_fenced_code_block {
+                    in_fenced_code_block = true;
+                    fenced_code_block_delim = fence;
+                } else if trimmed.starts_with(fenced_code_block_delim) {
+                    in_fenced_code_block = false;
+                    fenced_code_block_delim = "";
+                }
+            }
+
+            // Skip if in fenced code block
+            if in_fenced_code_block {
+                result_lines.push(line.to_string());
+                continue;
+            }
+
+            // Skip if in front matter
+            if structure.is_in_front_matter(line_num) {
+                result_lines.push(line.to_string());
+                continue;
+            }
+
+            // Skip if this is an indented code block (4+ spaces with blank line before)
+            if self.is_indented_code_block(line, line_idx, &lines) {
+                result_lines.push(line.to_string());
+                continue;
+            }
+
+            // Skip blockquotes for now (conservative approach)
+            if line.trim_start().starts_with('>') {
+                result_lines.push(line.to_string());
+                continue;
+            }
+
+            // Try to fix list marker spacing
+            if let Some(fixed_line) = self.try_fix_list_marker_spacing(line) {
+                result_lines.push(fixed_line);
+            } else {
+                result_lines.push(line.to_string());
+            }
+        }
+
+        // Preserve trailing newline if original content had one
+        let result = result_lines.join("\n");
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            Ok(result + "\n")
+        } else {
+            Ok(result)
+        }
+    }
+}
+
+impl MD030ListMarkerSpace {
+    /// Fix list marker spacing - handles tabs, multiple spaces, and mixed whitespace
+    fn try_fix_list_marker_spacing(&self, line: &str) -> Option<String> {
+        let trimmed = line.trim_start();
+        let indent = &line[..line.len() - trimmed.len()];
+
+        // Check for unordered list markers
+        for marker in &["*", "-", "+"] {
+            if trimmed.starts_with(marker) {
+                let after_marker = &trimmed[marker.len()..];
+                // Fix if there are tabs, multiple spaces, or mixed whitespace
+                if after_marker.starts_with('\t') || after_marker.starts_with("  ") ||
+                   (after_marker.starts_with(' ') && after_marker.chars().nth(1) == Some('\t')) {
+                    let content = after_marker.trim_start();
+                    if !content.is_empty() {
+                        // Use the configured number of spaces for unordered lists
+                        let spaces = " ".repeat(self.ul_single);
+                        return Some(format!("{}{}{}{}", indent, marker, spaces, content));
+                    }
+                }
+                break; // Found a marker, don't check others
+            }
+        }
+
+        // Check for ordered list markers
+        if let Some(dot_pos) = trimmed.find('.') {
+            let before_dot = &trimmed[..dot_pos];
+            if before_dot.chars().all(|c| c.is_ascii_digit()) && !before_dot.is_empty() {
+                let after_dot = &trimmed[dot_pos + 1..];
+                // Fix if there are tabs, multiple spaces, or mixed whitespace
+                if after_dot.starts_with('\t') || after_dot.starts_with("  ") ||
+                   (after_dot.starts_with(' ') && after_dot.chars().nth(1) == Some('\t')) {
+                    let content = after_dot.trim_start();
+                    if !content.is_empty() {
+                        // Use the configured number of spaces for ordered lists
+                        let spaces = " ".repeat(self.ol_single);
+                        return Some(format!("{}{}.{}{}", indent, before_dot, spaces, content));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Check if a line is part of an indented code block (4+ spaces with blank line before)
+    fn is_indented_code_block(&self, line: &str, line_idx: usize, lines: &[&str]) -> bool {
+        // Must start with 4+ spaces or tab
+        if !line.starts_with("    ") && !line.starts_with('\t') {
+            return false;
+        }
+
+        // If it's the first line, it's not an indented code block
+        if line_idx == 0 {
+            return false;
+        }
+
+        // Check if there's a blank line before this line or before the start of the indented block
+        if self.has_blank_line_before_indented_block(line_idx, lines) {
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if there's a blank line before the start of an indented block
+    fn has_blank_line_before_indented_block(&self, line_idx: usize, lines: &[&str]) -> bool {
+        // Walk backwards to find the start of the indented block
+        let mut current_idx = line_idx;
+
+        // Find the first line in this indented block
+        while current_idx > 0 {
+            let current_line = lines[current_idx];
+            let prev_line = lines[current_idx - 1];
+
+            // If current line is not indented, we've gone too far
+            if !current_line.starts_with("    ") && !current_line.starts_with('\t') {
+                break;
+            }
+
+            // If previous line is not indented, check if it's blank
+            if !prev_line.starts_with("    ") && !prev_line.starts_with('\t') {
+                return prev_line.trim().is_empty();
+            }
+
+            current_idx -= 1;
+        }
+
+        false
     }
 }
 
