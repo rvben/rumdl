@@ -61,10 +61,16 @@ impl MD046CodeBlockStyle {
         }
 
         // Check if preceded by a blank line (typical for code blocks)
+        // OR if the previous line is also an indented code block (continuation)
         let has_blank_line_before = i == 0 || lines[i - 1].trim().is_empty();
+        let prev_is_indented_code = i > 0 &&
+            (lines[i - 1].starts_with("    ") || lines[i - 1].starts_with("\t")) &&
+            !self.is_part_of_list_structure(lines, i - 1) &&
+            !self.is_part_of_formatted_text_block(lines, i - 1);
 
-        // If no blank line before, it's likely list continuation, not a code block
-        if !has_blank_line_before {
+        // If no blank line before and previous line is not indented code,
+        // it's likely list continuation, not a code block
+        if !has_blank_line_before && !prev_is_indented_code {
             return false;
         }
 

@@ -264,6 +264,8 @@ impl MD034NoBareUrls {
         match node {
             Text(text) if !parent_is_link_or_image => {
                 let text_str = &text.value;
+
+                // Check for URLs
                 for url_match in SIMPLE_URL_REGEX.find_iter(text_str) {
                     let url_start = url_match.start();
                     let url_end = url_match.end();
@@ -294,6 +296,42 @@ impl MD034NoBareUrls {
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
                                 replacement: format!("<{}>", url_text),
+                            }),
+                        });
+                    }
+                }
+
+                // Check for email addresses
+                for email_match in EMAIL_REGEX.find_iter(text_str) {
+                    let email_start = email_match.start();
+                    let email_end = email_match.end();
+                    let before = if email_start == 0 {
+                        None
+                    } else {
+                        text_str.get(email_start - 1..email_start)
+                    };
+                    let after = text_str.get(email_end..email_end + 1);
+                    let is_valid_boundary = before.map_or(true, |c| {
+                        !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
+                    }) && after.map_or(true, |c| {
+                        !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
+                    });
+                    if !is_valid_boundary {
+                        continue;
+                    }
+                    if let Some(pos) = &text.position {
+                        let offset = pos.start.offset + email_start;
+                        let (line, column) = ctx.offset_to_line_col(offset);
+                        let email_text = &text_str[email_start..email_end];
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line,
+                            column,
+                            message: format!("Bare email address found: {}", email_text),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: offset..(offset + email_text.len()),
+                                replacement: format!("<{}>", email_text),
                             }),
                         });
                     }
@@ -467,9 +505,9 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD034NoBa
         ctx: &crate::lint_context::LintContext,
         _doc_structure: &crate::utils::document_structure::DocumentStructure,
     ) -> bool {
-        // This rule is only relevant if there might be URLs in the content
+        // This rule is only relevant if there might be URLs or emails in the content
         let content = ctx.content;
-        !content.is_empty() && (content.contains("http://") || content.contains("https://") || content.contains("ftp://"))
+        !content.is_empty() && (content.contains("http://") || content.contains("https://") || content.contains("ftp://") || content.contains('@'))
     }
 }
 
