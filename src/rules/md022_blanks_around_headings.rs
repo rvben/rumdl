@@ -250,18 +250,14 @@ impl MD022BlanksAroundHeadings {
     }
 
     /// Fix a document by adding appropriate blank lines around headings
-    fn _fix_content(&self, lines: &[&str]) -> String {
+        fn _fix_content(&self, lines: &[&str]) -> String {
         let mut result = Vec::new();
         let mut in_code_block = false;
         let mut fence_char = None;
         let mut in_front_matter = false;
         let mut front_matter_start_detected = false;
-        let mut i = 0;
 
-        // Process the document line by line
-        while i < lines.len() {
-            let line = lines[i];
-
+        for (i, line) in lines.iter().enumerate() {
             // Handle front matter - only consider it front matter if at the start
             if FRONT_MATTER_PATTERN.is_match(line).unwrap_or(false) {
                 // Only start front matter if at the beginning of the document (allowing for blank lines)
@@ -277,7 +273,6 @@ impl MD022BlanksAroundHeadings {
                 // Otherwise it's just a horizontal rule, not front matter
 
                 result.push(line.to_string());
-                i += 1;
                 continue;
             }
 
@@ -304,120 +299,162 @@ impl MD022BlanksAroundHeadings {
                 }
 
                 result.push(line.to_string());
-                i += 1;
                 continue;
             }
 
             // Inside code block or front matter, preserve content exactly
             if in_code_block || in_front_matter {
                 result.push(line.to_string());
-                i += 1;
                 continue;
             }
 
-            // Check if it's a heading
-            let is_heading_line = is_heading(line);
-            let _is_setext_marker = i > 0 && is_setext_heading_marker(line);
+                                    // Check if it's a heading (ATX or setext)
+            let is_atx_heading = is_heading(line);
+            let is_setext_marker = i > 0 && is_setext_heading_marker(line);
+            let is_setext_content = i + 1 < lines.len() && is_setext_heading_marker(lines[i + 1]);
 
-            if is_heading_line || _is_setext_marker {
-                // For setext headings, we need to process both the content line and the marker line
-                let heading_line = if _is_setext_marker { i - 1 } else { i };
-                let is_first_heading = heading_line == 0
-                    || (0..heading_line).all(|j| {
+            if is_atx_heading {
+                let is_first_heading = i == 0
+                    || (0..i).all(|j| {
                         lines[j].trim().is_empty()
                             || FRONT_MATTER_PATTERN.is_match(lines[j]).unwrap_or(false)
                     });
 
-                // Count existing blank lines above
+                // Count existing blank lines above in the result
                 let mut blank_lines_above = 0;
-                if heading_line > 0 {
-                    for j in (0..heading_line).rev() {
-                        if lines[j].trim().is_empty() {
-                            blank_lines_above += 1;
-                        } else {
-                            break;
-                        }
-                    }
+                let mut check_idx = result.len();
+                while check_idx > 0 && result[check_idx - 1].trim().is_empty() {
+                    blank_lines_above += 1;
+                    check_idx -= 1;
                 }
 
-                // Add blank lines before heading if needed
+                // Determine how many blank lines we need above
                 let needed_blanks_above = if is_first_heading && self.allowed_at_start {
                     0
                 } else {
                     self.lines_above
                 };
 
-                // Ensure we have the right number of blank lines before the heading
-                // First, remove trailing blank lines from the result
-                while !result.is_empty()
-                    && result.last().unwrap().trim().is_empty()
-                    && blank_lines_above > needed_blanks_above
-                {
-                    result.pop();
-                    blank_lines_above -= 1;
-                }
-
-                // Then add any needed blank lines
+                // Add missing blank lines above if needed
                 while blank_lines_above < needed_blanks_above {
                     result.push(String::new());
                     blank_lines_above += 1;
                 }
 
-                // Add the heading line(s)
-                if _is_setext_marker {
-                    // For setext, we need to add both the content line and the marker line
-                    result.push(lines[heading_line].to_string());
-                    result.push(line.to_string());
-                } else {
-                    result.push(line.to_string());
-                }
+                // Add the heading line
+                result.push(line.to_string());
 
-                // Count existing blank lines below to skip them in further processing
-                let heading_end = i;
+                                // Count existing blank lines below in the original content
                 let mut blank_lines_below = 0;
-                for line in lines.iter().skip(heading_end + 1) {
-                    if !line.trim().is_empty() {
+                let mut next_content_line_idx = None;
+                for j in (i + 1)..lines.len() {
+                    if lines[j].trim().is_empty() {
+                        blank_lines_below += 1;
+                    } else {
+                        next_content_line_idx = Some(j);
                         break;
                     }
-                    blank_lines_below += 1;
                 }
 
-                // Add exactly the number of blank lines needed
-                for _ in 0..(self.lines_below - blank_lines_below.min(self.lines_below)) {
+                // Check if the next non-blank line is a list item or code fence
+                let next_is_list_or_code = if let Some(idx) = next_content_line_idx {
+                    let next_line = lines[idx].trim();
+                    // Check for list items (-, *, +, or numbered)
+                    next_line.starts_with("- ") ||
+                    next_line.starts_with("* ") ||
+                    next_line.starts_with("+ ") ||
+                    next_line.chars().next().map_or(false, |c| c.is_ascii_digit()) && next_line.contains(". ") ||
+                    // Check for code fences
+                    next_line.starts_with("```") || next_line.starts_with("~~~")
+                } else {
+                    false
+                };
+
+                // Add missing blank lines below if needed (but don't remove existing ones)
+                // Don't add blank lines if the next content is a list item or code fence
+                let needed_blanks_below = if next_is_list_or_code { 0 } else { self.lines_below };
+                if blank_lines_below < needed_blanks_below {
+                    for _ in 0..(needed_blanks_below - blank_lines_below) {
+                        result.push(String::new());
+                    }
+                }
+            } else if is_setext_content {
+                // This is a setext heading content line (the line before ===== or -----)
+                let is_first_heading = i == 0
+                    || (0..i).all(|j| {
+                        lines[j].trim().is_empty()
+                            || FRONT_MATTER_PATTERN.is_match(lines[j]).unwrap_or(false)
+                    });
+
+                // Count existing blank lines above in the result
+                let mut blank_lines_above = 0;
+                let mut check_idx = result.len();
+                while check_idx > 0 && result[check_idx - 1].trim().is_empty() {
+                    blank_lines_above += 1;
+                    check_idx -= 1;
+                }
+
+                // Determine how many blank lines we need above
+                let needed_blanks_above = if is_first_heading && self.allowed_at_start {
+                    0
+                } else {
+                    self.lines_above
+                };
+
+                // Add missing blank lines above if needed
+                while blank_lines_above < needed_blanks_above {
                     result.push(String::new());
+                    blank_lines_above += 1;
                 }
 
-                // Skip over the heading and blank lines so we don't process them again
-                i += 1;
-                i += blank_lines_below; // Skip existing blank lines
-
-                // If we've reached the end of the document, break
-                if i >= lines.len() {
-                    break;
-                }
-            } else {
+                // Add the setext heading content line
                 result.push(line.to_string());
-                i += 1;
-            }
-        }
+            } else if is_setext_marker {
+                // This is a setext heading marker line (===== or -----)
+                // Add the marker line
+                result.push(line.to_string());
 
-        // Ensure the result doesn't have consecutive blank lines
-        let mut final_result = Vec::new();
-        let mut consecutive_blanks = 0;
+                // Count existing blank lines below in the original content
+                let mut blank_lines_below = 0;
+                let mut next_content_line_idx = None;
+                for j in (i + 1)..lines.len() {
+                    if lines[j].trim().is_empty() {
+                        blank_lines_below += 1;
+                    } else {
+                        next_content_line_idx = Some(j);
+                        break;
+                    }
+                }
 
-        for line in result {
-            if line.trim().is_empty() {
-                consecutive_blanks += 1;
-                if consecutive_blanks <= self.lines_below {
-                    final_result.push(line);
+                // Check if the next non-blank line is a list item or code fence
+                let next_is_list_or_code = if let Some(idx) = next_content_line_idx {
+                    let next_line = lines[idx].trim();
+                    // Check for list items (-, *, +, or numbered)
+                    next_line.starts_with("- ") ||
+                    next_line.starts_with("* ") ||
+                    next_line.starts_with("+ ") ||
+                    next_line.chars().next().map_or(false, |c| c.is_ascii_digit()) && next_line.contains(". ") ||
+                    // Check for code fences
+                    next_line.starts_with("```") || next_line.starts_with("~~~")
+                } else {
+                    false
+                };
+
+                // Add missing blank lines below if needed (but don't remove existing ones)
+                // Don't add blank lines if the next content is a list item or code fence
+                let needed_blanks_below = if next_is_list_or_code { 0 } else { self.lines_below };
+                if blank_lines_below < needed_blanks_below {
+                    for _ in 0..(needed_blanks_below - blank_lines_below) {
+                        result.push(String::new());
+                    }
                 }
             } else {
-                consecutive_blanks = 0;
-                final_result.push(line);
+                // Regular line - just add it
+                result.push(line.to_string());
             }
         }
 
-        final_result.join("\n")
+                        result.join("\n")
     }
 }
 
@@ -579,24 +616,33 @@ impl Rule for MD022BlanksAroundHeadings {
                                         .map_or(true, |c| c.is_whitespace() || c.is_alphabetic()))
                     };
 
-                    // If next line is a code fence, we don't need blank lines between
-                    if !next_line_is_code_fence {
-                        let mut blank_lines_below = 0;
-                        for line in lines.iter().skip(effective_heading_line + 1) {
-                            if !line.trim().is_empty() {
-                                break;
-                            }
-                            blank_lines_below += 1;
-                        }
+                                    // Check if next line is a code fence or list item
+                let next_line_is_list = next_non_blank_idx < lines.len() && {
+                    let next_trimmed = lines[next_non_blank_idx].trim();
+                    next_trimmed.starts_with("- ") ||
+                    next_trimmed.starts_with("* ") ||
+                    next_trimmed.starts_with("+ ") ||
+                    next_trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) && next_trimmed.contains(". ")
+                };
 
-                        if blank_lines_below < self.lines_below {
-                            let line_word = if self.lines_below == 1 { "line" } else { "lines" };
-                            issues.push(format!(
-                                "Heading should have at least {} blank {} below.",
-                                self.lines_below, line_word
-                            ));
+                // If next line is a code fence or list item, we don't need blank lines between
+                if !next_line_is_code_fence && !next_line_is_list {
+                    let mut blank_lines_below = 0;
+                    for line in lines.iter().skip(effective_heading_line + 1) {
+                        if !line.trim().is_empty() {
+                            break;
                         }
+                        blank_lines_below += 1;
                     }
+
+                    if blank_lines_below < self.lines_below {
+                        let line_word = if self.lines_below == 1 { "line" } else { "lines" };
+                        issues.push(format!(
+                            "Heading should have at least {} blank {} below.",
+                            self.lines_below, line_word
+                        ));
+                    }
+                }
                 }
 
                 // Combine all issues for this heading into one warning
@@ -631,12 +677,21 @@ impl Rule for MD022BlanksAroundHeadings {
             return Ok(content.to_string());
         }
 
+        // Check if original content ended with newline
+        let had_trailing_newline = content.ends_with('\n');
+
         // Use a consolidated fix that avoids adding multiple blank lines
         let lines: Vec<&str> = content.lines().collect();
         let fixed = self._fix_content(&lines);
 
-        // Just return the fixed content - the MD012 rule will handle consecutive blank lines
-        Ok(fixed)
+        // Preserve original trailing newline if it existed
+        let result = if had_trailing_newline && !fixed.ends_with('\n') {
+            format!("{}\n", fixed)
+        } else {
+            fixed
+        };
+
+        Ok(result)
     }
 
     /// Optimized check using document structure
@@ -741,8 +796,17 @@ impl Rule for MD022BlanksAroundHeadings {
                                     .map_or(true, |c| c.is_whitespace() || c.is_alphabetic()))
                 };
 
-                // If next line is a code fence, we don't need blank lines between
-                if !next_line_is_code_fence {
+                // Check if next line is a code fence or list item
+                let next_line_is_list = next_non_blank_idx < lines.len() && {
+                    let next_trimmed = lines[next_non_blank_idx].trim();
+                    next_trimmed.starts_with("- ") ||
+                    next_trimmed.starts_with("* ") ||
+                    next_trimmed.starts_with("+ ") ||
+                    next_trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) && next_trimmed.contains(". ")
+                };
+
+                // If next line is a code fence or list item, we don't need blank lines between
+                if !next_line_is_code_fence && !next_line_is_list {
                     let mut blank_lines_below = 0;
                     for line in lines.iter().skip(effective_heading_line + 1) {
                         if !line.trim().is_empty() {
@@ -1081,5 +1145,75 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(!result.is_empty()); // Should flag issues with both setext headings
+    }
+
+    #[test]
+    fn test_fix_preserves_existing_blank_lines() {
+        let rule = MD022BlanksAroundHeadings::new();
+        let content = "# Title
+
+## Section 1
+
+Content here.
+
+## Section 2
+
+More content.
+### Missing Blank Above
+
+Even more content.
+
+## Section 3
+
+Final content.";
+
+        let expected = "# Title
+
+## Section 1
+
+Content here.
+
+## Section 2
+
+More content.
+
+### Missing Blank Above
+
+Even more content.
+
+## Section 3
+
+Final content.";
+
+        let result = rule._fix_content(&content.lines().collect::<Vec<&str>>());
+        assert_eq!(result, expected, "Fix should only add missing blank lines, never remove existing ones");
+    }
+
+    #[test]
+    fn test_fix_preserves_trailing_newline() {
+        let rule = MD022BlanksAroundHeadings::new();
+
+        // Test with trailing newline
+        let content_with_newline = "# Title\nContent here.\n";
+        let ctx = LintContext::new(content_with_newline);
+        let result = rule.fix(&ctx).unwrap();
+        assert!(result.ends_with('\n'), "Should preserve trailing newline");
+
+        // Test without trailing newline
+        let content_without_newline = "# Title\nContent here.";
+        let ctx = LintContext::new(content_without_newline);
+        let result = rule.fix(&ctx).unwrap();
+        assert!(!result.ends_with('\n'), "Should not add trailing newline if original didn't have one");
+    }
+
+    #[test]
+    fn test_fix_does_not_add_blank_lines_before_lists() {
+        let rule = MD022BlanksAroundHeadings::new();
+        let content = "## Configuration\n\nThis rule has the following configuration options:\n\n- `option1`: Description of option 1.\n- `option2`: Description of option 2.\n\n## Another Section\n\nSome content here.";
+
+        let expected = "## Configuration\n\nThis rule has the following configuration options:\n\n- `option1`: Description of option 1.\n- `option2`: Description of option 2.\n\n## Another Section\n\nSome content here.";
+
+        let result = rule._fix_content(&content.lines().collect::<Vec<&str>>());
+        assert_eq!(result, expected, "Fix should not add blank lines before lists");
     }
 }

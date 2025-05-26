@@ -2,7 +2,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
-use regex::Regex;
+use fancy_regex::Regex;
 
 /// Rule MD042: No empty links
 ///
@@ -39,16 +39,21 @@ impl Rule for MD042NoEmptyLinks {
         let mut warnings = Vec::new();
 
         lazy_static! {
-            static ref EMPTY_LINK_REGEX: Regex = Regex::new(r"\[([^\]]*)\]\(([^\)]*)\)").unwrap();
+            static ref EMPTY_LINK_REGEX: Regex = Regex::new(r"(?<!\!)\[([^\]]*)\]\(([^\)]*)\)").unwrap();
         }
 
         for (line_num, line) in content.lines().enumerate() {
-            for cap in EMPTY_LINK_REGEX.captures_iter(line) {
+            for cap_result in EMPTY_LINK_REGEX.captures_iter(line) {
+                let cap = match cap_result {
+                    Ok(cap) => cap,
+                    Err(_) => continue,
+                };
+
+                let full_match = cap.get(0).unwrap();
                 let text = cap.get(1).map_or("", |m| m.as_str());
                 let url = cap.get(2).map_or("", |m| m.as_str());
 
                 if text.trim().is_empty() || url.trim().is_empty() {
-                    let full_match = cap.get(0).unwrap();
                     let replacement = if text.trim().is_empty() && url.trim().is_empty() {
                         "[Link text](https://example.com)".to_string()
                     } else if text.trim().is_empty() {
@@ -121,32 +126,47 @@ impl Rule for MD042NoEmptyLinks {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
 
-        lazy_static! {
-            static ref EMPTY_LINK_REGEX: Regex = Regex::new(r"\[([^\]]*)\]\(([^\)]*)\)").unwrap();
+        // Get all warnings first - only fix links that are actually flagged
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(content.to_string());
         }
 
-        let result = EMPTY_LINK_REGEX.replace_all(content, |caps: &regex::Captures| {
-            let text = caps.get(1).map_or("", |m| m.as_str());
-            let url = caps.get(2).map_or("", |m| m.as_str());
+        // Group warnings by line number for easier processing
+        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
-            if text.trim().is_empty() && url.trim().is_empty() {
-                // Both text and URL are empty - provide placeholder
-                "[Link text](https://example.com)".to_string()
-            } else if text.trim().is_empty() {
-                // Only text is empty - provide placeholder text
-                format!("[Link text]({})", url)
-            } else if url.trim().is_empty() {
-                // Only URL is empty - provide placeholder URL
-                format!("[{}](https://example.com)", text)
-            } else {
-                // Neither is empty - keep as is
-                caps[0].to_string()
+        // Process warnings line by line (in reverse order to avoid offset issues)
+        let mut warnings_by_line: std::collections::BTreeMap<usize, Vec<&crate::rule::LintWarning>> = std::collections::BTreeMap::new();
+        for warning in &warnings {
+            warnings_by_line.entry(warning.line).or_insert_with(Vec::new).push(warning);
+        }
+
+        // Process lines in reverse order to avoid affecting line indices
+        for (line_num, line_warnings) in warnings_by_line.iter().rev() {
+            let line_idx = line_num - 1;
+            if line_idx >= lines.len() {
+                continue;
             }
-        });
 
-        Ok(result.to_string())
+            // Sort warnings by column in reverse order (rightmost first)
+            let mut sorted_warnings = line_warnings.clone();
+            sorted_warnings.sort_by_key(|w| std::cmp::Reverse(w.column));
+
+            for warning in sorted_warnings {
+                if let Some(fix) = &warning.fix {
+                    let line = &mut lines[line_idx];
+                    let start = fix.range.start;
+                    let end = fix.range.end;
+
+                    if start <= line.len() && end <= line.len() && start < end {
+                        line.replace_range(start..end, &fix.replacement);
+                    }
+                }
+            }
+        }
+
+        Ok(lines.join("\n"))
     }
 
     /// Get the category of this rule for selective processing

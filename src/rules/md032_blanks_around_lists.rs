@@ -144,8 +144,24 @@ impl MD032BlanksAroundLists {
                         let is_next_list_item_start = LIST_ITEM_START_REGEX.is_match(next_line_content);
                         let next_line_indent = calculate_indent(next_line_content); // Calculate indent on content only
 
-                        // Compare indent against the first item's *content* indent
-                        if is_next_list_item_start || next_line_indent >= first_item_content_indent {
+                                                                                                                        // A line continues the list if:
+                        // 1. It's a new list item (starts with marker)
+                        // 2. It's indented enough to be list content (>= first_item_content_indent)
+                        // 3. It's an unindented continuation that immediately follows a list item
+                        //    and starts with lowercase (indicating it's a sentence fragment)
+                        let is_unindented_continuation = !next_line_content.trim().is_empty() &&
+                                                       !next_line_content.starts_with('#') && // Not a heading
+                                                       !next_line_content.starts_with("```") && // Not a code block
+                                                       !next_line_content.starts_with("~~~") && // Not a code block
+                                                       next_line_indent == 0 && // Must be unindented
+                                                       // Must start with lowercase letter (sentence fragment)
+                                                       next_line_content.trim().chars().next().map_or(false, |c| c.is_lowercase());
+
+                        let is_continuation = is_next_list_item_start ||
+                                            next_line_indent >= first_item_content_indent ||
+                                            is_unindented_continuation;
+
+                        if is_continuation {
                              block_end_line_1 = next_line_idx_1;
                              potential_blank_lines.clear();
                              lookahead_idx_0 += 1;
@@ -979,6 +995,19 @@ mod tests {
         let fixed_without_newline = fix(content_without_newline);
         assert!(!fixed_without_newline.ends_with('\n'), "Fix should not add final newline when not present");
         assert_eq!(fixed_without_newline, "Text\n\n- Item 1\n- Item 2\n\nText");
+    }
+
+    #[test]
+    fn test_fix_multiline_list_items_no_indent() {
+        let content = "## Configuration\n\nThis rule has the following configuration options:\n\n- `option1`: Description that continues\non the next line without indentation.\n- `option2`: Another description that also continues\non the next line.\n\n## Next Section";
+
+        let warnings = lint(content);
+        // Should only warn about missing blank lines around the entire list, not between items
+        assert_eq!(warnings.len(), 0, "Should not warn for properly formatted list with multi-line items. Got: {:?}", warnings);
+
+        let fixed_content = fix(content);
+        // Should not change the content since it's already correct
+        assert_eq!(fixed_content, content, "Should not modify correctly formatted multi-line list items");
     }
 
 }
