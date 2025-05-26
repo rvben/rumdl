@@ -198,54 +198,17 @@ pub fn is_rule_disabled_at_line(content: &str, rule_name: &str, line_num: usize)
 
         let line = line.trim();
 
-        // Check for global disable comments
-        if line.contains("<!-- markdownlint-disable -->") || line.contains("<!-- rumdl-disable -->")
-        {
-            is_disabled = true;
-            continue;
-        }
-
-        // Check for rule-specific disable comments
-        if line.contains("<!-- markdownlint-disable ") || line.contains("<!-- rumdl-disable ") {
-            // Extract the rule names from the comment
-            let start_idx = if line.contains("<!-- markdownlint-disable ") {
-                "<!-- markdownlint-disable ".len()
-            } else {
-                "<!-- rumdl-disable ".len()
-            };
-
-            let end_idx = line.find(" -->").unwrap_or(line.len());
-            let rules_str = &line[start_idx..end_idx];
-
-            // Check if the current rule is in the list
-            let rules: Vec<&str> = rules_str.split_whitespace().collect();
-            if rules.contains(&rule_name) {
+        // Check for disable comments (both global and rule-specific)
+        if let Some(rules) = parse_disable_comment(line) {
+            if rules.is_empty() || rules.contains(&rule_name) {
                 is_disabled = true;
                 continue;
             }
         }
 
-        // Check for global enable comments
-        if line.contains("<!-- markdownlint-enable -->") || line.contains("<!-- rumdl-enable -->") {
-            is_disabled = false;
-            continue;
-        }
-
-        // Check for rule-specific enable comments
-        if line.contains("<!-- markdownlint-enable ") || line.contains("<!-- rumdl-enable ") {
-            // Extract the rule names from the comment
-            let start_idx = if line.contains("<!-- markdownlint-enable ") {
-                "<!-- markdownlint-enable ".len()
-            } else {
-                "<!-- rumdl-enable ".len()
-            };
-
-            let end_idx = line.find(" -->").unwrap_or(line.len());
-            let rules_str = &line[start_idx..end_idx];
-
-            // Check if the current rule is in the list
-            let rules: Vec<&str> = rules_str.split_whitespace().collect();
-            if rules.contains(&rule_name) {
+        // Check for enable comments (both global and rule-specific)
+        if let Some(rules) = parse_enable_comment(line) {
+            if rules.is_empty() || rules.contains(&rule_name) {
                 is_disabled = false;
                 continue;
             }
@@ -253,6 +216,92 @@ pub fn is_rule_disabled_at_line(content: &str, rule_name: &str, line_num: usize)
     }
 
     is_disabled
+}
+
+/// Parse a disable comment and return the list of rules (empty vec means all rules)
+fn parse_disable_comment(line: &str) -> Option<Vec<&str>> {
+    // Check for rumdl-disable first (preferred syntax)
+    if let Some(start) = line.find("<!-- rumdl-disable") {
+        let after_prefix = &line[start + "<!-- rumdl-disable".len()..];
+
+        // Global disable: <!-- rumdl-disable -->
+        if after_prefix.trim_start().starts_with("-->") {
+            return Some(Vec::new()); // Empty vec means all rules
+        }
+
+        // Rule-specific disable: <!-- rumdl-disable MD001 MD002 -->
+        if let Some(end) = after_prefix.find("-->") {
+            let rules_str = after_prefix[..end].trim();
+            if !rules_str.is_empty() {
+                let rules: Vec<&str> = rules_str.split_whitespace().collect();
+                return Some(rules);
+            }
+        }
+    }
+
+    // Check for markdownlint-disable (compatibility)
+    if let Some(start) = line.find("<!-- markdownlint-disable") {
+        let after_prefix = &line[start + "<!-- markdownlint-disable".len()..];
+
+        // Global disable: <!-- markdownlint-disable -->
+        if after_prefix.trim_start().starts_with("-->") {
+            return Some(Vec::new()); // Empty vec means all rules
+        }
+
+        // Rule-specific disable: <!-- markdownlint-disable MD001 MD002 -->
+        if let Some(end) = after_prefix.find("-->") {
+            let rules_str = after_prefix[..end].trim();
+            if !rules_str.is_empty() {
+                let rules: Vec<&str> = rules_str.split_whitespace().collect();
+                return Some(rules);
+            }
+        }
+    }
+
+    None
+}
+
+/// Parse an enable comment and return the list of rules (empty vec means all rules)
+fn parse_enable_comment(line: &str) -> Option<Vec<&str>> {
+    // Check for rumdl-enable first (preferred syntax)
+    if let Some(start) = line.find("<!-- rumdl-enable") {
+        let after_prefix = &line[start + "<!-- rumdl-enable".len()..];
+
+        // Global enable: <!-- rumdl-enable -->
+        if after_prefix.trim_start().starts_with("-->") {
+            return Some(Vec::new()); // Empty vec means all rules
+        }
+
+        // Rule-specific enable: <!-- rumdl-enable MD001 MD002 -->
+        if let Some(end) = after_prefix.find("-->") {
+            let rules_str = after_prefix[..end].trim();
+            if !rules_str.is_empty() {
+                let rules: Vec<&str> = rules_str.split_whitespace().collect();
+                return Some(rules);
+            }
+        }
+    }
+
+    // Check for markdownlint-enable (compatibility)
+    if let Some(start) = line.find("<!-- markdownlint-enable") {
+        let after_prefix = &line[start + "<!-- markdownlint-enable".len()..];
+
+        // Global enable: <!-- markdownlint-enable -->
+        if after_prefix.trim_start().starts_with("-->") {
+            return Some(Vec::new()); // Empty vec means all rules
+        }
+
+        // Rule-specific enable: <!-- markdownlint-enable MD001 MD002 -->
+        if let Some(end) = after_prefix.find("-->") {
+            let rules_str = after_prefix[..end].trim();
+            if !rules_str.is_empty() {
+                let rules: Vec<&str> = rules_str.split_whitespace().collect();
+                return Some(rules);
+            }
+        }
+    }
+
+    None
 }
 
 /// Check if a rule is disabled via inline comments in the file content (for backward compatibility)
@@ -334,4 +383,76 @@ impl MaybeAst for dyn Rule {
 pub trait AstExtensions {
     /// Check if the AST contains relevant elements for this rule
     fn has_relevant_ast_elements(&self, ctx: &LintContext, ast: &MarkdownAst) -> bool;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_disable_comment() {
+        // Test rumdl-disable global
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable -->"), Some(vec![]));
+
+        // Test rumdl-disable specific rules
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable MD001 MD002 -->"), Some(vec!["MD001", "MD002"]));
+
+        // Test markdownlint-disable global
+        assert_eq!(parse_disable_comment("<!-- markdownlint-disable -->"), Some(vec![]));
+
+        // Test markdownlint-disable specific rules
+        assert_eq!(parse_disable_comment("<!-- markdownlint-disable MD001 MD002 -->"), Some(vec!["MD001", "MD002"]));
+
+        // Test non-disable comment
+        assert_eq!(parse_disable_comment("<!-- some other comment -->"), None);
+
+        // Test with extra whitespace
+        assert_eq!(parse_disable_comment("  <!-- rumdl-disable MD013 -->  "), Some(vec!["MD013"]));
+    }
+
+    #[test]
+    fn test_parse_enable_comment() {
+        // Test rumdl-enable global
+        assert_eq!(parse_enable_comment("<!-- rumdl-enable -->"), Some(vec![]));
+
+        // Test rumdl-enable specific rules
+        assert_eq!(parse_enable_comment("<!-- rumdl-enable MD001 MD002 -->"), Some(vec!["MD001", "MD002"]));
+
+        // Test markdownlint-enable global
+        assert_eq!(parse_enable_comment("<!-- markdownlint-enable -->"), Some(vec![]));
+
+        // Test markdownlint-enable specific rules
+        assert_eq!(parse_enable_comment("<!-- markdownlint-enable MD001 MD002 -->"), Some(vec!["MD001", "MD002"]));
+
+        // Test non-enable comment
+        assert_eq!(parse_enable_comment("<!-- some other comment -->"), None);
+    }
+
+    #[test]
+    fn test_is_rule_disabled_at_line() {
+        let content = r#"# Test
+<!-- rumdl-disable MD013 -->
+This is a long line
+<!-- rumdl-enable MD013 -->
+This is another line
+<!-- markdownlint-disable MD042 -->
+Empty link: []()
+<!-- markdownlint-enable MD042 -->
+Final line"#;
+
+        // Test MD013 disabled at line 2 (0-indexed line 1)
+        assert!(is_rule_disabled_at_line(content, "MD013", 2));
+
+        // Test MD013 enabled at line 4 (0-indexed line 3)
+        assert!(!is_rule_disabled_at_line(content, "MD013", 4));
+
+        // Test MD042 disabled at line 6 (0-indexed line 5)
+        assert!(is_rule_disabled_at_line(content, "MD042", 6));
+
+        // Test MD042 enabled at line 8 (0-indexed line 7)
+        assert!(!is_rule_disabled_at_line(content, "MD042", 8));
+
+        // Test rule that's never disabled
+        assert!(!is_rule_disabled_at_line(content, "MD001", 5));
+    }
 }

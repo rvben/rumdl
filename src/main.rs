@@ -73,6 +73,8 @@ struct Cli {
     #[arg(short, long, default_value = "false", hide = true)]
     _fix: bool,
 
+
+
     /// List all available rules
     #[arg(short, long, default_value = "false", hide = true)]
     list_rules: bool,
@@ -172,6 +174,8 @@ struct CheckArgs {
     /// Fix issues automatically where possible
     #[arg(short, long, default_value = "false")]
     _fix: bool,
+
+
 
     /// List all available rules
     #[arg(short, long, default_value = "false")]
