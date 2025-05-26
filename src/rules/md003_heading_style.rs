@@ -4,9 +4,8 @@
 //! See [docs/md003.md](../../docs/md003.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rules::heading_utils::{HeadingStyle, HeadingUtils};
+use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::document_structure::DocumentStructure;
-use crate::utils::markdown_elements::{ElementQuality, ElementType, MarkdownElements};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::str::FromStr;
@@ -166,143 +165,29 @@ impl Rule for MD003HeadingStyle {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        // Early return for empty content
-        if content.is_empty() {
-            return Ok(String::new());
+        // Get all warnings with their fixes
+        let warnings = self.check(ctx)?;
+
+        // If no warnings, return original content
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
 
-        // Quick check if there are any headings at all
-        if !QUICK_HEADING_CHECK.is_match(content) {
-            return Ok(content.to_string());
-        }
+        // Collect all fixes and sort by range start (descending) to apply from end to beginning
+        let mut fixes: Vec<_> = warnings.iter()
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
+            .collect();
+        fixes.sort_by(|a, b| b.0.cmp(&a.0));
 
-        let mut fixed_content = String::new();
-        let mut last_processed_line = 0;
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Get the target style - use the fallback method since no structure is available
-        let target_style = self.get_target_style(content, None);
-
-        // Get all headings using the MarkdownElements utility
-        let headings = MarkdownElements::detect_headings(content);
-
-        for heading in headings {
-            if heading.element_type != ElementType::Heading
-                || heading.quality != ElementQuality::Valid
-            {
-                continue; // Skip non-headings or invalid headings
-            }
-
-            // Add any lines before this heading
-            for i in last_processed_line..heading.start_line {
-                if !fixed_content.is_empty() {
-                    fixed_content.push('\n');
-                }
-                fixed_content.push_str(lines.get(i).unwrap_or(&""));
-            }
-
-            // Get the heading level
-            if let Some(level_str) = &heading.metadata {
-                if let Ok(level) = level_str.parse::<u32>() {
-                    // Determine the current style of the heading
-                    let style = if heading.end_line > heading.start_line {
-                        // Setext heading (has an underline)
-                        if level == 1 {
-                            HeadingStyle::Setext1
-                        } else {
-                            HeadingStyle::Setext2
-                        }
-                    } else {
-                        // ATX heading
-                        let line = lines.get(heading.start_line).map_or("", |v| *v);
-                        if line.trim().ends_with('#') {
-                            HeadingStyle::AtxClosed
-                        } else {
-                            HeadingStyle::Atx
-                        }
-                    };
-
-                    // For markdownlint parity: when target style is Setext, all headings are expected to be Setext
-                    // For level 3+, we can't actually convert to Setext, so leave as ATX but flag as violation
-                    let expected_style = if target_style == HeadingStyle::Setext1
-                        || target_style == HeadingStyle::Setext2
-                    {
-                        if level > 2 {
-                            // Level 3+ can't be Setext, so keep as ATX but this will be flagged as violation
-                            HeadingStyle::Atx
-                        } else if level == 1 {
-                            HeadingStyle::Setext1
-                        } else {
-                            HeadingStyle::Setext2
-                        }
-                    } else {
-                        target_style
-                    };
-
-                    // If this heading's style doesn't match the target, convert it
-                    if style != expected_style {
-                        // Get the text content from the heading
-                        let text_content = if heading.end_line > heading.start_line {
-                            // Setext heading
-                            lines.get(heading.start_line).unwrap_or(&"").to_string()
-                        } else {
-                            // ATX heading
-                            let line = lines.get(heading.start_line).map_or("", |v| *v);
-                            HeadingUtils::get_heading_text(line).unwrap_or_default()
-                        };
-
-                        // Get indentation
-                        let indentation = if let Some(line) = lines.get(heading.start_line) {
-                            line.chars()
-                                .take_while(|c| c.is_whitespace())
-                                .collect::<String>()
-                        } else {
-                            String::new()
-                        };
-
-                        // Convert heading to target style
-                        let converted_heading = HeadingUtils::convert_heading_style(
-                            &format!("{}{}", indentation, text_content),
-                            level,
-                            expected_style,
-                        );
-
-                        // Add converted heading
-                        if !fixed_content.is_empty() {
-                            fixed_content.push('\n');
-                        }
-                        fixed_content.push_str(&converted_heading);
-                    } else {
-                        // Add original heading lines
-                        for i in heading.start_line..=heading.end_line {
-                            if !fixed_content.is_empty() {
-                                fixed_content.push('\n');
-                            }
-                            fixed_content.push_str(lines.get(i).unwrap_or(&""));
-                        }
-                    }
-
-                    // Update last processed line
-                    last_processed_line = heading.end_line + 1;
-                }
+        // Apply fixes from end to beginning to preserve byte offsets
+        let mut result = ctx.content.to_string();
+        for (start, end, replacement) in fixes {
+            if start < result.len() && end <= result.len() && start <= end {
+                result.replace_range(start..end, replacement);
             }
         }
 
-        // Add any remaining lines
-        for i in last_processed_line..lines.len() {
-            if !fixed_content.is_empty() {
-                fixed_content.push('\n');
-            }
-            fixed_content.push_str(lines.get(i).unwrap_or(&""));
-        }
-
-        // Preserve trailing newline
-        if content.ends_with('\n') && !fixed_content.ends_with('\n') {
-            fixed_content.push('\n');
-        }
-
-        Ok(fixed_content)
+        Ok(result)
     }
 
     fn check_with_structure(
@@ -383,6 +268,63 @@ impl Rule for MD003HeadingStyle {
             };
 
             if style != expected_style {
+                // Generate fix for this heading
+                let fix = {
+                    use crate::rules::heading_utils::HeadingUtils;
+
+                    // Get the text content from the heading
+                    let text_content = if next_line_idx < lines.len() &&
+                        (lines[next_line_idx].trim_start().starts_with('=') ||
+                         lines[next_line_idx].trim_start().starts_with('-')) {
+                        // Setext heading
+                        current_line.to_string()
+                    } else {
+                        // ATX heading
+                        HeadingUtils::get_heading_text(current_line).unwrap_or_default()
+                    };
+
+                    // Get indentation
+                    let indentation = current_line.chars()
+                        .take_while(|c| c.is_whitespace())
+                        .collect::<String>();
+
+                    // Convert heading to target style
+                    let converted_heading = HeadingUtils::convert_heading_style(
+                        &format!("{}{}", indentation, text_content.trim()),
+                        level as u32,
+                        expected_style,
+                    );
+
+                    // Calculate the correct range for the heading
+                    let line_index = crate::utils::range_utils::LineIndex::new(ctx.content.to_string());
+                    let range = if next_line_idx < lines.len() &&
+                        (lines[next_line_idx].trim_start().starts_with('=') ||
+                         lines[next_line_idx].trim_start().starts_with('-')) {
+                        // Setext heading spans two lines
+                        let start_byte = line_index.line_col_to_byte_range(line_num, 1).start;
+                        let end_byte = if line_num + 1 < lines.len() {
+                            line_index.line_col_to_byte_range(line_num + 2, 1).start - 1
+                        } else {
+                            ctx.content.len()
+                        };
+                        start_byte..end_byte
+                    } else {
+                        // ATX heading is single line
+                        let start_byte = line_index.line_col_to_byte_range(line_num, 1).start;
+                        let end_byte = if line_num < lines.len() {
+                            line_index.line_col_to_byte_range(line_num + 1, 1).start - 1
+                        } else {
+                            ctx.content.len()
+                        };
+                        start_byte..end_byte
+                    };
+
+                    Some(crate::rule::Fix {
+                        range,
+                        replacement: converted_heading,
+                    })
+                };
+
                 result.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: line_num, // Already 1-indexed
@@ -392,7 +334,7 @@ impl Rule for MD003HeadingStyle {
                         expected_style, style
                     ),
                     severity: Severity::Warning,
-                    fix: None,
+                    fix,
                 });
             }
         }

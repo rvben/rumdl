@@ -90,14 +90,33 @@ impl Rule for MD049EmphasisStyle {
                 let target_marker = emphasis_nodes[0].2;
 
                 // Check all subsequent emphasis nodes for consistency
-                for (line, col, marker, _) in emphasis_nodes.iter().skip(1) {
+                for (line, col, marker, em) in emphasis_nodes.iter().skip(1) {
                     if *marker != target_marker {
+                        // Generate fix for this emphasis
+                        let fix = if let Some(pos) = &em.position {
+                            let start_offset = pos.start.offset;
+                            let end_offset = pos.end.offset;
+
+                            // Create fix for just the emphasis markers
+                            if end_offset > start_offset && start_offset < ctx.content.len() && end_offset <= ctx.content.len() {
+                                let inner_content = &ctx.content[start_offset + 1..end_offset - 1];
+                                Some(crate::rule::Fix {
+                                    range: start_offset..end_offset,
+                                    replacement: format!("{}{}{}", target_marker, inner_content, target_marker),
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             line: *line,
                             column: *col,
                             message: format!("Emphasis should use {} instead of {}", target_marker, marker),
-                            fix: None,
+                            fix,
                             severity: Severity::Warning,
                         });
                     }
@@ -111,14 +130,33 @@ impl Rule for MD049EmphasisStyle {
                     EmphasisStyle::Underscore => ('*', '_'),
                     EmphasisStyle::Consistent => unreachable!(),
                 };
-                for (line, col, marker, _) in &emphasis_nodes {
+                for (line, col, marker, em) in &emphasis_nodes {
                     if *marker == wrong_marker {
+                        // Generate fix for this emphasis
+                        let fix = if let Some(pos) = &em.position {
+                            let start_offset = pos.start.offset;
+                            let end_offset = pos.end.offset;
+
+                            // Create fix for just the emphasis markers
+                            if end_offset > start_offset && start_offset < ctx.content.len() && end_offset <= ctx.content.len() {
+                                let inner_content = &ctx.content[start_offset + 1..end_offset - 1];
+                                Some(crate::rule::Fix {
+                                    range: start_offset..end_offset,
+                                    replacement: format!("{}{}{}", correct_marker, inner_content, correct_marker),
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             line: *line,
                             column: *col,
                             message: format!("Emphasis should use {} instead of {}", correct_marker, wrong_marker),
-                            fix: None,
+                            fix,
                             severity: Severity::Warning,
                         });
                     }
@@ -129,61 +167,28 @@ impl Rule for MD049EmphasisStyle {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let ast = &ctx.ast;
-        let mut edits = vec![];
-        match self.style {
-            EmphasisStyle::Consistent => {
-                // Collect all emphasis nodes from the entire document
-                let mut emphasis_nodes = vec![];
-                self.collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
+        // Get all warnings with their fixes
+        let warnings = self.check(ctx)?;
 
-                // If we have less than 2 emphasis nodes, nothing to fix
-                if emphasis_nodes.len() < 2 {
-                    return Ok(ctx.content.to_string());
-                }
-
-                // Use the first emphasis marker found as the target style
-                let target_marker = emphasis_nodes[0].2;
-
-                // Fix all subsequent emphasis nodes that don't match the target style
-                for (_, _, marker, em) in emphasis_nodes.iter().skip(1) {
-                    if *marker != target_marker {
-                        if let Some(pos) = &em.position {
-                            let start = pos.start.offset;
-                            let end = pos.end.offset;
-                            edits.push((start, target_marker));
-                            edits.push((end - 1, target_marker));
-                        }
-                    }
-                }
-            }
-            EmphasisStyle::Asterisk | EmphasisStyle::Underscore => {
-                let mut emphasis_nodes = vec![];
-                self.collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
-                let (wrong_marker, correct_marker) = match self.style {
-                    EmphasisStyle::Asterisk => ('_', '*'),
-                    EmphasisStyle::Underscore => ('*', '_'),
-                    EmphasisStyle::Consistent => unreachable!(),
-                };
-                for (_, _, marker, em) in &emphasis_nodes {
-                    if *marker == wrong_marker {
-                        if let Some(pos) = &em.position {
-                            let start = pos.start.offset;
-                            let end = pos.end.offset;
-                            edits.push((start, correct_marker));
-                            edits.push((end - 1, correct_marker));
-                        }
-                    }
-                }
-            }
+        // If no warnings, return original content
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
+
+        // Collect all fixes and sort by range start (descending) to apply from end to beginning
+        let mut fixes: Vec<_> = warnings.iter()
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
+            .collect();
+        fixes.sort_by(|a, b| b.0.cmp(&a.0));
+
+        // Apply fixes from end to beginning to preserve byte offsets
         let mut result = ctx.content.to_string();
-        edits.sort_by(|a, b| b.0.cmp(&a.0));
-        for (offset, marker) in edits {
-            if offset < result.len() {
-                result.replace_range(offset..offset + 1, &marker.to_string());
+        for (start, end, replacement) in fixes {
+            if start < result.len() && end <= result.len() && start <= end {
+                result.replace_range(start..end, replacement);
             }
         }
+
         Ok(result)
     }
 

@@ -73,6 +73,38 @@ impl Rule for MD007ULIndent {
             if matches!(item.marker_type, ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus) {
                 let expected_indent = item.nesting_level * self.indent;
                 if item.indentation != expected_indent {
+                    // Generate fix for this list item
+                    let fix = {
+                        let lines: Vec<&str> = content.lines().collect();
+                        if let Some(line) = lines.get(item.line_number - 1) {
+                            // Extract the marker and content
+                            let re = regex::Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
+                            if let Some(caps) = re.captures(line) {
+                                let content_part = caps.get(4).map_or("", |m| m.as_str());
+                                let space_after_marker = caps.get(3).map_or(" ", |m| m.as_str());
+                                let marker_char = caps.get(2).map_or("*", |m| m.as_str());
+                                let correct_indent = " ".repeat(expected_indent);
+                                let fixed_line = format!("{}{}{}{}{}", item.blockquote_prefix, correct_indent, marker_char, space_after_marker, content_part);
+
+                                let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
+                                let line_start = line_index.line_col_to_byte_range(item.line_number, 1).start;
+                                let line_end = if item.line_number < lines.len() {
+                                    line_index.line_col_to_byte_range(item.line_number + 1, 1).start - 1
+                                } else {
+                                    content.len()
+                                };
+                                Some(crate::rule::Fix {
+                                    range: line_start..line_end,
+                                    replacement: fixed_line,
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    };
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message: format!(
@@ -82,7 +114,7 @@ impl Rule for MD007ULIndent {
                         line: item.line_number,
                         column: item.blockquote_prefix.len() + item.indentation + 1, // correct column for marker
                         severity: Severity::Warning,
-                        fix: None,
+                        fix,
                     });
                 }
             }
@@ -99,84 +131,30 @@ impl Rule for MD007ULIndent {
         self.check(ctx)
     }
 
-            fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-
-        // Get the warnings to know which lines need indentation fixing
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        // Get all warnings with their fixes
         let warnings = self.check(ctx)?;
-        let mut lines_to_fix: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        for warning in &warnings {
-            lines_to_fix.insert(warning.line);
+
+        // If no warnings, return original content
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
 
-        let element_cache = ElementCache::new(content);
-        let lines: Vec<&str> = content.lines().collect();
-        let mut result_lines: Vec<String> = Vec::new();
+        // Collect all fixes and sort by range start (descending) to apply from end to beginning
+        let mut fixes: Vec<_> = warnings.iter()
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
+            .collect();
+        fixes.sort_by(|a, b| b.0.cmp(&a.0));
 
-        // Check if any list items have tabs that need normalization
-        let mut has_tabs = false;
-        for &line in &lines {
-            if line.contains('\t') && element_cache.get_list_items().iter().any(|item| item.line_number == lines.iter().position(|&l| l == line).unwrap_or(0) + 1) {
-                has_tabs = true;
-                break;
+        // Apply fixes from end to beginning to preserve byte offsets
+        let mut result = ctx.content.to_string();
+        for (start, end, replacement) in fixes {
+            if start < result.len() && end <= result.len() && start <= end {
+                result.replace_range(start..end, replacement);
             }
         }
 
-        // If no warnings and no tabs to normalize, return original content
-        if warnings.is_empty() && !has_tabs {
-            return Ok(content.to_string());
-        }
-
-        for (line_idx, &line) in lines.iter().enumerate() {
-            let line_number = line_idx + 1;
-
-            // Check if this line is a list item
-            if let Some(item) = element_cache.get_list_items().iter().find(|item| item.line_number == line_number) {
-                if matches!(item.marker_type, ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus) {
-                    // Determine if we need to fix this line
-                    let needs_indentation_fix = lines_to_fix.contains(&line_number);
-                    let needs_tab_normalization = line.contains('\t');
-
-                    if needs_indentation_fix || needs_tab_normalization {
-                        let expected_indent = item.nesting_level * self.indent;
-
-                        // Reconstruct the line with correct indentation
-                        let marker_char = match item.marker_type {
-                            ListMarkerType::Asterisk => '*',
-                            ListMarkerType::Plus => '+',
-                            ListMarkerType::Minus => '-',
-                            _ => unreachable!(),
-                        };
-
-                        // Extract the content after the marker and space
-                        let re = regex::Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
-                        if let Some(caps) = re.captures(line) {
-                            let content_part = caps.get(4).map_or("", |m| m.as_str());
-                            let space_after_marker = caps.get(3).map_or(" ", |m| m.as_str());
-                            let correct_indent = " ".repeat(expected_indent);
-                            let fixed_line = format!("{}{}{}{}{}", item.blockquote_prefix, correct_indent, marker_char, space_after_marker, content_part);
-                            result_lines.push(fixed_line);
-                        } else {
-                            // Fallback: just use the original line
-                            result_lines.push(line.to_string());
-                        }
-                    } else {
-                        result_lines.push(line.to_string());
-                    }
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            } else {
-                result_lines.push(line.to_string());
-            }
-        }
-
-        let result = result_lines.join("\n");
-        if content.ends_with('\n') {
-            Ok(result + "\n")
-        } else {
-            Ok(result)
-        }
+        Ok(result)
     }
 
     /// Get the category of this rule for selective processing
