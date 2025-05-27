@@ -1,5 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::calculate_heading_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -154,14 +155,17 @@ impl Rule for MD043RequiredHeadings {
 
         if actual_headings != self.headings {
             let lines: Vec<&str> = content.lines().collect();
-            for (i, _) in lines.iter().enumerate() {
+            for (i, line) in lines.iter().enumerate() {
                 if self.is_heading(content, i) {
+                    // Calculate precise character range for the entire heading
+                    let (start_line, start_col, end_line, end_col) = calculate_heading_range(i + 1, line);
+
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: i + 1,
-                column: 1,
-                end_line: i + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Heading structure does not match the required structure"
                 .to_string(),
                 severity: Severity::Warning,

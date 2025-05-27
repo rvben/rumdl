@@ -1,4 +1,4 @@
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
@@ -84,15 +84,21 @@ impl Rule for MD041FirstLineHeading {
             || structure.heading_lines[0] != first_line
             || structure.heading_levels[0] != self.level
         {
+            // Calculate precise character range for the entire first line that should be a heading
+            let first_line_content = lines.get(first_line - 1).unwrap_or(&"");
+            let (start_line, start_col, end_line, end_col) = calculate_line_range(
+                first_line,
+                first_line_content
+            );
+
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: first_line,
-                column: 1,
-                end_line: first_line,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: format!(
-                "First line in file should be a level {
-            } heading",
+                "First line in file should be a level {} heading",
                     self.level
                 ),
                 severity: Severity::Warning,

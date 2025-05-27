@@ -2,7 +2,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::{
     CodeBlockType, DocumentStructure, DocumentStructureExtensions,
 };
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 /// Rule MD040: Fenced code blocks should have a language
 ///
@@ -50,13 +50,18 @@ impl Rule for MD040FencedCodeLanguage {
                 // Check if language is specified
                 let after_fence = trimmed[fence.len()..].trim();
                 if after_fence.is_empty() {
-                    let _indent = line.len() - line.trim_start().len();
+                    // Calculate precise character range for the entire fence line that needs a language
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(
+                        i + 1,
+                        line
+                    );
+
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: i + 1,
-                column: 1,
-                end_line: i + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Fenced code blocks should have a language specified".to_string(),
                 severity: Severity::Warning,
                 fix: Some(Fix {
@@ -100,19 +105,19 @@ impl Rule for MD040FencedCodeLanguage {
                     if block.language.as_ref().map_or(true, |lang| lang.is_empty()) {
                         // Get the opening fence line
                         let fence_line = content.lines().nth(block.start_line - 1).unwrap_or("");
-                        let trimmed = fence_line.trim();
-                        let _fence = if trimmed.starts_with("```") {
-                            "```"
-                        } else {
-                            "~~~"
-                        };
+
+                        // Calculate precise character range for the entire fence line that needs a language
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(
+                            block.start_line,
+                            fence_line
+                        );
 
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: block.start_line,
-                column: 1,
-                end_line: block.start_line,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Fenced code blocks should have a language specified"
                 .to_string(),
                 severity: Severity::Warning,

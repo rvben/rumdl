@@ -3,6 +3,7 @@
 /// See [docs/md013.md](../../docs/md013.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::calculate_excess_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -266,13 +267,17 @@ impl Rule for MD013LineLength {
                     )
                 };
 
+                // Calculate precise character range for the excess portion
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_excess_range(line_number, line, self.line_length);
+
                 warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message,
-                line: line_number,
-                column: self.line_length + 1,
-                end_line: line_number,
-                end_column: self.line_length + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 severity: Severity::Warning,
                 fix,
             });

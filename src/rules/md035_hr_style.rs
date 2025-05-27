@@ -3,7 +3,7 @@
 //!
 //! See [docs/md035.md](../../docs/md035.md) for full documentation, configuration, and examples.
 
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
@@ -123,12 +123,15 @@ impl Rule for MD035HRStyle {
                 let style_mismatch = line.trim() != expected_style;
 
                 if style_mismatch || has_indentation {
+                    // Calculate precise character range for the entire horizontal rule
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
+
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: i + 1,
-                column: 1,
-                end_line: i + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: if has_indentation {
                 "Horizontal rule should not be indented".to_string()
             } else {

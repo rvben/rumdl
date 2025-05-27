@@ -1,4 +1,4 @@
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use toml;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
@@ -118,18 +118,23 @@ impl Rule for MD012NoMultipleBlanks {
                     // Report warnings starting from the (maximum+1)th blank line
                     for i in self.maximum..blank_count {
                         let excess_line = blank_start + i + 1; // +1 for 1-indexed lines
+                        let excess_line_content = lines.get(blank_start + i).unwrap_or(&"");
+
+                        // Calculate precise character range for the entire blank line
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_line_range(excess_line, excess_line_content);
+
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 severity: Severity::Warning,
                 message: format!(
-                "Multiple consecutive blank lines {
-            } (Expected: {}; Actual: {})",
+                "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
                                 location, self.maximum, blank_count
                             ),
-                            line: excess_line,
-                            column: 1,
-                            end_line: excess_line,
-                            end_column: 1,
+                            line: start_line,
+                            column: start_col,
+                            end_line: end_line,
+                            end_column: end_col,
                             fix: Some(Fix {
                                 range: _line_index.line_col_to_byte_range(excess_line, 1),
                                 replacement: String::new(), // Remove the excess line
@@ -146,18 +151,23 @@ impl Rule for MD012NoMultipleBlanks {
             let location = "at end of file";
             for i in self.maximum..blank_count {
                 let excess_line = blank_start + i + 1;
+                let excess_line_content = lines.get(blank_start + i).unwrap_or(&"");
+
+                // Calculate precise character range for the entire blank line
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_line_range(excess_line, excess_line_content);
+
                 warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 severity: Severity::Warning,
                 message: format!(
-                "Multiple consecutive blank lines {
-            } (Expected: {}; Actual: {})",
+                "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
                         location, self.maximum, blank_count
                     ),
-                    line: excess_line,
-                    column: 1,
-                    end_line: excess_line,
-                    end_column: 1,
+                    line: start_line,
+                    column: start_col,
+                    end_line: end_line,
+                    end_column: end_col,
                     fix: Some(Fix {
                         range: _line_index.line_col_to_byte_range(excess_line, 1),
                         replacement: String::new(),

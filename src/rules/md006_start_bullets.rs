@@ -1,4 +1,4 @@
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
@@ -158,13 +158,17 @@ impl Rule for MD006StartBullets {
                                         let is_nested = MD006StartBullets::is_nested_list_item(lines, line_idx);
 
                                         if !is_nested {
+                                            // Calculate precise character range for the incorrect indentation
+                                            let (start_line, start_col, end_line, end_col) =
+                                                calculate_match_range(line_idx + 1, line, 1, indent + 1);
+
                                             result.push(LintWarning {
                 rule_name: Some("MD006"),
                 severity: Severity::Warning,
-                line: line_idx + 1,
-                column: 1,
-                end_line: line_idx + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Consider starting bulleted lists at the beginning of the line".to_string(),
                 fix: Some(Fix {
                 range: 0..indent,

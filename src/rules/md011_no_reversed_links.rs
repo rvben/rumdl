@@ -2,6 +2,7 @@
 ///
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::range_utils::calculate_match_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -72,18 +73,21 @@ impl Rule for MD011NoReversedLinks {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let mut warnings = Vec::new();
-        let mut line_start = 0;
 
         for (line_num, line) in content.lines().enumerate() {
             for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
-                let column = line_start + cap.get(0).unwrap().start() + 1;
+                                let match_obj = cap.get(0).unwrap();
+
+                // Calculate precise character range for the reversed syntax
+                let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_obj.start(), match_obj.len());
+
                 warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message: "Reversed link syntax".to_string(),
-                line: line_num + 1,
-                column,
-                end_line: line_num + 1,
-                end_column: column + cap.get(0).unwrap().len(),
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 severity: Severity::Warning,
                 fix: Some(Fix {
                 range: (0..0), // TODO: Replace with correct byte range if available
@@ -91,7 +95,6 @@ impl Rule for MD011NoReversedLinks {
                     }),
                 });
             }
-            line_start += line.len() + 1;
         }
 
         Ok(warnings)

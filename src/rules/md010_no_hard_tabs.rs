@@ -1,7 +1,7 @@
 /// Rule MD010: No hard tabs
 ///
 /// See [docs/md010.md](../../docs/md010.md) for full documentation, configuration, and examples.
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use lazy_static::lazy_static;
@@ -101,6 +101,32 @@ impl MD010NoHardTabs {
             .map(|(i, _)| i)
             .collect()
     }
+
+    fn group_consecutive_tabs(tab_positions: &[usize]) -> Vec<(usize, usize)> {
+        if tab_positions.is_empty() {
+            return Vec::new();
+        }
+
+        let mut groups = Vec::new();
+        let mut start = tab_positions[0];
+        let mut end = tab_positions[0];
+
+        for &pos in tab_positions.iter().skip(1) {
+            if pos == end + 1 {
+                // Consecutive tab
+                end = pos;
+            } else {
+                // Gap found, save current group and start new one
+                groups.push((start, end + 1)); // end + 1 for exclusive end
+                start = pos;
+                end = pos;
+            }
+        }
+
+        // Add the last group
+        groups.push((start, end + 1));
+        groups
+    }
 }
 
 impl Rule for MD010NoHardTabs {
@@ -139,36 +165,51 @@ impl Rule for MD010NoHardTabs {
             }
 
             let leading_tabs = Self::count_leading_tabs(line);
-            let non_leading_tabs = tab_positions.len() - leading_tabs;
+            let tab_groups = Self::group_consecutive_tabs(&tab_positions);
 
-            // Generate warning for each tab
-            for &pos in &tab_positions {
-                let is_leading = pos < leading_tabs;
+            // Generate warning for each group of consecutive tabs
+            for (start_pos, end_pos) in tab_groups {
+                let tab_count = end_pos - start_pos;
+                let is_leading = start_pos < leading_tabs;
+
+                // Calculate precise character range for the tab group
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_match_range(line_num + 1, line, start_pos, tab_count);
+
                 let message = if line.trim().is_empty() {
-                    "Empty line contains hard tabs".to_string()
+                    if tab_count == 1 {
+                        "Empty line contains hard tab".to_string()
+                    } else {
+                        format!("Empty line contains {} hard tabs", tab_count)
+                    }
                 } else if is_leading {
-                    format!(
-                        "Found {} leading hard tab(s), use {} spaces instead",
-                        leading_tabs,
-                        leading_tabs * self.spaces_per_tab
-                    )
+                    if tab_count == 1 {
+                        format!("Found leading hard tab, use {} spaces instead", self.spaces_per_tab)
+                    } else {
+                        format!(
+                            "Found {} leading hard tabs, use {} spaces instead",
+                            tab_count,
+                            tab_count * self.spaces_per_tab
+                        )
+                    }
                 } else {
-                    format!(
-                        "Found {} hard tab(s) for alignment, use spaces instead",
-                        non_leading_tabs
-                    )
+                    if tab_count == 1 {
+                        "Found hard tab for alignment, use spaces instead".to_string()
+                    } else {
+                        format!("Found {} hard tabs for alignment, use spaces instead", tab_count)
+                    }
                 };
 
                 warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: pos + 1,
-                end_line: line_num + 1,
-                end_column: pos + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                range: _line_index.line_col_to_byte_range(line_num + 1, pos + 1),
+                range: _line_index.line_col_to_byte_range(line_num + 1, start_pos + 1),
                 replacement: line.replace('\t', &" ".repeat(self.spaces_per_tab)),
             }),
                 });

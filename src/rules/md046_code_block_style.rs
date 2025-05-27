@@ -1,7 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_block_utils::CodeBlockStyle;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -545,13 +545,16 @@ impl Rule for MD046CodeBlockStyle {
                 && (line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~"))
             {
                 if target_style == CodeBlockStyle::Indented {
+                    // Calculate precise character range for the entire fence line
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
+
                     // Add warning for opening fence
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: i + 1,
-                column: 1,
-                end_line: i + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Code block style should be indented".to_string(),
                 severity: Severity::Warning,
                 fix: Some(Fix {
@@ -568,12 +571,15 @@ impl Rule for MD046CodeBlockStyle {
                         {
                             // Add warnings for content lines and closing fence
                             for k in i + 1..=j {
+                                // Calculate precise character range for the entire line
+                                let (start_line, start_col, end_line, end_col) = calculate_line_range(k + 1, lines[k]);
+
                                 warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: k + 1,
-                column: 1,
-                end_line: k + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Code block style should be indented".to_string(),
                 severity: Severity::Warning,
                 fix: Some(Fix {
@@ -622,13 +628,16 @@ impl Rule for MD046CodeBlockStyle {
                     let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1);
 
                     if !prev_line_is_indented {
+                        // Calculate precise character range for the entire indented line
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
+
                         // Add warning for indented block that should be fenced
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: i + 1,
-                column: 1,
-                end_line: i + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Code block style should be fenced".to_string(),
                 severity: Severity::Warning,
                 fix: Some(Fix {

@@ -6,6 +6,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::document_structure::DocumentStructure;
+use crate::utils::range_utils::calculate_heading_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::str::FromStr;
@@ -325,15 +326,27 @@ impl Rule for MD003HeadingStyle {
                     })
                 };
 
+                // Calculate precise character range for the heading marker
+                let (start_line, start_col, end_line, end_col) = if style == HeadingStyle::Setext1 || style == HeadingStyle::Setext2 {
+                    // For Setext headings, highlight the underline
+                    if next_line_idx < lines.len() {
+                        calculate_heading_range(line_num + 1, lines[next_line_idx])
+                    } else {
+                        calculate_heading_range(line_num, current_line)
+                    }
+                } else {
+                    // For ATX headings, highlight the hash markers
+                    calculate_heading_range(line_num, current_line)
+                };
+
                 result.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num, // Already 1-indexed
-                column: 1,
-                end_line: line_num, // Already 1-indexed,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: format!(
-                "Heading style should be {:?
-            }, found {:?}",
+                "Heading style should be {:?}, found {:?}",
                         expected_style, style
                     ),
                     severity: Severity::Warning,

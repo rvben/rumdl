@@ -3,7 +3,7 @@
 //!
 //! See [docs/md005.md](../../docs/md005.md) for full documentation, configuration, and examples.
 
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::DocumentStructure;
@@ -257,12 +257,21 @@ impl Rule for MD005ListIndent {
                 let trimmed = line.trim_start();
                 let replacement = format!("{}{}", " ".repeat(expected_indent), trimmed);
 
+                // Calculate precise character range for the incorrect indentation
+                let (start_line, start_col, end_line, end_col) = if *indent > 0 {
+                    // Highlight the incorrect indentation spaces
+                    calculate_match_range(*line_num + 1, line, 1, *indent + 1)
+                } else {
+                    // No indentation, highlight position where indentation should be
+                    calculate_match_range(*line_num + 1, line, 1, 1)
+                };
+
                 warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: 1,
-                end_line: line_num + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: inconsistent_message,
                 severity: Severity::Warning,
                 fix: Some(Fix {
@@ -315,12 +324,21 @@ impl Rule for MD005ListIndent {
 
                     // Only add if we don't already have a warning for this line
                     if !warnings.iter().any(|w| w.line == line_num + 1) {
+                        // Calculate precise character range for the incorrect indentation
+                        let (start_line, start_col, end_line, end_col) = if indent > 0 {
+                            // Highlight the incorrect indentation spaces
+                            calculate_match_range(line_num + 1, line, 1, indent + 1)
+                        } else {
+                            // No indentation, highlight position where indentation should be
+                            calculate_match_range(line_num + 1, line, 1, 1)
+                        };
+
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: 1,
-                end_line: line_num + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: inconsistent_message,
                 severity: Severity::Warning,
                 fix: Some(Fix {
@@ -372,12 +390,21 @@ impl Rule for MD005ListIndent {
 
                     // Only add if we don't already have a warning
                     if !warnings.iter().any(|w| w.line == line_num + 1) {
+                        // Calculate precise character range for the incorrect indentation
+                        let (start_line, start_col, end_line, end_col) = if *indent > 0 {
+                            // Highlight the incorrect indentation spaces
+                            calculate_match_range(*line_num + 1, line, 1, *indent + 1)
+                        } else {
+                            // No indentation, highlight position where indentation should be
+                            calculate_match_range(*line_num + 1, line, 1, 1)
+                        };
+
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: 1,
-                end_line: line_num + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message,
                 severity: Severity::Warning,
                 fix: Some(Fix {

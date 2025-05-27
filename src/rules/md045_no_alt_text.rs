@@ -1,4 +1,4 @@
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
@@ -49,12 +49,16 @@ impl Rule for MD045NoAltText {
                 if alt_text.trim().is_empty() {
                     let full_match = cap.get(0).unwrap();
                     let _url_part = cap.get(2).unwrap();
+
+                    // Calculate precise character range for the entire image syntax
+                    let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, full_match.start(), full_match.len());
+
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: full_match.start() + 1,
-                end_line: line_num + 1,
-                end_column: full_match.start() + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Image should have alternate text".to_string(),
                 severity: Severity::Warning,
                 fix: Some(Fix {

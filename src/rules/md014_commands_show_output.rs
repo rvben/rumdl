@@ -4,7 +4,7 @@
 //! See [docs/md014.md](../../docs/md014.md) for full documentation, configuration, and examples.
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -13,6 +13,7 @@ lazy_static! {
     static ref COMMAND_PATTERN: Regex = Regex::new(r"^\s*[$>]\s+\S+").unwrap();
     static ref SHELL_LANG_PATTERN: Regex =
         Regex::new(r"^(?i)(bash|sh|shell|console|terminal)").unwrap();
+    static ref DOLLAR_PROMPT_PATTERN: Regex = Regex::new(r"^\s*([$>])").unwrap();
 }
 
 #[derive(Clone)]
@@ -118,6 +119,15 @@ impl MD014CommandsShowOutput {
             .unwrap_or("")
             .to_string()
     }
+
+    fn find_first_command_line<'a>(&self, block: &[&'a str]) -> Option<(usize, &'a str)> {
+        for (i, line) in block.iter().enumerate() {
+            if self.is_command_line(line) {
+                return Some((i, line));
+            }
+        }
+        None
+    }
 }
 
 impl Rule for MD014CommandsShowOutput {
@@ -148,19 +158,31 @@ impl Rule for MD014CommandsShowOutput {
                 if in_code_block {
                     // End of code block
                     if self.is_command_without_output(&current_block, &current_lang) {
-                        warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: block_start_line + 1,
-                column: 1,
-                end_line: block_start_line + 1,
-                end_column: 1 + 1,
-                message: "Commands in code blocks should show output".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index.line_col_to_byte_range(block_start_line + 1, 1),
-                replacement: self.fix_command_block(&current_block),
-            }),
-                        });
+                        // Find the first command line to highlight the dollar sign
+                        if let Some((cmd_line_idx, cmd_line)) = self.find_first_command_line(&current_block) {
+                            let cmd_line_num = block_start_line + 1 + cmd_line_idx + 1; // +1 for fence, +1 for 1-indexed
+
+                            // Find and highlight the dollar sign or prompt
+                            if let Some(cap) = DOLLAR_PROMPT_PATTERN.captures(cmd_line) {
+                                let match_obj = cap.get(1).unwrap(); // The $ or > character
+                                let (start_line, start_col, end_line, end_col) =
+                                    calculate_match_range(cmd_line_num, cmd_line, match_obj.start(), match_obj.len());
+
+                                warnings.push(LintWarning {
+                                    rule_name: Some(self.name()),
+                                    line: start_line,
+                                    column: start_col,
+                                    end_line: end_line,
+                                    end_column: end_col,
+                                    message: "Commands in code blocks should show output".to_string(),
+                                    severity: Severity::Warning,
+                                    fix: Some(Fix {
+                                        range: _line_index.line_col_to_byte_range(block_start_line + 1, 1),
+                                        replacement: self.fix_command_block(&current_block),
+                                    }),
+                                });
+                            }
+                        }
                     }
                     current_block.clear();
                 } else {
@@ -206,20 +228,15 @@ impl Rule for MD014CommandsShowOutput {
                 } else {
                     current_lang = Self::get_code_block_language(line);
                 }
+                in_code_block = !in_code_block;
                 result.push_str(line);
                 result.push('\n');
-                in_code_block = !in_code_block;
             } else if in_code_block {
                 current_block.push(line);
             } else {
                 result.push_str(line);
                 result.push('\n');
             }
-        }
-
-        // Remove trailing newline if the original content didn't have one
-        if !content.ends_with('\n') {
-            result.pop();
         }
 
         Ok(result)

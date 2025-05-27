@@ -17,16 +17,16 @@ fn test_leading_hard_tabs() {
     let content = "\tIndented line\n\t\tDouble indented";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3);
+    assert_eq!(result.len(), 2); // One warning per line (grouped consecutive tabs)
     assert_eq!(result[0].line, 1);
     assert_eq!(
         result[0].message,
-        "Found 1 leading hard tab(s), use 4 spaces instead"
+        "Found leading hard tab, use 4 spaces instead"
     );
     assert_eq!(result[1].line, 2);
     assert_eq!(
         result[1].message,
-        "Found 2 leading hard tab(s), use 8 spaces instead"
+        "Found 2 leading hard tabs, use 8 spaces instead"
     );
 }
 
@@ -40,7 +40,7 @@ fn test_alignment_tabs() {
     assert_eq!(result[0].line, 1);
     assert_eq!(
         result[0].message,
-        "Found 1 hard tab(s) for alignment, use spaces instead"
+        "Found hard tab for alignment, use spaces instead"
     );
 }
 
@@ -50,9 +50,9 @@ fn test_empty_line_tabs() {
     let content = "Normal line\n\t\t\n\tMore text";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3);
+    assert_eq!(result.len(), 2); // One warning per line (grouped consecutive tabs)
     assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].message, "Empty line contains hard tabs");
+    assert_eq!(result[0].message, "Empty line contains 2 hard tabs");
 }
 
 #[test]
