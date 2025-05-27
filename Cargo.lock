@@ -1748,7 +1748,11 @@ dependencies = [
  "tower 0.5.2",
  "tower-lsp",
  "tower-service",
+ "unicode-bidi",
+ "unicode-blocks",
  "unicode-normalization",
+ "unicode-segmentation",
+ "unicode-width",
  "url",
  "walkdir",
 ]
@@ -2294,6 +2298,18 @@ name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
+
+[[package]]
+name = "unicode-bidi"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
+
+[[package]]
+name = "unicode-blocks"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b12e05d9e06373163a9bb6bb8c263c261b396643a99445fe6b9811fd376581b"
 
 [[package]]
 name = "unicode-id"

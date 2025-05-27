@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Write, Read};
 use std::path::Path;
 use std::process;
 use std::sync::Arc;
@@ -220,6 +220,10 @@ struct CheckArgs {
     /// Output format: text (default) or json
     #[arg(long, short = 'o', default_value = "text")]
     output: String,
+
+    /// Read from stdin instead of files
+    #[arg(long, help = "Read from stdin instead of files")]
+    stdin: bool,
 }
 
 // Get a complete set of enabled rules based on CLI options and config
@@ -1204,6 +1208,7 @@ build-backend = \"setuptools.build_meta\"
                         profile: cli.profile,
                         quiet: cli.quiet,
                         output: "text".to_string(),
+                        stdin: false,
                     };
                     eprintln!("{}: Deprecation warning: Running 'rumdl .' or 'rumdl [PATHS...]' without a subcommand is deprecated and will be removed in a future release. Please use 'rumdl check .' instead.", "[rumdl]".yellow().bold());
                     run_check(&args, cli.config.as_deref(), cli.no_config);
@@ -1222,6 +1227,85 @@ build-backend = \"setuptools.build_meta\"
         std::process::exit(1);
     } else {
         Ok(())
+    }
+}
+
+/// Process markdown content from stdin
+fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs) {
+    // Read all content from stdin
+    let mut content = String::new();
+    if let Err(e) = io::stdin().read_to_string(&mut content) {
+        if !args.quiet {
+            eprintln!("Error reading from stdin: {}", e);
+        }
+        process::exit(1);
+    }
+
+    // Create a lint context for the stdin content
+    let ctx = LintContext::new(&content);
+    let mut all_warnings = Vec::new();
+
+    // Run all enabled rules on the content
+    for rule in rules {
+        match rule.check(&ctx) {
+            Ok(mut warnings) => {
+                // Set file path to "<stdin>" for all warnings
+                for warning in &mut warnings {
+                    // The warnings already have the correct character ranges
+                }
+                all_warnings.extend(warnings);
+            }
+            Err(e) => {
+                if !args.quiet {
+                    eprintln!("Error running rule {}: {}", rule.name(), e);
+                }
+            }
+        }
+    }
+
+    // Output results
+    if args.output == "json" {
+        // For JSON output, modify warnings to show "<stdin>" as filename
+        let mut json_warnings = Vec::new();
+        for warning in all_warnings {
+            let mut json_warning = serde_json::to_value(&warning).unwrap();
+            if let Some(obj) = json_warning.as_object_mut() {
+                obj.insert("file".to_string(), serde_json::Value::String("<stdin>".to_string()));
+            }
+            json_warnings.push(json_warning);
+        }
+        println!("{}", serde_json::to_string_pretty(&json_warnings).unwrap());
+    } else {
+        // Text output
+        let has_issues = !all_warnings.is_empty();
+        if has_issues {
+            for warning in &all_warnings {
+                println!(
+                    "<stdin>:{}:{}: {}: {} [{}]",
+                    warning.line,
+                    warning.column,
+                    match warning.severity {
+                        rumdl::rule::Severity::Error => "error".red(),
+                        rumdl::rule::Severity::Warning => "warning".yellow(),
+                    },
+                    warning.message,
+                    warning.rule_name.as_deref().unwrap_or("unknown")
+                );
+            }
+        }
+
+        if !args.quiet {
+            if has_issues {
+                println!("\nFound {} issue(s) in stdin", all_warnings.len());
+            } else {
+                println!("No issues found in stdin");
+            }
+        }
+
+        // Exit with error code if issues found
+        if has_issues {
+            process::exit(1);
+        }
     }
 }
 
@@ -1256,6 +1340,12 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
 
     // Initialize rules with configuration
     let enabled_rules = get_enabled_rules_from_checkargs(args, &config);
+
+    // Handle stdin input
+    if args.stdin {
+        process_stdin(&enabled_rules, args);
+        return;
+    }
 
     // Find all markdown files to check
     let file_paths = match find_markdown_files(&args.paths, args, &config) {

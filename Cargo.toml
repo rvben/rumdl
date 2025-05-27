@@ -81,6 +81,10 @@ proptest = "1.6.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 rand = "0.9.1"
 pretty_assertions = "1.4"
+unicode-segmentation = "1.12"
+unicode-width = "0.2"
+unicode-blocks = "0.1"
+unicode-bidi = "0.3"
 
 [[bench]]
 name = "rule_performance"
