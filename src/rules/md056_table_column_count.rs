@@ -1,4 +1,4 @@
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
@@ -218,6 +218,9 @@ impl Rule for MD056TableColumnCount {
                     } else if count != expected_count {
                         let fix_result = self.fix_table_row(lines[i], expected_count);
 
+                        // Calculate precise character range for the entire table row
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
+
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message: format!(
@@ -225,10 +228,10 @@ impl Rule for MD056TableColumnCount {
             } cells, but expected {}",
                                 count, expected_count
                             ),
-                            line: i + 1,
-                            column: 1,
-                            end_line: i + 1,
-                            end_column: lines[i].len() + 1,
+                            line: start_line,
+                            column: start_col,
+                            end_line: end_line,
+                            end_column: end_col,
                             severity: Severity::Warning,
                             fix: fix_result.map(|fixed_row| Fix {
                                 range: LineIndex::new(content.to_string())

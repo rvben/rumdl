@@ -1,6 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::regex_cache::*;
+use crate::utils::range_utils::calculate_match_range;
 use std::collections::HashSet;
 
 /// Rule MD051: Link fragments should match document headings
@@ -256,12 +257,16 @@ impl Rule for MD051LinkFragments {
 
                     // Check if the fragment exists in headings
                     if !headings.contains(&fragment.to_lowercase()) {
+                        // Calculate precise character range for the entire link
+                        let match_len = full_match.end() - full_match.start();
+                        let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, full_match.start(), match_len);
+
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: full_match.start() + 1,
-                end_line: line_num + 1,
-                end_column: full_match.start() + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: format!(
                 "Link fragment '#{
             }' does not exist in document headings.",

@@ -1,4 +1,4 @@
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
@@ -37,19 +37,36 @@ impl Rule for MD047SingleTrailingNewline {
         // Only issue warning if there's no newline or more than one
         if !has_trailing_newline || has_multiple_newlines {
             let lines: Vec<&str> = content.lines().collect();
-            let last_line = lines.len();
-            let last_column = lines.last().map_or(1, |line| line.len() + 1);
+            let last_line_num = lines.len();
+            let last_line_content = lines.last().unwrap_or(&"");
+
+            // Calculate precise character range for the end of file
+            let (start_line, start_col, end_line, end_col) = if has_multiple_newlines {
+                // For multiple newlines, highlight from the end of the last content line to the end
+                let last_content_line = content.trim_end_matches('\n');
+                let last_content_lines: Vec<&str> = last_content_line.lines().collect();
+                if last_content_lines.is_empty() {
+                    (1, 1, 1, 2)
+                } else {
+                    let line_num = last_content_lines.len();
+                    let line_content = last_content_lines.last().unwrap_or(&"");
+                    (line_num, line_content.len() + 1, line_num, line_content.len() + 2)
+                }
+            } else {
+                // For missing newline, highlight the end of the last line
+                calculate_line_range(last_line_num, last_line_content)
+            };
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message: String::from("File should end with a single newline character"),
-                line: last_line,
-                column: last_column,
-                end_line: last_line,
-                end_column: last_column + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(last_line, last_column),
+                range: line_index.line_col_to_byte_range(start_line, start_col),
                 replacement: if has_trailing_newline {
                 // If there are multiple newlines, fix by ensuring just one
                 let trimmed = content.trim_end();

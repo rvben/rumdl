@@ -5,6 +5,7 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
+use crate::utils::range_utils::calculate_match_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -178,12 +179,16 @@ impl Rule for MD054LinkImageStyle {
                     let match_end_char = line[..match_end_byte].chars().count();
                     if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.full
                     {
+                        // Calculate precise character range for the entire link/image
+                        let match_len = match_end_char - match_start_char;
+                        let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_start_char, match_len);
+
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: match_start_char + 1,
-                end_line: line_num + 1,
-                end_column: match_start_char + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Link/image style 'full' is not consistent with document"
                 .to_string(),
                 severity: Severity::Warning,
@@ -203,12 +208,16 @@ impl Rule for MD054LinkImageStyle {
                     if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
                         && !self.collapsed
                     {
+                        // Calculate precise character range for the entire link/image
+                        let match_len = match_end_char - match_start_char;
+                        let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_start_char, match_len);
+
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: match_start_char + 1,
-                end_line: line_num + 1,
-                end_column: match_start_char + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Link/image style 'collapsed' is not consistent with document"
                 .to_string(),
                 severity: Severity::Warning,
@@ -230,12 +239,16 @@ impl Rule for MD054LinkImageStyle {
                         let url = cap.get(2).unwrap().as_str();
                         let style = if text == url { "url_inline" } else { "inline" };
                         if !self.is_style_allowed(style) {
+                            // Calculate precise character range for the entire link/image
+                            let match_len = match_end_char - match_start_char;
+                            let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_start_char, match_len);
+
                             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: match_start_char + 1,
-                end_line: line_num + 1,
-                end_column: match_start_char + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: format!(
                 "Link/image style '{
             }' is not consistent with document",
@@ -259,12 +272,16 @@ impl Rule for MD054LinkImageStyle {
                     if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
                         && !self.autolink
                     {
+                        // Calculate precise character range for the entire link/image
+                        let match_len = match_end_char - match_start_char;
+                        let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_start_char, match_len);
+
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: match_start_char + 1,
-                end_line: line_num + 1,
-                end_column: match_start_char + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Link/image style 'autolink' is not consistent with document"
                 .to_string(),
                 severity: Severity::Warning,
@@ -291,12 +308,16 @@ impl Rule for MD054LinkImageStyle {
                     if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
                         && !self.shortcut
                     {
+                        // Calculate precise character range for the entire link/image
+                        let match_len = match_end_char - match_start_char;
+                        let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_start_char, match_len);
+
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: match_start_char + 1,
-                end_line: line_num + 1,
-                end_column: match_start_char + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: "Link/image style 'shortcut' is not consistent with document"
                 .to_string(),
                 severity: Severity::Warning,

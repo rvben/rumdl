@@ -1,4 +1,4 @@
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
@@ -102,12 +102,15 @@ impl Rule for MD050StrongStyle {
                         StrongStyle::Consistent => unreachable!(),
                     };
 
+                    // Calculate precise character range for the entire strong emphasis
+                    let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, m.start(), m.len());
+
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: m.start() + 1,
-                end_line: line_num + 1,
-                end_column: m.start() + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: message.to_string(),
                 severity: Severity::Warning,
                 fix: Some(Fix {

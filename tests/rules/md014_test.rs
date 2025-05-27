@@ -18,8 +18,10 @@ fn test_invalid_command() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 1);
-    assert_eq!(result[0].column, 1);
+    assert_eq!(result[0].line, 2); // Command is on line 2, not line 1 (fence)
+    assert_eq!(result[0].column, 1); // Highlights the $ character
+    assert_eq!(result[0].end_line, 2);
+    assert_eq!(result[0].end_column, 2); // End of $ character
 }
 
 #[test]
@@ -37,7 +39,7 @@ fn test_fix_command() {
     let content = "```bash\n$ ls -l\n```";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "```bash\nls -l\n```");
+    assert_eq!(result, "```bash\nls -l\n```\n"); // Fix method preserves trailing newline
 }
 
 #[test]
@@ -118,7 +120,7 @@ fn test_fix_multiple_commands() {
     let content = "```bash\n$ ls -l\n$ pwd\n$ echo hello\n```";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "```bash\nls -l\npwd\necho hello\n```");
+    assert_eq!(result, "```bash\nls -l\npwd\necho hello\n```\n"); // Fix method preserves trailing newline
 }
 
 #[test]
@@ -127,5 +129,5 @@ fn test_fix_indented_commands() {
     let content = "```bash\n    $ ls -l\n    $ pwd\n```";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "```bash\n    ls -l\n    pwd\n```");
+    assert_eq!(result, "```bash\n    ls -l\n    pwd\n```\n"); // Fix method preserves trailing newline
 }

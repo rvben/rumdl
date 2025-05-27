@@ -1,6 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::lint_context::LintContext;
+use crate::utils::range_utils::calculate_match_range;
 use markdown::mdast::{Node, Emphasis};
 
 /// Rule MD049: Emphasis style
@@ -92,6 +93,16 @@ impl Rule for MD049EmphasisStyle {
                 // Check all subsequent emphasis nodes for consistency
                 for (line, col, marker, em) in emphasis_nodes.iter().skip(1) {
                     if *marker != target_marker {
+                        // Calculate precise character range for the entire emphasis
+                        let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
+                        let emphasis_start = col - 1; // Convert to 0-based
+                        let emphasis_len = if let Some(pos) = &em.position {
+                            pos.end.offset - pos.start.offset
+                        } else {
+                            1 // Fallback to single character
+                        };
+                        let (start_line, start_col, end_line, end_col) = calculate_match_range(*line, line_str, emphasis_start, emphasis_len);
+
                         // Generate fix for this emphasis
                         let fix = if let Some(pos) = &em.position {
                             let start_offset = pos.start.offset;
@@ -113,10 +124,10 @@ impl Rule for MD049EmphasisStyle {
 
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: *line,
-                column: *col,
-                end_line: *line,
-                end_column: *col + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: format!("Emphasis should use {
             } instead of {}", target_marker, marker),
                             fix,
@@ -135,6 +146,16 @@ impl Rule for MD049EmphasisStyle {
                 };
                 for (line, col, marker, em) in &emphasis_nodes {
                     if *marker == wrong_marker {
+                        // Calculate precise character range for the entire emphasis
+                        let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
+                        let emphasis_start = col - 1; // Convert to 0-based
+                        let emphasis_len = if let Some(pos) = &em.position {
+                            pos.end.offset - pos.start.offset
+                        } else {
+                            1 // Fallback to single character
+                        };
+                        let (start_line, start_col, end_line, end_col) = calculate_match_range(*line, line_str, emphasis_start, emphasis_len);
+
                         // Generate fix for this emphasis
                         let fix = if let Some(pos) = &em.position {
                             let start_offset = pos.start.offset;
@@ -156,10 +177,10 @@ impl Rule for MD049EmphasisStyle {
 
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: *line,
-                column: *col,
-                end_line: *line,
-                end_column: *col + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: format!("Emphasis should use {
             } instead of {}", correct_marker, wrong_marker),
                             fix,

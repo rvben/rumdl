@@ -1,5 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
+use crate::utils::range_utils::calculate_line_range;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -312,12 +313,19 @@ impl Rule for MD053LinkImageReferenceDefinitions {
 
         // Create warnings for unused references
         for (definition, start, _end) in unused_refs {
+            let line_num = start + 1; // 1-indexed line numbers
+            let lines: Vec<&str> = content.lines().collect();
+            let line_content = lines.get(start).unwrap_or(&"");
+
+            // Calculate precise character range for the entire reference definition line
+            let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line_content);
+
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: start + 1, // 1-indexed line numbers
-                column: 1,
-                end_line: start + 1, // 1-indexed line numbers,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: format!("Unused link/image reference definition: [{
             }]", definition),
                 severity: Severity::Warning,

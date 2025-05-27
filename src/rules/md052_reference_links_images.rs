@@ -1,4 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::range_utils::calculate_match_range;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -150,7 +151,7 @@ impl MD052ReferenceLinkImages {
         &self,
         content: &str,
         references: &HashSet<String>,
-    ) -> Vec<(usize, usize, String)> {
+    ) -> Vec<(usize, usize, usize, String)> {
         let mut undefined = Vec::new();
         let mut reported_refs = HashMap::new();
 
@@ -220,7 +221,8 @@ impl MD052ReferenceLinkImages {
                             if !references.contains(&reference_lower)
                                 && !reported_refs.contains_key(&reference_lower)
                             {
-                                undefined.push((line_num, full_match.start(), ref_text));
+                                let match_len = full_match.end() - full_match.start();
+                                undefined.push((line_num, full_match.start(), match_len, ref_text));
                                 reported_refs.insert(reference_lower, true);
                             }
                         }
@@ -255,7 +257,8 @@ impl MD052ReferenceLinkImages {
                             if !references.contains(&reference_lower)
                                 && !reported_refs.contains_key(&reference_lower)
                             {
-                                undefined.push((line_num, full_match.start(), ref_text));
+                                let match_len = full_match.end() - full_match.start();
+                                undefined.push((line_num, full_match.start(), match_len, ref_text));
                                 reported_refs.insert(reference_lower, true);
                             }
                         }
@@ -296,7 +299,8 @@ impl MD052ReferenceLinkImages {
                             if !references.contains(&reference_lower)
                                 && !reported_refs.contains_key(&reference_lower)
                             {
-                                undefined.push((line_num, full_match.start(), ref_text));
+                                let match_len = full_match.end() - full_match.start();
+                                undefined.push((line_num, full_match.start(), match_len, ref_text));
                                 reported_refs.insert(reference_lower, true);
                             }
                         }
@@ -323,13 +327,19 @@ impl Rule for MD052ReferenceLinkImages {
         let mut warnings = Vec::new();
         let references = self.extract_references(content);
 
-        for (line_num, col, reference) in self.find_undefined_references(content, &references) {
+        for (line_num, col, match_len, reference) in self.find_undefined_references(content, &references) {
+            let lines: Vec<&str> = content.lines().collect();
+            let line_content = lines.get(line_num).unwrap_or(&"");
+
+            // Calculate precise character range for the entire undefined reference
+            let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line_content, col, match_len);
+
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: col + 1,
-                end_line: line_num + 1,
-                end_column: col + 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: format!("Reference '{
             }' not found", reference),
                 severity: Severity::Warning,

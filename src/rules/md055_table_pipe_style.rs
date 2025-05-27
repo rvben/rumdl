@@ -1,6 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::code_block_utils::CodeBlockUtils;
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use toml;
 
 /// Rule MD055: Table pipe style
@@ -385,12 +385,15 @@ impl Rule for MD055TablePipeStyle {
 
                 // Check if this row needs fixing
                 if current_style != target_style {
+                    // Calculate precise character range for the entire table row
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
+
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: i + 1,
-                column: 1,
-                end_line: i + 1,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 message: format!(
                 "Table pipe style should be {
             }",
