@@ -27,6 +27,11 @@ lazy_static! {
 
     // Regex cache for punctuation patterns
     static ref PUNCTUATION_REGEX_CACHE: RwLock<HashMap<String, Regex>> = RwLock::new(HashMap::new());
+
+    // Optimized regex patterns for fix operations
+    // Only match ATX headings with 0-3 spaces indentation (4+ spaces are code blocks)
+    static ref FAST_ATX_PUNCTUATION_RE: Regex = Regex::new(r"(?m)^( {0,3}#{1,6}\s+.+?)[.,;:!?]+(\s*(?:#{1,6})?)$").unwrap();
+    static ref FAST_SETEXT_PUNCTUATION_RE: Regex = Regex::new(r"(?m)^(.+?)[.,;:!?]+(\s*)$").unwrap();
 }
 
 /// Rule MD026: Trailing punctuation in heading
@@ -198,30 +203,30 @@ impl MD026NoTrailingPunctuation {
         }
 
         let mut start_marker = false;
-        let mut end_marker = false;
 
-        // Find front matter markers before this line
-        for (i, _item) in lines.iter().enumerate().take(line_idx) {
-            if i == 0 && lines[i] == "---" {
-                start_marker = true;
-                continue;
+        for (i, &line) in lines.iter().enumerate() {
+            if i >= line_idx {
+                break;
             }
 
-            if start_marker && lines[i] == "---" && i < line_idx {
-                end_marker = true;
-                break;
+            let trimmed = line.trim();
+            if trimmed == "---" {
+                if !start_marker {
+                    start_marker = true;
+                } else {
+                    // Found end marker, we're past front matter
+                    return false;
+                }
             }
         }
 
-        // Check if we're between markers
-        start_marker && !end_marker
+        // If we found a start marker but no end marker, we're still in front matter
+        start_marker
     }
 
-    // Check if a line is a deeply indented heading (4+ spaces)
-    // These are treated as code blocks in Markdown
-    #[inline]
+    // Check if a line is a deeply indented heading (4+ spaces) which should be treated as code
     fn is_deeply_indented_heading(&self, line: &str) -> bool {
-        line.starts_with("    ") && line.trim_start().starts_with('#')
+        DEEPLY_INDENTED_HEADING_RE.is_match(line)
     }
 
     fn check_with_structure(
@@ -230,109 +235,71 @@ impl MD026NoTrailingPunctuation {
         structure: &crate::utils::document_structure::DocumentStructure,
     ) -> LintResult {
         let content = ctx.content;
-
-        // Early return: if no content or no headings
-        if content.is_empty() || structure.heading_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Early return: quick check if content contains any punctuation we care about
-        if !content.chars().any(|c| self.punctuation.contains(c)) {
-            return Ok(Vec::new());
-        }
+        let lines: Vec<&str> = content.lines().collect();
+        let mut warnings = Vec::new();
 
         let re = match self.get_punctuation_regex() {
-            Ok(re) => re,
-            Err(e) => {
-                return Err(LintError::FixFailed(format!(
-                    "Invalid regex pattern: {}",
-                    e
-                )))
-            }
+            Ok(regex) => regex,
+            Err(_) => return Ok(warnings),
         };
 
-        let mut warnings = Vec::new();
-        let line_index = LineIndex::new(content.to_string());
-        let lines: Vec<&str> = content.lines().collect();
-
-        for (idx, &_line_num) in structure.heading_lines.iter().enumerate() {
-            let region = structure.heading_regions[idx];
-            let heading_line = region.0; // Always the content line for both ATX and setext
-
-            // Skip front matter content
-            if self.is_in_front_matter(&lines, heading_line) {
+        for (idx, &heading_line) in structure.heading_lines.iter().enumerate() {
+            // Check bounds
+            if heading_line == 0 || heading_line > lines.len() {
                 continue;
             }
 
-            // Skip deeply indented headings (4+ spaces) as they are considered code blocks
+            // Skip if we're in front matter
+            if self.is_in_front_matter(&lines, heading_line - 1) {
+                continue;
+            }
+
+            // Skip deeply indented headings (they're code blocks)
             if self.is_deeply_indented_heading(lines[heading_line - 1]) {
                 continue;
             }
 
-            // Check if it's a code block, but don't skip lightly indented headings
-            if line_index.is_code_block(heading_line + 1)
-                && !INDENTED_HEADING_RE.is_match(lines[heading_line - 1])
-            {
-                continue;
-            }
+            // Use heading_regions to determine heading type
+            let region = structure.heading_regions[idx];
 
-            // For ATX headings
             if region.0 == region.1 {
-                if INDENTED_HEADING_RE.is_match(lines[heading_line - 1])
-                    || ATX_HEADING_RE.is_match(lines[heading_line - 1])
-                {
-                    if let Some(heading_text) =
-                        self.extract_atx_heading_text(lines[heading_line - 1])
-                    {
-                        if self.has_trailing_punctuation(&heading_text, &re) {
-                            // Find the trailing punctuation in the heading text
-                            if let Some(punctuation_match) = re.find(heading_text.trim()) {
-                                let line_content = lines[heading_line - 1];
+                // ATX heading (single line)
+                if let Some(heading_text) = self.extract_atx_heading_text(lines[heading_line - 1]) {
+                    if self.has_trailing_punctuation(&heading_text, &re) {
+                        // Find the trailing punctuation in the ATX heading
+                        if let Some(punctuation_match) = re.find(heading_text.trim()) {
+                            let line_content = lines[heading_line - 1];
 
-                                // Find where the heading text starts in the line
-                                let text_start_in_line = if let Some(pos) = line_content.find(heading_text.trim()) {
-                                    pos
-                                } else {
-                                    // Fallback: find after hash markers
-                                    let trimmed = line_content.trim_start();
-                                    let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-                                    let after_hashes = &trimmed[hash_count..];
-                                    let text_start_in_trimmed = after_hashes.find(heading_text.trim()).unwrap_or(0);
-                                    (line_content.len() - trimmed.len()) + hash_count + text_start_in_trimmed
-                                };
+                            // For ATX headings, find the punctuation position in the line
+                            let heading_start_in_line = line_content.find(&heading_text).unwrap_or(0);
+                            let punctuation_start_in_line = heading_start_in_line + punctuation_match.start();
+                            let punctuation_len = punctuation_match.len();
 
-                                // Calculate the position of the punctuation within the line
-                                let punctuation_start_in_line = text_start_in_line + punctuation_match.start();
-                                let punctuation_len = punctuation_match.len();
+                            let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                                heading_line,
+                                line_content,
+                                punctuation_start_in_line,
+                                punctuation_len
+                            );
 
-                                let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                                    heading_line,
-                                    line_content,
-                                    punctuation_start_in_line,
-                                    punctuation_len
-                                );
-
-                                let last_char = heading_text.trim().chars().last().unwrap_or(' ');
-
-                                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: start_line,
-                    column: start_col,
-                    end_line: end_line,
-                    end_column: end_col,
-                    message: format!(
-                    "Heading '{
-                }' should not end with punctuation '{}'",
-                                        heading_text.trim(),
-                                        last_char
-                                    ),
-                                    severity: Severity::Warning,
-                                    fix: Some(Fix {
-                                        range: self.get_line_byte_range(content, heading_line),
-                                        replacement: self.fix_atx_heading(lines[heading_line - 1], &re),
-                                    }),
-                                });
-                            }
+                            let last_char = heading_text.trim().chars().last().unwrap_or(' ');
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                line: start_line,
+                                column: start_col,
+                                end_line: end_line,
+                                end_column: end_col,
+                                message: format!(
+                                    "Heading '{}' should not end with punctuation '{}'",
+                                    heading_text.trim(),
+                                    last_char
+                                ),
+                                severity: Severity::Warning,
+                                fix: Some(Fix {
+                                    range: self.get_line_byte_range(content, heading_line),
+                                    replacement: self.fix_atx_heading(lines[heading_line - 1], &re),
+                                }),
+                            });
                         }
                     }
                 }
@@ -429,14 +396,59 @@ impl Rule for MD026NoTrailingPunctuation {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        // Parse the document structure to get heading info
-        let structure = crate::utils::document_structure::DocumentStructure::new(content);
 
+        // Fast path: if no headings or punctuation, return unchanged
+        if !content.contains('#') && !content.lines().any(|line| {
+            let lines: Vec<&str> = content.lines().collect();
+            let idx = lines.iter().position(|&l| l == line).unwrap_or(0);
+            idx + 1 < lines.len() &&
+            SETEXT_UNDERLINE_RE.is_match(lines[idx + 1])
+        }) {
+            return Ok(content.to_string());
+        }
+
+        if !content.chars().any(|c| self.punctuation.contains(c)) {
+            return Ok(content.to_string());
+        }
+
+        // For default punctuation, use fast regex approach
+        if self.punctuation == ".,;:!?" {
+            let mut result = content.to_string();
+
+            // Fix ATX headings with fast regex
+            result = FAST_ATX_PUNCTUATION_RE.replace_all(&result, "$1$2").to_string();
+
+            // Fix setext headings - need to be more careful here
+            let lines: Vec<&str> = result.lines().collect();
+            let mut fixed_lines = Vec::with_capacity(lines.len());
+
+            for (i, &line) in lines.iter().enumerate() {
+                if i + 1 < lines.len() && SETEXT_UNDERLINE_RE.is_match(lines[i + 1]) {
+                    // This is a setext heading content line
+                    fixed_lines.push(FAST_SETEXT_PUNCTUATION_RE.replace(line, "$1$2").to_string());
+                } else {
+                    fixed_lines.push(line.to_string());
+                }
+            }
+
+            // Preserve original line endings
+            let mut final_result = String::with_capacity(result.len());
+            for (i, line) in fixed_lines.iter().enumerate() {
+                final_result.push_str(line);
+                if i < fixed_lines.len() - 1 || content.ends_with('\n') {
+                    final_result.push('\n');
+                }
+            }
+
+            return Ok(final_result);
+        }
+
+        // Fallback for custom punctuation: use document structure approach
+        let structure = crate::utils::document_structure::DocumentStructure::new(content);
         let lines: Vec<&str> = content.lines().collect();
         let mut fixed_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
         let re = self.get_punctuation_regex().unwrap();
 
-        // Use _line_num as line number from structure.heading_lines is unused
         for (idx, &_line_num) in structure.heading_lines.iter().enumerate() {
             // Use heading_regions to get line indices
             let region = structure.heading_regions[idx];
@@ -460,7 +472,6 @@ impl Rule for MD026NoTrailingPunctuation {
         }
 
         // Join lines back with original newline separators
-        // Need to handle original newline endings (e.g., CRLF vs LF)
         let mut result = String::new();
         let mut original_lines = content.lines().peekable();
         let fixed_lines_iter = fixed_lines.into_iter();
@@ -469,13 +480,11 @@ impl Rule for MD026NoTrailingPunctuation {
             result.push_str(&fixed_line);
             // Append original newline sequence if possible
             if original_lines.next().is_some() && original_lines.peek().is_some() {
-                // Determine newline type from original content if possible (tricky)
-                // For simplicity, using platform default for now
                 #[cfg(windows)]
                 result.push_str("\r\n");
                 #[cfg(not(windows))]
                 result.push('\n');
-            } // Else: original content might have ended without newline?
+            }
         }
 
         // Handle case where content originally ended with a newline

@@ -11,6 +11,9 @@ lazy_static! {
     static ref FENCED_CODE_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"^(\s*)```").unwrap();
     static ref ALTERNATE_FENCED_CODE_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"^(\s*)~~~").unwrap();
     static ref BLOCKQUOTE_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"^\s*>\s*$").unwrap();
+
+    // Optimized regex patterns for fix operations
+    static ref TRAILING_SPACES_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"(?m) +$").unwrap();
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +66,8 @@ impl MD009TrailingSpaces {
         }
         count
     }
+
+
 }
 
 impl Rule for MD009TrailingSpaces {
@@ -180,23 +185,35 @@ impl Rule for MD009TrailingSpaces {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
 
-        let mut result = String::new();
+        // For simple cases (strict mode), use fast regex approach
+        if self.strict {
+            // In strict mode, remove ALL trailing spaces everywhere
+            return Ok(TRAILING_SPACES_REGEX.replace_all(content, "").to_string());
+        }
 
+        // For complex cases, we need line-by-line processing but with optimizations
         let lines: Vec<&str> = content.lines().collect();
+        let mut result = String::with_capacity(content.len()); // Pre-allocate capacity
 
         for (i, line) in lines.iter().enumerate() {
+            // Fast path: if no trailing spaces, just add the line
+            if !line.ends_with(' ') {
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+
             let trimmed = line.trim_end();
 
-            // Handle empty lines
+            // Handle empty lines - fast regex replacement
             if trimmed.is_empty() {
                 result.push('\n');
                 continue;
             }
 
             // Handle code blocks if not in strict mode
-            if !self.strict && Self::is_in_code_block(&lines, i) {
+            if Self::is_in_code_block(&lines, i) {
                 result.push_str(line);
                 result.push('\n');
                 continue;
@@ -211,7 +228,8 @@ impl Rule for MD009TrailingSpaces {
             }
 
             // Handle lines with trailing spaces
-            if !self.strict && i < lines.len() - 1 && Self::count_trailing_spaces(line) >= 1 {
+            let trailing_spaces = Self::count_trailing_spaces(line);
+            if i < lines.len() - 1 && trailing_spaces >= 1 {
                 // This is a line break (intentional trailing spaces)
                 result.push_str(trimmed);
                 result.push_str(&" ".repeat(self.br_spaces));

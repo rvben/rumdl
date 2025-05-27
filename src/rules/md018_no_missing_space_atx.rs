@@ -8,7 +8,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    static ref ATX_NO_SPACE_PATTERN: Regex = Regex::new(r"^(#+)([^#\s])").unwrap();
+    static ref ATX_NO_SPACE_PATTERN: Regex = Regex::new(r"(?m)^(#+)([^#\s].*)").unwrap();
 }
 
 #[derive(Clone)]
@@ -86,31 +86,41 @@ impl Rule for MD018NoMissingSpaceAtx {
         self.check_with_structure(ctx, &structure)
     }
 
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        if content.is_empty() {
-            return Ok(String::new());
+
+        // Fast path: if no hash symbols, return unchanged
+        if content.is_empty() || !content.contains('#') {
+            return Ok(content.to_string());
         }
+
+        // Use document structure to identify code blocks and heading lines
         let structure = DocumentStructure::new(content);
+
+        // If no headings, return unchanged
+        if structure.heading_lines.is_empty() {
+            return Ok(content.to_string());
+        }
+
+        // Create a set of heading line numbers for fast lookup
+        let heading_lines: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
+
+        // Process line by line, only applying regex to heading lines
         let lines: Vec<&str> = content.lines().collect();
-        let mut result = String::new();
-        for (i, line) in lines.iter().enumerate() {
-            // Only process heading lines
-            let is_heading_line = structure.heading_lines.iter().any(|&ln| ln == i + 1);
-            if is_heading_line && self.is_atx_heading_without_space(line) {
-                result.push_str(&self.fix_atx_heading(line));
+        let mut result_lines = Vec::with_capacity(lines.len());
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_num = line_idx + 1; // Convert to 1-indexed
+
+            // Only apply fix to heading lines that need it
+            if heading_lines.contains(&line_num) && self.is_atx_heading_without_space(line) {
+                result_lines.push(self.fix_atx_heading(line));
             } else {
-                result.push_str(line);
-            }
-            if i < lines.len() - 1 {
-                result.push('\n');
+                result_lines.push(line.to_string());
             }
         }
-        // Preserve trailing newline if original had it
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
-        }
-        Ok(result)
+
+        Ok(result_lines.join("\n"))
     }
 
     /// Optimized check using document structure

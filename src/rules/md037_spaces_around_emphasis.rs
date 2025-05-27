@@ -132,6 +132,11 @@ impl Rule for MD037NoSpaceInEmphasis {
         let content = ctx.content;
         let _timer = crate::profiling::ScopedTimer::new("MD037_fix");
 
+        // Fast path: if no emphasis markers, return unchanged
+        if !content.contains('*') && !content.contains('_') {
+            return Ok(content.to_string());
+        }
+
         // First check for issues and get all warnings with fixes
         let warnings = match self.check(ctx) {
             Ok(warnings) => warnings,
