@@ -43,7 +43,9 @@ lazy_static! {
 
     // Add a simple regex for candidate URLs (no look-behind/look-ahead)
     // Updated to match markdownlint's behavior: URLs can have domains without dots
-    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://[^\s<>\[\]()\\'\"`]+(?:\.[^\s<>\[\]()\\'\"`]+)*(?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
+    // Handles URL components properly: scheme://domain[:port][/path][?query][#fragment]
+    // Will post-process to remove trailing sentence punctuation
+    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://[^\s<>\[\]()\\'\"`]+(?:\.[^\s<>\[\]()\\'\"`]+)*(?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
 
     // Add regex for email addresses - matches markdownlint behavior
     // Detects email addresses that should be autolinked like URLs
@@ -64,6 +66,27 @@ impl MD034NoBareUrls {
     pub fn should_skip(&self, content: &str) -> bool {
         // Skip if content has no URLs and no email addresses
         !early_returns::has_urls(content) && !content.contains('@')
+    }
+
+    /// Remove trailing punctuation that is likely sentence punctuation, not part of the URL
+    fn trim_trailing_punctuation<'a>(&self, url: &'a str) -> &'a str {
+        let trailing_punct = ['.', ',', ';', ':', '!', '?'];
+        let mut end = url.len();
+
+        // Remove trailing punctuation characters
+        while end > 0 {
+            if let Some(last_char) = url.chars().nth(end - 1) {
+                if trailing_punct.contains(&last_char) {
+                    end -= last_char.len_utf8();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        &url[..end]
     }
 
     // Find all bare URLs in a line, using DocumentStructure for code span detection
@@ -136,7 +159,18 @@ impl MD034NoBareUrls {
 
         for url_match in SIMPLE_URL_REGEX.find_iter(line) {
             let url_start = url_match.start();
-            let url_end = url_match.end();
+            let mut url_end = url_match.end();
+
+            // Trim trailing punctuation that's likely sentence punctuation
+            let raw_url = &line[url_start..url_end];
+            let trimmed_url = self.trim_trailing_punctuation(raw_url);
+            url_end = url_start + trimmed_url.len();
+
+            // Skip if URL became empty after trimming
+            if url_end <= url_start {
+                continue;
+            }
+
             // Manual boundary check: not part of a larger word
             let before = if url_start == 0 {
                 None
@@ -277,7 +311,18 @@ impl MD034NoBareUrls {
                 // Check for URLs
                 for url_match in SIMPLE_URL_REGEX.find_iter(text_str) {
                     let url_start = url_match.start();
-                    let url_end = url_match.end();
+                    let mut url_end = url_match.end();
+
+                    // Trim trailing punctuation that's likely sentence punctuation
+                    let raw_url = &text_str[url_start..url_end];
+                    let trimmed_url = self.trim_trailing_punctuation(raw_url);
+                    url_end = url_start + trimmed_url.len();
+
+                    // Skip if URL became empty after trimming
+                    if url_end <= url_start {
+                        continue;
+                    }
+
                     let before = if url_start == 0 {
                         None
                     } else {
@@ -364,7 +409,18 @@ impl MD034NoBareUrls {
                 let alt_str = &image.alt;
                 for url_match in SIMPLE_URL_REGEX.find_iter(alt_str) {
                     let url_start = url_match.start();
-                    let url_end = url_match.end();
+                    let mut url_end = url_match.end();
+
+                    // Trim trailing punctuation that's likely sentence punctuation
+                    let raw_url = &alt_str[url_start..url_end];
+                    let trimmed_url = self.trim_trailing_punctuation(raw_url);
+                    url_end = url_start + trimmed_url.len();
+
+                    // Skip if URL became empty after trimming
+                    if url_end <= url_start {
+                        continue;
+                    }
+
                     let before = if url_start == 0 {
                         None
                     } else {

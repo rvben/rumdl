@@ -179,7 +179,7 @@ fn test_md034_edge_cases() {
         ("This is not a URL: htp://example.com", 0),
         // Custom scheme - should not be flagged (not http/https/ftp)
         ("custom://example.com", 0),
-        // URL with trailing period - should be flagged
+        // URL with trailing period - should be flagged (period should not be part of URL)
         ("See https://example.com.", 1),
         // URL with space in the middle - the valid part before space should be flagged
         ("https://example .com", 1),
