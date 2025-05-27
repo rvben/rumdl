@@ -2,6 +2,7 @@ use toml;
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::calculate_match_range;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Default)]
@@ -72,7 +73,7 @@ impl Rule for MD024NoDuplicateHeading {
                 .unwrap_or((line_num, line_num));
             let line_idx = region.0 - 1; // 0-based
             let line = lines.get(line_idx).unwrap_or(&"");
-            let indentation = line
+            let _indentation = line
                 .chars()
                 .take_while(|c| c.is_whitespace())
                 .collect::<String>();
@@ -86,6 +87,26 @@ impl Rule for MD024NoDuplicateHeading {
                 continue; // Ignore empty headings
             }
             let heading_key = text.to_string();
+
+            // Calculate precise character range for the heading text content
+            let text_start_in_line = if let Some(pos) = line.find(text) {
+                pos
+            } else {
+                // Fallback: find after hash markers
+                let trimmed = line.trim_start();
+                let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+                let after_hashes = &trimmed[hash_count..];
+                let text_start_in_trimmed = after_hashes.find(text).unwrap_or(0);
+                (line.len() - trimmed.len()) + hash_count + text_start_in_trimmed
+            };
+
+            let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                line_num,
+                line,
+                text_start_in_line,
+                text.len()
+            );
+
             if self.siblings_only {
                 // TODO: Implement siblings_only logic if needed
             } else if self.allow_different_nesting {
@@ -95,10 +116,10 @@ impl Rule for MD024NoDuplicateHeading {
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message: format!("Duplicate heading: '{}'.", text),
-                        line: line_num,
-                        column: indentation.len() + 1,
-                        end_line: line_num,
-                        end_column: line.len() + 1,
+                        line: start_line,
+                        column: start_col,
+                        end_line: end_line,
+                        end_column: end_col,
                         severity: Severity::Warning,
                         fix: None,
                     });
@@ -111,10 +132,10 @@ impl Rule for MD024NoDuplicateHeading {
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message: format!("Duplicate heading: '{}'.", text),
-                        line: line_num,
-                        column: indentation.len() + 1,
-                        end_line: line_num,
-                        end_column: line.len() + 1,
+                        line: start_line,
+                        column: start_col,
+                        end_line: end_line,
+                        end_column: end_col,
                         severity: Severity::Warning,
                         fix: None,
                     });

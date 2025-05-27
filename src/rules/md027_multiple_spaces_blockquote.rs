@@ -1,7 +1,14 @@
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::blockquote_utils::BlockquoteUtils;
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    // Pattern to match blockquote lines with multiple spaces after >
+    static ref BLOCKQUOTE_MULTIPLE_SPACES: Regex = Regex::new(r"^(\s*)>(\s{2,})(.*)$").unwrap();
+}
 
 /// Rule MD027: No multiple spaces after blockquote symbol
 ///
@@ -31,22 +38,38 @@ impl Rule for MD027MultipleSpacesBlockquote {
             if BlockquoteUtils::is_blockquote(line)
                 && BlockquoteUtils::has_multiple_spaces_after_marker(line)
             {
-                let start_col = BlockquoteUtils::get_blockquote_start_col(line);
-                let actual_content = BlockquoteUtils::get_blockquote_content(line);
-                warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: i + 1,
-                column: start_col,
-                end_line: i + 1,
-                end_column: start_col + 1,
-                message: "Multiple spaces after blockquote symbol".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index.line_col_to_byte_range(i + 1, start_col),
-                replacement: format!("> {
-            }", actual_content.trim_start()),
-                    }),
-                });
+                // Find the extra spaces after the > marker
+                if let Some(captures) = BLOCKQUOTE_MULTIPLE_SPACES.captures(line) {
+                    let indentation = captures.get(1).map_or("", |m| m.as_str());
+                    let extra_spaces = captures.get(2).map_or("", |m| m.as_str());
+
+                    // Calculate the position of the extra spaces
+                    let marker_pos = indentation.len(); // Position of '>'
+                    let extra_spaces_start = marker_pos + 1; // Position after '>'
+                    let extra_spaces_len = extra_spaces.len() - 1; // All spaces except the first one (which is correct)
+
+                    let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                        i + 1,
+                        line,
+                        extra_spaces_start + 1, // Skip the first space (which is correct)
+                        extra_spaces_len
+                    );
+
+                    let actual_content = BlockquoteUtils::get_blockquote_content(line);
+                    warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line: end_line,
+                    end_column: end_col,
+                    message: "Multiple spaces after blockquote symbol".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                    range: _line_index.line_col_to_byte_range(i + 1, indentation.len() + 1),
+                    replacement: format!("> {}", actual_content.trim_start()),
+                        }),
+                    });
+                }
             }
         }
 

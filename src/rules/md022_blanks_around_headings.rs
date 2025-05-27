@@ -4,6 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::{is_heading, is_setext_heading_marker};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::calculate_heading_range;
 use fancy_regex::Regex;
 use lazy_static::lazy_static;
 use toml;
@@ -650,13 +651,19 @@ impl Rule for MD022BlanksAroundHeadings {
                     // Use the combined message like check_with_structure does
                     let message = issues.join(" ");
 
+                    // Calculate precise character range for the heading
+                    let (start_line, start_col, end_line, end_col) = calculate_heading_range(
+                        heading_display_line,
+                        line
+                    );
+
                     result.push(LintWarning {
                 rule_name: Some(self.name()),
                 message,
-                line: heading_display_line,
-                column: 1,
-                end_line: heading_display_line,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 severity: Severity::Warning,
                 fix: Some(Fix {
                 range: 0..0, // Placeholder range - the actual fix is handled by the fix() method
@@ -830,15 +837,22 @@ impl Rule for MD022BlanksAroundHeadings {
             // Combine all issues for this heading into one warning
             if !issues.is_empty() {
                 let message = issues.join(" ");
+
+                // Calculate precise character range for the heading
+                let (start_line, start_col, end_line, end_col) = calculate_heading_range(
+                    heading_line + 1, // Convert back to 1-indexed
+                    line
+                );
+
                 // For fix, just insert the required number of newlines at the start of the heading (above)
                 // and after the heading (below). For simplicity, only provide a fix for the first issue.
                 result.push(LintWarning {
                 rule_name: Some(self.name()),
                 message,
-                line: heading_line + 1, // Convert back to 1-indexed
-                column: 1,
-                end_line: heading_line + 1, // Convert back to 1-indexed,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 severity: Severity::Warning,
                 fix: Some(Fix {
                 range: 0..0, // Placeholder range - the actual fix is handled by the fix() method

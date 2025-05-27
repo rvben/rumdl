@@ -2,7 +2,7 @@
 ///
 /// See [docs/md026.md](../../docs/md026.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
@@ -285,51 +285,96 @@ impl MD026NoTrailingPunctuation {
                         self.extract_atx_heading_text(lines[heading_line - 1])
                     {
                         if self.has_trailing_punctuation(&heading_text, &re) {
-                            let last_char = heading_text.trim().chars().last().unwrap_or(' ');
+                            // Find the trailing punctuation in the heading text
+                            if let Some(punctuation_match) = re.find(heading_text.trim()) {
+                                let line_content = lines[heading_line - 1];
 
-                            warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: heading_line,
-                column: 1,
-                end_line: heading_line,
-                end_column: 1 + 1,
-                message: format!(
-                "Heading '{
-            }' should not end with punctuation '{}'",
-                                    heading_text.trim(),
-                                    last_char
-                                ),
-                                severity: Severity::Warning,
-                                fix: Some(Fix {
-                                    range: self.get_line_byte_range(content, heading_line),
-                                    replacement: self.fix_atx_heading(lines[heading_line - 1], &re),
-                                }),
-                            });
+                                // Find where the heading text starts in the line
+                                let text_start_in_line = if let Some(pos) = line_content.find(heading_text.trim()) {
+                                    pos
+                                } else {
+                                    // Fallback: find after hash markers
+                                    let trimmed = line_content.trim_start();
+                                    let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+                                    let after_hashes = &trimmed[hash_count..];
+                                    let text_start_in_trimmed = after_hashes.find(heading_text.trim()).unwrap_or(0);
+                                    (line_content.len() - trimmed.len()) + hash_count + text_start_in_trimmed
+                                };
+
+                                // Calculate the position of the punctuation within the line
+                                let punctuation_start_in_line = text_start_in_line + punctuation_match.start();
+                                let punctuation_len = punctuation_match.len();
+
+                                let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                                    heading_line,
+                                    line_content,
+                                    punctuation_start_in_line,
+                                    punctuation_len
+                                );
+
+                                let last_char = heading_text.trim().chars().last().unwrap_or(' ');
+
+                                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line: end_line,
+                    end_column: end_col,
+                    message: format!(
+                    "Heading '{
+                }' should not end with punctuation '{}'",
+                                        heading_text.trim(),
+                                        last_char
+                                    ),
+                                    severity: Severity::Warning,
+                                    fix: Some(Fix {
+                                        range: self.get_line_byte_range(content, heading_line),
+                                        replacement: self.fix_atx_heading(lines[heading_line - 1], &re),
+                                    }),
+                                });
+                            }
                         }
                     }
                 }
             } else {
                 // Setext heading: check the content line for trailing punctuation
                 if self.has_trailing_punctuation(lines[heading_line - 1], &re) {
-                    let last_char = lines[heading_line - 1].trim().chars().last().unwrap_or(' ');
-                    warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: heading_line,
-                column: 1,
-                end_line: heading_line,
-                end_column: 1 + 1,
-                message: format!(
-                "Heading '{
-            }' should not end with punctuation '{}'",
-                            lines[heading_line - 1].trim(),
-                            last_char
-                        ),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: self.get_line_byte_range(content, heading_line),
-                            replacement: self.fix_setext_heading(lines[heading_line - 1], &re),
-                        }),
-                    });
+                    // Find the trailing punctuation in the setext heading
+                    if let Some(punctuation_match) = re.find(lines[heading_line - 1].trim()) {
+                        let line_content = lines[heading_line - 1];
+
+                        // For setext headings, find the punctuation position in the line
+                        let text_start_in_line = line_content.find(lines[heading_line - 1].trim()).unwrap_or(0);
+                        let punctuation_start_in_line = text_start_in_line + punctuation_match.start();
+                        let punctuation_len = punctuation_match.len();
+
+                        let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                            heading_line,
+                            line_content,
+                            punctuation_start_in_line,
+                            punctuation_len
+                        );
+
+                        let last_char = lines[heading_line - 1].trim().chars().last().unwrap_or(' ');
+                        warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line: end_line,
+                    end_column: end_col,
+                    message: format!(
+                    "Heading '{
+                }' should not end with punctuation '{}'",
+                                lines[heading_line - 1].trim(),
+                                last_char
+                            ),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: self.get_line_byte_range(content, heading_line),
+                                replacement: self.fix_setext_heading(lines[heading_line - 1], &re),
+                            }),
+                        });
+                    }
                 }
             }
         }

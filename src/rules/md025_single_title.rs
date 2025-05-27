@@ -3,7 +3,7 @@
 /// See [docs/md025.md](../../docs/md025.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -194,22 +194,58 @@ impl Rule for MD025SingleTitle {
                     continue;
                 }
                 let line_content = lines[line];
+
+                // Extract the heading text content
+                let heading_text = if line_content.trim_start().starts_with('#') {
+                    // ATX heading: extract text after hash markers
+                    let trimmed = line_content.trim_start();
+                    let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+                    trimmed[hash_count..].trim().trim_end_matches('#').trim()
+                } else {
+                    // Setext heading: use the entire line content
+                    line_content.trim()
+                };
+
+                // Calculate precise character range for the heading text content
+                let text_start_in_line = if let Some(pos) = line_content.find(heading_text) {
+                    pos
+                } else {
+                    // Fallback: find after hash markers for ATX headings
+                    if line_content.trim_start().starts_with('#') {
+                        let trimmed = line_content.trim_start();
+                        let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+                        let after_hashes = &trimmed[hash_count..];
+                        let text_start_in_trimmed = after_hashes.find(heading_text).unwrap_or(0);
+                        (line_content.len() - trimmed.len()) + hash_count + text_start_in_trimmed
+                    } else {
+                        0 // Setext headings start at beginning
+                    }
+                };
+
+                let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                    line + 1, // Convert to 1-indexed
+                    line_content,
+                    text_start_in_line,
+                    heading_text.len()
+                );
+
                 // For ATX headings, find the '#' position; for Setext, use column 1
                 let col = if line_content.trim_start().starts_with('#') {
                     line_content.find('#').unwrap_or(0)
                 } else {
                     0 // Setext headings start at column 1
                 };
+
                 warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message: format!(
                 "Multiple top-level headings (level {}) in the same document",
                         self.level
                     ),
-                    line: line + 1, // Convert back to 1-indexed
-                    column: col + 1,
-                    end_line: line + 1,
-                    end_column: col + line_content.trim().len() + 1,
+                    line: start_line,
+                    column: start_col,
+                    end_line: end_line,
+                    end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(line + 1, col + 1),

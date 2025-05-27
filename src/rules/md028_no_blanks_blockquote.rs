@@ -4,7 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::blockquote_utils::BlockquoteUtils;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 #[derive(Clone)]
 pub struct MD028NoBlanksBlockquote;
@@ -66,13 +66,20 @@ impl Rule for MD028NoBlanksBlockquote {
             if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::needs_md028_fix(line) {
                 let level = BlockquoteUtils::get_nesting_level(line);
                 let indent = BlockquoteUtils::extract_indentation(line);
+
+                // Calculate precise character range for the entire empty blockquote line
+                let (start_line, start_col, end_line, end_col) = calculate_line_range(
+                    line_num,
+                    line
+                );
+
                 warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message: "Blank line inside blockquote".to_string(),
-                line: line_num,
-                column: 1,
-                end_line: line_num,
-                end_column: 1 + 1,
+                line: start_line,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 severity: Severity::Warning,
                 fix: Some(Fix {
                 range: line_index.line_col_to_byte_range(line_num, 1),

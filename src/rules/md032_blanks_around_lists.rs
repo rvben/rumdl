@@ -1,7 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::document_structure_from_str;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 use std::collections::VecDeque;
@@ -223,18 +223,23 @@ impl MD032BlanksAroundLists {
 
                 // Only require blank lines for content in the same context (same blockquote level)
                 if !is_prev_excluded && !prev_is_blank && prefixes_match {
+                    // Calculate precise character range for the entire list line that needs a blank line before it
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(
+                        start_line,
+                        lines[start_line - 1]
+                    );
+
                      warnings.push(LintWarning {
                 line: start_line,
-                column: 0,
-                end_line: start_line,
-                end_column: 0 + 1,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 severity: Severity::Error,
                 rule_name: Some(self.name()),
                 message: format!("Lists should be preceded by a blank line"),
                 fix: Some(Fix {
                 range: line_index.line_col_to_byte_range(start_line, 1),
-                replacement: format!("{
-            }\n{}", prefix, lines[start_line - 1]),
+                replacement: format!("{}\n{}", prefix, lines[start_line - 1]),
                         }),
                     });
                 }
@@ -251,18 +256,23 @@ impl MD032BlanksAroundLists {
 
                  // Only require blank lines for content in the same context (same blockquote level)
                  if !is_next_excluded && !next_is_blank && prefixes_match {
+                    // Calculate precise character range for the last line of the list (not the line after)
+                    let (start_line_last, start_col_last, end_line_last, end_col_last) = calculate_line_range(
+                        end_line,
+                        lines[end_line - 1]
+                    );
+
                       warnings.push(LintWarning {
-                line: end_line,
-                column: 0,
-                end_line: end_line,
-                end_column: 0 + 1,
+                line: start_line_last,
+                column: start_col_last,
+                end_line: end_line_last,
+                end_column: end_col_last,
                 severity: Severity::Error,
                 rule_name: Some(self.name()),
                 message: format!("Lists should be followed by a blank line"),
                 fix: Some(Fix {
                 range: line_index.line_col_to_byte_range(end_line + 1, 1),
-                replacement: format!("{
-            }\n{}", prefix, lines[end_line]),
+                replacement: format!("{}\n{}", prefix, lines[end_line]),
                         }),
                      });
         }

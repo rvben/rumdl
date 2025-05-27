@@ -4,7 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::markdown_elements::{ElementType, MarkdownElements};
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, calculate_single_line_range};
 
 #[derive(Clone)]
 pub struct MD023HeadingStartLeft;
@@ -64,13 +64,20 @@ impl Rule for MD023HeadingStartLeft {
                     if underline_line < lines.len() {
                         let underline_text = lines[underline_line].trim();
 
+                        // Calculate precise character range for the indentation
+                        let (start_line_calc, start_col, end_line, end_col) = calculate_single_line_range(
+                            start_line + 1, // Convert to 1-indexed
+                            1,
+                            indentation
+                        );
+
                         // Add warning for the heading text line
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: start_line + 1, // Convert to 1-indexed
-                column: 1,
-                end_line: start_line + 1, // Convert to 1-indexed,
-                end_column: 1 + 1,
+                line: start_line_calc,
+                column: start_col,
+                end_line: end_line,
+                end_column: end_col,
                 severity: Severity::Warning,
                 message: format!(
                 "Setext heading should not be indented by {
@@ -87,12 +94,19 @@ impl Rule for MD023HeadingStartLeft {
                         let underline_indentation =
                             lines[underline_line].len() - lines[underline_line].trim_start().len();
                         if underline_indentation > 0 {
+                            // Calculate precise character range for the underline indentation
+                            let (underline_start_line, underline_start_col, underline_end_line, underline_end_col) = calculate_single_line_range(
+                                underline_line + 1, // Convert to 1-indexed
+                                1,
+                                underline_indentation
+                            );
+
                             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: underline_line + 1, // Convert to 1-indexed
-                column: 1,
-                end_line: underline_line + 1, // Convert to 1-indexed,
-                end_column: 1 + 1,
+                line: underline_start_line,
+                column: underline_start_col,
+                end_line: underline_end_line,
+                end_column: underline_end_col,
                 severity: Severity::Warning,
                 message: "Setext heading underline should not be indented"
                 .to_string(),
@@ -132,12 +146,19 @@ impl Rule for MD023HeadingStartLeft {
                         format!("{}{}", "#".repeat(level as usize), heading_content)
                     };
 
+                    // Calculate precise character range for the indentation
+                    let (atx_start_line, atx_start_col, atx_end_line, atx_end_col) = calculate_single_line_range(
+                        start_line + 1, // Convert to 1-indexed
+                        1,
+                        indentation
+                    );
+
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: start_line + 1, // Convert to 1-indexed
-                column: 1,
-                end_line: start_line + 1, // Convert to 1-indexed,
-                end_column: 1 + 1,
+                line: atx_start_line,
+                column: atx_start_col,
+                end_line: atx_end_line,
+                end_column: atx_end_col,
                 severity: Severity::Warning,
                 message: format!(
                 "Heading should not be indented by {
@@ -305,13 +326,20 @@ impl Rule for MD023HeadingStartLeft {
                     if underline_line_idx < lines.len() {
                         let underline_text = lines[underline_line_idx].trim();
 
+                        // Calculate precise character range for the indentation
+                        let (setext_start_line, setext_start_col, setext_end_line, setext_end_col) = calculate_single_line_range(
+                            line_num, // Already 1-indexed from structure
+                            1,
+                            indentation
+                        );
+
                         // Add warning for the heading text line
                         warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num, // Already 1-indexed from structure
-                column: 1,
-                end_line: line_num, // Already 1-indexed from structure,
-                end_column: 1 + 1,
+                line: setext_start_line,
+                column: setext_start_col,
+                end_line: setext_end_line,
+                end_column: setext_end_col,
                 severity: Severity::Warning,
                 message: format!(
                 "Setext heading should not be indented by {
@@ -328,12 +356,19 @@ impl Rule for MD023HeadingStartLeft {
                         let underline_indentation = lines[underline_line_idx].len()
                             - lines[underline_line_idx].trim_start().len();
                         if underline_indentation > 0 {
+                            // Calculate precise character range for the underline indentation
+                            let (underline_start_line_struct, underline_start_col_struct, underline_end_line_struct, underline_end_col_struct) = calculate_single_line_range(
+                                underline_line_idx + 1, // Convert to 1-indexed
+                                1,
+                                underline_indentation
+                            );
+
                             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: underline_line_idx + 1, // Convert to 1-indexed
-                column: 1,
-                end_line: underline_line_idx + 1, // Convert to 1-indexed,
-                end_column: 1 + 1,
+                line: underline_start_line_struct,
+                column: underline_start_col_struct,
+                end_line: underline_end_line_struct,
+                end_column: underline_end_col_struct,
                 severity: Severity::Warning,
                 message: "Setext heading underline should not be indented"
                 .to_string(),
@@ -382,12 +417,19 @@ impl Rule for MD023HeadingStartLeft {
                         format!("{} {}", "#".repeat(*level), heading_content.trim())
                     };
 
+                    // Calculate precise character range for the indentation
+                    let (atx_start_line_struct, atx_start_col_struct, atx_end_line_struct, atx_end_col_struct) = calculate_single_line_range(
+                        line_num, // Already 1-indexed from structure
+                        1,
+                        indentation
+                    );
+
                     warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                line: line_num, // Already 1-indexed from structure
-                column: 1,
-                end_line: line_num, // Already 1-indexed from structure,
-                end_column: 1 + 1,
+                line: atx_start_line_struct,
+                column: atx_start_col_struct,
+                end_line: atx_end_line_struct,
+                end_column: atx_end_col_struct,
                 severity: Severity::Warning,
                 message: format!(
                 "Heading should not be indented by {

@@ -3,12 +3,13 @@
 //!
 //! See [docs/md030.md](../../docs/md030.md) for full documentation, configuration, and examples.
 
-use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::rules::list_utils::ListType;
 use regex::Regex;
 use lazy_static::lazy_static;
 use toml;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 lazy_static! {
     // Matches indentation, marker, and whitespace after marker
@@ -109,7 +110,31 @@ impl Rule for MD030ListMarkerSpace {
                     ListType::Unordered
                 };
                 let expected_spaces = self.get_expected_spaces(list_type, false); // single-line by default
-                                if whitespace.contains('\t') || whitespace.len() > expected_spaces {
+                if whitespace.contains('\t') || whitespace.len() > expected_spaces {
+                    // Calculate precise character range for the problematic spacing
+                    let marker_end_pos = cap.get(2).map_or(0, |m| m.end());
+                    let whitespace_start_pos = marker_end_pos;
+                    let _whitespace_len = whitespace.len();
+
+                    // If we have expected spaces, highlight only the extra ones
+                    let extra_spaces_start = if whitespace.len() > expected_spaces {
+                        whitespace_start_pos + expected_spaces
+                    } else {
+                        whitespace_start_pos
+                    };
+                    let extra_spaces_len = if whitespace.len() > expected_spaces {
+                        whitespace.len() - expected_spaces
+                    } else {
+                        whitespace.len()
+                    };
+
+                    let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                        line_num,
+                        line,
+                        extra_spaces_start,
+                        extra_spaces_len
+                    );
+
                     // Generate the fix text
                     let fix = if let Some(fixed_line) = self.try_fix_list_marker_spacing(line) {
                         Some(crate::rule::Fix {
@@ -124,10 +149,10 @@ impl Rule for MD030ListMarkerSpace {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         severity: Severity::Warning,
-                        line: line_num,
-                        column: cap.get(1).map_or(0, |m| m.start()) + 1,
-                        end_line: line_num,
-                        end_column: cap.get(1).map_or(0, |m| m.start()) + marker.len() + 2,
+                        line: start_line,
+                        column: start_col,
+                        end_line: end_line,
+                        end_column: end_col,
                         message: "Spaces after list markers".to_string(),
                         fix,
                     });
