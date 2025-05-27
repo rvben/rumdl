@@ -492,8 +492,18 @@ impl Rule for MD034NoBareUrls {
         // AST-based approach doesn't work because CommonMark parser converts bare URLs to links
         let content = ctx.content;
 
-        // Early return for empty content or content without URLs or emails
-        if content.is_empty() || (!content.contains("http://") && !content.contains("https://") && !content.contains("ftp://") && !content.contains('@')) {
+        // Fast path: Early return for empty content
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Fast path: Early return if no potential URLs or emails
+        if !content.contains("http://") && !content.contains("https://") && !content.contains("ftp://") && !content.contains('@') {
+            return Ok(Vec::new());
+        }
+
+        // Fast path: Quick check using simple pattern
+        if !URL_QUICK_CHECK.is_match(content) {
             return Ok(Vec::new());
         }
 
@@ -641,5 +651,65 @@ mod tests {
         assert_eq!(result.len(), 1, "Bare URLs should be flagged");
         assert_eq!(result[0].line, 1);
         assert_eq!(result[0].column, 21);
+    }
+
+    #[test]
+    fn test_md034_performance_baseline() {
+        use std::time::Instant;
+
+        // Generate test content with various URL patterns
+        let mut content = String::with_capacity(50_000);
+
+        // Add content with bare URLs (should be detected)
+        for i in 0..250 {
+            content.push_str(&format!("Line {} with bare URL https://example{}.com/path\n", i, i));
+        }
+
+        // Add content with proper markdown links (should not be detected)
+        for i in 0..250 {
+            content.push_str(&format!("Line {} with [proper link](https://example{}.com/path)\n", i + 250, i));
+        }
+
+        // Add content with no URLs (should be fast)
+        for i in 0..500 {
+            content.push_str(&format!("Line {} with no URLs, just regular text content\n", i + 500));
+        }
+
+        // Add content with emails
+        for i in 0..100 {
+            content.push_str(&format!("Contact user{}@example{}.com for more info\n", i, i));
+        }
+
+        println!("MD034 Performance Test - Content: {} bytes, {} lines", content.len(), content.lines().count());
+
+        let rule = MD034NoBareUrls::default();
+        let ctx = LintContext::new(&content);
+
+        // Warm up
+        let _ = rule.check(&ctx).unwrap();
+
+        // Measure check performance (multiple runs for accuracy)
+        let mut total_duration = std::time::Duration::ZERO;
+        let runs = 5;
+        let mut warnings_count = 0;
+
+        for _ in 0..runs {
+            let start = Instant::now();
+            let warnings = rule.check(&ctx).unwrap();
+            total_duration += start.elapsed();
+            warnings_count = warnings.len();
+        }
+
+        let avg_check_duration = total_duration / runs;
+
+        println!("MD034 Baseline Performance:");
+        println!("- Average check time: {:?} ({:.2} ms)", avg_check_duration, avg_check_duration.as_secs_f64() * 1000.0);
+        println!("- Found {} warnings", warnings_count);
+        println!("- Lines per second: {:.0}", content.lines().count() as f64 / avg_check_duration.as_secs_f64());
+
+        // Performance assertion - should complete reasonably fast
+        assert!(avg_check_duration.as_millis() < 100,
+                "MD034 check should complete in under 100ms, took {}ms",
+                avg_check_duration.as_millis());
     }
 }
