@@ -7,10 +7,14 @@
 pub mod unicode_utils;
 pub mod basic_tests;
 pub mod comprehensive_tests;
+pub mod additional_tests;
+pub mod extended_tests;
 
 use rumdl::lint_context::LintContext;
 use rumdl::rule::{LintWarning, Rule};
 use rumdl::rules::*;
+use rumdl::rules::heading_utils::HeadingStyle;
+use rumdl::rules::md004_unordered_list_style::UnorderedListStyle;
 
 /// Represents a single character range test case
 #[derive(Debug, Clone)]
@@ -194,21 +198,46 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
     match rule_name {
         "MD001" => Some(Box::new(MD001HeadingIncrement)),
         "MD002" => Some(Box::new(MD002FirstHeadingH1::new(1))),
+        "MD003" => Some(Box::new(MD003HeadingStyle::new(HeadingStyle::Consistent))),
+        "MD004" => Some(Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent))),
+        "MD005" => Some(Box::new(MD005ListIndent)),
+        "MD006" => Some(Box::new(MD006StartBullets)),
+        "MD007" => Some(Box::new(MD007ULIndent::new(2))),
         "MD009" => Some(Box::new(MD009TrailingSpaces::new(2, false))),
         "MD010" => Some(Box::new(MD010NoHardTabs::new(4, false))),
+        "MD011" => Some(Box::new(MD011NoReversedLinks)),
         "MD012" => Some(Box::new(MD012NoMultipleBlanks::new(1))),
         "MD013" => Some(Box::new(MD013LineLength::new(80, true, true, true, false))),
-        "MD014" => Some(Box::new(MD014CommandsShowOutput::new())),
-        "MD018" => Some(Box::new(MD018NoMissingSpaceAtx::new())),
-        "MD019" => Some(Box::new(MD019NoMultipleSpaceAtx::new())),
-        "MD020" => Some(Box::new(MD020NoMissingSpaceClosedAtx::new())),
-        "MD021" => Some(Box::new(MD021NoMultipleSpaceClosedAtx::new())),
+        "MD014" => Some(Box::new(MD014CommandsShowOutput { show_output: true })),
+        "MD018" => Some(Box::new(MD018NoMissingSpaceAtx)),
+        "MD019" => Some(Box::new(MD019NoMultipleSpaceAtx)),
+        "MD020" => Some(Box::new(MD020NoMissingSpaceClosedAtx)),
+        "MD021" => Some(Box::new(MD021NoMultipleSpaceClosedAtx)),
+        "MD022" => Some(Box::new(MD022BlanksAroundHeadings::new())),
+        "MD023" => Some(Box::new(MD023HeadingStartLeft)),
+        "MD025" => Some(Box::new(MD025SingleTitle::new(1, ""))),
         "MD026" => Some(Box::new(MD026NoTrailingPunctuation::new(Some(".,;:!?".to_string())))),
+        "MD027" => Some(Box::new(MD027MultipleSpacesBlockquote)),
+        "MD028" => Some(Box::new(MD028NoBlanksBlockquote)),
+        "MD030" => Some(Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1))),
+        "MD031" => Some(Box::new(MD031BlanksAroundFences)),
+        "MD032" => Some(Box::new(MD032BlanksAroundLists)),
+        "MD033" => Some(Box::new(MD033NoInlineHtml::new())),
+        "MD034" => Some(Box::new(MD034NoBareUrls)),
+        "MD035" => Some(Box::new(MD035HRStyle::new("consistent".to_string()))),
         "MD036" => Some(Box::new(MD036NoEmphasisAsHeading::new(".,;:!?".to_string()))),
         "MD037" => Some(Box::new(MD037NoSpaceInEmphasis)),
-        "MD038" => Some(Box::new(MD038NoSpaceInCode::new())),
+        "MD038" => Some(Box::new(MD038NoSpaceInCode { enabled: true })),
+        "MD039" => Some(Box::new(MD039NoSpaceInLinks)),
         "MD040" => Some(Box::new(MD040FencedCodeLanguage)),
         "MD041" => Some(Box::new(MD041FirstLineHeading::new(1, false))),
+        "MD042" => Some(Box::new(MD042NoEmptyLinks)),
+        "MD043" => Some(Box::new(MD043RequiredHeadings::new(vec![]))),
+        "MD044" => Some(Box::new(MD044ProperNames::new(vec![], false))),
+        "MD045" => Some(Box::new(MD045NoAltText)),
+        "MD047" => Some(Box::new(MD047SingleTrailingNewline)),
+        "MD051" => Some(Box::new(MD051LinkFragments)),
+        "MD053" => Some(Box::new(MD053LinkImageReferenceDefinitions {})),
         _ => None,
     }
 }
