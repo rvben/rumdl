@@ -149,7 +149,11 @@ impl Rule for MD030ListMarkerSpace {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: "Spaces after list markers".to_string(),
+                        message: format!(
+                            "Spaces after list markers (Expected: {}; Actual: {})",
+                            expected_spaces,
+                            whitespace.len()
+                        ),
                         fix,
                     });
                 }
@@ -420,7 +424,11 @@ mod tests {
             "Should flag lines with too many spaces after list marker"
         );
         for warning in result {
-            assert_eq!(warning.message, "Spaces after list markers");
+            assert!(
+                warning.message.starts_with("Spaces after list markers (Expected:") && warning.message.contains("Actual:"),
+                "Warning message should include expected and actual values, got: '{}'",
+                warning.message
+            );
         }
     }
 }

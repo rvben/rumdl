@@ -29,7 +29,11 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         for warning in result {
-            assert_eq!(warning.message, "Spaces after list markers");
+            assert!(
+                warning.message.starts_with("Spaces after list markers (Expected:") && warning.message.contains("Actual:"),
+                "Warning message should include expected and actual values, got: '{}'",
+                warning.message
+            );
         }
     }
 
@@ -41,7 +45,11 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         for warning in result {
-            assert_eq!(warning.message, "Spaces after list markers");
+            assert!(
+                warning.message.starts_with("Spaces after list markers (Expected:") && warning.message.contains("Actual:"),
+                "Warning message should include expected and actual values, got: '{}'",
+                warning.message
+            );
         }
     }
 
@@ -139,7 +147,11 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].message, "Spaces after list markers");
+        assert!(
+            result[0].message.starts_with("Spaces after list markers (Expected:") && result[0].message.contains("Actual:"),
+            "Warning message should include expected and actual values, got: '{}'",
+            result[0].message
+        );
     }
 
     #[test]
@@ -149,7 +161,11 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].message, "Spaces after list markers");
+        assert!(
+            result[0].message.starts_with("Spaces after list markers (Expected:") && result[0].message.contains("Actual:"),
+            "Warning message should include expected and actual values, got: '{}'",
+            result[0].message
+        );
     }
 
     #[test]
@@ -159,7 +175,11 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].message, "Spaces after list markers");
+        assert!(
+            result[0].message.starts_with("Spaces after list markers (Expected:") && result[0].message.contains("Actual:"),
+            "Warning message should include expected and actual values, got: '{}'",
+            result[0].message
+        );
     }
 
     #[test]
@@ -169,7 +189,11 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].message, "Spaces after list markers");
+        assert!(
+            result[0].message.starts_with("Spaces after list markers (Expected:") && result[0].message.contains("Actual:"),
+            "Warning message should include expected and actual values, got: '{}'",
+            result[0].message
+        );
     }
 
     #[test]
@@ -179,7 +203,11 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].message, "Spaces after list markers");
+        assert!(
+            result[0].message.starts_with("Spaces after list markers (Expected:") && result[0].message.contains("Actual:"),
+            "Warning message should include expected and actual values, got: '{}'",
+            result[0].message
+        );
     }
 
     #[test]

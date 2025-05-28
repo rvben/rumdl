@@ -25,14 +25,14 @@ lazy_static! {
 }
 
 impl MD006StartBullets {
-    /// Check if a line is a bullet list item and return the indentation level
+    /// Checks if a line is a bullet list item and returns its indentation level
     fn is_bullet_list_item(line: &str) -> Option<usize> {
-        if let Some(caps) = BULLET_PATTERN.captures(line) {
-            let indent = caps.get(1).unwrap().as_str().len();
-            Some(indent)
-        } else {
-            None
+        if let Some(captures) = BULLET_PATTERN.captures(line) {
+            if let Some(indent) = captures.get(1) {
+                return Some(indent.as_str().len());
+            }
         }
+        None
     }
 
     /// Checks if a line is blank (empty or whitespace only)
@@ -46,7 +46,9 @@ impl MD006StartBullets {
             Some(indent) => indent,
             None => return None, // Should not happen if called on a bullet item
         };
+
         let mut i = line_idx;
+
         while i > 0 {
             i -= 1;
             if Self::is_blank_line(lines[i]) {
@@ -54,13 +56,36 @@ impl MD006StartBullets {
             }
             if let Some(prev_indent) = Self::is_bullet_list_item(lines[i]) {
                 if prev_indent <= current_indent {
-                    return Some((i, prev_indent));
+                    // Found a potential parent or sibling
+                    // Check if there's any non-list content between this potential parent and current item
+                    let mut has_breaking_content = false;
+                    for check_idx in (i + 1)..line_idx {
+                        if Self::is_blank_line(lines[check_idx]) {
+                            continue;
+                        }
+                        if Self::is_bullet_list_item(lines[check_idx]).is_none() {
+                            // Found non-list content - check if it breaks the list structure
+                            let content_indent = lines[check_idx].len() - lines[check_idx].trim_start().len();
+                            // Content is only acceptable if it's indented at least as much as current item
+                            // AND we have a true parent relationship (prev_indent < current_indent)
+                            if content_indent < current_indent || prev_indent >= current_indent {
+                                has_breaking_content = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if !has_breaking_content {
+                        return Some((i, prev_indent));
+                    } else {
+                        // Content breaks the list structure
+                        return None;
+                    }
                 }
                 // If prev_indent > current_indent, it's a child of a sibling, ignore it and keep searching.
-            }
-            // If we hit non-list content, stop searching
-            if Self::is_bullet_list_item(lines[i]).is_none() {
-                break;
+            } else {
+                // Found non-list content - this breaks the search
+                return None;
             }
         }
         None
@@ -156,36 +181,25 @@ impl Rule for MD006StartBullets {
         doc_structure: &DocumentStructure,
     ) -> LintResult {
         let content = _ctx.content;
-
-        // Early returns for performance
-        if content.is_empty() || doc_structure.list_lines.is_empty() {
+        if doc_structure.list_lines.is_empty() {
             return Ok(Vec::new());
         }
-
-        // Quick check for any list markers before processing
         if !content.contains('*') && !content.contains('-') && !content.contains('+') {
             return Ok(Vec::new());
         }
-
-        // Pre-compute LineIndex once for all operations
         let line_index = LineIndex::new(content.to_string());
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         let mut valid_bullet_lines = vec![false; lines.len()];
-
-        // Process list lines in order for better cache locality
         for &line_num in &doc_structure.list_lines {
             let line_idx = line_num - 1;
             if line_idx >= lines.len() {
                 continue;
             }
             let line = lines[line_idx];
-
-            // Skip lines in code blocks
             if doc_structure.is_in_code_block(line_num) {
                 continue;
             }
-
             if let Some(indent) = Self::is_bullet_list_item(line) {
                 let mut is_valid = false; // Assume invalid initially
                 if indent == 0 {
@@ -220,19 +234,25 @@ impl Rule for MD006StartBullets {
                     } else {
                         fixed_line.to_string()
                     };
+
+                    // Calculate the range to highlight: from first indentation character to end of list marker
+                    let start_col = if indent > 0 { 2 } else { 1 }; // Start from first indentation space if indented
+                    let marker_pos = line.find(|c: char| c == '*' || c == '-' || c == '+').unwrap_or(0);
+                    let end_col = marker_pos + 3; // +1 for the marker itself, +1 for 1-based indexing, +1 for space after marker
+
                     result.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        severity: Severity::Warning,
-                        line: line_num,
-                        column: indent,
-                        end_line: line_num,
-                        end_column: indent + 3,
-                        message: "Consider starting bulleted lists at the beginning of the line"
-                            .to_string(),
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num, 1),
-                            replacement,
-                        }),
+                rule_name: Some(self.name()),
+                severity: Severity::Warning,
+                line: line_num,
+                column: start_col,
+                end_line: line_num,
+                end_column: end_col,
+                message: "List item should start at the beginning of the line (remove indentation)"
+                .to_string(),
+                fix: Some(Fix {
+                range: line_index.line_col_to_byte_range(line_num, 1),
+                replacement,
+            }),
                     });
                 }
             }
