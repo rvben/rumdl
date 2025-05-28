@@ -1,7 +1,6 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::code_block_utils::CodeBlockUtils;
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
-use crate::utils::table_utils::{TableUtils, TableBlock};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::table_utils::TableUtils;
 use toml;
 
 /// Rule MD055: Table pipe style
@@ -102,20 +101,30 @@ impl MD055TablePipeStyle {
         }
 
         // Check if this is a delimiter row (contains dashes)
-        let is_delimiter_row = trimmed.contains('-') &&
-            trimmed.chars().all(|c| c == '-' || c == ':' || c == '|' || c.is_whitespace());
+        let is_delimiter_row = trimmed.contains('-')
+            && trimmed
+                .chars()
+                .all(|c| c == '-' || c == ':' || c == '|' || c.is_whitespace());
 
         // Split the line by pipes to get the content
         let parts: Vec<&str> = trimmed.split('|').collect();
         let mut content_parts = Vec::new();
 
         // Extract the actual content (skip empty leading/trailing parts)
-        let start_idx = if parts.first().map_or(false, |p| p.trim().is_empty()) { 1 } else { 0 };
-        let end_idx = if parts.last().map_or(false, |p| p.trim().is_empty()) { parts.len() - 1 } else { parts.len() };
+        let start_idx = if parts.first().map_or(false, |p| p.trim().is_empty()) {
+            1
+        } else {
+            0
+        };
+        let end_idx = if parts.last().map_or(false, |p| p.trim().is_empty()) {
+            parts.len() - 1
+        } else {
+            parts.len()
+        };
 
-        for i in start_idx..end_idx {
+        for part in parts.iter().take(end_idx).skip(start_idx) {
             // Trim each part to remove extra spaces, but preserve the content
-            content_parts.push(parts[i].trim());
+            content_parts.push(part.trim());
         }
 
         // Rebuild the line with the target style
@@ -126,28 +135,28 @@ impl MD055TablePipeStyle {
                 } else {
                     format!("| {} |", content_parts.join(" | "))
                 }
-            },
+            }
             "leading_only" => {
                 if is_delimiter_row {
                     format!("| {}", content_parts.join("|"))
                 } else {
                     format!("| {}", content_parts.join(" | "))
                 }
-            },
+            }
             "trailing_only" => {
                 if is_delimiter_row {
                     format!("{} |", content_parts.join("|"))
                 } else {
                     format!("{} |", content_parts.join(" | "))
                 }
-            },
+            }
             "no_leading_or_trailing" => {
                 if is_delimiter_row {
                     content_parts.join("|")
                 } else {
                     content_parts.join(" | ")
                 }
-            },
+            }
             _ => line.to_string(),
         }
     }
@@ -197,7 +206,9 @@ impl Rule for MD055TablePipeStyle {
             // First pass: determine the table's style for "consistent" mode
             if configured_style == "consistent" {
                 // Check header row first
-                if let Some(style) = TableUtils::determine_pipe_style(lines[table_block.header_line]) {
+                if let Some(style) =
+                    TableUtils::determine_pipe_style(lines[table_block.header_line])
+                {
                     table_style = Some(style);
                 } else {
                     // Check content rows if header doesn't have a clear style
@@ -232,7 +243,8 @@ impl Rule for MD055TablePipeStyle {
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             severity: Severity::Warning,
-                            message: format!("Table pipe style should be {}",
+                            message: format!(
+                                "Table pipe style should be {}",
                                 match target_style {
                                     "leading_and_trailing" => "leading and trailing",
                                     "no_leading_or_trailing" => "no leading or trailing",
@@ -243,7 +255,7 @@ impl Rule for MD055TablePipeStyle {
                             ),
                             line: start_line,
                             column: start_col,
-                            end_line: end_line,
+                            end_line,
                             end_column: end_col,
                             fix: Some(crate::rule::Fix {
                                 range: line_index.line_col_to_byte_range(line_idx + 1, 1),
@@ -279,7 +291,10 @@ impl Rule for MD055TablePipeStyle {
         let table_blocks = TableUtils::find_table_blocks(content);
 
         // Create a copy of lines that we can modify
-        let mut result_lines = lines.iter().map(|&s| s.to_string()).collect::<Vec<String>>();
+        let mut result_lines = lines
+            .iter()
+            .map(|&s| s.to_string())
+            .collect::<Vec<String>>();
 
         // Process each table block
         for table_block in table_blocks {
@@ -288,7 +303,9 @@ impl Rule for MD055TablePipeStyle {
             // First pass: determine the table's style for "consistent" mode
             if configured_style == "consistent" {
                 // Check header row first
-                if let Some(style) = TableUtils::determine_pipe_style(lines[table_block.header_line]) {
+                if let Some(style) =
+                    TableUtils::determine_pipe_style(lines[table_block.header_line])
+                {
                     table_style = Some(style);
                 } else {
                     // Check content rows if header doesn't have a clear style

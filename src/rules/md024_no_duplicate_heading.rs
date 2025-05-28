@@ -100,12 +100,8 @@ impl Rule for MD024NoDuplicateHeading {
                 (line.len() - trimmed.len()) + hash_count + text_start_in_trimmed
             };
 
-            let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                line_num,
-                line,
-                text_start_in_line,
-                text.len()
-            );
+            let (start_line, start_col, end_line, end_col) =
+                calculate_match_range(line_num, line, text_start_in_line, text.len());
 
             if self.siblings_only {
                 // TODO: Implement siblings_only logic if needed
@@ -114,11 +110,11 @@ impl Rule for MD024NoDuplicateHeading {
                 let seen = seen_headings_per_level.entry(level).or_default();
                 if seen.contains(&heading_key) {
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!("Duplicate heading: '{}'.", text),
+                        rule_name: Some(self.name()),
+                        message: format!("Duplicate heading: '{}'.", text),
                         line: start_line,
                         column: start_col,
-                        end_line: end_line,
+                        end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
                         fix: None,
@@ -130,11 +126,11 @@ impl Rule for MD024NoDuplicateHeading {
                 // Flag all duplicates, regardless of level
                 if seen_headings.contains(&heading_key) {
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!("Duplicate heading: '{}'.", text),
+                        rule_name: Some(self.name()),
+                        message: format!("Duplicate heading: '{}'.", text),
                         line: start_line,
                         column: start_col,
-                        end_line: end_line,
+                        end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
                         fix: None,

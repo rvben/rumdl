@@ -175,8 +175,13 @@ impl Rule for MD003HeadingStyle {
         }
 
         // Collect all fixes and sort by range start (descending) to apply from end to beginning
-        let mut fixes: Vec<_> = warnings.iter()
-            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
+        let mut fixes: Vec<_> = warnings
+            .iter()
+            .filter_map(|w| {
+                w.fix
+                    .as_ref()
+                    .map(|f| (f.range.start, f.range.end, &f.replacement))
+            })
             .collect();
         fixes.sort_by(|a, b| b.0.cmp(&a.0));
 
@@ -274,9 +279,10 @@ impl Rule for MD003HeadingStyle {
                     use crate::rules::heading_utils::HeadingUtils;
 
                     // Get the text content from the heading
-                    let text_content = if next_line_idx < lines.len() &&
-                        (lines[next_line_idx].trim_start().starts_with('=') ||
-                         lines[next_line_idx].trim_start().starts_with('-')) {
+                    let text_content = if next_line_idx < lines.len()
+                        && (lines[next_line_idx].trim_start().starts_with('=')
+                            || lines[next_line_idx].trim_start().starts_with('-'))
+                    {
                         // Setext heading
                         current_line.to_string()
                     } else {
@@ -285,7 +291,8 @@ impl Rule for MD003HeadingStyle {
                     };
 
                     // Get indentation
-                    let indentation = current_line.chars()
+                    let indentation = current_line
+                        .chars()
                         .take_while(|c| c.is_whitespace())
                         .collect::<String>();
 
@@ -297,10 +304,12 @@ impl Rule for MD003HeadingStyle {
                     );
 
                     // Calculate the correct range for the heading
-                    let line_index = crate::utils::range_utils::LineIndex::new(ctx.content.to_string());
-                    let range = if next_line_idx < lines.len() &&
-                        (lines[next_line_idx].trim_start().starts_with('=') ||
-                         lines[next_line_idx].trim_start().starts_with('-')) {
+                    let line_index =
+                        crate::utils::range_utils::LineIndex::new(ctx.content.to_string());
+                    let range = if next_line_idx < lines.len()
+                        && (lines[next_line_idx].trim_start().starts_with('=')
+                            || lines[next_line_idx].trim_start().starts_with('-'))
+                    {
                         // Setext heading spans two lines
                         let start_byte = line_index.line_col_to_byte_range(line_num, 1).start;
                         let end_byte = if line_num + 1 < lines.len() {
@@ -327,26 +336,27 @@ impl Rule for MD003HeadingStyle {
                 };
 
                 // Calculate precise character range for the heading marker
-                let (start_line, start_col, end_line, end_col) = if style == HeadingStyle::Setext1 || style == HeadingStyle::Setext2 {
-                    // For Setext headings, highlight the underline
-                    if next_line_idx < lines.len() {
-                        calculate_heading_range(line_num + 1, lines[next_line_idx])
+                let (start_line, start_col, end_line, end_col) =
+                    if style == HeadingStyle::Setext1 || style == HeadingStyle::Setext2 {
+                        // For Setext headings, highlight the underline
+                        if next_line_idx < lines.len() {
+                            calculate_heading_range(line_num + 1, lines[next_line_idx])
+                        } else {
+                            calculate_heading_range(line_num, current_line)
+                        }
                     } else {
+                        // For ATX headings, highlight the hash markers
                         calculate_heading_range(line_num, current_line)
-                    }
-                } else {
-                    // For ATX headings, highlight the hash markers
-                    calculate_heading_range(line_num, current_line)
-                };
+                    };
 
                 result.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: format!(
-                "Heading style should be {:?}, found {:?}",
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: format!(
+                        "Heading style should be {:?}, found {:?}",
                         expected_style, style
                     ),
                     severity: Severity::Warning,

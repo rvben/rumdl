@@ -128,7 +128,7 @@ impl Rule for MD038NoSpaceInCode {
                 };
 
                 warnings.push(LintWarning {
-                message: format!("Spaces inside code span elements: {}", original),
+                    message: format!("Spaces inside code span elements: {}", original),
                     line: code_span.line,
                     column: code_span.start_col,
                     end_line: code_span.line,

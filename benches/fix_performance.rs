@@ -88,7 +88,10 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD022 - Headings should be surrounded by blank lines
         if i % 35 == 0 {
-            content.push_str(&format!("Text before heading\n# Heading {}\nText after heading\n\n", i));
+            content.push_str(&format!(
+                "Text before heading\n# Heading {}\nText after heading\n\n",
+                i
+            ));
         }
 
         // MD023 - Headings must start at beginning of line
@@ -113,7 +116,10 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD031 - Fenced code blocks should be surrounded by blank lines
         if i % 50 == 0 {
-            content.push_str(&format!("Text before\n```\ncode {}\n```\nText after\n\n", i));
+            content.push_str(&format!(
+                "Text before\n```\ncode {}\n```\nText after\n\n",
+                i
+            ));
         }
 
         // MD032 - Lists should be surrounded by blank lines
@@ -163,7 +169,10 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD044 - Proper names
         if i % 11 == 0 {
-            content.push_str(&format!("Text mentioning javascript and github number {}\n", i));
+            content.push_str(&format!(
+                "Text mentioning javascript and github number {}\n",
+                i
+            ));
         }
 
         // MD045 - Images should have alternate text
@@ -175,12 +184,18 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD049 - Emphasis style
         if i % 23 == 0 {
-            content.push_str(&format!("Text with _underscore emphasis_ and *asterisk emphasis* {}\n", i));
+            content.push_str(&format!(
+                "Text with _underscore emphasis_ and *asterisk emphasis* {}\n",
+                i
+            ));
         }
 
         // MD050 - Strong style
         if i % 27 == 0 {
-            content.push_str(&format!("Text with __underscore strong__ and **asterisk strong** {}\n", i));
+            content.push_str(&format!(
+                "Text with __underscore strong__ and **asterisk strong** {}\n",
+                i
+            ));
         }
 
         // MD053 - Link and image reference definitions should be needed
@@ -202,7 +217,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD001 - Heading increment
     c.bench_function("MD001 fix", |b| {
-        let rule = MD001HeadingIncrement::default();
+        let rule = MD001HeadingIncrement;
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
@@ -218,7 +233,7 @@ fn bench_fix_performance(c: &mut Criterion) {
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
-        // MD004 - Unordered list style
+    // MD004 - Unordered list style
     c.bench_function("MD004 fix", |b| {
         let rule = MD004UnorderedListStyle::new(rumdl::rules::UnorderedListStyle::Consistent);
         b.iter(|| rule.fix(black_box(&ctx)))
@@ -242,7 +257,7 @@ fn bench_fix_performance(c: &mut Criterion) {
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
-        // MD009 - Trailing spaces
+    // MD009 - Trailing spaces
     c.bench_function("MD009 fix", |b| {
         let rule = MD009TrailingSpaces::default();
         b.iter(|| rule.fix(black_box(&ctx)))
@@ -262,25 +277,25 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD018 - No space after hash
     c.bench_function("MD018 fix", |b| {
-        let rule = MD018NoMissingSpaceAtx::default();
+        let rule = MD018NoMissingSpaceAtx;
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
     // MD019 - Multiple spaces after hash
     c.bench_function("MD019 fix", |b| {
-        let rule = MD019NoMultipleSpaceAtx::default();
+        let rule = MD019NoMultipleSpaceAtx;
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
     // MD020 - No space inside hashes on closed atx
     c.bench_function("MD020 fix", |b| {
-        let rule = MD020NoMissingSpaceClosedAtx::default();
+        let rule = MD020NoMissingSpaceClosedAtx;
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
     // MD021 - Multiple spaces inside hashes on closed atx
     c.bench_function("MD021 fix", |b| {
-        let rule = MD021NoMultipleSpaceClosedAtx::default();
+        let rule = MD021NoMultipleSpaceClosedAtx;
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
@@ -290,7 +305,7 @@ fn bench_fix_performance(c: &mut Criterion) {
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
-        // MD023 - Headings start at beginning
+    // MD023 - Headings start at beginning
     c.bench_function("MD023 fix", |b| {
         let rule = MD023HeadingStartLeft;
         b.iter(|| rule.fix(black_box(&ctx)))
@@ -381,7 +396,7 @@ fn bench_fix_performance(c: &mut Criterion) {
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
-        // MD050 - Strong style (skip - requires enum parameter)
+    // MD050 - Strong style (skip - requires enum parameter)
     // c.bench_function("MD050 fix", |b| {
     //     let rule = MD050StrongStyle::new(rumdl::rules::StrongStyle::Consistent);
     //     b.iter(|| rule.fix(black_box(&ctx)))
@@ -411,7 +426,7 @@ fn bench_fix_performance_large(c: &mut Criterion) {
     });
 
     c.bench_function("MD018 fix large", |b| {
-        let rule = MD018NoMissingSpaceAtx::default();
+        let rule = MD018NoMissingSpaceAtx;
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
@@ -433,7 +448,8 @@ fn bench_string_operations(c: &mut Criterion) {
     // Test different approaches to removing trailing spaces
     c.bench_function("trim_end approach", |b| {
         b.iter(|| {
-            content.lines()
+            content
+                .lines()
                 .map(|line| line.trim_end())
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -443,9 +459,7 @@ fn bench_string_operations(c: &mut Criterion) {
     c.bench_function("regex replace approach", |b| {
         use regex::Regex;
         let re = Regex::new(r" +$").unwrap();
-        b.iter(|| {
-            re.replace_all(black_box(&content), "").to_string()
-        })
+        b.iter(|| re.replace_all(black_box(&content), "").to_string())
     });
 
     c.bench_function("manual char iteration", |b| {
@@ -489,7 +503,8 @@ fn bench_memory_patterns(c: &mut Criterion) {
 
     c.bench_function("collect_approach", |b| {
         b.iter(|| {
-            content.lines()
+            content
+                .lines()
                 .map(|line| line.trim_end())
                 .collect::<Vec<_>>()
                 .join("\n")

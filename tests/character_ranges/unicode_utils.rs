@@ -20,12 +20,6 @@ impl UnicodeUtils {
         text.width()
     }
 
-    /// Check if text contains combining characters
-    pub fn has_combining_characters(text: &str) -> bool {
-        use unicode_normalization::char::is_combining_mark;
-        text.chars().any(is_combining_mark)
-    }
-
     /// Check if text contains emoji (simplified check)
     pub fn has_emoji(text: &str) -> bool {
         text.chars().any(|c| {
@@ -34,7 +28,7 @@ impl UnicodeUtils {
             (0x1F600..=0x1F64F).contains(&code) || // Emoticons
             (0x1F300..=0x1F5FF).contains(&code) || // Misc Symbols and Pictographs
             (0x1F680..=0x1F6FF).contains(&code) || // Transport and Map
-            (0x2600..=0x26FF).contains(&code)     // Misc symbols
+            (0x2600..=0x26FF).contains(&code) // Misc symbols
         })
     }
 
@@ -45,11 +39,6 @@ impl UnicodeUtils {
             // Hebrew: U+0590–U+05FF, Arabic: U+0600–U+06FF
             (0x0590..=0x05FF).contains(&code) || (0x0600..=0x06FF).contains(&code)
         })
-    }
-
-    /// Normalize text for consistent comparison
-    pub fn normalize_nfc(text: &str) -> String {
-        unicode_normalization::UnicodeNormalization::nfc(text).collect()
     }
 }
 
@@ -149,89 +138,41 @@ impl MultiLineUtils {
 }
 
 /// Line ending types
-#[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LineEnding {
-    LF,    // Unix (\n)
-    CRLF,  // Windows (\r\n)
-    CR,    // Classic Mac (\r)
-    None,  // No line ending (last line)
+    LF,   // Unix (\n)
+    CRLF, // Windows (\r\n)
+    CR,   // Classic Mac (\r)
+    None, // No line ending (last line)
 }
 
 /// Zero-width character handling utilities
 pub struct ZeroWidthUtils;
 
 impl ZeroWidthUtils {
-    /// Common zero-width characters
-    pub const ZERO_WIDTH_SPACE: char = '\u{200B}';
-    pub const ZERO_WIDTH_NON_JOINER: char = '\u{200C}';
-    pub const ZERO_WIDTH_JOINER: char = '\u{200D}';
-    pub const WORD_JOINER: char = '\u{2060}';
-    pub const ZERO_WIDTH_NO_BREAK_SPACE: char = '\u{FEFF}';
-
     /// Check if character is zero-width
     pub fn is_zero_width(ch: char) -> bool {
-        matches!(ch,
+        matches!(
+            ch,
             '\u{200B}' | // Zero Width Space
             '\u{200C}' | // Zero Width Non-Joiner
             '\u{200D}' | // Zero Width Joiner
             '\u{2060}' | // Word Joiner
-            '\u{FEFF}'   // Zero Width No-Break Space (BOM)
+            '\u{FEFF}' // Zero Width No-Break Space (BOM)
         ) || unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1) == 0
     }
 
     /// Remove zero-width characters from text
     pub fn remove_zero_width(text: &str) -> String {
-        text.chars().filter(|&ch| !Self::is_zero_width(ch)).collect()
+        text.chars()
+            .filter(|&ch| !Self::is_zero_width(ch))
+            .collect()
     }
 
     /// Count visible characters (excluding zero-width)
     pub fn visible_char_count(text: &str) -> usize {
         text.chars().filter(|&ch| !Self::is_zero_width(ch)).count()
-    }
-}
-
-/// Test content generators for various Unicode scenarios
-pub struct TestContentGenerator;
-
-impl TestContentGenerator {
-    /// Generate test content with Unicode characters
-    pub fn unicode_content() -> &'static str {
-        "# Café and naïve résumé\n\nThis is a test with Unicode: café, naïve, résumé, Zürich"
-    }
-
-    /// Generate test content with emoji
-    pub fn emoji_content() -> &'static str {
-        "# Welcome 🎉\n\nHello 👋 world 🌍! This is a test with emoji 😊\n\n- Item 1 🎯\n- Item 2 🚀"
-    }
-
-    /// Generate test content with combining characters
-    pub fn combining_chars_content() -> &'static str {
-        "# Combining: é vs é\n\nOne is precomposed (é), other is e + ́ (combining acute)"
-    }
-
-    /// Generate test content with zero-width characters
-    pub fn zero_width_content() -> &'static str {
-        "# Zero\u{200B}Width\u{200C}Test\n\nThis has zero\u{200D}width characters"
-    }
-
-    /// Generate test content with RTL text
-    pub fn rtl_content() -> &'static str {
-        "# Mixed LTR and RTL\n\nEnglish text and עברית (Hebrew) and العربية (Arabic)"
-    }
-
-    /// Generate test content with very long lines
-    pub fn long_line_content() -> &'static str {
-        "# Long Line Test\n\nThis is a very long line that exceeds normal limits and should be used to test character range handling with extremely long content that might cause issues with buffer management or performance problems in the character range extraction logic."
-    }
-
-    /// Generate test content with Windows line endings
-    pub fn windows_line_endings() -> &'static str {
-        "# Windows Line Endings\r\n\r\nThis content uses CRLF line endings\r\nlike Windows systems do.\r\n"
-    }
-
-    /// Generate test content with mixed line endings
-    pub fn mixed_line_endings() -> &'static str {
-        "# Mixed Line Endings\r\n\nThis has CRLF\rThis has CR\nThis has LF"
     }
 }
 
@@ -269,7 +210,10 @@ mod tests {
         assert!(!ZeroWidthUtils::is_zero_width('a'));
 
         let text_with_zw = "hello\u{200B}world";
-        assert_eq!(ZeroWidthUtils::remove_zero_width(text_with_zw), "helloworld");
+        assert_eq!(
+            ZeroWidthUtils::remove_zero_width(text_with_zw),
+            "helloworld"
+        );
         assert_eq!(ZeroWidthUtils::visible_char_count(text_with_zw), 10);
     }
 
@@ -277,7 +221,7 @@ mod tests {
     fn test_multiline_utils_extract_range() {
         let content = "Line 1\nLine 2\nLine 3";
         let result = MultiLineUtils::extract_range_unicode_aware(content, 1, 6, 2, 5);
-        assert_eq!(result, "1\nLine");  // Fixed expectation
+        assert_eq!(result, "1\nLine"); // Fixed expectation
     }
 
     #[test]

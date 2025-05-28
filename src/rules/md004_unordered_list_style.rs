@@ -94,8 +94,6 @@ impl MD004UnorderedListStyle {
             after_marker: 1,
         }
     }
-
-
 }
 
 impl Rule for MD004UnorderedListStyle {
@@ -118,7 +116,7 @@ impl Rule for MD004UnorderedListStyle {
         }
 
         // Quick check for any list markers before processing
-        if !ctx.content.contains(|c: char| c == '*' || c == '-' || c == '+') {
+        if !ctx.content.contains(['*', '-', '+']) {
             return Ok(Vec::new());
         }
 
@@ -163,9 +161,21 @@ impl Rule for MD004UnorderedListStyle {
 
             // Check for unordered list items
             if let Some(caps) = UNORDERED_LIST_REGEX.captures(line) {
-                let indent = caps.name("indent").map(|m| m.as_str().to_string()).unwrap_or_default();
-                let blockquote = caps.name("blockquote").map(|m| m.as_str().to_string()).unwrap_or_default();
-                let marker = caps.name("marker").unwrap().as_str().chars().next().unwrap();
+                let indent = caps
+                    .name("indent")
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default();
+                let blockquote = caps
+                    .name("blockquote")
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default();
+                let marker = caps
+                    .name("marker")
+                    .unwrap()
+                    .as_str()
+                    .chars()
+                    .next()
+                    .unwrap();
                 // Use pre-computed line position
                 let offset = line_positions[i] + indent.len() + blockquote.len();
 
@@ -180,7 +190,10 @@ impl Rule for MD004UnorderedListStyle {
                                     column: col,
                                     end_line: line,
                                     end_column: col + 1,
-                                    message: format!("marker '{}' does not match expected style '{}'", marker, first),
+                                    message: format!(
+                                        "marker '{}' does not match expected style '{}'",
+                                        marker, first
+                                    ),
                                     severity: Severity::Warning,
                                     rule_name: Some(self.name()),
                                     fix: Some(Fix {
@@ -193,7 +206,7 @@ impl Rule for MD004UnorderedListStyle {
                             // This is the first marker we've found - set the style
                             first_marker = Some(marker);
                         }
-                    },
+                    }
                     _ => {
                         // Handle specific style requirements (asterisk, dash, plus)
                         let target_marker = match self.style {
@@ -209,7 +222,10 @@ impl Rule for MD004UnorderedListStyle {
                                 column: col,
                                 end_line: line,
                                 end_column: col + 1,
-                                message: format!("marker '{}' does not match expected style '{}'", marker, target_marker),
+                                message: format!(
+                                    "marker '{}' does not match expected style '{}'",
+                                    marker, target_marker
+                                ),
                                 severity: Severity::Warning,
                                 rule_name: Some(self.name()),
                                 fix: Some(Fix {
@@ -269,9 +285,21 @@ impl Rule for MD004UnorderedListStyle {
 
             // Check for unordered list items
             if let Some(caps) = UNORDERED_LIST_REGEX.captures(line) {
-                let indent = caps.name("indent").map(|m| m.as_str().to_string()).unwrap_or_default();
-                let blockquote = caps.name("blockquote").map(|m| m.as_str().to_string()).unwrap_or_default();
-                let marker = caps.name("marker").unwrap().as_str().chars().next().unwrap();
+                let indent = caps
+                    .name("indent")
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default();
+                let blockquote = caps
+                    .name("blockquote")
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default();
+                let marker = caps
+                    .name("marker")
+                    .unwrap()
+                    .as_str()
+                    .chars()
+                    .next()
+                    .unwrap();
                 // Use pre-computed line position
                 let offset = line_positions[i] + indent.len() + blockquote.len();
 
@@ -284,22 +312,22 @@ impl Rule for MD004UnorderedListStyle {
                         } else {
                             first_marker = Some(marker);
                         }
-                    },
+                    }
                     UnorderedListStyle::Asterisk => {
                         if marker != '*' {
                             edits.push((offset, '*'));
                         }
-                    },
+                    }
                     UnorderedListStyle::Dash => {
                         if marker != '-' {
                             edits.push((offset, '-'));
                         }
-                    },
+                    }
                     UnorderedListStyle::Plus => {
                         if marker != '+' {
                             edits.push((offset, '+'));
                         }
-                    },
+                    }
                 }
             }
         }
@@ -322,7 +350,7 @@ impl Rule for MD004UnorderedListStyle {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || !ctx.content.contains(|c: char| c == '*' || c == '-' || c == '+')
+        ctx.content.is_empty() || !ctx.content.contains(['*', '-', '+'])
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

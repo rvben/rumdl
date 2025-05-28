@@ -97,24 +97,24 @@ impl MD013LineLength {
         let trimmed = line.trim();
 
         // Only skip if the entire line is a URL (quick check first)
-        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-            if URL_PATTERN.is_match(trimmed) {
-                return true;
-            }
+        if (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+            && URL_PATTERN.is_match(trimmed)
+        {
+            return true;
         }
 
         // Only skip if the entire line is an image reference (quick check first)
-        if trimmed.starts_with("![") && trimmed.ends_with(']') {
-            if IMAGE_REF_PATTERN.is_match(trimmed) {
-                return true;
-            }
+        if trimmed.starts_with("![")
+            && trimmed.ends_with(']')
+            && IMAGE_REF_PATTERN.is_match(trimmed)
+        {
+            return true;
         }
 
         // Only skip if the entire line is a link reference (quick check first)
-        if trimmed.starts_with('[') && trimmed.contains("]:") {
-            if LINK_REF_PATTERN.is_match(trimmed) {
-                return true;
-            }
+        if trimmed.starts_with('[') && trimmed.contains("]:") && LINK_REF_PATTERN.is_match(trimmed)
+        {
+            return true;
         }
 
         // Code blocks with long strings (only check if in code block)
@@ -211,11 +211,12 @@ impl Rule for MD013LineLength {
                 }
 
                 // Skip block elements according to config flags (optimized checks)
-                if (self.headings && heading_lines_set.contains(&line_number)) ||
-                   (!self.code_blocks && structure.is_in_code_block(line_number)) ||
-                   (self.tables && table_lines_set.contains(&line_number)) ||
-                   structure.is_in_blockquote(line_number) ||
-                   structure.is_in_html_block(line_number) {
+                if (self.headings && heading_lines_set.contains(&line_number))
+                    || (!self.code_blocks && structure.is_in_code_block(line_number))
+                    || (self.tables && table_lines_set.contains(&line_number))
+                    || structure.is_in_blockquote(line_number)
+                    || structure.is_in_html_block(line_number)
+                {
                     continue;
                 }
 
@@ -247,7 +248,7 @@ impl Rule for MD013LineLength {
                 None
             };
 
-            let message = if let Some(ref fix_obj) = fix {
+            let message = if let Some(ref _fix_obj) = fix {
                 format!(
                     "Line length {} exceeds {} characters (can trim whitespace)",
                     effective_length, self.line_length
@@ -268,7 +269,7 @@ impl Rule for MD013LineLength {
                 message,
                 line: start_line,
                 column: start_col,
-                end_line: end_line,
+                end_line,
                 end_column: end_col,
                 severity: Severity::Warning,
                 fix,
@@ -287,8 +288,13 @@ impl Rule for MD013LineLength {
         }
 
         // Collect all fixes and sort by range start (descending) to apply from end to beginning
-        let mut fixes: Vec<_> = warnings.iter()
-            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
+        let mut fixes: Vec<_> = warnings
+            .iter()
+            .filter_map(|w| {
+                w.fix
+                    .as_ref()
+                    .map(|f| (f.range.start, f.range.end, &f.replacement))
+            })
             .collect();
         fixes.sort_by(|a, b| b.0.cmp(&a.0));
 
@@ -337,11 +343,13 @@ impl Rule for MD013LineLength {
         Self: Sized,
     {
         // get_rule_config_value now automatically tries both underscore and kebab-case variants
-        let line_length = crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length")
-            .unwrap_or(80);
+        let line_length =
+            crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length")
+                .unwrap_or(80);
 
-        let code_blocks = crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
-            .unwrap_or(true);
+        let code_blocks =
+            crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
+                .unwrap_or(true);
 
         let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables")
             .unwrap_or(false);
@@ -363,122 +371,13 @@ impl Rule for MD013LineLength {
 }
 
 impl MD013LineLength {
-        /// Find sentence boundaries in a line, avoiding false positives
-    fn find_sentence_boundaries(&self, line: &str) -> Vec<usize> {
-        let mut boundaries = Vec::new();
-
-        // Find all potential sentence endings
-        for mat in SENTENCE_END.find_iter(line) {
-            // The regex matches "[.!?]\s+[A-Z]", so we want to split after the punctuation and space
-            // Find the position right before the capital letter
-            let match_text = mat.as_str();
-            let punct_and_space_len = match_text.len() - 1; // Everything except the capital letter
-            let split_pos = mat.start() + punct_and_space_len;
-
-            // Check if this is a false positive
-            let before = &line[..mat.start() + 1];
-
-            // Skip if it's an abbreviation
-            if ABBREVIATION.is_match(&line[..mat.end()]) {
-                continue;
-            }
-
-            // Skip if it's a decimal number
-            if DECIMAL_NUMBER.is_match(&line[..mat.end()]) {
-                continue;
-            }
-
-            // Skip if it's a numbered list item
-            if LIST_ITEM.is_match(line) && before.contains('.') && before.matches('.').count() == 1 {
-                continue;
-            }
-
-            // Skip if we're inside a link or code span
-            if self.is_inside_markdown_construct(line, mat.start()) {
-                continue;
-            }
-
-            boundaries.push(split_pos);
-        }
-
-        boundaries
-    }
-
-        /// Check if a position is inside a markdown construct (links, code spans, etc.)
-    fn is_inside_markdown_construct(&self, line: &str, pos: usize) -> bool {
-        let chars: Vec<char> = line.chars().collect();
-
-        // Check for code spans
-        let mut in_code = false;
-        let mut i = 0;
-        while i < chars.len() {
-            if chars[i] == '`' {
-                // Count consecutive backticks
-                let mut _backtick_count = 0;
-                let _start = i;
-                while i < chars.len() && chars[i] == '`' {
-                    _backtick_count += 1;
-                    i += 1;
-                }
-
-                if in_code {
-                    // Look for matching closing backticks
-                    in_code = false; // Assume we found the closing
-                } else {
-                    // Opening backticks
-                    in_code = true;
-                }
-            } else {
-                if i == pos && in_code {
-                    return true;
-                }
-                i += 1;
-            }
-        }
-
-                // Check for links - look for complete [text](url) or [text][ref] patterns
-        for mat in INLINE_LINK.find_iter(line) {
-            if pos >= mat.start() && pos < mat.end() {
-                return true;
-            }
-        }
-
-        for mat in REFERENCE_LINK.find_iter(line) {
-            if pos >= mat.start() && pos < mat.end() {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    /// Attempt to split a line at sentence boundaries
-    fn try_split_sentences(&self, line: &str, max_length: usize) -> Option<(String, String)> {
-        let boundaries = self.find_sentence_boundaries(line);
-
-        if boundaries.is_empty() {
-            return None;
-        }
-
-        // Find the best split point
-        for &boundary in &boundaries {
-            let first_part = line[..boundary].trim_end();
-            let second_part = line[boundary..].trim_start();
-
-            // Check if both parts would be within the limit
-            if first_part.len() <= max_length && second_part.len() <= max_length {
-                // Ensure the second part starts with a capital letter (sentence)
-                if second_part.chars().next().map_or(false, |c| c.is_uppercase()) {
-                    return Some((first_part.to_string(), second_part.to_string()));
-                }
-            }
-        }
-
-        None
-    }
-
     /// Check if a line should be skipped for fixing
-    fn should_skip_line_for_fix(&self, line: &str, line_num: usize, structure: &DocumentStructure) -> bool {
+    fn should_skip_line_for_fix(
+        &self,
+        line: &str,
+        line_num: usize,
+        structure: &DocumentStructure,
+    ) -> bool {
         let line_number = line_num + 1; // 1-based
 
         // Skip code blocks

@@ -3,7 +3,7 @@
 //! This module contains comprehensive tests for character ranges across
 //! multiple rules and edge cases.
 
-use super::{test_character_ranges, simple_test, multi_warning_test, ExpectedWarning};
+use super::{simple_test, test_character_ranges, ExpectedWarning};
 
 // MD010 - Hard tabs
 #[test]
@@ -11,7 +11,7 @@ fn test_md010_hard_tabs() {
     let test = simple_test(
         "MD010",
         "Line with\ttab character",
-        ExpectedWarning::new(1, 10, 1, 11, "\t")
+        ExpectedWarning::new(1, 10, 1, 11, "\t"),
     );
     test_character_ranges(test);
 }
@@ -29,7 +29,7 @@ fn test_md014_commands_show_output() {
     let test = simple_test(
         "MD014",
         "```bash\n$ echo hello\n```",
-        ExpectedWarning::new(2, 1, 2, 2, "$")
+        ExpectedWarning::new(2, 1, 2, 2, "$"),
     );
     test_character_ranges(test);
 }
@@ -40,7 +40,7 @@ fn test_md020_no_space_closed_atx() {
     let test = simple_test(
         "MD020",
         "# Heading#",
-        ExpectedWarning::new(1, 9, 1, 10, "g")  // Highlights the position where space is missing
+        ExpectedWarning::new(1, 9, 1, 10, "g"), // Highlights the position where space is missing
     );
     test_character_ranges(test);
 }
@@ -51,7 +51,7 @@ fn test_md021_multiple_spaces_closed_atx() {
     let test = simple_test(
         "MD021",
         "# Heading  #",
-        ExpectedWarning::new(1, 11, 1, 12, " ")  // Highlights the extra space
+        ExpectedWarning::new(1, 11, 1, 12, " "), // Highlights the extra space
     );
     test_character_ranges(test);
 }
@@ -62,7 +62,7 @@ fn test_md041_first_line_heading() {
     let test = simple_test(
         "MD041",
         "Some text\n\n# Heading",
-        ExpectedWarning::new(1, 1, 1, 10, "Some text")
+        ExpectedWarning::new(1, 1, 1, 10, "Some text"),
     );
     test_character_ranges(test);
 }
@@ -73,7 +73,7 @@ fn test_unicode_characters() {
     let test = simple_test(
         "MD018",
         "#Café without space",
-        ExpectedWarning::new(1, 2, 1, 2, "")
+        ExpectedWarning::new(1, 2, 1, 2, ""),
     );
     test_character_ranges(test);
 }
@@ -83,7 +83,7 @@ fn test_emoji_characters() {
     let test = simple_test(
         "MD018",
         "#🎉Emoji without space",
-        ExpectedWarning::new(1, 2, 1, 2, "")
+        ExpectedWarning::new(1, 2, 1, 2, ""),
     );
     test_character_ranges(test);
 }

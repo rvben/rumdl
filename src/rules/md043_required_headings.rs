@@ -158,19 +158,20 @@ impl Rule for MD043RequiredHeadings {
             for (i, line) in lines.iter().enumerate() {
                 if self.is_heading(content, i) {
                     // Calculate precise character range for the entire heading
-                    let (start_line, start_col, end_line, end_col) = calculate_heading_range(i + 1, line);
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_heading_range(i + 1, line);
 
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Heading structure does not match the required structure"
-                .to_string(),
-                severity: Severity::Warning,
-                fix: None, // Cannot automatically fix as we don't know the intended structure
-            });
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "Heading structure does not match the required structure"
+                            .to_string(),
+                        severity: Severity::Warning,
+                        fix: None, // Cannot automatically fix as we don't know the intended structure
+                    });
                 }
             }
         }
@@ -298,8 +299,11 @@ impl Rule for MD043RequiredHeadings {
                 column: 1,
                 end_line: 1,
                 end_column: 1 + 1,
-                message: format!("Required headings not found: {:?
-            }", self.headings),
+                message: format!(
+                    "Required headings not found: {:?
+            }",
+                    self.headings
+                ),
                 severity: Severity::Warning,
                 fix: None,
             });
@@ -316,13 +320,13 @@ impl Rule for MD043RequiredHeadings {
                     }
 
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: *line_num,
-                column: 1,
-                end_line: *line_num,
-                end_column: 1 + 1,
-                message: format!(
-                "Heading structure does not match required structure. Expected: {:?
+                        rule_name: Some(self.name()),
+                        line: *line_num,
+                        column: 1,
+                        end_line: *line_num,
+                        end_column: 1 + 1,
+                        message: format!(
+                            "Heading structure does not match required structure. Expected: {:?
             }, Found: {:?}",
                             self.headings, actual_headings
                         ),
@@ -336,13 +340,13 @@ impl Rule for MD043RequiredHeadings {
             // add a warning at the beginning of the file
             if warnings.is_empty() {
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: 1,
-                column: 1,
-                end_line: 1,
-                end_column: 1 + 1,
-                message: format!(
-                "Heading structure does not match required structure. Expected: {:?
+                    rule_name: Some(self.name()),
+                    line: 1,
+                    column: 1,
+                    end_line: 1,
+                    end_column: 1 + 1,
+                    message: format!(
+                        "Heading structure does not match required structure. Expected: {:?
             }, Found: {:?}",
                         self.headings, actual_headings
                     ),

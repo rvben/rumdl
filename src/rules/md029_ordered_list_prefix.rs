@@ -289,11 +289,15 @@ impl DocumentStructureExtensions for MD029OrderedListPrefix {
 impl MD029OrderedListPrefix {
     fn check_list_section(&self, items: &[(usize, String)], warnings: &mut Vec<LintWarning>) {
         // Group items by indentation level and process each level independently
-        let mut level_groups: std::collections::HashMap<usize, Vec<(usize, String)>> = std::collections::HashMap::new();
+        let mut level_groups: std::collections::HashMap<usize, Vec<(usize, String)>> =
+            std::collections::HashMap::new();
 
         for (line_num, line) in items {
             let indent = line.chars().take_while(|c| c.is_whitespace()).count();
-            level_groups.entry(indent).or_default().push((*line_num, line.clone()));
+            level_groups
+                .entry(indent)
+                .or_default()
+                .push((*line_num, line.clone()));
         }
 
         // Process each indentation level separately
@@ -309,16 +313,17 @@ impl MD029OrderedListPrefix {
 
                     if actual_num != expected_num {
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!(
-                "Ordered list item number {} does not match style (expected {})",
-                                actual_num,
-                                expected_num
+                            rule_name: Some(self.name()),
+                            message: format!(
+                                "Ordered list item number {} does not match style (expected {})",
+                                actual_num, expected_num
                             ),
                             line: line_num + 1,
                             column: line.find(char::is_numeric).unwrap_or(0) + 1,
                             end_line: line_num + 1,
-                            end_column: line.find(char::is_numeric).unwrap_or(0) + actual_num.to_string().len() + 1,
+                            end_column: line.find(char::is_numeric).unwrap_or(0)
+                                + actual_num.to_string().len()
+                                + 1,
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: 0..0, // TODO: Replace with correct byte range if available

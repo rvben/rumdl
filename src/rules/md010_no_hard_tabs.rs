@@ -1,7 +1,7 @@
 /// Rule MD010: No hard tabs
 ///
 /// See [docs/md010.md](../../docs/md010.md) for full documentation, configuration, and examples.
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::{calculate_match_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use lazy_static::lazy_static;
@@ -184,7 +184,10 @@ impl Rule for MD010NoHardTabs {
                     }
                 } else if is_leading {
                     if tab_count == 1 {
-                        format!("Found leading hard tab, use {} spaces instead", self.spaces_per_tab)
+                        format!(
+                            "Found leading hard tab, use {} spaces instead",
+                            self.spaces_per_tab
+                        )
                     } else {
                         format!(
                             "Found {} leading hard tabs, use {} spaces instead",
@@ -192,26 +195,27 @@ impl Rule for MD010NoHardTabs {
                             tab_count * self.spaces_per_tab
                         )
                     }
+                } else if tab_count == 1 {
+                    "Found hard tab for alignment, use spaces instead".to_string()
                 } else {
-                    if tab_count == 1 {
-                        "Found hard tab for alignment, use spaces instead".to_string()
-                    } else {
-                        format!("Found {} hard tabs for alignment, use spaces instead", tab_count)
-                    }
+                    format!(
+                        "Found {} hard tabs for alignment, use spaces instead",
+                        tab_count
+                    )
                 };
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index.line_col_to_byte_range(line_num + 1, start_pos + 1),
-                replacement: line.replace('\t', &" ".repeat(self.spaces_per_tab)),
-            }),
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: _line_index.line_col_to_byte_range(line_num + 1, start_pos + 1),
+                        replacement: line.replace('\t', &" ".repeat(self.spaces_per_tab)),
+                    }),
                 });
             }
         }

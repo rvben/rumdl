@@ -1,8 +1,8 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
-use lazy_static::lazy_static;
 use fancy_regex::Regex;
+use lazy_static::lazy_static;
 
 /// Rule MD042: No empty links
 ///
@@ -39,7 +39,8 @@ impl Rule for MD042NoEmptyLinks {
         let mut warnings = Vec::new();
 
         lazy_static! {
-            static ref EMPTY_LINK_REGEX: Regex = Regex::new(r"(?<!\!)\[([^\]]*)\]\(([^\)]*)\)").unwrap();
+            static ref EMPTY_LINK_REGEX: Regex =
+                Regex::new(r"(?<!\!)\[([^\]]*)\]\(([^\)]*)\)").unwrap();
         }
 
         for (line_num, line) in content.lines().enumerate() {
@@ -63,9 +64,12 @@ impl Rule for MD042NoEmptyLinks {
                     };
 
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!("Empty link found: [{
-            }]({})", text, url),
+                        rule_name: Some(self.name()),
+                        message: format!(
+                            "Empty link found: [{
+            }]({})",
+                            text, url
+                        ),
                         line: line_num + 1,
                         column: full_match.start() + 1,
                         end_line: line_num + 1,
@@ -113,8 +117,11 @@ impl Rule for MD042NoEmptyLinks {
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                message: format!("Empty link found: [{
-            }]({})", link.text, link.url),
+                message: format!(
+                    "Empty link found: [{
+            }]({})",
+                    link.text, link.url
+                ),
                 line: link.line,
                 column: link.start_col,
                 end_line: link.line,
@@ -142,7 +149,8 @@ impl Rule for MD042NoEmptyLinks {
         let mut result = content.to_string();
 
         lazy_static! {
-            static ref EMPTY_LINK_REGEX: Regex = Regex::new(r"(?<!\!)\[([^\]]*)\]\(([^\)]*)\)").unwrap();
+            static ref EMPTY_LINK_REGEX: Regex =
+                Regex::new(r"(?<!\!)\[([^\]]*)\]\(([^\)]*)\)").unwrap();
         }
 
         // Apply fixes by replacing each empty link with the appropriate replacement
@@ -161,7 +169,7 @@ impl Rule for MD042NoEmptyLinks {
 
                     // Check if this is an empty link that needs fixing
                     if text.trim().is_empty() || url.trim().is_empty() {
-                        result = result.replacen(&full_match.as_str(), &fix.replacement, 1);
+                        result = result.replacen(full_match.as_str(), &fix.replacement, 1);
                         break; // Only replace one at a time to avoid issues
                     }
                 }

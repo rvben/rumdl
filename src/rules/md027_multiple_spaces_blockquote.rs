@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::{calculate_match_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::blockquote_utils::BlockquoteUtils;
@@ -52,21 +52,21 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         i + 1,
                         line,
                         extra_spaces_start + 1, // Skip the first space (which is correct)
-                        extra_spaces_len
+                        extra_spaces_len,
                     );
 
                     let actual_content = BlockquoteUtils::get_blockquote_content(line);
                     warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: start_line,
-                    column: start_col,
-                    end_line: end_line,
-                    end_column: end_col,
-                    message: "Multiple spaces after blockquote symbol".to_string(),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                    range: _line_index.line_col_to_byte_range(i + 1, indentation.len() + 1),
-                    replacement: format!("> {}", actual_content.trim_start()),
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "Multiple spaces after blockquote symbol".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: _line_index.line_col_to_byte_range(i + 1, indentation.len() + 1),
+                            replacement: format!("> {}", actual_content.trim_start()),
                         }),
                     });
                 }

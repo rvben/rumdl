@@ -119,7 +119,10 @@ fn test_emphasis_with_various_punctuation() {
     assert_eq!(result.len(), 4);
     let fixed = rule.fix(&ctx).unwrap();
     // All trailing punctuation should be removed
-    assert_eq!(fixed, "## Title with period\n\n# Question\n\n## Exclamation\n\n# Semicolon");
+    assert_eq!(
+        fixed,
+        "## Title with period\n\n# Question\n\n## Exclamation\n\n# Semicolon"
+    );
 }
 
 #[test]

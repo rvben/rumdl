@@ -81,7 +81,8 @@ fn bench_string_approaches(c: &mut Criterion) {
     // Approach 1: trim_end + collect
     c.bench_function("trim_end_collect", |b| {
         b.iter(|| {
-            content.lines()
+            content
+                .lines()
                 .map(|line| line.trim_end())
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -104,9 +105,7 @@ fn bench_string_approaches(c: &mut Criterion) {
     c.bench_function("regex_replace", |b| {
         use regex::Regex;
         let re = Regex::new(r" +$").unwrap();
-        b.iter(|| {
-            re.replace_all(black_box(&content), "").to_string()
-        })
+        b.iter(|| re.replace_all(black_box(&content), "").to_string())
     });
 }
 
@@ -117,13 +116,9 @@ fn bench_fix_vs_check(c: &mut Criterion) {
 
     let rule = MD009TrailingSpaces::default();
 
-    c.bench_function("MD009 check", |b| {
-        b.iter(|| rule.check(black_box(&ctx)))
-    });
+    c.bench_function("MD009 check", |b| b.iter(|| rule.check(black_box(&ctx))));
 
-    c.bench_function("MD009 fix", |b| {
-        b.iter(|| rule.fix(black_box(&ctx)))
-    });
+    c.bench_function("MD009 fix", |b| b.iter(|| rule.fix(black_box(&ctx))));
 }
 
 criterion_group!(

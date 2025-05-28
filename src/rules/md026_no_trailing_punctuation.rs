@@ -2,7 +2,7 @@
 ///
 /// See [docs/md026.md](../../docs/md026.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::calculate_match_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
@@ -271,15 +271,17 @@ impl MD026NoTrailingPunctuation {
                             let line_content = lines[heading_line - 1];
 
                             // For ATX headings, find the punctuation position in the line
-                            let heading_start_in_line = line_content.find(&heading_text).unwrap_or(0);
-                            let punctuation_start_in_line = heading_start_in_line + punctuation_match.start();
+                            let heading_start_in_line =
+                                line_content.find(&heading_text).unwrap_or(0);
+                            let punctuation_start_in_line =
+                                heading_start_in_line + punctuation_match.start();
                             let punctuation_len = punctuation_match.len();
 
                             let (start_line, start_col, end_line, end_col) = calculate_match_range(
                                 heading_line,
                                 line_content,
                                 punctuation_start_in_line,
-                                punctuation_len
+                                punctuation_len,
                             );
 
                             let last_char = heading_text.trim().chars().last().unwrap_or(' ');
@@ -287,7 +289,7 @@ impl MD026NoTrailingPunctuation {
                                 rule_name: Some(self.name()),
                                 line: start_line,
                                 column: start_col,
-                                end_line: end_line,
+                                end_line,
                                 end_column: end_col,
                                 message: format!(
                                     "Heading '{}' should not end with punctuation '{}'",
@@ -311,26 +313,30 @@ impl MD026NoTrailingPunctuation {
                         let line_content = lines[heading_line - 1];
 
                         // For setext headings, find the punctuation position in the line
-                        let text_start_in_line = line_content.find(lines[heading_line - 1].trim()).unwrap_or(0);
-                        let punctuation_start_in_line = text_start_in_line + punctuation_match.start();
+                        let text_start_in_line = line_content
+                            .find(lines[heading_line - 1].trim())
+                            .unwrap_or(0);
+                        let punctuation_start_in_line =
+                            text_start_in_line + punctuation_match.start();
                         let punctuation_len = punctuation_match.len();
 
                         let (start_line, start_col, end_line, end_col) = calculate_match_range(
                             heading_line,
                             line_content,
                             punctuation_start_in_line,
-                            punctuation_len
+                            punctuation_len,
                         );
 
-                        let last_char = lines[heading_line - 1].trim().chars().last().unwrap_or(' ');
+                        let last_char =
+                            lines[heading_line - 1].trim().chars().last().unwrap_or(' ');
                         warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: start_line,
-                    column: start_col,
-                    end_line: end_line,
-                    end_column: end_col,
-                    message: format!(
-                    "Heading '{
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: format!(
+                                "Heading '{
                 }' should not end with punctuation '{}'",
                                 lines[heading_line - 1].trim(),
                                 last_char
@@ -375,8 +381,9 @@ impl Rule for MD026NoTrailingPunctuation {
         let has_headings = content.contains('#') || {
             let lines: Vec<&str> = content.lines().collect();
             lines.windows(2).any(|pair| {
-                !pair[0].trim().is_empty() &&
-                (pair[1].trim().chars().all(|c| c == '=' || c == '-') && pair[1].trim().len() > 0)
+                !pair[0].trim().is_empty()
+                    && (pair[1].trim().chars().all(|c| c == '=' || c == '-')
+                        && !pair[1].trim().is_empty())
             })
         };
 
@@ -398,12 +405,13 @@ impl Rule for MD026NoTrailingPunctuation {
         let content = ctx.content;
 
         // Fast path: if no headings or punctuation, return unchanged
-        if !content.contains('#') && !content.lines().any(|line| {
-            let lines: Vec<&str> = content.lines().collect();
-            let idx = lines.iter().position(|&l| l == line).unwrap_or(0);
-            idx + 1 < lines.len() &&
-            SETEXT_UNDERLINE_RE.is_match(lines[idx + 1])
-        }) {
+        if !content.contains('#')
+            && !content.lines().any(|line| {
+                let lines: Vec<&str> = content.lines().collect();
+                let idx = lines.iter().position(|&l| l == line).unwrap_or(0);
+                idx + 1 < lines.len() && SETEXT_UNDERLINE_RE.is_match(lines[idx + 1])
+            })
+        {
             return Ok(content.to_string());
         }
 
@@ -416,7 +424,9 @@ impl Rule for MD026NoTrailingPunctuation {
             let mut result = content.to_string();
 
             // Fix ATX headings with fast regex
-            result = FAST_ATX_PUNCTUATION_RE.replace_all(&result, "$1$2").to_string();
+            result = FAST_ATX_PUNCTUATION_RE
+                .replace_all(&result, "$1$2")
+                .to_string();
 
             // Fix setext headings - need to be more careful here
             let lines: Vec<&str> = result.lines().collect();

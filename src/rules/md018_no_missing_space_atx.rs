@@ -86,7 +86,7 @@ impl Rule for MD018NoMissingSpaceAtx {
         self.check_with_structure(ctx, &structure)
     }
 
-        fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
 
         // Fast path: if no hash symbols, return unchanged
@@ -103,7 +103,8 @@ impl Rule for MD018NoMissingSpaceAtx {
         }
 
         // Create a set of heading line numbers for fast lookup
-        let heading_lines: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
+        let heading_lines: std::collections::HashSet<usize> =
+            structure.heading_lines.iter().cloned().collect();
 
         // Process line by line, only applying regex to heading lines
         let lines: Vec<&str> = content.lines().collect();
@@ -161,7 +162,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                 let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
                     line_num,
                     hash_end_col,
-                    content_start_col - hash_end_col
+                    content_start_col - hash_end_col,
                 );
 
                 let line_range = self.get_line_byte_range(content, line_num);
@@ -174,7 +175,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                     ),
                     line: start_line,
                     column: start_col,
-                    end_line: end_line,
+                    end_line,
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {

@@ -5,6 +5,7 @@
 use crate::rule::Rule;
 use crate::rules;
 use lazy_static::lazy_static;
+use log;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::{BTreeSet, HashMap};
@@ -12,7 +13,6 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use toml_edit::DocumentMut;
-use log;
 
 lazy_static! {
     // Map common markdownlint config keys to rumdl rule names
@@ -222,10 +222,10 @@ pub fn get_rule_config_value<T: serde::de::DeserializeOwned>(
 
     // Try multiple key variants to support both underscore and kebab-case formats
     let key_variants = [
-        key.to_string(),                              // Original key as provided
-        normalize_key(key),                           // Normalized key (lowercase, kebab-case)
-        key.replace('-', "_"),                        // Convert kebab-case to snake_case
-        key.replace('_', "-"),                        // Convert snake_case to kebab-case
+        key.to_string(),       // Original key as provided
+        normalize_key(key),    // Normalized key (lowercase, kebab-case)
+        key.replace('-', "_"), // Convert kebab-case to snake_case
+        key.replace('_', "-"), // Convert snake_case to kebab-case
     ];
 
     // Try each variant until we find a match
@@ -308,7 +308,9 @@ respect-gitignore = true
         fs::write(&config_path, content).unwrap();
 
         // Load the config with skip_auto_discovery to avoid environment config files
-        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let sourced =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                .unwrap();
         let config: Config = sourced.into(); // Convert to plain config for assertions
 
         // Check global settings
@@ -342,7 +344,9 @@ respect_gitignore = true
         fs::write(&config_path, content).unwrap();
 
         // Load the config with skip_auto_discovery to avoid environment config files
-        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let sourced =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                .unwrap();
         let config: Config = sourced.into(); // Convert to plain config for assertions
 
         // Check settings were correctly loaded
@@ -362,7 +366,9 @@ line-length = 222
 "#;
         fs::write(&config_path, config_content).unwrap();
         // Load the config with skip_auto_discovery to avoid environment config files
-        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let sourced =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                .unwrap();
         // DEBUG: Print all rule keys and their value keys
         log::debug!(
             "[DEBUG] All rules loaded: {:?}",
@@ -408,7 +414,9 @@ line-length = 103
 "#;
         fs::write(&config_path, config_content).unwrap();
         // Load the config with skip_auto_discovery to avoid environment config files
-        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let sourced =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                .unwrap();
         let config: Config = sourced.clone().into();
         // Only the last section should win, and be present
         let rule_cfg = sourced
@@ -434,7 +442,9 @@ line-length = 202
 "#;
         fs::write(&config_path, config_content).unwrap();
         // Load the config with skip_auto_discovery to avoid environment config files
-        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let sourced =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                .unwrap();
         let config: Config = sourced.clone().into();
         let rule_cfg = sourced
             .rules
@@ -463,7 +473,9 @@ line-length = 303
 "#;
         fs::write(&config_path, config_content).unwrap();
         // Load the config with skip_auto_discovery to avoid environment config files
-        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let sourced =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                .unwrap();
         let config: Config = sourced.clone().into();
         // MD999 should not be present
         assert!(!sourced.rules.contains_key("MD999"));
@@ -701,7 +713,10 @@ impl SourcedConfig {
         skip_auto_discovery: bool,
     ) -> Result<Self, ConfigError> {
         use std::env;
-        log::debug!("[rumdl-config] Current working directory: {:?}", env::current_dir());
+        log::debug!(
+            "[rumdl-config] Current working directory: {:?}",
+            env::current_dir()
+        );
         if config_path.is_none() {
             if skip_auto_discovery {
                 log::debug!("[rumdl-config] Skipping auto-discovery due to --no-config flag");
@@ -709,7 +724,10 @@ impl SourcedConfig {
                 log::debug!("[rumdl-config] No explicit config_path provided, will search default locations");
             }
         } else {
-            log::debug!("[rumdl-config] Explicit config_path provided: {:?}", config_path);
+            log::debug!(
+                "[rumdl-config] Explicit config_path provided: {:?}",
+                config_path
+            );
         }
         let mut sourced_config = SourcedConfig::default();
         let mut loaded_toml_or_pyproject = false;
@@ -753,7 +771,8 @@ impl SourcedConfig {
                 || path_str.ends_with(".json")
                 || path_str.ends_with(".jsonc")
                 || path_str.ends_with(".yaml")
-                || path_str.ends_with(".yml") {
+                || path_str.ends_with(".yml")
+            {
                 // Parse as markdownlint config (JSON/YAML)
                 let fragment = load_from_markdownlint(&path_str)?;
                 sourced_config.merge(fragment);
@@ -952,9 +971,9 @@ impl RuleRegistry {
 
             // Try key variants
             let key_variants = [
-                key.replace('-', "_"),              // Convert kebab-case to snake_case
-                key.replace('_', "-"),              // Convert snake_case to kebab-case
-                normalize_key(key),                 // Normalized key (lowercase, kebab-case)
+                key.replace('-', "_"), // Convert kebab-case to snake_case
+                key.replace('_', "-"), // Convert snake_case to kebab-case
+                normalize_key(key),    // Normalized key (lowercase, kebab-case)
             ];
 
             for variant in &key_variants {
@@ -1390,7 +1409,8 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                         // fragment.unknown_keys.push(("[global]".to_string(), key.to_string()));
                         log::warn!(
                             "[WARN] Unknown key in [global] section of {}: {}",
-                            path, key
+                            path,
+                            key
                         );
                     }
                 }
@@ -1456,7 +1476,9 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
         } else if item.is_value() {
             log::warn!(
                 "[WARN] Ignoring top-level value key in {}: '{}'. Expected a table like [{}].",
-                path, key, key
+                path,
+                key,
+                key
             );
         }
     }

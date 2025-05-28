@@ -307,8 +307,9 @@ line_length = 20
 
     let config_path_str = config_path.to_str().expect("Path is valid UTF-8");
     // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
-    let sourced_config_1 = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
-        .expect("Failed to load config 1");
+    let sourced_config_1 =
+        rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+            .expect("Failed to load config 1");
     let config_1: Config = sourced_config_1.into(); // Convert
 
     // Test content with MD001 violation and MD013 violation
@@ -357,8 +358,9 @@ line_length = 20 # Set a low limit to trigger it
     fs::write(&config_path, config_content_2).expect("Failed to write config 2");
 
     // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
-    let sourced_config_2 = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
-        .expect("Failed to load config 2");
+    let sourced_config_2 =
+        rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+            .expect("Failed to load config 2");
     let config_2: Config = sourced_config_2.into(); // Convert
 
     // Get all rules and apply config
@@ -419,8 +421,9 @@ headings = false
 
     let config_path_str = config_path.to_str().expect("Path is valid UTF-8");
     // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
-    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
-        .expect("Failed to load config");
+    let sourced_config =
+        rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+            .expect("Failed to load config");
     let config: Config = sourced_config.into(); // Convert
 
     // Get all rules and apply config

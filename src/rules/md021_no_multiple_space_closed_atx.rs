@@ -214,24 +214,21 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                     length = end_spaces - 1; // Extra spaces only
                 }
 
-                let (start_line, start_col_calc, end_line, end_col) = calculate_single_line_range(
-                    line_num,
-                    start_col,
-                    length
-                );
+                let (start_line, start_col_calc, end_line, end_col) =
+                    calculate_single_line_range(line_num, start_col, length);
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message,
-                line: start_line,
-                column: start_col_calc,
-                end_line: end_line,
-                end_column: end_col,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_range,
-                replacement: self.fix_closed_atx_heading(line),
-            }),
+                    rule_name: Some(self.name()),
+                    message,
+                    line: start_line,
+                    column: start_col_calc,
+                    end_line,
+                    end_column: end_col,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_range,
+                        replacement: self.fix_closed_atx_heading(line),
+                    }),
                 });
             }
         }

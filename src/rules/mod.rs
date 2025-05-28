@@ -188,10 +188,7 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
         ("MD057", MD057ExistingRelativeLinks::from_config),
         ("MD058", MD058BlanksAroundTables::from_config),
     ];
-    RULES
-        .iter()
-        .map(|(_, ctor)| ctor(config))
-        .collect()
+    RULES.iter().map(|(_, ctor)| ctor(config)).collect()
 }
 
 // Filter rules based on config (moved from main.rs)

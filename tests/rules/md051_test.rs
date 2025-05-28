@@ -412,11 +412,14 @@ fn test_readme_fragments_debug() {
     let rule = MD051LinkFragments::new();
     let ctx = LintContext::new(content);
 
-        // Test the actual rule
+    // Test the actual rule
     println!("\nRunning MD051 check on README-like content:");
     let result = rule.check(&ctx).unwrap();
     for warning in &result {
-        println!("Warning: line {}, message: {}", warning.line, warning.message);
+        println!(
+            "Warning: line {}, message: {}",
+            warning.line, warning.message
+        );
     }
 
     if result.is_empty() {

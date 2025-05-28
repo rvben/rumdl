@@ -3,7 +3,7 @@
 /// See [docs/md031.md](../../docs/md031.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::{calculate_line_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -49,22 +49,20 @@ impl Rule for MD031BlanksAroundFences {
                 // Check for blank line before fence
                 if i > 0 && !Self::is_empty_line(lines[i - 1]) {
                     // Calculate precise character range for the entire fence line that needs a blank line before it
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(
-                        i + 1,
-                        lines[i]
-                    );
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_line_range(i + 1, lines[i]);
 
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "No blank line before fenced code block".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index.line_col_to_byte_range(i + 1, 1),
-                replacement: format!("\n{}", lines[i]),
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "No blank line before fenced code block".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: _line_index.line_col_to_byte_range(i + 1, 1),
+                            replacement: format!("\n{}", lines[i]),
                         }),
                     });
                 }
@@ -81,23 +79,21 @@ impl Rule for MD031BlanksAroundFences {
                     // Check for blank line after fence
                     if i + 1 < lines.len() && !Self::is_empty_line(lines[i + 1]) {
                         // Calculate precise character range for the entire fence line that needs a blank line after it
-                        let (start_line_fence, start_col_fence, end_line_fence, end_col_fence) = calculate_line_range(
-                            i + 1,
-                            lines[i]
-                        );
+                        let (start_line_fence, start_col_fence, end_line_fence, end_col_fence) =
+                            calculate_line_range(i + 1, lines[i]);
 
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line_fence,
-                column: start_col_fence,
-                end_line: end_line_fence,
-                end_column: end_col_fence,
-                message: "No blank line after fenced code block".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index
-                .line_col_to_byte_range(i + 1, lines[i].len() + 1),
-                replacement: format!("{}\n", lines[i]),
+                            rule_name: Some(self.name()),
+                            line: start_line_fence,
+                            column: start_col_fence,
+                            end_line: end_line_fence,
+                            end_column: end_col_fence,
+                            message: "No blank line after fenced code block".to_string(),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: _line_index
+                                    .line_col_to_byte_range(i + 1, lines[i].len() + 1),
+                                replacement: format!("{}\n", lines[i]),
                             }),
                         });
                     }
@@ -204,22 +200,20 @@ impl Rule for MD031BlanksAroundFences {
             // Check for blank line before fence
             if line_num > 1 && !Self::is_empty_line(lines[line_num - 2]) {
                 // Calculate precise character range for the entire fence line that needs a blank line before it
-                let (start_line, start_col, end_line, end_col) = calculate_line_range(
-                    line_num,
-                    lines[line_num - 1]
-                );
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_line_range(line_num, lines[line_num - 1]);
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "No blank line before fenced code block".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(line_num, 1),
-                replacement: format!("\n{}", lines[line_num - 1]),
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: "No blank line before fenced code block".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range(line_num, 1),
+                        replacement: format!("\n{}", lines[line_num - 1]),
                     }),
                 });
             }
@@ -231,23 +225,21 @@ impl Rule for MD031BlanksAroundFences {
             // Check for blank line after fence
             if line_num < lines.len() && !Self::is_empty_line(lines[line_num]) {
                 // Calculate precise character range for the entire fence line that needs a blank line after it
-                let (start_line_fence, start_col_fence, end_line_fence, end_col_fence) = calculate_line_range(
-                    line_num,
-                    lines[line_num - 1]
-                );
+                let (start_line_fence, start_col_fence, end_line_fence, end_col_fence) =
+                    calculate_line_range(line_num, lines[line_num - 1]);
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line_fence,
-                column: start_col_fence,
-                end_line: end_line_fence,
-                end_column: end_col_fence,
-                message: "No blank line after fenced code block".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index
-                .line_col_to_byte_range(line_num, lines[line_num - 1].len() + 1),
-                replacement: format!("{}\n", lines[line_num - 1]),
+                    rule_name: Some(self.name()),
+                    line: start_line_fence,
+                    column: start_col_fence,
+                    end_line: end_line_fence,
+                    end_column: end_col_fence,
+                    message: "No blank line after fenced code block".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index
+                            .line_col_to_byte_range(line_num, lines[line_num - 1].len() + 1),
+                        replacement: format!("{}\n", lines[line_num - 1]),
                     }),
                 });
             }
@@ -353,7 +345,10 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should preserve the trailing newline
-        assert!(fixed.ends_with('\n'), "Fix should preserve trailing newline");
+        assert!(
+            fixed.ends_with('\n'),
+            "Fix should preserve trailing newline"
+        );
         assert_eq!(fixed, "Some text\n\n```\ncode\n```\n\nMore text\n");
     }
 
@@ -367,7 +362,10 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should not add trailing newline if original didn't have one
-        assert!(!fixed.ends_with('\n'), "Fix should not add trailing newline if original didn't have one");
+        assert!(
+            !fixed.ends_with('\n'),
+            "Fix should not add trailing newline if original didn't have one"
+        );
         assert_eq!(fixed, "Some text\n\n```\ncode\n```\n\nMore text");
     }
 }

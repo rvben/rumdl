@@ -82,7 +82,10 @@ impl Rule for MD007ULIndent {
             if element_cache.is_in_code_block(item.line_number) {
                 continue;
             }
-            if matches!(item.marker_type, ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus) {
+            if matches!(
+                item.marker_type,
+                ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus
+            ) {
                 let expected_indent = item.nesting_level * self.indent;
                 if item.indentation != expected_indent {
                     // Generate fix for this list item
@@ -96,12 +99,24 @@ impl Rule for MD007ULIndent {
                                 let space_after_marker = caps.get(3).map_or(" ", |m| m.as_str());
                                 let marker_char = caps.get(2).map_or("*", |m| m.as_str());
                                 let correct_indent = " ".repeat(expected_indent);
-                                let fixed_line = format!("{}{}{}{}{}", item.blockquote_prefix, correct_indent, marker_char, space_after_marker, content_part);
+                                let fixed_line = format!(
+                                    "{}{}{}{}{}",
+                                    item.blockquote_prefix,
+                                    correct_indent,
+                                    marker_char,
+                                    space_after_marker,
+                                    content_part
+                                );
 
-                                let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
-                                let line_start = line_index.line_col_to_byte_range(item.line_number, 1).start;
+                                let line_index =
+                                    crate::utils::range_utils::LineIndex::new(content.to_string());
+                                let line_start =
+                                    line_index.line_col_to_byte_range(item.line_number, 1).start;
                                 let line_end = if item.line_number < lines.len() {
-                                    line_index.line_col_to_byte_range(item.line_number + 1, 1).start - 1
+                                    line_index
+                                        .line_col_to_byte_range(item.line_number + 1, 1)
+                                        .start
+                                        - 1
                                 } else {
                                     content.len()
                                 };
@@ -164,7 +179,10 @@ impl Rule for MD007ULIndent {
                 continue;
             }
 
-            if matches!(item.marker_type, ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus) {
+            if matches!(
+                item.marker_type,
+                ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus
+            ) {
                 let expected_indent = item.nesting_level * self.indent;
                 if item.indentation != expected_indent {
                     // Generate fix for this list item
@@ -178,12 +196,24 @@ impl Rule for MD007ULIndent {
                                 let space_after_marker = caps.get(3).map_or(" ", |m| m.as_str());
                                 let marker_char = caps.get(2).map_or("*", |m| m.as_str());
                                 let correct_indent = " ".repeat(expected_indent);
-                                let fixed_line = format!("{}{}{}{}{}", item.blockquote_prefix, correct_indent, marker_char, space_after_marker, content_part);
+                                let fixed_line = format!(
+                                    "{}{}{}{}{}",
+                                    item.blockquote_prefix,
+                                    correct_indent,
+                                    marker_char,
+                                    space_after_marker,
+                                    content_part
+                                );
 
-                                let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
-                                let line_start = line_index.line_col_to_byte_range(item.line_number, 1).start;
+                                let line_index =
+                                    crate::utils::range_utils::LineIndex::new(content.to_string());
+                                let line_start =
+                                    line_index.line_col_to_byte_range(item.line_number, 1).start;
                                 let line_end = if item.line_number < lines.len() {
-                                    line_index.line_col_to_byte_range(item.line_number + 1, 1).start - 1
+                                    line_index
+                                        .line_col_to_byte_range(item.line_number + 1, 1)
+                                        .start
+                                        - 1
                                 } else {
                                     content.len()
                                 };
@@ -228,8 +258,13 @@ impl Rule for MD007ULIndent {
         }
 
         // Collect all fixes and sort by range start (descending) to apply from end to beginning
-        let mut fixes: Vec<_> = warnings.iter()
-            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
+        let mut fixes: Vec<_> = warnings
+            .iter()
+            .filter_map(|w| {
+                w.fix
+                    .as_ref()
+                    .map(|f| (f.range.start, f.range.end, &f.replacement))
+            })
             .collect();
         fixes.sort_by(|a, b| b.0.cmp(&a.0));
 

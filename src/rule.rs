@@ -3,9 +3,9 @@
 //! Includes rule categories, dynamic dispatch helpers, and inline comment handling for rule enable/disable.
 
 use dyn_clone::DynClone;
+use serde::Serialize;
 use std::ops::Range;
 use thiserror::Error;
-use serde::Serialize;
 
 // Import document structure
 use crate::lint_context::LintContext;
@@ -43,10 +43,10 @@ pub type LintResult = Result<Vec<LintWarning>, LintError>;
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct LintWarning {
     pub message: String,
-    pub line: usize,           // 1-indexed start line
-    pub column: usize,         // 1-indexed start column
-    pub end_line: usize,       // 1-indexed end line
-    pub end_column: usize,     // 1-indexed end column
+    pub line: usize,       // 1-indexed start line
+    pub column: usize,     // 1-indexed start column
+    pub end_line: usize,   // 1-indexed end line
+    pub end_column: usize, // 1-indexed end column
     pub severity: Severity,
     pub fix: Option<Fix>,
     pub rule_name: Option<&'static str>,
@@ -100,11 +100,7 @@ pub trait Rule: DynClone + Send + Sync {
 
     /// AST-based check method for rules that can benefit from shared AST parsing
     /// By default, calls the regular check method if not overridden
-    fn check_with_ast(
-        &self,
-        ctx: &LintContext,
-        _ast: &MarkdownAst,
-    ) -> LintResult {
+    fn check_with_ast(&self, ctx: &LintContext, _ast: &MarkdownAst) -> LintResult {
         self.check(ctx)
     }
 
@@ -347,22 +343,14 @@ impl MaybeDocumentStructure for dyn Rule {
 
 // Helper trait for dynamic dispatch to check_with_ast
 pub trait MaybeAst {
-    fn check_with_ast_opt(
-        &self,
-        ctx: &LintContext,
-        ast: &MarkdownAst,
-    ) -> Option<LintResult>;
+    fn check_with_ast_opt(&self, ctx: &LintContext, ast: &MarkdownAst) -> Option<LintResult>;
 }
 
 impl<T> MaybeAst for T
 where
     T: Rule + AstExtensions + 'static,
 {
-    fn check_with_ast_opt(
-        &self,
-        ctx: &LintContext,
-        ast: &MarkdownAst,
-    ) -> Option<LintResult> {
+    fn check_with_ast_opt(&self, ctx: &LintContext, ast: &MarkdownAst) -> Option<LintResult> {
         if self.has_relevant_ast_elements(ctx, ast) {
             Some(self.check_with_ast(ctx, ast))
         } else {
@@ -372,11 +360,7 @@ where
 }
 
 impl MaybeAst for dyn Rule {
-    fn check_with_ast_opt(
-        &self,
-        _ctx: &LintContext,
-        _ast: &MarkdownAst,
-    ) -> Option<LintResult> {
+    fn check_with_ast_opt(&self, _ctx: &LintContext, _ast: &MarkdownAst) -> Option<LintResult> {
         None
     }
 }
@@ -394,22 +378,37 @@ mod tests {
     #[test]
     fn test_parse_disable_comment() {
         // Test rumdl-disable global
-        assert_eq!(parse_disable_comment("<!-- rumdl-disable -->"), Some(vec![]));
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable -->"),
+            Some(vec![])
+        );
 
         // Test rumdl-disable specific rules
-        assert_eq!(parse_disable_comment("<!-- rumdl-disable MD001 MD002 -->"), Some(vec!["MD001", "MD002"]));
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable MD001 MD002 -->"),
+            Some(vec!["MD001", "MD002"])
+        );
 
         // Test markdownlint-disable global
-        assert_eq!(parse_disable_comment("<!-- markdownlint-disable -->"), Some(vec![]));
+        assert_eq!(
+            parse_disable_comment("<!-- markdownlint-disable -->"),
+            Some(vec![])
+        );
 
         // Test markdownlint-disable specific rules
-        assert_eq!(parse_disable_comment("<!-- markdownlint-disable MD001 MD002 -->"), Some(vec!["MD001", "MD002"]));
+        assert_eq!(
+            parse_disable_comment("<!-- markdownlint-disable MD001 MD002 -->"),
+            Some(vec!["MD001", "MD002"])
+        );
 
         // Test non-disable comment
         assert_eq!(parse_disable_comment("<!-- some other comment -->"), None);
 
         // Test with extra whitespace
-        assert_eq!(parse_disable_comment("  <!-- rumdl-disable MD013 -->  "), Some(vec!["MD013"]));
+        assert_eq!(
+            parse_disable_comment("  <!-- rumdl-disable MD013 -->  "),
+            Some(vec!["MD013"])
+        );
     }
 
     #[test]
@@ -418,13 +417,22 @@ mod tests {
         assert_eq!(parse_enable_comment("<!-- rumdl-enable -->"), Some(vec![]));
 
         // Test rumdl-enable specific rules
-        assert_eq!(parse_enable_comment("<!-- rumdl-enable MD001 MD002 -->"), Some(vec!["MD001", "MD002"]));
+        assert_eq!(
+            parse_enable_comment("<!-- rumdl-enable MD001 MD002 -->"),
+            Some(vec!["MD001", "MD002"])
+        );
 
         // Test markdownlint-enable global
-        assert_eq!(parse_enable_comment("<!-- markdownlint-enable -->"), Some(vec![]));
+        assert_eq!(
+            parse_enable_comment("<!-- markdownlint-enable -->"),
+            Some(vec![])
+        );
 
         // Test markdownlint-enable specific rules
-        assert_eq!(parse_enable_comment("<!-- markdownlint-enable MD001 MD002 -->"), Some(vec!["MD001", "MD002"]));
+        assert_eq!(
+            parse_enable_comment("<!-- markdownlint-enable MD001 MD002 -->"),
+            Some(vec!["MD001", "MD002"])
+        );
 
         // Test non-enable comment
         assert_eq!(parse_enable_comment("<!-- some other comment -->"), None);

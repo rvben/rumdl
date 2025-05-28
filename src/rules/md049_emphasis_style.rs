@@ -1,8 +1,8 @@
+use crate::lint_context::LintContext;
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
-use crate::lint_context::LintContext;
 use crate::utils::range_utils::calculate_match_range;
-use markdown::mdast::{Node, Emphasis};
+use markdown::mdast::{Emphasis, Node};
 
 /// Rule MD049: Emphasis style
 ///
@@ -26,7 +26,6 @@ impl MD049EmphasisStyle {
 
     // Recursively walk AST and collect all valid emphasis nodes with marker info
     fn collect_emphasis<'a>(
-        &'a self,
         node: &'a Node,
         parent_type: Option<&'static str>,
         emphasis_nodes: &mut Vec<(usize, usize, char, &'a Emphasis)>, // (line, col, marker, node)
@@ -47,7 +46,7 @@ impl MD049EmphasisStyle {
                 }
                 // Recurse into children
                 for child in &em.children {
-                    self.collect_emphasis(child, Some("Emphasis"), emphasis_nodes, ctx);
+                    Self::collect_emphasis(child, Some("Emphasis"), emphasis_nodes, ctx);
                 }
             }
             Node::Link(_) | Node::Image(_) | Node::Code(_) => {
@@ -56,7 +55,7 @@ impl MD049EmphasisStyle {
             _ => {
                 if let Some(children) = node.children() {
                     for child in children {
-                        self.collect_emphasis(child, parent_type, emphasis_nodes, ctx);
+                        Self::collect_emphasis(child, parent_type, emphasis_nodes, ctx);
                     }
                 }
             }
@@ -80,7 +79,7 @@ impl Rule for MD049EmphasisStyle {
             EmphasisStyle::Consistent => {
                 // Collect all emphasis nodes from the entire document
                 let mut emphasis_nodes = vec![];
-                self.collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
+                Self::collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
 
                 // If we have less than 2 emphasis nodes, no need to check consistency
                 if emphasis_nodes.len() < 2 {
@@ -101,7 +100,8 @@ impl Rule for MD049EmphasisStyle {
                         } else {
                             1 // Fallback to single character
                         };
-                        let (start_line, start_col, end_line, end_col) = calculate_match_range(*line, line_str, emphasis_start, emphasis_len);
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_match_range(*line, line_str, emphasis_start, emphasis_len);
 
                         // Generate fix for this emphasis
                         let fix = if let Some(pos) = &em.position {
@@ -109,11 +109,17 @@ impl Rule for MD049EmphasisStyle {
                             let end_offset = pos.end.offset;
 
                             // Create fix for just the emphasis markers
-                            if end_offset > start_offset && start_offset < ctx.content.len() && end_offset <= ctx.content.len() {
+                            if end_offset > start_offset
+                                && start_offset < ctx.content.len()
+                                && end_offset <= ctx.content.len()
+                            {
                                 let inner_content = &ctx.content[start_offset + 1..end_offset - 1];
                                 Some(crate::rule::Fix {
                                     range: start_offset..end_offset,
-                                    replacement: format!("{}{}{}", target_marker, inner_content, target_marker),
+                                    replacement: format!(
+                                        "{}{}{}",
+                                        target_marker, inner_content, target_marker
+                                    ),
                                 })
                             } else {
                                 None
@@ -123,13 +129,16 @@ impl Rule for MD049EmphasisStyle {
                         };
 
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: format!("Emphasis should use {
-            } instead of {}", target_marker, marker),
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: format!(
+                                "Emphasis should use {
+            } instead of {}",
+                                target_marker, marker
+                            ),
                             fix,
                             severity: Severity::Warning,
                         });
@@ -138,7 +147,7 @@ impl Rule for MD049EmphasisStyle {
             }
             EmphasisStyle::Asterisk | EmphasisStyle::Underscore => {
                 let mut emphasis_nodes = vec![];
-                self.collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
+                Self::collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
                 let (wrong_marker, correct_marker) = match self.style {
                     EmphasisStyle::Asterisk => ('_', '*'),
                     EmphasisStyle::Underscore => ('*', '_'),
@@ -154,7 +163,8 @@ impl Rule for MD049EmphasisStyle {
                         } else {
                             1 // Fallback to single character
                         };
-                        let (start_line, start_col, end_line, end_col) = calculate_match_range(*line, line_str, emphasis_start, emphasis_len);
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_match_range(*line, line_str, emphasis_start, emphasis_len);
 
                         // Generate fix for this emphasis
                         let fix = if let Some(pos) = &em.position {
@@ -162,11 +172,17 @@ impl Rule for MD049EmphasisStyle {
                             let end_offset = pos.end.offset;
 
                             // Create fix for just the emphasis markers
-                            if end_offset > start_offset && start_offset < ctx.content.len() && end_offset <= ctx.content.len() {
+                            if end_offset > start_offset
+                                && start_offset < ctx.content.len()
+                                && end_offset <= ctx.content.len()
+                            {
                                 let inner_content = &ctx.content[start_offset + 1..end_offset - 1];
                                 Some(crate::rule::Fix {
                                     range: start_offset..end_offset,
-                                    replacement: format!("{}{}{}", correct_marker, inner_content, correct_marker),
+                                    replacement: format!(
+                                        "{}{}{}",
+                                        correct_marker, inner_content, correct_marker
+                                    ),
                                 })
                             } else {
                                 None
@@ -176,13 +192,16 @@ impl Rule for MD049EmphasisStyle {
                         };
 
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: format!("Emphasis should use {
-            } instead of {}", correct_marker, wrong_marker),
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: format!(
+                                "Emphasis should use {
+            } instead of {}",
+                                correct_marker, wrong_marker
+                            ),
                             fix,
                             severity: Severity::Warning,
                         });
@@ -203,8 +222,13 @@ impl Rule for MD049EmphasisStyle {
         }
 
         // Collect all fixes and sort by range start (descending) to apply from end to beginning
-        let mut fixes: Vec<_> = warnings.iter()
-            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
+        let mut fixes: Vec<_> = warnings
+            .iter()
+            .filter_map(|w| {
+                w.fix
+                    .as_ref()
+                    .map(|f| (f.range.start, f.range.end, &f.replacement))
+            })
             .collect();
         fixes.sort_by(|a, b| b.0.cmp(&a.0));
 

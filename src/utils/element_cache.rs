@@ -62,7 +62,7 @@ pub struct ListItem {
     pub spaces_after_marker: usize,
     pub nesting_level: usize,
     pub parent_line_number: Option<usize>,
-    pub blockquote_depth: usize, // Number of leading blockquote markers
+    pub blockquote_depth: usize,   // Number of leading blockquote markers
     pub blockquote_prefix: String, // The actual prefix (e.g., "> > ")
 }
 
@@ -311,9 +311,16 @@ impl ElementCache {
                     continue;
                 }
                 // Parse and strip blockquote prefix
-                let (blockquote_depth, blockquote_prefix, rest) = Self::parse_blockquote_prefix(line);
+                let (blockquote_depth, blockquote_prefix, rest) =
+                    Self::parse_blockquote_prefix(line);
                 // Always call parse_list_item and always push if Some
-                if let Some(item) = self.parse_list_item(rest, i + 1, &mut prev_items, blockquote_depth, blockquote_prefix.clone()) {
+                if let Some(item) = self.parse_list_item(
+                    rest,
+                    i + 1,
+                    &mut prev_items,
+                    blockquote_depth,
+                    blockquote_prefix.clone(),
+                ) {
                     self.list_items.push(item);
                     self.list_line_map[i] = true;
                 }
@@ -328,9 +335,8 @@ impl ElementCache {
         let mut depth = 0;
         loop {
             let trimmed = rest.trim_start();
-            if trimmed.starts_with('>') {
+            if let Some(after) = trimmed.strip_prefix('>') {
                 // Find the '>' and a single optional space
-                let after = &trimmed[1..];
                 let mut chars = after.chars();
                 let mut space_count = 0;
                 if let Some(' ') = chars.next() {
@@ -348,7 +354,7 @@ impl ElementCache {
         (depth, prefix, rest)
     }
 
-        /// Calculate the nesting level for a list item, considering blockquote depth
+    /// Calculate the nesting level for a list item, considering blockquote depth
     fn calculate_nesting_level(
         &self,
         indent: usize,
@@ -358,52 +364,63 @@ impl ElementCache {
         let mut nesting_level = 0;
 
         // Only consider previous items with the same blockquote depth
-        if let Some(&(_last_bq, last_indent, last_level)) = prev_items.iter().rev().find(|(bq, _, _)| *bq == blockquote_depth) {
-            if indent > last_indent {
-                // More indented - increase nesting level
-                nesting_level = last_level + 1;
-            } else if indent == last_indent {
-                // Same indentation - same level
-                nesting_level = last_level;
-            } else {
-                // Less indented - find the appropriate level
-                let mut found_level = None;
-
-                // First look for exact match
-                for &(prev_bq, prev_indent, prev_level) in prev_items.iter().rev() {
-                    if prev_bq == blockquote_depth && prev_indent == indent {
-                        found_level = Some(prev_level);
-                        break;
-                    }
+        if let Some(&(_last_bq, last_indent, last_level)) = prev_items
+            .iter()
+            .rev()
+            .find(|(bq, _, _)| *bq == blockquote_depth)
+        {
+            use std::cmp::Ordering;
+            match indent.cmp(&last_indent) {
+                Ordering::Greater => {
+                    // More indented - increase nesting level
+                    nesting_level = last_level + 1;
                 }
-
-                // If no exact match, check if this is a case where we should treat similar indentations as same level
-                // This handles mixed tab/space scenarios where 4 and 6 spaces should be at the same level
-                if found_level.is_none() && indent > 0 && last_indent > 0 {
-                    // Only apply similar indentation logic if the difference is small and we're dealing with small indentations
-                    let diff = (indent as i32 - last_indent as i32).abs();
-                    if diff <= 2 && indent <= 8 && last_indent <= 8 {
-                        // Check if there's a recent item at a lower indentation level
-                        let has_lower_indent = prev_items.iter().rev().take(3).any(|(bq, prev_indent, _)| {
-                            *bq == blockquote_depth && *prev_indent < indent.min(last_indent)
-                        });
-                        if has_lower_indent {
-                            found_level = Some(last_level);
-                        }
-                    }
+                Ordering::Equal => {
+                    // Same indentation - same level
+                    nesting_level = last_level;
                 }
+                Ordering::Less => {
+                    // Less indented - find the appropriate level
+                    let mut found_level = None;
 
-                // If still no match, look for the most recent less indented item
-                if found_level.is_none() {
+                    // First look for exact match
                     for &(prev_bq, prev_indent, prev_level) in prev_items.iter().rev() {
-                        if prev_bq == blockquote_depth && prev_indent < indent {
+                        if prev_bq == blockquote_depth && prev_indent == indent {
                             found_level = Some(prev_level);
                             break;
                         }
                     }
-                }
 
-                nesting_level = found_level.unwrap_or(0);
+                    // If no exact match, check if this is a case where we should treat similar indentations as same level
+                    // This handles mixed tab/space scenarios where 4 and 6 spaces should be at the same level
+                    if found_level.is_none() && indent > 0 && last_indent > 0 {
+                        // Only apply similar indentation logic if the difference is small and we're dealing with small indentations
+                        let diff = (indent as i32 - last_indent as i32).abs();
+                        if diff <= 2 && indent <= 8 && last_indent <= 8 {
+                            // Check if there's a recent item at a lower indentation level
+                            let has_lower_indent =
+                                prev_items.iter().rev().take(3).any(|(bq, prev_indent, _)| {
+                                    *bq == blockquote_depth
+                                        && *prev_indent < indent.min(last_indent)
+                                });
+                            if has_lower_indent {
+                                found_level = Some(last_level);
+                            }
+                        }
+                    }
+
+                    // If still no match, look for the most recent less indented item
+                    if found_level.is_none() {
+                        for &(prev_bq, prev_indent, prev_level) in prev_items.iter().rev() {
+                            if prev_bq == blockquote_depth && prev_indent < indent {
+                                found_level = Some(prev_level);
+                                break;
+                            }
+                        }
+                    }
+
+                    nesting_level = found_level.unwrap_or(0);
+                }
             }
         }
 
@@ -445,7 +462,8 @@ impl ElementCache {
                     "-" => ListMarkerType::Minus,
                     _ => unreachable!(),
                 };
-                let nesting_level = self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
+                let nesting_level =
+                    self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
                 // Find parent: most recent previous item with lower nesting_level and same blockquote depth
                 let parent_line_number = prev_items
                     .iter()
@@ -485,7 +503,8 @@ impl ElementCache {
                     .map_or("", |m| m.as_str())
                     .trim_start()
                     .to_string();
-                let nesting_level = self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
+                let nesting_level =
+                    self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
                 // Find parent: most recent previous item with lower nesting_level and same blockquote depth
                 let parent_line_number = prev_items
                     .iter()
@@ -606,7 +625,7 @@ mod tests {
         assert_eq!(cache.list_items[4].nesting_level, 1);
     }
 
-        #[test]
+    #[test]
     fn test_list_item_detection_complex() {
         let complex = "  * Level 1 item 1\n    - Level 2 item 1\n      + Level 3 item 1\n    - Level 2 item 2\n  * Level 1 item 2\n\n* Top\n  + Nested\n    - Deep\n      * Deeper\n        + Deepest\n";
         let cache = ElementCache::new(complex);
@@ -786,11 +805,11 @@ mod tests {
         assert_eq!(cache.list_items.len(), 5);
 
         // Check indentation values (tabs should be converted to spaces)
-        assert_eq!(cache.list_items[0].indentation, 0);  // "* Level 0"
-        assert_eq!(cache.list_items[1].indentation, 4);  // "\t* Tab indented" (tab = 4 spaces)
-        assert_eq!(cache.list_items[2].indentation, 8);  // "\t\t* Double tab" (2 tabs = 8 spaces)
-        assert_eq!(cache.list_items[3].indentation, 4);  // "    * 4 spaces"
-        assert_eq!(cache.list_items[4].indentation, 8);  // "        * 8 spaces"
+        assert_eq!(cache.list_items[0].indentation, 0); // "* Level 0"
+        assert_eq!(cache.list_items[1].indentation, 4); // "\t* Tab indented" (tab = 4 spaces)
+        assert_eq!(cache.list_items[2].indentation, 8); // "\t\t* Double tab" (2 tabs = 8 spaces)
+        assert_eq!(cache.list_items[3].indentation, 4); // "    * 4 spaces"
+        assert_eq!(cache.list_items[4].indentation, 8); // "        * 8 spaces"
 
         // Check nesting levels
         assert_eq!(cache.list_items[0].nesting_level, 0);
@@ -811,16 +830,18 @@ mod tests {
 
         println!("DEBUG: Number of list items: {}", cache.list_items.len());
         for (i, item) in cache.list_items.iter().enumerate() {
-            println!("DEBUG: Item {}: indent_str={:?}, indentation={}, content={:?}",
-                     i, item.indent_str, item.indentation, item.content);
+            println!(
+                "DEBUG: Item {}: indent_str={:?}, indentation={}, content={:?}",
+                i, item.indent_str, item.indentation, item.content
+            );
         }
 
         assert_eq!(cache.list_items.len(), 4);
 
         // Check indentation values
-        assert_eq!(cache.list_items[0].indentation, 0);  // "* Level 0"
-        assert_eq!(cache.list_items[1].indentation, 6);  // "\t  * Tab + 2 spaces" (tab to 4 + 2 spaces = 6)
-        assert_eq!(cache.list_items[2].indentation, 4);  // "  \t* 2 spaces + tab" (2 spaces, then tab to next stop = 4)
+        assert_eq!(cache.list_items[0].indentation, 0); // "* Level 0"
+        assert_eq!(cache.list_items[1].indentation, 6); // "\t  * Tab + 2 spaces" (tab to 4 + 2 spaces = 6)
+        assert_eq!(cache.list_items[2].indentation, 4); // "  \t* 2 spaces + tab" (2 spaces, then tab to next stop = 4)
         assert_eq!(cache.list_items[3].indentation, 10); // "\t\t  * 2 tabs + 2 spaces" (2 tabs = 8 + 2 spaces = 10)
 
         // Check nesting levels
@@ -839,8 +860,8 @@ mod tests {
         assert_eq!(cache.list_items.len(), 2);
 
         // With default tab width of 4
-        assert_eq!(cache.list_items[0].indentation, 4);  // "\t*" = 4 spaces
-        assert_eq!(cache.list_items[1].indentation, 8);  // "\t\t*" = 8 spaces
+        assert_eq!(cache.list_items[0].indentation, 4); // "\t*" = 4 spaces
+        assert_eq!(cache.list_items[1].indentation, 8); // "\t\t*" = 8 spaces
 
         // Check nesting levels
         assert_eq!(cache.list_items[0].nesting_level, 0);
@@ -856,9 +877,12 @@ mod tests {
         assert_eq!(ElementCache::calculate_indentation_width_default("    "), 4);
         assert_eq!(ElementCache::calculate_indentation_width_default("\t"), 4);
         assert_eq!(ElementCache::calculate_indentation_width_default("\t\t"), 8);
-        assert_eq!(ElementCache::calculate_indentation_width_default("\t  "), 6);  // tab to 4, then 2 spaces = 6
-        assert_eq!(ElementCache::calculate_indentation_width_default("  \t"), 4);  // 2 spaces, then tab to next stop (4)
-        assert_eq!(ElementCache::calculate_indentation_width_default("\t\t  "), 10); // 2 tabs = 8, then 2 spaces = 10
+        assert_eq!(ElementCache::calculate_indentation_width_default("\t  "), 6); // tab to 4, then 2 spaces = 6
+        assert_eq!(ElementCache::calculate_indentation_width_default("  \t"), 4); // 2 spaces, then tab to next stop (4)
+        assert_eq!(
+            ElementCache::calculate_indentation_width_default("\t\t  "),
+            10
+        ); // 2 tabs = 8, then 2 spaces = 10
     }
 
     #[test]
@@ -869,13 +893,18 @@ mod tests {
 
         println!("Number of list items: {}", cache.list_items.len());
         for (i, item) in cache.list_items.iter().enumerate() {
-            println!("Item {}: indent_str={:?}, indentation={}, content={:?}",
-                     i, item.indent_str, item.indentation, item.content);
+            println!(
+                "Item {}: indent_str={:?}, indentation={}, content={:?}",
+                i, item.indent_str, item.indentation, item.content
+            );
         }
 
         // Test the specific indentation strings
-        assert_eq!(ElementCache::calculate_indentation_width_default("\t  "), 6);  // tab + 2 spaces
-        assert_eq!(ElementCache::calculate_indentation_width_default("  \t"), 4);  // 2 spaces + tab
-        assert_eq!(ElementCache::calculate_indentation_width_default("\t\t  "), 10); // 2 tabs + 2 spaces
+        assert_eq!(ElementCache::calculate_indentation_width_default("\t  "), 6); // tab + 2 spaces
+        assert_eq!(ElementCache::calculate_indentation_width_default("  \t"), 4); // 2 spaces + tab
+        assert_eq!(
+            ElementCache::calculate_indentation_width_default("\t\t  "),
+            10
+        ); // 2 tabs + 2 spaces
     }
 }

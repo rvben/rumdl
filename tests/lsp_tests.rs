@@ -7,11 +7,14 @@
 //! - Real-time linting and diagnostics
 //! - Code actions and fixes
 
+#![allow(deprecated)]
+
 use rumdl::lsp::types::{warning_to_code_action, warning_to_diagnostic, RumdlLspConfig};
 use rumdl::lsp::RumdlLanguageServer;
 use rumdl::rule::{Fix, LintWarning, Severity};
 use tower_lsp::lsp_types::*;
-use tower_lsp::{LspService, LanguageServer};
+use tower_lsp::{LanguageServer, LspService};
+use url::Url;
 
 /// Test the RumdlLspConfig struct and its default values
 #[test]
@@ -38,8 +41,8 @@ fn test_rumdl_lsp_config_serde() {
     let json = serde_json::to_string(&config).expect("Failed to serialize config");
 
     // Test deserialization
-    let deserialized: RumdlLspConfig = serde_json::from_str(&json)
-        .expect("Failed to deserialize config");
+    let deserialized: RumdlLspConfig =
+        serde_json::from_str(&json).expect("Failed to deserialize config");
 
     assert_eq!(deserialized.config_path, config.config_path);
     assert_eq!(deserialized.enable_linting, config.enable_linting);
@@ -163,11 +166,10 @@ fn test_warning_to_code_action_without_fix() {
 /// Test LSP server initialization
 #[tokio::test]
 async fn test_lsp_server_initialization() {
-    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client));
+    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
 
     let init_params = InitializeParams {
-        process_id: None,
-        root_path: None,
+        process_id: None, root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///test").unwrap()),
         initialization_options: None,
         capabilities: ClientCapabilities::default(),
@@ -198,7 +200,7 @@ async fn test_lsp_server_initialization() {
 /// Test LSP server initialization with custom config
 #[tokio::test]
 async fn test_lsp_server_initialization_with_config() {
-    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client));
+    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
 
     let custom_config = RumdlLspConfig {
         config_path: Some("/custom/path/.rumdl.toml".to_string()),
@@ -208,8 +210,7 @@ async fn test_lsp_server_initialization_with_config() {
     };
 
     let init_params = InitializeParams {
-        process_id: None,
-        root_path: None,
+        process_id: None, root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///test").unwrap()),
         initialization_options: Some(serde_json::to_value(custom_config).unwrap()),
         capabilities: ClientCapabilities::default(),
@@ -226,13 +227,12 @@ async fn test_lsp_server_initialization_with_config() {
 /// Test document lifecycle (open, change, save, close)
 #[tokio::test]
 async fn test_document_lifecycle() {
-    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client));
+    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
     let server = service.inner();
 
     // Initialize server first
     let init_params = InitializeParams {
-        process_id: None,
-        root_path: None,
+        process_id: None, root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///test").unwrap()),
         initialization_options: None,
         capabilities: ClientCapabilities::default(),
@@ -293,13 +293,12 @@ async fn test_document_lifecycle() {
 /// Test code action request
 #[tokio::test]
 async fn test_code_action_request() {
-    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client));
+    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
     let server = service.inner();
 
     // Initialize server
     let init_params = InitializeParams {
-        process_id: None,
-        root_path: None,
+        process_id: None, root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///test").unwrap()),
         initialization_options: None,
         capabilities: ClientCapabilities::default(),
@@ -330,8 +329,14 @@ async fn test_code_action_request() {
     let code_action_params = CodeActionParams {
         text_document: TextDocumentIdentifier { uri },
         range: Range {
-            start: Position { line: 2, character: 0 },
-            end: Position { line: 2, character: 25 },
+            start: Position {
+                line: 2,
+                character: 0,
+            },
+            end: Position {
+                line: 2,
+                character: 25,
+            },
         },
         context: CodeActionContext {
             diagnostics: vec![],
@@ -355,13 +360,12 @@ async fn test_code_action_request() {
 /// Test diagnostic request
 #[tokio::test]
 async fn test_diagnostic_request() {
-    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client));
+    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
     let server = service.inner();
 
     // Initialize server
     let init_params = InitializeParams {
-        process_id: None,
-        root_path: None,
+        process_id: None, root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///test").unwrap()),
         initialization_options: None,
         capabilities: ClientCapabilities::default(),
@@ -413,13 +417,12 @@ async fn test_diagnostic_request() {
 /// Integration test that simulates real LSP workflow
 #[tokio::test]
 async fn test_real_workflow_integration() {
-    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client));
+    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
     let server = service.inner();
 
     // 1. Initialize
     let init_params = InitializeParams {
-        process_id: None,
-        root_path: None,
+        process_id: None, root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///workspace").unwrap()),
         initialization_options: Some(serde_json::json!({
             "enableLinting": true,
@@ -473,8 +476,14 @@ Another paragraph.
     let code_action_params = CodeActionParams {
         text_document: TextDocumentIdentifier { uri: uri.clone() },
         range: Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 25 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 25,
+            },
         },
         context: CodeActionContext {
             diagnostics: vec![],
@@ -568,13 +577,12 @@ mod edge_cases {
     /// Test empty document handling
     #[tokio::test]
     async fn test_empty_document_handling() {
-        let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client));
+        let (service, _socket) = LspService::new(RumdlLanguageServer::new);
         let server = service.inner();
 
         // Initialize
         let init_params = InitializeParams {
-            process_id: None,
-            root_path: None,
+            process_id: None, root_path: None, // Deprecated but required
             root_uri: Some(Url::parse("file:///test").unwrap()),
             initialization_options: None,
             capabilities: ClientCapabilities::default(),

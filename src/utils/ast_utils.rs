@@ -6,16 +6,22 @@
 
 use crate::rule::MarkdownAst;
 use lazy_static::lazy_static;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::panic;
 use log::warn;
+use std::collections::HashMap;
+use std::panic;
+use std::sync::{Arc, Mutex};
 
 /// Cache for parsed AST nodes
 #[derive(Debug)]
 pub struct AstCache {
     cache: HashMap<u64, Arc<MarkdownAst>>,
     usage_stats: HashMap<u64, u64>,
+}
+
+impl Default for AstCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AstCache {
@@ -137,8 +143,10 @@ fn content_has_problematic_lists(content: &str) -> bool {
             let line2 = window[1].trim_start();
 
             // Check if both lines are list items with different markers
-            let is_list1 = line1.starts_with("* ") || line1.starts_with("+ ") || line1.starts_with("- ");
-            let is_list2 = line2.starts_with("* ") || line2.starts_with("+ ") || line2.starts_with("- ");
+            let is_list1 =
+                line1.starts_with("* ") || line1.starts_with("+ ") || line1.starts_with("- ");
+            let is_list2 =
+                line2.starts_with("* ") || line2.starts_with("+ ") || line2.starts_with("- ");
 
             if is_list1 && is_list2 {
                 let marker1 = line1.chars().next().unwrap_or(' ');
@@ -158,9 +166,10 @@ fn content_has_problematic_lists(content: &str) -> bool {
 /// Check if AST contains specific node types
 pub fn ast_contains_node_type(ast: &MarkdownAst, node_type: &str) -> bool {
     match ast {
-        MarkdownAst::Root(root) => {
-            root.children.iter().any(|child| ast_contains_node_type(child, node_type))
-        }
+        MarkdownAst::Root(root) => root
+            .children
+            .iter()
+            .any(|child| ast_contains_node_type(child, node_type)),
         MarkdownAst::Heading(_) if node_type == "heading" => true,
         MarkdownAst::List(_) if node_type == "list" => true,
         MarkdownAst::Link(_) if node_type == "link" => true,
@@ -175,7 +184,9 @@ pub fn ast_contains_node_type(ast: &MarkdownAst, node_type: &str) -> bool {
         _ => {
             // Check children recursively
             if let Some(children) = ast.children() {
-                children.iter().any(|child| ast_contains_node_type(child, node_type))
+                children
+                    .iter()
+                    .any(|child| ast_contains_node_type(child, node_type))
             } else {
                 false
             }
@@ -226,7 +237,11 @@ pub fn get_text_content(ast: &MarkdownAst) -> String {
         MarkdownAst::Code(code) => code.value.clone(),
         _ => {
             if let Some(children) = ast.children() {
-                children.iter().map(get_text_content).collect::<Vec<_>>().join("")
+                children
+                    .iter()
+                    .map(get_text_content)
+                    .collect::<Vec<_>>()
+                    .join("")
             } else {
                 String::new()
             }

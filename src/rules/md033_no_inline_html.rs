@@ -16,7 +16,6 @@ lazy_static! {
     static ref HTML_COMMENT_PATTERN: Regex = Regex::new(r"<!--.*?-->").unwrap();
 }
 
-
 #[derive(Clone)]
 pub struct MD033NoInlineHtml {
     allowed: HashSet<String>,
@@ -68,15 +67,49 @@ impl MD033NoInlineHtml {
     fn is_likely_type_annotation(&self, tag: &str) -> bool {
         // Common programming type names that are often used in generics
         const COMMON_TYPES: &[&str] = &[
-            "string", "number", "any", "void", "null", "undefined",
-            "array", "promise", "function", "error", "date", "regexp", "symbol",
-            "bigint", "map", "set", "weakmap", "weakset", "iterator", "generator",
-            "t", "u", "v", "k", "e", // Common single-letter type parameters
-            "userdata", "apiresponse", "config", "options", "params",
-            "result", "response", "request", "data", "item", "element", "node",
+            "string",
+            "number",
+            "any",
+            "void",
+            "null",
+            "undefined",
+            "array",
+            "promise",
+            "function",
+            "error",
+            "date",
+            "regexp",
+            "symbol",
+            "bigint",
+            "map",
+            "set",
+            "weakmap",
+            "weakset",
+            "iterator",
+            "generator",
+            "t",
+            "u",
+            "v",
+            "k",
+            "e", // Common single-letter type parameters
+            "userdata",
+            "apiresponse",
+            "config",
+            "options",
+            "params",
+            "result",
+            "response",
+            "request",
+            "data",
+            "item",
+            "element",
+            "node",
         ];
 
-        let tag_content = tag.trim_start_matches('<').trim_end_matches('>').trim_start_matches('/');
+        let tag_content = tag
+            .trim_start_matches('<')
+            .trim_end_matches('>')
+            .trim_start_matches('/');
         let tag_name = tag_content
             .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
             .next()
@@ -95,10 +128,12 @@ impl MD033NoInlineHtml {
     fn is_email_address(&self, tag: &str) -> bool {
         let content = tag.trim_start_matches('<').trim_end_matches('>');
         // Simple email pattern: contains @ and has reasonable structure
-        content.contains('@') &&
-        content.chars().all(|c| c.is_alphanumeric() || "@.-_+".contains(c)) &&
-        content.split('@').count() == 2 &&
-        content.split('@').all(|part| !part.is_empty())
+        content.contains('@')
+            && content
+                .chars()
+                .all(|c| c.is_alphanumeric() || "@.-_+".contains(c))
+            && content.split('@').count() == 2
+            && content.split('@').all(|part| !part.is_empty())
     }
 
     // Check if a tag is actually a URL in angle brackets
@@ -106,11 +141,11 @@ impl MD033NoInlineHtml {
     fn is_url_in_angle_brackets(&self, tag: &str) -> bool {
         let content = tag.trim_start_matches('<').trim_end_matches('>');
         // Check for common URL schemes
-        content.starts_with("http://") ||
-        content.starts_with("https://") ||
-        content.starts_with("ftp://") ||
-        content.starts_with("ftps://") ||
-        content.starts_with("mailto:")
+        content.starts_with("http://")
+            || content.starts_with("https://")
+            || content.starts_with("ftp://")
+            || content.starts_with("ftps://")
+            || content.starts_with("mailto:")
     }
 
     /// Find HTML tags that span multiple lines
@@ -154,7 +189,7 @@ impl MD033NoInlineHtml {
                 let mut found_end = false;
 
                 // Look for the closing > in subsequent lines (limit search to 10 lines)
-                for j in (i + 1)..std::cmp::min(lines.len(), i + 11) {
+                for (j, next_line) in lines.iter().enumerate().skip(i + 1).take(10) {
                     let next_line_num = j + 1;
 
                     // Stop if we hit a code block
@@ -163,9 +198,9 @@ impl MD033NoInlineHtml {
                     }
 
                     complete_tag.push(' '); // Add space to normalize whitespace
-                    complete_tag.push_str(lines[j].trim());
+                    complete_tag.push_str(next_line.trim());
 
-                    if lines[j].contains('>') {
+                    if next_line.contains('>') {
                         found_end = true;
                         break;
                     }
@@ -185,23 +220,28 @@ impl MD033NoInlineHtml {
                             && HTML_TAG_FINDER.is_match(final_tag)
                         {
                             // Check for duplicates (avoid flagging the same position twice)
-                            let already_warned = warnings.iter().any(|w| {
-                                w.line == line_num && w.column == start_column
-                            });
+                            let already_warned = warnings
+                                .iter()
+                                .any(|w| w.line == line_num && w.column == start_column);
 
                             if !already_warned {
                                 let (start_line, start_col, end_line, end_col) =
-                                    calculate_html_tag_range(line_num, line, incomplete_match.start(), incomplete_match.len());
+                                    calculate_html_tag_range(
+                                        line_num,
+                                        line,
+                                        incomplete_match.start(),
+                                        incomplete_match.len(),
+                                    );
                                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                message: "Inline HTML".to_string(),
-                severity: Severity::Warning,
-                fix: None,
-            });
+                                    rule_name: Some(self.name()),
+                                    line: start_line,
+                                    column: start_col,
+                                    end_line,
+                                    end_column: end_col,
+                                    message: "Inline HTML".to_string(),
+                                    severity: Severity::Warning,
+                                    fix: None,
+                                });
                             }
                         }
                     }
@@ -298,15 +338,15 @@ impl Rule for MD033NoInlineHtml {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_html_tag_range(line_num, line, tag_match.start(), tag_match.len());
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                message: "Inline HTML".to_string(),
-                severity: Severity::Warning,
-                fix: None,
-            });
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: "Inline HTML".to_string(),
+                    severity: Severity::Warning,
+                    fix: None,
+                });
             }
         }
 

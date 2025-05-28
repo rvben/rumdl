@@ -278,10 +278,8 @@ impl MD053LinkImageReferenceDefinitions {
             result_lines.pop();
         }
 
-        let result = result_lines.join("\n");
-
         // Don't add trailing newlines - let the content determine its own ending
-        result
+        result_lines.join("\n")
     }
 }
 
@@ -318,16 +316,20 @@ impl Rule for MD053LinkImageReferenceDefinitions {
             let line_content = lines.get(start).unwrap_or(&"");
 
             // Calculate precise character range for the entire reference definition line
-            let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line_content);
+            let (start_line, start_col, end_line, end_col) =
+                calculate_line_range(line_num, line_content);
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 line: start_line,
                 column: start_col,
-                end_line: end_line,
+                end_line,
                 end_column: end_col,
-                message: format!("Unused link/image reference definition: [{
-            }]", definition),
+                message: format!(
+                    "Unused link/image reference definition: [{
+            }]",
+                    definition
+                ),
                 severity: Severity::Warning,
                 fix: None, // We'll handle fixes in the fix() method
             });
@@ -389,7 +391,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         let cleaned = self.clean_up_blank_lines(&result);
 
         Ok(cleaned)
-        }
+    }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self

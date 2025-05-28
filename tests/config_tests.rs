@@ -28,7 +28,8 @@ tables = true
 
     // Test loading the config using the full path
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
+    let sourced_result =
+        rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
     assert!(
         sourced_result.is_ok(),
         "SourcedConfig loading should succeed. Error: {:?}",
@@ -61,7 +62,11 @@ tables = true
 #[test]
 fn test_load_nonexistent_config() {
     // Test loading a nonexistent config file using SourcedConfig::load
-    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some("nonexistent_config.toml"), None, true);
+    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(
+        Some("nonexistent_config.toml"),
+        None,
+        true,
+    );
     assert!(
         sourced_result.is_err(),
         "Loading nonexistent config should fail"
@@ -135,7 +140,8 @@ fn test_create_default_config() {
     );
 
     // Load the created config using SourcedConfig::load
-    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
+    let sourced_result =
+        rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
     assert!(
         sourced_result.is_ok(),
         "Loading created config should succeed: {:?}",
@@ -165,8 +171,9 @@ style = "asterisk"
 
     // Load the config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
-        .expect("Failed to load sourced config");
+    let sourced_config =
+        rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+            .expect("Failed to load sourced config");
     // Convert to Config for rule application logic
     let config: Config = sourced_config.into();
 
@@ -245,8 +252,9 @@ style = "backtick"
 
     // Load the config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
-        .expect("Failed to load sourced config");
+    let sourced_config =
+        rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+            .expect("Failed to load sourced config");
     // Convert to Config for rule verification
     let config: Config = sourced_config.into();
 
@@ -279,7 +287,8 @@ disable = ["MD013" # Missing closing bracket
 
     // Attempt to load the invalid config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
+    let sourced_result =
+        rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
     assert!(
         sourced_result.is_err(),
         "Loading invalid config should fail"
@@ -313,8 +322,9 @@ style = "dash"
 
     // Load config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
-        .expect("Failed to load integration config");
+    let sourced_config =
+        rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+            .expect("Failed to load integration config");
     let config: Config = sourced_config.into(); // Convert for use
 
     // Test MD013 behavior with line_length = 60
@@ -356,8 +366,12 @@ fn test_config_validation_unknown_rule() {
     let config_path = temp_dir.path().join("unknown_rule.toml");
     let config_content = r#"[UNKNOWN_RULE]"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
-        .expect("config should load successfully"); // Use load
+    let sourced = rumdl::config::SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()),
+        None,
+        true,
+    )
+    .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
     let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
@@ -371,8 +385,12 @@ fn test_config_validation_unknown_option() {
     let config_content = r#"[MD013]
 unknown_opt = true"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
-        .expect("config should load successfully"); // Use load
+    let sourced = rumdl::config::SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()),
+        None,
+        true,
+    )
+    .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
     let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
@@ -387,8 +405,12 @@ fn test_config_validation_type_mismatch() {
     let config_content = r#"[MD013]
 line_length = "not a number""#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
-        .expect("config should load successfully"); // Use load
+    let sourced = rumdl::config::SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()),
+        None,
+        true,
+    )
+    .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
     let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
@@ -403,8 +425,12 @@ fn test_config_validation_unknown_global_option() {
     let config_content = r#"[global]
 unknown_global = true"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
-        .expect("config should load successfully"); // Use load
+    let sourced = rumdl::config::SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()),
+        None,
+        true,
+    )
+    .expect("config should load successfully"); // Use load
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
     let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
@@ -444,8 +470,9 @@ indent = 2
 
     // Load the config using the explicit path to the temp file
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
-        .expect("Failed to load sourced config from explicit path");
+    let sourced_config =
+        rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+            .expect("Failed to load sourced config from explicit path");
 
     let config: Config = sourced_config.into(); // Convert to plain config for assertions
 
@@ -490,7 +517,8 @@ mod config_file_parsing_tests {
         }"#;
         fs::write(&config_path, config_content).unwrap();
 
-        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        let result =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid JSON config should load successfully");
 
         let config: rumdl::config::Config = result.unwrap().into();
@@ -507,12 +535,21 @@ mod config_file_parsing_tests {
         let config_content = r#"{ MD004: { "style": "dash" } }"#;
         fs::write(&config_path, config_content).unwrap();
 
-        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        let result =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_err(), "Invalid JSON should fail to parse");
 
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Failed to parse JSON"), "Error should mention JSON parsing: {}", error_msg);
-        assert!(error_msg.contains("key must be a string"), "Error should be specific about the issue: {}", error_msg);
+        assert!(
+            error_msg.contains("Failed to parse JSON"),
+            "Error should mention JSON parsing: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains("key must be a string"),
+            "Error should be specific about the issue: {}",
+            error_msg
+        );
     }
 
     #[test]
@@ -529,7 +566,8 @@ MD013:
 "#;
         fs::write(&config_path, config_content).unwrap();
 
-        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        let result =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid YAML config should load successfully");
 
         let config: rumdl::config::Config = result.unwrap().into();
@@ -550,11 +588,16 @@ MD004:
 "#;
         fs::write(&config_path, config_content).unwrap();
 
-        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        let result =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_err(), "Invalid YAML should fail to parse");
 
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Failed to parse YAML"), "Error should mention YAML parsing: {}", error_msg);
+        assert!(
+            error_msg.contains("Failed to parse YAML"),
+            "Error should mention YAML parsing: {}",
+            error_msg
+        );
     }
 
     #[test]
@@ -572,7 +615,8 @@ line_length = 100
 "#;
         fs::write(&config_path, config_content).unwrap();
 
-        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        let result =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid TOML config should load successfully");
 
         let config: rumdl::config::Config = result.unwrap().into();
@@ -593,12 +637,21 @@ invalid_key =
 "#;
         fs::write(&config_path, config_content).unwrap();
 
-        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        let result =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_err(), "Invalid TOML should fail to parse");
 
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Failed to parse TOML"), "Error should mention TOML parsing: {}", error_msg);
-        assert!(error_msg.contains("invalid string"), "Error should describe the specific issue: {}", error_msg);
+        assert!(
+            error_msg.contains("Failed to parse TOML"),
+            "Error should mention TOML parsing: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains("invalid string"),
+            "Error should describe the specific issue: {}",
+            error_msg
+        );
     }
 
     #[test]
@@ -613,8 +666,12 @@ invalid_key =
         }"#;
         fs::write(&config_path, config_content).unwrap();
 
-        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
-        assert!(result.is_ok(), "Valid markdownlint JSON should load successfully");
+        let result =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        assert!(
+            result.is_ok(),
+            "Valid markdownlint JSON should load successfully"
+        );
 
         let config: rumdl::config::Config = result.unwrap().into();
         let md004_style = rumdl::config::get_rule_config_value::<String>(&config, "MD004", "style");
@@ -635,8 +692,12 @@ line-length:
 "#;
         fs::write(&config_path, config_content).unwrap();
 
-        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
-        assert!(result.is_ok(), "Valid markdownlint YAML should load successfully");
+        let result =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        assert!(
+            result.is_ok(),
+            "Valid markdownlint YAML should load successfully"
+        );
 
         let config: rumdl::config::Config = result.unwrap().into();
         let md004_style = rumdl::config::get_rule_config_value::<String>(&config, "MD004", "style");
@@ -645,12 +706,21 @@ line-length:
 
     #[test]
     fn test_file_not_found_error() {
-        let result = SourcedConfig::load_with_discovery(Some("/nonexistent/config.json"), None, true);
+        let result =
+            SourcedConfig::load_with_discovery(Some("/nonexistent/config.json"), None, true);
         assert!(result.is_err(), "Nonexistent file should fail to load");
 
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Failed to read config file"), "Error should mention file reading failure: {}", error_msg);
-        assert!(error_msg.contains("No such file or directory"), "Error should mention specific I/O error: {}", error_msg);
+        assert!(
+            error_msg.contains("Failed to read config file"),
+            "Error should mention file reading failure: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains("No such file or directory"),
+            "Error should mention specific I/O error: {}",
+            error_msg
+        );
     }
 
     #[test]
@@ -660,30 +730,46 @@ line-length:
         // Test that .json files get JSON parsing even if content is invalid
         let json_path = temp_dir.path().join("test.json");
         fs::write(&json_path, r#"{ invalid: json }"#).unwrap();
-        let json_result = SourcedConfig::load_with_discovery(Some(json_path.to_str().unwrap()), None, true);
+        let json_result =
+            SourcedConfig::load_with_discovery(Some(json_path.to_str().unwrap()), None, true);
         assert!(json_result.is_err());
-        assert!(json_result.unwrap_err().to_string().contains("Failed to parse JSON"));
+        assert!(json_result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to parse JSON"));
 
         // Test that .yaml files get YAML parsing even if content is invalid
         let yaml_path = temp_dir.path().join("test.yaml");
         fs::write(&yaml_path, "invalid: - yaml").unwrap();
-        let yaml_result = SourcedConfig::load_with_discovery(Some(yaml_path.to_str().unwrap()), None, true);
+        let yaml_result =
+            SourcedConfig::load_with_discovery(Some(yaml_path.to_str().unwrap()), None, true);
         assert!(yaml_result.is_err());
-        assert!(yaml_result.unwrap_err().to_string().contains("Failed to parse YAML"));
+        assert!(yaml_result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to parse YAML"));
 
         // Test that .toml files get TOML parsing
         let toml_path = temp_dir.path().join("test.toml");
         fs::write(&toml_path, "invalid = ").unwrap();
-        let toml_result = SourcedConfig::load_with_discovery(Some(toml_path.to_str().unwrap()), None, true);
+        let toml_result =
+            SourcedConfig::load_with_discovery(Some(toml_path.to_str().unwrap()), None, true);
         assert!(toml_result.is_err());
-        assert!(toml_result.unwrap_err().to_string().contains("Failed to parse TOML"));
+        assert!(toml_result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to parse TOML"));
 
         // Test that unknown extensions default to TOML parsing
         let unknown_path = temp_dir.path().join("test.config");
         fs::write(&unknown_path, "invalid = ").unwrap();
-        let unknown_result = SourcedConfig::load_with_discovery(Some(unknown_path.to_str().unwrap()), None, true);
+        let unknown_result =
+            SourcedConfig::load_with_discovery(Some(unknown_path.to_str().unwrap()), None, true);
         assert!(unknown_result.is_err());
-        assert!(unknown_result.unwrap_err().to_string().contains("Failed to parse TOML"));
+        assert!(unknown_result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to parse TOML"));
     }
 
     #[test]
@@ -698,12 +784,16 @@ line-length:
         }"#;
         fs::write(&config_path, config_content).unwrap();
 
-        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        let result =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         // Note: This might fail if our JSON parser doesn't support comments
         // If it fails, that's actually expected behavior - JSONC requires special handling
         if result.is_err() {
             let error_msg = result.unwrap_err().to_string();
-            assert!(error_msg.contains("Failed to parse JSON"), "JSONC parsing should attempt JSON first");
+            assert!(
+                error_msg.contains("Failed to parse JSON"),
+                "JSONC parsing should attempt JSON first"
+            );
         }
     }
 
@@ -720,9 +810,13 @@ line-length:
         }"#;
         fs::write(&config_path, config_content).unwrap();
 
-        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        let result =
+            SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         // Config should load successfully but invalid values should be handled gracefully
-        assert!(result.is_ok(), "Config with invalid values should still load");
+        assert!(
+            result.is_ok(),
+            "Config with invalid values should still load"
+        );
 
         // Could add validation tests here if we implement config validation warnings
     }
@@ -741,45 +835,79 @@ line-length:
         fs::write(&json_path, r#"{ invalid: "json" }"#).unwrap();
 
         let output = Command::new(binary_path)
-            .args(&["check", "--config", json_path.to_str().unwrap(), "README.md"])
+            .args([
+                "check",
+                "--config",
+                json_path.to_str().unwrap(),
+                "README.md",
+            ])
             .output()
             .expect("Failed to execute command");
 
-        assert!(!output.status.success(), "Command should fail with invalid config");
+        assert!(
+            !output.status.success(),
+            "Command should fail with invalid config"
+        );
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let combined_output = format!("{}{}", stderr, stdout);
-        assert!(combined_output.contains("Failed to parse JSON") || combined_output.contains("Config error"),
-                "CLI should show JSON parsing error: stderr='{}' stdout='{}'", stderr, stdout);
+        assert!(
+            combined_output.contains("Failed to parse JSON")
+                || combined_output.contains("Config error"),
+            "CLI should show JSON parsing error: stderr='{}' stdout='{}'",
+            stderr,
+            stdout
+        );
 
         // Test YAML syntax error via CLI
         let yaml_path = temp_dir.path().join("invalid.yaml");
         fs::write(&yaml_path, "invalid: - yaml").unwrap();
 
         let output = Command::new(binary_path)
-            .args(&["check", "--config", yaml_path.to_str().unwrap(), "README.md"])
+            .args([
+                "check",
+                "--config",
+                yaml_path.to_str().unwrap(),
+                "README.md",
+            ])
             .output()
             .expect("Failed to execute command");
 
-        assert!(!output.status.success(), "Command should fail with invalid YAML config");
+        assert!(
+            !output.status.success(),
+            "Command should fail with invalid YAML config"
+        );
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let combined_output = format!("{}{}", stderr, stdout);
-        assert!(combined_output.contains("Failed to parse YAML") || combined_output.contains("Config error"),
-                "CLI should show YAML parsing error: stderr='{}' stdout='{}'", stderr, stdout);
+        assert!(
+            combined_output.contains("Failed to parse YAML")
+                || combined_output.contains("Config error"),
+            "CLI should show YAML parsing error: stderr='{}' stdout='{}'",
+            stderr,
+            stdout
+        );
 
         // Test file not found error via CLI
         let output = Command::new(binary_path)
-            .args(&["check", "--config", "/nonexistent/config.json", "README.md"])
+            .args(["check", "--config", "/nonexistent/config.json", "README.md"])
             .output()
             .expect("Failed to execute command");
 
-        assert!(!output.status.success(), "Command should fail with nonexistent config");
+        assert!(
+            !output.status.success(),
+            "Command should fail with nonexistent config"
+        );
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let combined_output = format!("{}{}", stderr, stdout);
-        assert!(combined_output.contains("Failed to read config file") || combined_output.contains("Config error"),
-                "CLI should show file reading error: stderr='{}' stdout='{}'", stderr, stdout);
+        assert!(
+            combined_output.contains("Failed to read config file")
+                || combined_output.contains("Config error"),
+            "CLI should show file reading error: stderr='{}' stdout='{}'",
+            stderr,
+            stdout
+        );
     }
 
     #[test]
@@ -801,7 +929,13 @@ line-length:
 
         // Test that --no-config bypasses config loading and succeeds even with invalid config
         let output = Command::new(binary_path)
-            .args(&["check", "--config", invalid_json_path.to_str().unwrap(), "--no-config", md_path.to_str().unwrap()])
+            .args([
+                "check",
+                "--config",
+                invalid_json_path.to_str().unwrap(),
+                "--no-config",
+                md_path.to_str().unwrap(),
+            ])
             .output()
             .expect("Failed to execute command");
 
@@ -826,10 +960,14 @@ line-length:
 
         // Test auto-discovery (should find .markdownlint.json)
         let auto_result = SourcedConfig::load_with_discovery(None, None, false);
-        assert!(auto_result.is_ok(), "Auto-discovery should find .markdownlint.json");
+        assert!(
+            auto_result.is_ok(),
+            "Auto-discovery should find .markdownlint.json"
+        );
 
         let auto_config: rumdl::config::Config = auto_result.unwrap().into();
-        let auto_style = rumdl::config::get_rule_config_value::<String>(&auto_config, "MD004", "style");
+        let auto_style =
+            rumdl::config::get_rule_config_value::<String>(&auto_config, "MD004", "style");
         assert_eq!(auto_style, Some("asterisk".to_string()));
 
         // Create explicit config with different value
@@ -838,11 +976,16 @@ line-length:
         fs::write(&explicit_path, explicit_config_content).unwrap();
 
         // Test explicit config (should override auto-discovery)
-        let explicit_result = SourcedConfig::load_with_discovery(Some(explicit_path.to_str().unwrap()), None, false);
-        assert!(explicit_result.is_ok(), "Explicit config should load successfully");
+        let explicit_result =
+            SourcedConfig::load_with_discovery(Some(explicit_path.to_str().unwrap()), None, false);
+        assert!(
+            explicit_result.is_ok(),
+            "Explicit config should load successfully"
+        );
 
         let explicit_config: rumdl::config::Config = explicit_result.unwrap().into();
-        let explicit_style = rumdl::config::get_rule_config_value::<String>(&explicit_config, "MD004", "style");
+        let explicit_style =
+            rumdl::config::get_rule_config_value::<String>(&explicit_config, "MD004", "style");
         assert_eq!(explicit_style, Some("dash".to_string()));
 
         // Test skip auto-discovery (should not find .markdownlint.json)
@@ -850,8 +993,12 @@ line-length:
         assert!(skip_result.is_ok(), "Skip auto-discovery should succeed");
 
         let skip_config: rumdl::config::Config = skip_result.unwrap().into();
-        let skip_style = rumdl::config::get_rule_config_value::<String>(&skip_config, "MD004", "style");
-        assert_eq!(skip_style, None, "Skip auto-discovery should not load any config");
+        let skip_style =
+            rumdl::config::get_rule_config_value::<String>(&skip_config, "MD004", "style");
+        assert_eq!(
+            skip_style, None,
+            "Skip auto-discovery should not load any config"
+        );
 
         // Restore original directory
         std::env::set_current_dir(original_dir).unwrap();

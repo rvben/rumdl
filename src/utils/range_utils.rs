@@ -201,10 +201,12 @@ impl LineIndex {
     }
 }
 
-/// Utilities for calculating character ranges in Markdown documents
-
 /// Calculate end position for a single-line range
-pub fn calculate_single_line_range(line: usize, start_col: usize, length: usize) -> (usize, usize, usize, usize) {
+pub fn calculate_single_line_range(
+    line: usize,
+    start_col: usize,
+    length: usize,
+) -> (usize, usize, usize, usize) {
     (line, start_col, line, start_col + length)
 }
 
@@ -215,15 +217,26 @@ pub fn calculate_line_range(line: usize, line_content: &str) -> (usize, usize, u
 }
 
 /// Calculate range from regex match on a line
-pub fn calculate_match_range(line: usize, line_content: &str, match_start: usize, match_len: usize) -> (usize, usize, usize, usize) {
+pub fn calculate_match_range(
+    line: usize,
+    line_content: &str,
+    match_start: usize,
+    match_len: usize,
+) -> (usize, usize, usize, usize) {
     // Convert byte positions to character positions
     let char_start = line_content[..match_start].chars().count() + 1; // 1-indexed
-    let char_len = line_content[match_start..match_start + match_len].chars().count();
+    let char_len = line_content[match_start..match_start + match_len]
+        .chars()
+        .count();
     (line, char_start, line, char_start + char_len)
 }
 
 /// Calculate range for trailing content (like trailing spaces)
-pub fn calculate_trailing_range(line: usize, line_content: &str, content_end: usize) -> (usize, usize, usize, usize) {
+pub fn calculate_trailing_range(
+    line: usize,
+    line_content: &str,
+    content_end: usize,
+) -> (usize, usize, usize, usize) {
     let char_content_end = line_content[..content_end].chars().count() + 1; // 1-indexed
     let line_char_len = line_content.chars().count() + 1;
     (line, char_content_end, line, line_char_len)
@@ -235,29 +248,53 @@ pub fn calculate_heading_range(line: usize, line_content: &str) -> (usize, usize
 }
 
 /// Calculate range for emphasis markers and content
-pub fn calculate_emphasis_range(line: usize, line_content: &str, start_pos: usize, end_pos: usize) -> (usize, usize, usize, usize) {
+pub fn calculate_emphasis_range(
+    line: usize,
+    line_content: &str,
+    start_pos: usize,
+    end_pos: usize,
+) -> (usize, usize, usize, usize) {
     let char_start = line_content[..start_pos].chars().count() + 1; // 1-indexed
     let char_end = line_content[..end_pos].chars().count() + 1; // 1-indexed
     (line, char_start, line, char_end)
 }
 
 /// Calculate range for HTML tags
-pub fn calculate_html_tag_range(line: usize, line_content: &str, tag_start: usize, tag_len: usize) -> (usize, usize, usize, usize) {
+pub fn calculate_html_tag_range(
+    line: usize,
+    line_content: &str,
+    tag_start: usize,
+    tag_len: usize,
+) -> (usize, usize, usize, usize) {
     calculate_match_range(line, line_content, tag_start, tag_len)
 }
 
 /// Calculate range for URLs
-pub fn calculate_url_range(line: usize, line_content: &str, url_start: usize, url_len: usize) -> (usize, usize, usize, usize) {
+pub fn calculate_url_range(
+    line: usize,
+    line_content: &str,
+    url_start: usize,
+    url_len: usize,
+) -> (usize, usize, usize, usize) {
     calculate_match_range(line, line_content, url_start, url_len)
 }
 
 /// Calculate range for list markers
-pub fn calculate_list_marker_range(line: usize, line_content: &str, marker_start: usize, marker_len: usize) -> (usize, usize, usize, usize) {
+pub fn calculate_list_marker_range(
+    line: usize,
+    line_content: &str,
+    marker_start: usize,
+    marker_len: usize,
+) -> (usize, usize, usize, usize) {
     calculate_match_range(line, line_content, marker_start, marker_len)
 }
 
 /// Calculate range that exceeds a limit (like line length)
-pub fn calculate_excess_range(line: usize, line_content: &str, limit: usize) -> (usize, usize, usize, usize) {
+pub fn calculate_excess_range(
+    line: usize,
+    line_content: &str,
+    limit: usize,
+) -> (usize, usize, usize, usize) {
     let char_limit = std::cmp::min(limit, line_content.chars().count());
     let line_char_len = line_content.chars().count() + 1;
     (line, char_limit + 1, line, line_char_len)
@@ -291,7 +328,8 @@ mod tests {
         let content = "Text <div>content</div> more";
         let tag_start = 5; // Position of '<'
         let tag_len = 5; // Length of "<div>"
-        let (start_line, start_col, end_line, end_col) = calculate_match_range(1, content, tag_start, tag_len);
+        let (start_line, start_col, end_line, end_col) =
+            calculate_match_range(1, content, tag_start, tag_len);
         assert_eq!(start_line, 1);
         assert_eq!(start_col, 6); // 1-indexed
         assert_eq!(end_line, 1);
@@ -302,7 +340,8 @@ mod tests {
     fn test_trailing_range() {
         let content = "Text content   "; // 3 trailing spaces
         let content_end = 12; // End of "Text content"
-        let (start_line, start_col, end_line, end_col) = calculate_trailing_range(1, content, content_end);
+        let (start_line, start_col, end_line, end_col) =
+            calculate_trailing_range(1, content, content_end);
         assert_eq!(start_line, 1);
         assert_eq!(start_col, 13); // content_end + 1 (1-indexed)
         assert_eq!(end_line, 1);

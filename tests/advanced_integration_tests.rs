@@ -17,7 +17,7 @@ fn create_dummy_config(dir: &tempfile::TempDir) -> PathBuf {
 fn test_cli_with_config_and_rules() {
     // Create a temporary directory for our test
     let temp_dir = tempdir().unwrap();
-    let config_path = temp_dir.path().join("rumdl.toml");
+    let _config_path = temp_dir.path().join("rumdl.toml");
 
     // Create a custom configuration file with stricter settings
     let config_content = r#"
@@ -27,7 +27,7 @@ line_length = 150
 [rules]
 disabled = ["MD033"]
 "#;
-    fs::write(&config_path, config_content).unwrap();
+    fs::write(&_config_path, config_content).unwrap();
 
     // Create a markdown file with various rule violations
     let markdown_path = temp_dir.path().join("test.md");
@@ -56,7 +56,7 @@ This is a line that would normally exceed the default line length limit, but we'
     // Execute the command and capture output first
     let assert = cmd
         .arg("--config")
-        .arg(&config_path)
+        .arg(&_config_path)
         .arg(&markdown_path)
         .assert();
 
@@ -137,7 +137,7 @@ No blank line at end"#;
 fn test_init_load_apply_config() {
     // Create a temporary directory for our test
     let temp_dir = tempdir().unwrap();
-    let config_path = temp_dir.path().join(".rumdl.toml");
+    let _config_path = temp_dir.path().join(".rumdl.toml");
 
     // First use the init command to create the config
     let mut init_cmd = Command::cargo_bin("rumdl").unwrap();
@@ -148,10 +148,10 @@ fn test_init_load_apply_config() {
         .success();
 
     // Verify the config file was created
-    assert!(config_path.exists());
+    assert!(_config_path.exists());
 
     // Read the default config
-    let config_content = fs::read_to_string(&config_path).unwrap();
+    let config_content = fs::read_to_string(&_config_path).unwrap();
 
     // Check that it contains a few key elements (more flexible assertions)
     assert!(config_content.contains("line_length"));
@@ -180,7 +180,7 @@ fn test_init_load_apply_config() {
 fn test_rules_interaction() {
     let temp_dir = tempdir().unwrap();
     let markdown_path = temp_dir.path().join("complex.md");
-    let config_path = create_dummy_config(&temp_dir); // Use dummy config
+    let _config_path = create_dummy_config(&temp_dir); // Use dummy config
 
     let markdown_content = r#"<!-- Test document -->
 # Heading with no blank line below
@@ -284,7 +284,7 @@ Link to [non-existent heading](#nowhere)
 #[test]
 fn test_cli_options() {
     let temp_dir = tempdir().unwrap();
-    let config_path = create_dummy_config(&temp_dir); // Use dummy config
+    let _config_path = create_dummy_config(&temp_dir); // Use dummy config
 
     // Create a markdown file with some issues
     let markdown_path = temp_dir.path().join("format_test.md");
@@ -327,11 +327,16 @@ fn test_cli_options() {
     let disabled_output = String::from_utf8(disabled_assert.get_output().stdout.clone()).unwrap();
     let disabled_code = disabled_assert.get_output().status.code().unwrap_or(-1);
     // Accept exit code 0 (no issues found) or 1 (issues found, but not expected here)
-    assert!(disabled_code == 0, "Expected exit code 0 (no issues found), got {}. Output: {}", disabled_code, disabled_output);
+    assert!(
+        disabled_code == 0,
+        "Expected exit code 0 (no issues found), got {}. Output: {}",
+        disabled_code,
+        disabled_output
+    );
     assert!(!disabled_output.contains("MD022"));
     assert!(!disabled_output.contains("MD033"));
     assert!(!disabled_output.contains("MD032")); // Also check MD032 is disabled
-    // MD030 should NOT be reported for *Bad item, because it is not a valid list item per CommonMark/markdownlint
+                                                 // MD030 should NOT be reported for *Bad item, because it is not a valid list item per CommonMark/markdownlint
     assert!(!disabled_output.contains("MD030"));
 
     // Test with enabled rules (using --no-config and enable via CLI)

@@ -1,6 +1,6 @@
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
-use crate::utils::table_utils::TableUtils;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::table_utils::TableUtils;
 
 /// Rule MD056: Table column count
 ///
@@ -16,115 +16,6 @@ impl Default for MD056TableColumnCount {
 }
 
 impl MD056TableColumnCount {
-    /// Check if a line is in a code block
-    fn is_in_code_block(&self, lines: &[&str], line_index: usize) -> bool {
-        let mut in_code_block = false;
-        let mut code_fence = None;
-
-        for (_i, line) in lines.iter().enumerate().take(line_index + 1) {
-            let trimmed = line.trim();
-
-            // Check for code fence markers
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                if !in_code_block {
-                    // Start of a code block
-                    in_code_block = true;
-                    code_fence = Some(if trimmed.starts_with("```") {
-                        "```"
-                    } else {
-                        "~~~"
-                    });
-                } else if let Some(fence) = code_fence {
-                    // End of a code block if the fence type matches
-                    if trimmed.starts_with(fence) {
-                        in_code_block = false;
-                        code_fence = None;
-                    }
-                }
-            }
-        }
-
-        in_code_block
-    }
-
-    /// Count cells in a table row
-    fn count_cells(&self, row: &str) -> usize {
-        let trimmed = row.trim();
-
-        // Skip non-table rows
-        if !trimmed.contains('|') {
-            return 0;
-        }
-
-        // Handle case with leading/trailing pipes
-        let mut cell_count = 0;
-        let parts: Vec<&str> = trimmed.split('|').collect();
-
-        for (i, part) in parts.iter().enumerate() {
-            // Skip first part if it's empty and there's a leading pipe
-            if i == 0 && part.trim().is_empty() && parts.len() > 1 {
-                continue;
-            }
-
-            // Skip last part if it's empty and there's a trailing pipe
-            if i == parts.len() - 1 && part.trim().is_empty() && parts.len() > 1 {
-                continue;
-            }
-
-            cell_count += 1;
-        }
-
-        cell_count
-    }
-
-    /// Identify table sections (groups of lines that form a table)
-    fn identify_tables(&self, lines: &[&str]) -> Vec<(usize, usize)> {
-        let mut tables = Vec::new();
-        let mut current_table_start: Option<usize> = None;
-
-        for (i, line) in lines.iter().enumerate() {
-            if self.is_in_code_block(lines, i) {
-                // If we were tracking a table, end it
-                if let Some(start) = current_table_start {
-                    if i - start >= 2 {
-                        // At least header + delimiter rows
-                        tables.push((start, i - 1));
-                    }
-                    current_table_start = None;
-                }
-                continue;
-            }
-
-            let trimmed = line.trim();
-            let is_table_row = trimmed.contains('|');
-
-            // Possible table row
-            if is_table_row {
-                if current_table_start.is_none() {
-                    current_table_start = Some(i);
-                }
-            } else if current_table_start.is_some() && !is_table_row && !trimmed.is_empty() {
-                // End of table
-                if let Some(start) = current_table_start {
-                    if i - start >= 2 {
-                        // At least header + delimiter rows
-                        tables.push((start, i - 1));
-                    }
-                }
-                current_table_start = None;
-            }
-        }
-
-        // Handle case where table ends at EOF
-        if let Some(start) = current_table_start {
-            if lines.len() - start >= 2 {
-                tables.push((start, lines.len() - 1));
-            }
-        }
-
-        tables
-    }
-
     /// Try to fix a table row to match the expected column count
     fn fix_table_row(&self, row: &str, expected_count: usize) -> Option<String> {
         let current_count = TableUtils::count_cells(row);
@@ -229,7 +120,8 @@ impl Rule for MD056TableColumnCount {
                     let fix_result = self.fix_table_row(line, expected_count);
 
                     // Calculate precise character range for the entire table row
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_line_range(line_idx + 1, line);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
@@ -239,7 +131,7 @@ impl Rule for MD056TableColumnCount {
                         ),
                         line: start_line,
                         column: start_col,
-                        end_line: end_line,
+                        end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
                         fix: fix_result.map(|fixed_row| Fix {

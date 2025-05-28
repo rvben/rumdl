@@ -2,7 +2,6 @@
 ///
 /// This module provides optimized table detection and processing functionality
 /// that can be shared across multiple table-related rules (MD055, MD056, MD058).
-
 use crate::utils::code_block_utils::CodeBlockUtils;
 
 /// Represents a table block in the document
@@ -78,7 +77,11 @@ impl TableUtils {
             }
 
             // Check if this part looks like a delimiter (contains dashes and optionally colons)
-            if part_trimmed.chars().all(|c| c == '-' || c == ':' || c.is_whitespace()) && part_trimmed.contains('-') {
+            if part_trimmed
+                .chars()
+                .all(|c| c == '-' || c == ':' || c.is_whitespace())
+                && part_trimmed.contains('-')
+            {
                 valid_delimiter_parts += 1;
             }
         }
@@ -104,7 +107,10 @@ impl TableUtils {
         while i < lines.len() {
             // Skip lines in code blocks using pre-computed positions
             let line_start = line_positions[i];
-            if code_blocks.iter().any(|(start, end)| line_start >= *start && line_start < *end) {
+            if code_blocks
+                .iter()
+                .any(|(start, end)| line_start >= *start && line_start < *end)
+            {
                 i += 1;
                 continue;
             }
@@ -212,7 +218,9 @@ mod tests {
 
     #[test]
     fn test_is_potential_table_row() {
-        assert!(TableUtils::is_potential_table_row("| Header 1 | Header 2 |"));
+        assert!(TableUtils::is_potential_table_row(
+            "| Header 1 | Header 2 |"
+        ));
         assert!(TableUtils::is_potential_table_row("| Cell 1 | Cell 2 |"));
         assert!(!TableUtils::is_potential_table_row("- List item"));
         assert!(!TableUtils::is_potential_table_row("Regular text"));
@@ -238,10 +246,22 @@ mod tests {
 
     #[test]
     fn test_determine_pipe_style() {
-        assert_eq!(TableUtils::determine_pipe_style("| Cell 1 | Cell 2 |"), Some("leading_and_trailing"));
-        assert_eq!(TableUtils::determine_pipe_style("| Cell 1 | Cell 2"), Some("leading_only"));
-        assert_eq!(TableUtils::determine_pipe_style("Cell 1 | Cell 2 |"), Some("trailing_only"));
-        assert_eq!(TableUtils::determine_pipe_style("Cell 1 | Cell 2"), Some("no_leading_or_trailing"));
+        assert_eq!(
+            TableUtils::determine_pipe_style("| Cell 1 | Cell 2 |"),
+            Some("leading_and_trailing")
+        );
+        assert_eq!(
+            TableUtils::determine_pipe_style("| Cell 1 | Cell 2"),
+            Some("leading_only")
+        );
+        assert_eq!(
+            TableUtils::determine_pipe_style("Cell 1 | Cell 2 |"),
+            Some("trailing_only")
+        );
+        assert_eq!(
+            TableUtils::determine_pipe_style("Cell 1 | Cell 2"),
+            Some("no_leading_or_trailing")
+        );
         assert_eq!(TableUtils::determine_pipe_style("Regular text"), None);
     }
 }

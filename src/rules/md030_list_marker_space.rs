@@ -3,13 +3,13 @@
 //!
 //! See [docs/md030.md](../../docs/md030.md) for full documentation, configuration, and examples.
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::list_utils::ListType;
-use regex::Regex;
+use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::calculate_match_range;
 use lazy_static::lazy_static;
+use regex::Regex;
 use toml;
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 lazy_static! {
     // Matches indentation, marker, and whitespace after marker
@@ -128,30 +128,26 @@ impl Rule for MD030ListMarkerSpace {
                         whitespace.len()
                     };
 
-                    let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                        line_num,
-                        line,
-                        extra_spaces_start,
-                        extra_spaces_len
-                    );
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_match_range(line_num, line, extra_spaces_start, extra_spaces_len);
 
                     // Generate the fix text
-                    let fix = if let Some(fixed_line) = self.try_fix_list_marker_spacing(line) {
-                        Some(crate::rule::Fix {
-                            range: crate::utils::range_utils::LineIndex::new(ctx.content.to_string())
+                    let fix =
+                        self.try_fix_list_marker_spacing(line)
+                            .map(|fixed_line| crate::rule::Fix {
+                                range: crate::utils::range_utils::LineIndex::new(
+                                    ctx.content.to_string(),
+                                )
                                 .line_col_to_byte_range(line_num, 1),
-                            replacement: fixed_line,
-                        })
-                    } else {
-                        None
-                    };
+                                replacement: fixed_line,
+                            });
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         severity: Severity::Warning,
                         line: start_line,
                         column: start_col,
-                        end_line: end_line,
+                        end_line,
                         end_column: end_col,
                         message: "Spaces after list markers".to_string(),
                         fix,
@@ -223,7 +219,10 @@ impl Rule for MD030ListMarkerSpace {
         ))
     }
 
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, crate::rule::LintError> {
+    fn fix(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+    ) -> Result<String, crate::rule::LintError> {
         let content = ctx.content;
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
         let lines: Vec<&str> = content.lines().collect();
@@ -297,11 +296,12 @@ impl MD030ListMarkerSpace {
 
         // Check for unordered list markers
         for marker in &["*", "-", "+"] {
-            if trimmed.starts_with(marker) {
-                let after_marker = &trimmed[marker.len()..];
+            if let Some(after_marker) = trimmed.strip_prefix(marker) {
                 // Fix if there are tabs, multiple spaces, or mixed whitespace
-                if after_marker.starts_with('\t') || after_marker.starts_with("  ") ||
-                   (after_marker.starts_with(' ') && after_marker.chars().nth(1) == Some('\t')) {
+                if after_marker.starts_with('\t')
+                    || after_marker.starts_with("  ")
+                    || (after_marker.starts_with(' ') && after_marker.chars().nth(1) == Some('\t'))
+                {
                     let content = after_marker.trim_start();
                     if !content.is_empty() {
                         // Use the configured number of spaces for unordered lists
@@ -319,8 +319,10 @@ impl MD030ListMarkerSpace {
             if before_dot.chars().all(|c| c.is_ascii_digit()) && !before_dot.is_empty() {
                 let after_dot = &trimmed[dot_pos + 1..];
                 // Fix if there are tabs, multiple spaces, or mixed whitespace
-                if after_dot.starts_with('\t') || after_dot.starts_with("  ") ||
-                   (after_dot.starts_with(' ') && after_dot.chars().nth(1) == Some('\t')) {
+                if after_dot.starts_with('\t')
+                    || after_dot.starts_with("  ")
+                    || (after_dot.starts_with(' ') && after_dot.chars().nth(1) == Some('\t'))
+                {
                     let content = after_dot.trim_start();
                     if !content.is_empty() {
                         // Use the configured number of spaces for ordered lists
@@ -412,7 +414,11 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         // Expect warnings for lines with too many spaces after the marker
-        assert_eq!(result.len(), 2, "Should flag lines with too many spaces after list marker");
+        assert_eq!(
+            result.len(),
+            2,
+            "Should flag lines with too many spaces after list marker"
+        );
         for warning in result {
             assert_eq!(warning.message, "Spaces after list markers");
         }

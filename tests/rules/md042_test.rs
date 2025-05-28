@@ -52,7 +52,10 @@ fn test_multiple_empty_links() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "[Link](https://example.com) and [Link text](https://example.com) and [Link text](url)");
+    assert_eq!(
+        fixed,
+        "[Link](https://example.com) and [Link text](https://example.com) and [Link text](url)"
+    );
 }
 
 #[test]

@@ -327,21 +327,27 @@ impl Rule for MD052ReferenceLinkImages {
         let mut warnings = Vec::new();
         let references = self.extract_references(content);
 
-        for (line_num, col, match_len, reference) in self.find_undefined_references(content, &references) {
+        for (line_num, col, match_len, reference) in
+            self.find_undefined_references(content, &references)
+        {
             let lines: Vec<&str> = content.lines().collect();
             let line_content = lines.get(line_num).unwrap_or(&"");
 
             // Calculate precise character range for the entire undefined reference
-            let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line_content, col, match_len);
+            let (start_line, start_col, end_line, end_col) =
+                calculate_match_range(line_num + 1, line_content, col, match_len);
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 line: start_line,
                 column: start_col,
-                end_line: end_line,
+                end_line,
                 end_column: end_col,
-                message: format!("Reference '{
-            }' not found", reference),
+                message: format!(
+                    "Reference '{
+            }' not found",
+                    reference
+                ),
                 severity: Severity::Warning,
                 fix: None,
             });

@@ -4,17 +4,17 @@
 //! character ranges across all rumdl rules. It ensures precise highlighting,
 //! prevents regressions, and serves as living documentation of expected behavior.
 
-pub mod unicode_utils;
+pub mod additional_tests;
 pub mod basic_tests;
 pub mod comprehensive_tests;
-pub mod additional_tests;
 pub mod extended_tests;
+pub mod unicode_utils;
 
 use rumdl::lint_context::LintContext;
 use rumdl::rule::{LintWarning, Rule};
-use rumdl::rules::*;
 use rumdl::rules::heading_utils::HeadingStyle;
 use rumdl::rules::md004_unordered_list_style::UnorderedListStyle;
+use rumdl::rules::*;
 
 /// Represents a single character range test case
 #[derive(Debug, Clone)]
@@ -25,8 +25,6 @@ pub struct CharacterRangeTest {
     pub content: &'static str,
     /// Expected warnings with precise character ranges
     pub expected_warnings: Vec<ExpectedWarning>,
-    /// Optional description of what this test validates
-    pub description: Option<&'static str>,
 }
 
 /// Represents an expected warning with precise character range information
@@ -48,7 +46,13 @@ pub struct ExpectedWarning {
 
 impl ExpectedWarning {
     /// Create a new expected warning with basic range information
-    pub fn new(line: usize, column: usize, end_line: usize, end_column: usize, highlighted_text: &'static str) -> Self {
+    pub fn new(
+        line: usize,
+        column: usize,
+        end_line: usize,
+        end_column: usize,
+        highlighted_text: &'static str,
+    ) -> Self {
         Self {
             line,
             column,
@@ -57,12 +61,6 @@ impl ExpectedWarning {
             highlighted_text,
             message_pattern: None,
         }
-    }
-
-    /// Create a new expected warning with message pattern matching
-    pub fn with_message(mut self, pattern: &'static str) -> Self {
-        self.message_pattern = Some(pattern);
-        self
     }
 }
 
@@ -74,7 +72,8 @@ pub fn test_character_ranges(test: CharacterRangeTest) {
 
     // Run the rule check
     let ctx = LintContext::new(test.content);
-    let warnings = rule.check(&ctx)
+    let warnings = rule
+        .check(&ctx)
         .unwrap_or_else(|e| panic!("Rule {} failed to check content: {}", test.rule_name, e));
 
     // Validate warning count
@@ -90,7 +89,11 @@ pub fn test_character_ranges(test: CharacterRangeTest) {
     );
 
     // Validate each warning
-    for (i, (actual, expected)) in warnings.iter().zip(test.expected_warnings.iter()).enumerate() {
+    for (i, (actual, expected)) in warnings
+        .iter()
+        .zip(test.expected_warnings.iter())
+        .enumerate()
+    {
         validate_warning(test.rule_name, test.content, i, actual, expected);
     }
 }
@@ -144,7 +147,10 @@ fn validate_warning(
         assert!(
             actual.message.contains(pattern),
             "Rule {} warning #{}: message doesn't contain pattern {:?}. Actual message: {:?}",
-            rule_name, warning_index, pattern, actual.message
+            rule_name,
+            warning_index,
+            pattern,
+            actual.message
         );
     }
 }
@@ -158,7 +164,11 @@ pub fn extract_highlighted_text(content: &str, warning: &LintWarning) -> String 
         if let Some(line) = lines.get(warning.line - 1) {
             let start_idx = (warning.column - 1).min(line.len());
             let end_idx = (warning.end_column - 1).min(line.len());
-            return line.chars().skip(start_idx).take(end_idx - start_idx).collect();
+            return line
+                .chars()
+                .skip(start_idx)
+                .take(end_idx - start_idx)
+                .collect();
         }
     } else {
         // Handle multi-line ranges
@@ -199,7 +209,9 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD001" => Some(Box::new(MD001HeadingIncrement)),
         "MD002" => Some(Box::new(MD002FirstHeadingH1::new(1))),
         "MD003" => Some(Box::new(MD003HeadingStyle::new(HeadingStyle::Consistent))),
-        "MD004" => Some(Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent))),
+        "MD004" => Some(Box::new(MD004UnorderedListStyle::new(
+            UnorderedListStyle::Consistent,
+        ))),
         "MD005" => Some(Box::new(MD005ListIndent)),
         "MD006" => Some(Box::new(MD006StartBullets)),
         "MD007" => Some(Box::new(MD007ULIndent::new(2))),
@@ -216,7 +228,9 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD022" => Some(Box::new(MD022BlanksAroundHeadings::new())),
         "MD023" => Some(Box::new(MD023HeadingStartLeft)),
         "MD025" => Some(Box::new(MD025SingleTitle::new(1, ""))),
-        "MD026" => Some(Box::new(MD026NoTrailingPunctuation::new(Some(".,;:!?".to_string())))),
+        "MD026" => Some(Box::new(MD026NoTrailingPunctuation::new(Some(
+            ".,;:!?".to_string(),
+        )))),
         "MD027" => Some(Box::new(MD027MultipleSpacesBlockquote)),
         "MD028" => Some(Box::new(MD028NoBlanksBlockquote)),
         "MD030" => Some(Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1))),
@@ -225,7 +239,9 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD033" => Some(Box::new(MD033NoInlineHtml::new())),
         "MD034" => Some(Box::new(MD034NoBareUrls)),
         "MD035" => Some(Box::new(MD035HRStyle::new("consistent".to_string()))),
-        "MD036" => Some(Box::new(MD036NoEmphasisAsHeading::new(".,;:!?".to_string()))),
+        "MD036" => Some(Box::new(MD036NoEmphasisAsHeading::new(
+            ".,;:!?".to_string(),
+        ))),
         "MD037" => Some(Box::new(MD037NoSpaceInEmphasis)),
         "MD038" => Some(Box::new(MD038NoSpaceInCode { enabled: true })),
         "MD039" => Some(Box::new(MD039NoSpaceInLinks)),
@@ -243,12 +259,15 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
 }
 
 /// Utility function to create a simple test case
-pub fn simple_test(rule_name: &'static str, content: &'static str, expected: ExpectedWarning) -> CharacterRangeTest {
+pub fn simple_test(
+    rule_name: &'static str,
+    content: &'static str,
+    expected: ExpectedWarning,
+) -> CharacterRangeTest {
     CharacterRangeTest {
         rule_name,
         content,
         expected_warnings: vec![expected],
-        description: None,
     }
 }
 
@@ -262,22 +281,6 @@ pub fn multi_warning_test(
         rule_name,
         content,
         expected_warnings: expected,
-        description: None,
-    }
-}
-
-/// Utility function to create a test case with description
-pub fn described_test(
-    rule_name: &'static str,
-    content: &'static str,
-    expected: Vec<ExpectedWarning>,
-    description: &'static str,
-) -> CharacterRangeTest {
-    CharacterRangeTest {
-        rule_name,
-        content,
-        expected_warnings: expected,
-        description: Some(description),
     }
 }
 
@@ -318,7 +321,7 @@ mod tests {
         };
 
         let highlighted = extract_highlighted_text(content, &warning);
-        assert_eq!(highlighted, "1\nLine");  // Fixed expectation
+        assert_eq!(highlighted, "1\nLine"); // Fixed expectation
     }
 
     #[test]

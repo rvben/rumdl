@@ -15,7 +15,8 @@ pub struct MarkdownlintConfig(pub HashMap<String, serde_yaml::Value>);
 pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read config file {}: {}", path, e))?;
-    let parse_result = if path.ends_with(".json") || path.ends_with(".jsonc") {
+
+    if path.ends_with(".json") || path.ends_with(".jsonc") {
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse JSON: {}", e))
     } else if path.ends_with(".yaml") || path.ends_with(".yml") {
         serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {}", e))
@@ -23,8 +24,7 @@ pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String
         serde_json::from_str(&content)
             .or_else(|_| serde_yaml::from_str(&content))
             .map_err(|e| format!("Failed to parse config as JSON or YAML: {}", e))
-    };
-    parse_result
+    }
 }
 
 /// Mapping table from markdownlint rule keys/aliases to rumdl rule keys

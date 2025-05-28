@@ -3,7 +3,7 @@
 /// See [docs/md025.md](../../docs/md025.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::{calculate_match_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -226,7 +226,7 @@ impl Rule for MD025SingleTitle {
                     line + 1, // Convert to 1-indexed
                     line_content,
                     text_start_in_line,
-                    heading_text.len()
+                    heading_text.len(),
                 );
 
                 // For ATX headings, find the '#' position; for Setext, use column 1
@@ -237,14 +237,14 @@ impl Rule for MD025SingleTitle {
                 };
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!(
-                "Multiple top-level headings (level {}) in the same document",
+                    rule_name: Some(self.name()),
+                    message: format!(
+                        "Multiple top-level headings (level {}) in the same document",
                         self.level
                     ),
                     line: start_line,
                     column: start_col,
-                    end_line: end_line,
+                    end_line,
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
@@ -273,7 +273,10 @@ impl Rule for MD025SingleTitle {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || (!ctx.content.contains('#') && !ctx.content.contains('=') && !ctx.content.contains('-'))
+        ctx.content.is_empty()
+            || (!ctx.content.contains('#')
+                && !ctx.content.contains('=')
+                && !ctx.content.contains('-'))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

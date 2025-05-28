@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::{calculate_line_range, LineIndex};
 use toml;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
@@ -76,7 +76,9 @@ impl MD012NoMultipleBlanks {
 
     /// Check if a line is in any of the given regions
     fn is_in_regions(line_num: usize, regions: &[(usize, usize)]) -> bool {
-        regions.iter().any(|(start, end)| line_num >= *start && line_num <= *end)
+        regions
+            .iter()
+            .any(|(start, end)| line_num >= *start && line_num <= *end)
     }
 }
 
@@ -104,9 +106,9 @@ impl Rule for MD012NoMultipleBlanks {
         // Quick check for consecutive newlines or potential whitespace-only lines before processing
         // Look for multiple consecutive lines that could be blank (empty or whitespace-only)
         let lines: Vec<&str> = content.lines().collect();
-        let has_potential_blanks = lines.windows(2).any(|pair| {
-            pair[0].trim().is_empty() && pair[1].trim().is_empty()
-        });
+        let has_potential_blanks = lines
+            .windows(2)
+            .any(|pair| pair[0].trim().is_empty() && pair[1].trim().is_empty());
 
         if !has_potential_blanks {
             return Ok(Vec::new());
@@ -155,15 +157,15 @@ impl Rule for MD012NoMultipleBlanks {
                             calculate_line_range(excess_line, excess_line_content);
 
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                severity: Severity::Warning,
-                message: format!(
-                "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                            rule_name: Some(self.name()),
+                            severity: Severity::Warning,
+                            message: format!(
+                                "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
                                 location, self.maximum, blank_count
                             ),
                             line: start_line,
                             column: start_col,
-                            end_line: end_line,
+                            end_line,
                             end_column: end_col,
                             fix: Some(Fix {
                                 range: _line_index.line_col_to_byte_range(excess_line, 1),
@@ -188,15 +190,15 @@ impl Rule for MD012NoMultipleBlanks {
                     calculate_line_range(excess_line, excess_line_content);
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                severity: Severity::Warning,
-                message: format!(
-                "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                    rule_name: Some(self.name()),
+                    severity: Severity::Warning,
+                    message: format!(
+                        "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
                         location, self.maximum, blank_count
                     ),
                     line: start_line,
                     column: start_col,
-                    end_line: end_line,
+                    end_line,
                     end_column: end_col,
                     fix: Some(Fix {
                         range: _line_index.line_col_to_byte_range(excess_line, 1),

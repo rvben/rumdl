@@ -4,7 +4,7 @@
 //! See [docs/md014.md](../../docs/md014.md) for full documentation, configuration, and examples.
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::{calculate_match_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -159,25 +159,34 @@ impl Rule for MD014CommandsShowOutput {
                     // End of code block
                     if self.is_command_without_output(&current_block, &current_lang) {
                         // Find the first command line to highlight the dollar sign
-                        if let Some((cmd_line_idx, cmd_line)) = self.find_first_command_line(&current_block) {
+                        if let Some((cmd_line_idx, cmd_line)) =
+                            self.find_first_command_line(&current_block)
+                        {
                             let cmd_line_num = block_start_line + 1 + cmd_line_idx + 1; // +1 for fence, +1 for 1-indexed
 
                             // Find and highlight the dollar sign or prompt
                             if let Some(cap) = DOLLAR_PROMPT_PATTERN.captures(cmd_line) {
                                 let match_obj = cap.get(1).unwrap(); // The $ or > character
                                 let (start_line, start_col, end_line, end_col) =
-                                    calculate_match_range(cmd_line_num, cmd_line, match_obj.start(), match_obj.len());
+                                    calculate_match_range(
+                                        cmd_line_num,
+                                        cmd_line,
+                                        match_obj.start(),
+                                        match_obj.len(),
+                                    );
 
                                 warnings.push(LintWarning {
                                     rule_name: Some(self.name()),
                                     line: start_line,
                                     column: start_col,
-                                    end_line: end_line,
+                                    end_line,
                                     end_column: end_col,
-                                    message: "Commands in code blocks should show output".to_string(),
+                                    message: "Commands in code blocks should show output"
+                                        .to_string(),
                                     severity: Severity::Warning,
                                     fix: Some(Fix {
-                                        range: _line_index.line_col_to_byte_range(block_start_line + 1, 1),
+                                        range: _line_index
+                                            .line_col_to_byte_range(block_start_line + 1, 1),
                                         replacement: self.fix_command_block(&current_block),
                                     }),
                                 });

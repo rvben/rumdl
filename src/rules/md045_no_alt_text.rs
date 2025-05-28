@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::{calculate_match_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
@@ -51,21 +51,26 @@ impl Rule for MD045NoAltText {
                     let _url_part = cap.get(2).unwrap();
 
                     // Calculate precise character range for the entire image syntax
-                    let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, full_match.start(), full_match.len());
+                    let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                        line_num + 1,
+                        line,
+                        full_match.start(),
+                        full_match.len(),
+                    );
 
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Image should have alternate text".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index
-                .line_col_to_byte_range(line_num + 1, full_match.start() + 1),
-                replacement: format!(
-                "![Image description]{
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "Image should have alternate text".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: _line_index
+                                .line_col_to_byte_range(line_num + 1, full_match.start() + 1),
+                            replacement: format!(
+                                "![Image description]{
             }",
                                 &line[full_match.start() + 2..full_match.end()]
                             ),

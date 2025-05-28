@@ -197,7 +197,8 @@ mod tests {
     #[test]
     fn test_fix_basic_unordered_list_extra_spaces() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "*  Item with two spaces\n-   Item with three spaces\n+    Item with four spaces";
+        let content =
+            "*  Item with two spaces\n-   Item with three spaces\n+    Item with four spaces";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "* Item with two spaces\n- Item with three spaces\n+ Item with four spaces";
@@ -207,10 +208,12 @@ mod tests {
     #[test]
     fn test_fix_basic_ordered_list_extra_spaces() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "1.  Item with two spaces\n2.   Item with three spaces\n10.    Item with four spaces";
+        let content =
+            "1.  Item with two spaces\n2.   Item with three spaces\n10.    Item with four spaces";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "1. Item with two spaces\n2. Item with three spaces\n10. Item with four spaces";
+        let expected =
+            "1. Item with two spaces\n2. Item with three spaces\n10. Item with four spaces";
         assert_eq!(fixed, expected);
     }
 
@@ -227,7 +230,8 @@ mod tests {
     #[test]
     fn test_fix_mixed_spaces_and_tabs() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "* \tMixed space and tab\n- \t Item with space-tab-space\n1. \t\tOrdered mixed";
+        let content =
+            "* \tMixed space and tab\n- \t Item with space-tab-space\n1. \t\tOrdered mixed";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "* Mixed space and tab\n- Item with space-tab-space\n1. Ordered mixed";
@@ -280,17 +284,20 @@ mod tests {
         let content = "*  Normal item\n> *  Blockquote item\n> 1.   Blockquote ordered\n-   Another normal item";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "* Normal item\n> *  Blockquote item\n> 1.   Blockquote ordered\n- Another normal item";
+        let expected =
+            "* Normal item\n> *  Blockquote item\n> 1.   Blockquote ordered\n- Another normal item";
         assert_eq!(fixed, expected);
     }
 
     #[test]
     fn test_fix_preserves_front_matter() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "---\ntitle: Test\n*  This is in front matter\n---\n*  This is a real list item";
+        let content =
+            "---\ntitle: Test\n*  This is in front matter\n---\n*  This is a real list item";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "---\ntitle: Test\n*  This is in front matter\n---\n* This is a real list item";
+        let expected =
+            "---\ntitle: Test\n*  This is in front matter\n---\n* This is a real list item";
         assert_eq!(fixed, expected);
     }
 
@@ -315,10 +322,12 @@ mod tests {
     #[test]
     fn test_fix_only_fixes_clear_violations() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "* Correct spacing\n*  Two spaces (fixed)\n* Another correct\n*   Three spaces (fixed)";
+        let content =
+            "* Correct spacing\n*  Two spaces (fixed)\n* Another correct\n*   Three spaces (fixed)";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "* Correct spacing\n* Two spaces (fixed)\n* Another correct\n* Three spaces (fixed)";
+        let expected =
+            "* Correct spacing\n* Two spaces (fixed)\n* Another correct\n* Three spaces (fixed)";
         assert_eq!(fixed, expected);
     }
 
@@ -403,17 +412,20 @@ mod tests {
     #[test]
     fn test_fix_handles_unicode_content() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "*  Unicode content: 你好世界\n-   Emoji content: 🚀🎉\n+    Mixed: café naïve résumé";
+        let content =
+            "*  Unicode content: 你好世界\n-   Emoji content: 🚀🎉\n+    Mixed: café naïve résumé";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "* Unicode content: 你好世界\n- Emoji content: 🚀🎉\n+ Mixed: café naïve résumé";
+        let expected =
+            "* Unicode content: 你好世界\n- Emoji content: 🚀🎉\n+ Mixed: café naïve résumé";
         assert_eq!(fixed, expected);
     }
 
     #[test]
     fn test_fix_handles_special_characters() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "*  Content with `code`\n-   Content with **bold**\n+    Content with [link](url)";
+        let content =
+            "*  Content with `code`\n-   Content with **bold**\n+    Content with [link](url)";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "* Content with `code`\n- Content with **bold**\n+ Content with [link](url)";

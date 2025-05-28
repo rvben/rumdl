@@ -3,7 +3,7 @@
 /// See [docs/md019.md](../../docs/md019.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::{LineIndex, calculate_single_line_range};
+use crate::utils::range_utils::{calculate_single_line_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -135,11 +135,8 @@ impl Rule for MD019NoMultipleSpaceAtx {
                 let extra_spaces_start = hash_end_col + 1; // Skip the first (correct) space
                 let extra_spaces_len = spaces - 1; // Number of extra spaces
 
-                let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
-                    line_num,
-                    extra_spaces_start,
-                    extra_spaces_len
-                );
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_single_line_range(line_num, extra_spaces_start, extra_spaces_len);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
@@ -150,7 +147,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
                     ),
                     line: start_line,
                     column: start_col,
-                    end_line: end_line,
+                    end_line,
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {

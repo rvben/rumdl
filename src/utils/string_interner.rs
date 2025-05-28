@@ -1,11 +1,17 @@
+use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use lazy_static::lazy_static;
 
 /// String interner for reducing memory allocations of common strings
 #[derive(Debug)]
 pub struct StringInterner {
     strings: HashMap<String, Arc<str>>,
+}
+
+impl Default for StringInterner {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StringInterner {

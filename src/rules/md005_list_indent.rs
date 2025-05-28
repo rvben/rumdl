@@ -3,7 +3,7 @@
 //!
 //! See [docs/md005.md](../../docs/md005.md) for full documentation, configuration, and examples.
 
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::{calculate_match_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::DocumentStructure;
@@ -267,17 +267,17 @@ impl Rule for MD005ListIndent {
                 };
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: inconsistent_message,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(line_num + 1, 1),
-                replacement,
-            }),
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: inconsistent_message,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range(line_num + 1, 1),
+                        replacement,
+                    }),
                 });
             }
         }
@@ -334,17 +334,17 @@ impl Rule for MD005ListIndent {
                         };
 
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: inconsistent_message,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(line_num + 1, 1),
-                replacement,
-            }),
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: inconsistent_message,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range(line_num + 1, 1),
+                                replacement,
+                            }),
                         });
                     }
                 }
@@ -400,17 +400,17 @@ impl Rule for MD005ListIndent {
                         };
 
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(line_num + 1, 1),
-                replacement,
-            }),
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range(line_num + 1, 1),
+                                replacement,
+                            }),
                         });
                     }
                 }
@@ -643,17 +643,17 @@ impl Rule for MD005ListIndent {
                 let replacement = format!("{}{}", " ".repeat(expected_indent), trimmed);
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: 1,
-                end_line: line_num + 1,
-                end_column: 1 + 1,
-                message: inconsistent_message,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(line_num + 1, 1),
-                replacement,
-            }),
+                    rule_name: Some(self.name()),
+                    line: line_num + 1,
+                    column: 1,
+                    end_line: line_num + 1,
+                    end_column: 1 + 1,
+                    message: inconsistent_message,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range(line_num + 1, 1),
+                        replacement,
+                    }),
                 });
             }
         }
@@ -701,17 +701,17 @@ impl Rule for MD005ListIndent {
                     // Only add if we don't already have a warning for this line
                     if !warnings.iter().any(|w| w.line == line_num + 1) {
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: 1,
-                end_line: line_num + 1,
-                end_column: 1 + 1,
-                message: inconsistent_message,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(line_num + 1, 1),
-                replacement,
-            }),
+                            rule_name: Some(self.name()),
+                            line: line_num + 1,
+                            column: 1,
+                            end_line: line_num + 1,
+                            end_column: 1 + 1,
+                            message: inconsistent_message,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range(line_num + 1, 1),
+                                replacement,
+                            }),
                         });
                     }
                 }
@@ -758,17 +758,17 @@ impl Rule for MD005ListIndent {
                     // Only add if we don't already have a warning
                     if !warnings.iter().any(|w| w.line == line_num + 1) {
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: line_num + 1,
-                column: 1,
-                end_line: line_num + 1,
-                end_column: 1 + 1,
-                message,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(line_num + 1, 1),
-                replacement,
-            }),
+                            rule_name: Some(self.name()),
+                            line: line_num + 1,
+                            column: 1,
+                            end_line: line_num + 1,
+                            end_column: 1 + 1,
+                            message,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range(line_num + 1, 1),
+                                replacement,
+                            }),
                         });
                     }
                 }

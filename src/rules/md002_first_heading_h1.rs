@@ -247,16 +247,14 @@ impl Rule for MD002FirstHeadingH1 {
             } else {
                 ""
             };
-            let (start_line, start_col, end_line, end_col) = calculate_heading_range(
-                first_heading_line,
-                line_content
-            );
+            let (start_line, start_col, end_line, end_col) =
+                calculate_heading_range(first_heading_line, line_content);
 
             result.push(LintWarning {
                 message,
                 line: start_line,
                 column: start_col,
-                end_line: end_line,
+                end_line,
                 end_column: end_col,
                 severity: Severity::Warning,
                 fix,

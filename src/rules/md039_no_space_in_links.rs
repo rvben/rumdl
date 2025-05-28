@@ -20,11 +20,14 @@ impl MD039NoSpaceInLinks {
     /// Fast check to see if content has any potential links or images
     #[inline]
     fn has_links_or_images(&self, content: &str) -> bool {
-        (content.contains('[') && content.contains("](")) || (content.contains("![") && content.contains("]("))
+        (content.contains('[') && content.contains("]("))
+            || (content.contains("![") && content.contains("]("))
     }
 
     /// Shared parser: yields (is_image, text, url, link_start, link_end, text_start, text_end)
-    fn parse_links_and_images(content: &str) -> Vec<(bool, &str, &str, usize, usize, usize, usize)> {
+    fn parse_links_and_images(
+        content: &str,
+    ) -> Vec<(bool, &str, &str, usize, usize, usize, usize)> {
         let mut results = Vec::new();
 
         // Early return if no potential links
@@ -33,7 +36,8 @@ impl MD039NoSpaceInLinks {
         }
 
         // Pre-compute code block ranges once for efficiency
-        let code_block_ranges = crate::utils::code_block_utils::CodeBlockUtils::detect_code_blocks(content);
+        let code_block_ranges =
+            crate::utils::code_block_utils::CodeBlockUtils::detect_code_blocks(content);
 
         // Convert to char indices for efficient processing
         let chars: Vec<(usize, char)> = content.char_indices().collect();
@@ -43,14 +47,21 @@ impl MD039NoSpaceInLinks {
             let (byte_i, c) = chars[idx];
 
             // Skip if in code block (optimized check)
-            if code_block_ranges.iter().any(|&(start, end)| byte_i >= start && byte_i < end) {
+            if code_block_ranges
+                .iter()
+                .any(|&(start, end)| byte_i >= start && byte_i < end)
+            {
                 idx += 1;
                 continue;
             }
 
             let is_image = c == '!' && idx + 1 < chars.len() && chars[idx + 1].1 == '[';
             let start_bracket = if is_image {
-                if idx + 1 < chars.len() && chars[idx + 1].1 == '[' { idx + 1 } else { usize::MAX }
+                if idx + 1 < chars.len() && chars[idx + 1].1 == '[' {
+                    idx + 1
+                } else {
+                    usize::MAX
+                }
             } else if c == '[' {
                 idx
             } else {
@@ -86,7 +97,9 @@ impl MD039NoSpaceInLinks {
 
             // Check for ( after ] (allow whitespace)
             let mut k = j + 1;
-            while k < chars.len() && chars[k].1.is_whitespace() { k += 1; }
+            while k < chars.len() && chars[k].1.is_whitespace() {
+                k += 1;
+            }
             if k >= chars.len() || chars[k].1 != '(' {
                 idx = j + 1;
                 continue;
@@ -96,10 +109,13 @@ impl MD039NoSpaceInLinks {
             let mut l = k + 1;
             let mut paren_count = 1;
             while l < chars.len() {
-                if chars[l].1 == '(' { paren_count += 1; }
-                else if chars[l].1 == ')' {
+                if chars[l].1 == '(' {
+                    paren_count += 1;
+                } else if chars[l].1 == ')' {
                     paren_count -= 1;
-                    if paren_count == 0 { break; }
+                    if paren_count == 0 {
+                        break;
+                    }
                 }
                 l += 1;
             }
@@ -114,17 +130,27 @@ impl MD039NoSpaceInLinks {
             let url_start = chars[k].0 + chars[k].1.len_utf8();
             let url_end = chars[l].0;
 
-            if text_end < text_start || url_end < url_start || text_end > content.len() || url_end > content.len() {
+            if text_end < text_start
+                || url_end < url_start
+                || text_end > content.len()
+                || url_end > content.len()
+            {
                 idx = l + 1;
                 continue;
             }
 
             let text = &content[text_start..text_end];
             let url = &content[url_start..url_end];
-            let link_start = if is_image { chars[idx].0 } else { chars[start_bracket].0 };
+            let link_start = if is_image {
+                chars[idx].0
+            } else {
+                chars[start_bracket].0
+            };
             let link_end = chars[l].0 + chars[l].1.len_utf8();
 
-            results.push((is_image, text, url, link_start, link_end, text_start, text_end));
+            results.push((
+                is_image, text, url, link_start, link_end, text_start, text_end,
+            ));
             idx = l + 1;
         }
         results
@@ -132,12 +158,14 @@ impl MD039NoSpaceInLinks {
 
     fn trim_link_text_preserve_escapes(text: &str) -> &str {
         // Find first non-whitespace
-        let start = text.char_indices()
+        let start = text
+            .char_indices()
             .find(|&(_, c)| !c.is_whitespace())
             .map(|(i, _)| i)
             .unwrap_or(text.len());
         // Find last non-whitespace
-        let end = text.char_indices()
+        let end = text
+            .char_indices()
             .rev()
             .find(|&(_, c)| !c.is_whitespace())
             .map(|(i, c)| i + c.len_utf8())
@@ -188,7 +216,8 @@ impl Rule for MD039NoSpaceInLinks {
             return Ok(Vec::new());
         }
 
-        for (is_image, text, url, link_start, _link_end, _text_start, _text_end) in links_and_images {
+        for (is_image, text, url, link_start, _link_end, _text_start, _text_end) in links_and_images
+        {
             // Unescape for whitespace check
             let mut unesc = String::with_capacity(text.len());
             let mut tchars = text.chars().peekable();
@@ -255,7 +284,9 @@ impl Rule for MD039NoSpaceInLinks {
         }
         let content = ctx.content;
         let mut fixes = Vec::new();
-        for (is_image, text, url, link_start, link_end, _text_start, _text_end) in Self::parse_links_and_images(content) {
+        for (is_image, text, url, link_start, link_end, _text_start, _text_end) in
+            Self::parse_links_and_images(content)
+        {
             // Unescape for whitespace check
             let mut unesc = String::with_capacity(text.len());
             let mut tchars = text.chars().peekable();

@@ -3,7 +3,7 @@
 //!
 //! See [docs/md035.md](../../docs/md035.md) for full documentation, configuration, and examples.
 
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::{calculate_line_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
@@ -83,7 +83,15 @@ impl MD035HRStyle {
         // Find the style with the highest count, breaking ties by first encountered
         counts
             .iter()
-            .max_by_key(|&(style, count)| (*count, -(order.iter().position(|&s| s == *style).unwrap_or(usize::MAX) as isize)))
+            .max_by_key(|&(style, count)| {
+                (
+                    *count,
+                    -(order
+                        .iter()
+                        .position(|&s| s == *style)
+                        .unwrap_or(usize::MAX) as isize),
+                )
+            })
             .map(|(style, _)| style.to_string())
     }
 }
@@ -124,17 +132,18 @@ impl Rule for MD035HRStyle {
 
                 if style_mismatch || has_indentation {
                     // Calculate precise character range for the entire horizontal rule
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_line_range(i + 1, line);
 
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: if has_indentation {
-                "Horizontal rule should not be indented".to_string()
-            } else {
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: if has_indentation {
+                            "Horizontal rule should not be indented".to_string()
+                        } else {
                             format!("Horizontal rule style should be \"{}\"", expected_style)
                         },
                         severity: Severity::Warning,

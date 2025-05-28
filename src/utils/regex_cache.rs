@@ -33,6 +33,12 @@ pub struct RegexCache {
     usage_stats: HashMap<String, u64>,
 }
 
+impl Default for RegexCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RegexCache {
     pub fn new() -> Self {
         Self {
@@ -56,16 +62,24 @@ impl RegexCache {
     }
 
     /// Get or compile a fancy regex pattern
-    pub fn get_fancy_regex(&mut self, pattern: &str) -> Result<Arc<FancyRegex>, fancy_regex::Error> {
+    pub fn get_fancy_regex(
+        &mut self,
+        pattern: &str,
+    ) -> Result<Arc<FancyRegex>, Box<fancy_regex::Error>> {
         if let Some(regex) = self.fancy_cache.get(pattern) {
             *self.usage_stats.entry(pattern.to_string()).or_insert(0) += 1;
             return Ok(regex.clone());
         }
 
-        let regex = Arc::new(FancyRegex::new(pattern)?);
-        self.fancy_cache.insert(pattern.to_string(), regex.clone());
-        *self.usage_stats.entry(pattern.to_string()).or_insert(0) += 1;
-        Ok(regex)
+        match FancyRegex::new(pattern) {
+            Ok(regex) => {
+                let arc_regex = Arc::new(regex);
+                self.fancy_cache
+                    .insert(pattern.to_string(), arc_regex.clone());
+                Ok(arc_regex)
+            }
+            Err(e) => Err(Box::new(e)),
+        }
     }
 
     /// Get cache statistics
@@ -93,7 +107,7 @@ pub fn get_cached_regex(pattern: &str) -> Result<Arc<Regex>, regex::Error> {
 }
 
 /// Get a fancy regex from the global cache
-pub fn get_cached_fancy_regex(pattern: &str) -> Result<Arc<FancyRegex>, fancy_regex::Error> {
+pub fn get_cached_fancy_regex(pattern: &str) -> Result<Arc<FancyRegex>, Box<fancy_regex::Error>> {
     let mut cache = GLOBAL_REGEX_CACHE.lock().unwrap();
     cache.get_fancy_regex(pattern)
 }
@@ -134,7 +148,8 @@ macro_rules! regex_cached {
 #[macro_export]
 macro_rules! fancy_regex_cached {
     ($pattern:expr) => {{
-        $crate::utils::regex_cache::get_cached_fancy_regex($pattern).expect("Failed to compile fancy regex")
+        $crate::utils::regex_cache::get_cached_fancy_regex($pattern)
+            .expect("Failed to compile fancy regex")
     }};
 }
 

@@ -11,12 +11,13 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
-use toml;
 use std::sync::{Arc, Mutex};
+use toml;
 
 // Thread-safe cache for file existence checks to avoid redundant filesystem operations
 lazy_static! {
-    static ref FILE_EXISTENCE_CACHE: Arc<Mutex<HashMap<PathBuf, bool>>> = Arc::new(Mutex::new(HashMap::new()));
+    static ref FILE_EXISTENCE_CACHE: Arc<Mutex<HashMap<PathBuf, bool>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 }
 
 // Reset the file existence cache (typically between rule runs)
@@ -191,13 +192,16 @@ impl MD057ExistingRelativeLinks {
             // Check if the file exists (with caching to avoid filesystem calls)
             if !file_exists_with_cache(&resolved_path) {
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: line_num,
-                column,
-                end_line: line_num,
-                end_column: column + url.len(),
-                message: format!("Relative link '{
-            }' does not exist", url),
+                    rule_name: Some(self.name()),
+                    line: line_num,
+                    column,
+                    end_line: line_num,
+                    end_column: column + url.len(),
+                    message: format!(
+                        "Relative link '{
+            }' does not exist",
+                        url
+                    ),
                     severity: Severity::Warning,
                     fix: None, // No automatic fix for missing files
                 });
@@ -216,59 +220,6 @@ impl MD057ExistingRelativeLinks {
                 (url, position)
             })
         })
-    }
-
-    /// Process links using the element cache and document structure
-    fn process_links_with_structure(
-        &self,
-        content: &str,
-        doc_structure: &DocumentStructure,
-        element_cache: &ElementCache,
-        warnings: &mut Vec<LintWarning>,
-    ) {
-        // Use DocumentStructure links instead of expensive regex parsing
-        if !doc_structure.links.is_empty() {
-            // Create element cache for code span detection
-            let element_cache = ElementCache::new(content);
-
-            for link in &doc_structure.links {
-                let line_idx = link.line - 1;
-                if let Some(line) = content.lines().nth(line_idx) {
-                    // Quick check for link pattern in this line
-                    if !line.contains("](") {
-                        continue;
-                    }
-
-                    // Find all links in this line using optimized regex
-                    for link_match in LINK_START_REGEX.find_iter(line) {
-                        let start_pos = link_match.start();
-                        let end_pos = link_match.end();
-
-                        // Calculate absolute position in content for code span detection
-                        let line_start_pos = content.lines().take(line_idx).map(|l| l.len() + 1).sum::<usize>();
-                        let absolute_start_pos = line_start_pos + start_pos;
-
-                        // Skip if this link is in a code span
-                        if element_cache.is_in_code_span(absolute_start_pos) {
-                            continue;
-                        }
-
-                        // Find the URL part after the link text
-                        if let Some(caps) = URL_EXTRACT_REGEX.captures_at(line, end_pos - 1) {
-                            if let Some(url_group) = caps.get(1) {
-                                let url = url_group.as_str().trim();
-
-                                // Calculate column position
-                                let column = start_pos + 1;
-
-                                // Process and validate the link
-                                self.process_link(url, link.line, column, warnings);
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -320,21 +271,24 @@ impl Rule for MD057ExistingRelativeLinks {
                 base_path_guard.clone()
             } else {
                 // Try to determine the base path from the file being processed (cached)
-                static CACHED_FILE_PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
-                CACHED_FILE_PATH.get_or_init(|| {
-                    if let Ok(file_path) = env::var("RUMDL_FILE_PATH") {
-                        let path = Path::new(&file_path);
-                        if path.exists() {
-                            path.parent()
-                                .map(|p| p.to_path_buf())
-                                .or_else(|| Some(CURRENT_DIR.clone()))
+                static CACHED_FILE_PATH: std::sync::OnceLock<Option<PathBuf>> =
+                    std::sync::OnceLock::new();
+                CACHED_FILE_PATH
+                    .get_or_init(|| {
+                        if let Ok(file_path) = env::var("RUMDL_FILE_PATH") {
+                            let path = Path::new(&file_path);
+                            if path.exists() {
+                                path.parent()
+                                    .map(|p| p.to_path_buf())
+                                    .or_else(|| Some(CURRENT_DIR.clone()))
+                            } else {
+                                Some(CURRENT_DIR.clone())
+                            }
                         } else {
                             Some(CURRENT_DIR.clone())
                         }
-                    } else {
-                        Some(CURRENT_DIR.clone())
-                    }
-                }).clone()
+                    })
+                    .clone()
             }
         };
 
@@ -385,7 +339,12 @@ impl Rule for MD057ExistingRelativeLinks {
                         line_positions[line_idx] + start_pos
                     } else {
                         // Fallback for edge cases
-                        content.lines().take(line_idx).map(|l| l.len() + 1).sum::<usize>() + start_pos
+                        content
+                            .lines()
+                            .take(line_idx)
+                            .map(|l| l.len() + 1)
+                            .sum::<usize>()
+                            + start_pos
                     };
 
                     // Skip if this link is in a code span

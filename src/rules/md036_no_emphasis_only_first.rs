@@ -4,11 +4,10 @@
 //! See [docs/md036.md](../../docs/md036.md) for full documentation, configuration, and examples.
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::heading_utils::HeadingUtils;
-use crate::utils::range_utils::{LineIndex, calculate_emphasis_range};
+use crate::utils::document_structure::DocumentStructure;
+use crate::utils::range_utils::{calculate_emphasis_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
-use crate::utils::document_structure::DocumentStructure;
 
 lazy_static! {
     // Optimize regex patterns with compilation once at startup
@@ -65,7 +64,8 @@ impl MD036NoEmphasisAsHeading {
         // Skip if line is in a list, blockquote, or code block using DocumentStructure
         if LIST_MARKER.is_match(line)
             || BLOCKQUOTE_MARKER.is_match(line)
-            || doc_structure.is_in_code_block(line_num + 1) // line_num is 0-based, but DocumentStructure expects 1-based
+            || doc_structure.is_in_code_block(line_num + 1)
+        // line_num is 0-based, but DocumentStructure expects 1-based
         {
             return None;
         }
@@ -76,7 +76,12 @@ impl MD036NoEmphasisAsHeading {
             let full_match = caps.get(0).unwrap();
             let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
             let end_pos = start_pos + full_match.len();
-            return Some((1, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
+            return Some((
+                1,
+                caps.get(1).unwrap().as_str().to_string(),
+                start_pos,
+                end_pos,
+            ));
         }
 
         // Check for _emphasis_ pattern (entire line)
@@ -84,7 +89,12 @@ impl MD036NoEmphasisAsHeading {
             let full_match = caps.get(0).unwrap();
             let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
             let end_pos = start_pos + full_match.len();
-            return Some((1, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
+            return Some((
+                1,
+                caps.get(1).unwrap().as_str().to_string(),
+                start_pos,
+                end_pos,
+            ));
         }
 
         // Check for **strong** pattern (entire line)
@@ -92,7 +102,12 @@ impl MD036NoEmphasisAsHeading {
             let full_match = caps.get(0).unwrap();
             let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
             let end_pos = start_pos + full_match.len();
-            return Some((2, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
+            return Some((
+                2,
+                caps.get(1).unwrap().as_str().to_string(),
+                start_pos,
+                end_pos,
+            ));
         }
 
         // Check for __strong__ pattern (entire line)
@@ -100,7 +115,12 @@ impl MD036NoEmphasisAsHeading {
             let full_match = caps.get(0).unwrap();
             let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
             let end_pos = start_pos + full_match.len();
-            return Some((2, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
+            return Some((
+                2,
+                caps.get(1).unwrap().as_str().to_string(),
+                start_pos,
+                end_pos,
+            ));
         }
 
         None
@@ -194,14 +214,17 @@ impl Rule for MD036NoEmphasisAsHeading {
                 continue;
             }
 
-            if let Some((level, text, start_pos, end_pos)) = Self::is_entire_line_emphasized(line, doc_structure, i) {
-                let (start_line, start_col, end_line, end_col) = calculate_emphasis_range(i + 1, line, start_pos, end_pos);
+            if let Some((level, text, start_pos, end_pos)) =
+                Self::is_entire_line_emphasized(line, doc_structure, i)
+            {
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_emphasis_range(i + 1, line, start_pos, end_pos);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: start_line,
                     column: start_col,
-                    end_line: end_line,
+                    end_line,
                     end_column: end_col,
                     message: format!("Emphasis used instead of a heading: '{}'", text),
                     severity: Severity::Warning,
@@ -230,7 +253,9 @@ impl Rule for MD036NoEmphasisAsHeading {
 
         for i in 0..lines.len() {
             let line = lines[i];
-            if let Some((level, text, _start_pos, _end_pos)) = Self::is_entire_line_emphasized(line, &doc_structure, i) {
+            if let Some((level, text, _start_pos, _end_pos)) =
+                Self::is_entire_line_emphasized(line, &doc_structure, i)
+            {
                 result.push_str(&self.get_heading_for_emphasis(level, &text));
             } else {
                 result.push_str(line);
@@ -264,8 +289,9 @@ impl Rule for MD036NoEmphasisAsHeading {
     where
         Self: Sized,
     {
-        let punctuation = crate::config::get_rule_config_value::<String>(config, "MD036", "punctuation")
-            .unwrap_or_else(|| ".,;:!?".to_string());
+        let punctuation =
+            crate::config::get_rule_config_value::<String>(config, "MD036", "punctuation")
+                .unwrap_or_else(|| ".,;:!?".to_string());
 
         Box::new(MD036NoEmphasisAsHeading::new(punctuation))
     }

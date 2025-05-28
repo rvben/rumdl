@@ -37,7 +37,8 @@ This is a code block line that is very very very very very very very long and sh
 #[test]
 fn test_tables() {
     let rule = MD013LineLength::new(50, false, false, true, false);
-    let content = "| This is a very long table cell that should be flagged |\n| This is another long cell |";
+    let content =
+        "| This is a very long table cell that should be flagged |\n| This is another long cell |";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -237,7 +238,8 @@ fn test_parity_image_reference_line_skipped() {
 #[test]
 fn test_parity_link_reference_definition_skipped() {
     let rule = MD013LineLength::new(80, true, true, true, false);
-    let content = "[reference]: https://example.com/this/is/a/very/long/url/that/should/not/be/flagged";
+    let content =
+        "[reference]: https://example.com/this/is/a/very/long/url/that/should/not/be/flagged";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());

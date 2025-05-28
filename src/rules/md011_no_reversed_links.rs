@@ -7,7 +7,8 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    static ref REVERSED_LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|(\([^)]+\))\[([^\]]+)\]").unwrap();
+    static ref REVERSED_LINK_REGEX: Regex =
+        Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|(\([^)]+\))\[([^\]]+)\]").unwrap();
     static ref REVERSED_LINK_CHECK_REGEX: Regex = Regex::new(r"\(([^)]+)\)\[([^\]]+)\]").unwrap();
     static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)").unwrap();
 }
@@ -76,22 +77,23 @@ impl Rule for MD011NoReversedLinks {
 
         for (line_num, line) in content.lines().enumerate() {
             for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
-                                let match_obj = cap.get(0).unwrap();
+                let match_obj = cap.get(0).unwrap();
 
                 // Calculate precise character range for the reversed syntax
-                let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_obj.start(), match_obj.len());
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_match_range(line_num + 1, line, match_obj.start(), match_obj.len());
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: "Reversed link syntax".to_string(),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: (0..0), // TODO: Replace with correct byte range if available
-                replacement: format!("[{}]({})", &cap[2], &cap[1]),
+                    rule_name: Some(self.name()),
+                    message: "Reversed link syntax".to_string(),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: (0..0), // TODO: Replace with correct byte range if available
+                        replacement: format!("[{}]({})", &cap[2], &cap[1]),
                     }),
                 });
             }

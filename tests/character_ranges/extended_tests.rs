@@ -3,7 +3,7 @@
 //! This module contains character range tests for additional rules
 //! covering MD006-MD053.
 
-use super::{test_character_ranges, simple_test, multi_warning_test, ExpectedWarning};
+use super::{multi_warning_test, simple_test, test_character_ranges, ExpectedWarning};
 
 // MD006 - Start bullets at beginning of line
 #[test]
@@ -11,7 +11,7 @@ fn test_md006_start_bullets() {
     let test = simple_test(
         "MD006",
         "  - Indented bullet",
-        ExpectedWarning::new(1, 2, 1, 5, " - ")
+        ExpectedWarning::new(1, 2, 1, 5, " - "),
     );
     test_character_ranges(test);
 }
@@ -22,7 +22,7 @@ fn test_md007_ul_indent() {
     let test = simple_test(
         "MD007",
         "- Item 1\n   - Wrong indent",
-        ExpectedWarning::new(2, 4, 2, 5, "-")
+        ExpectedWarning::new(2, 4, 2, 5, "-"),
     );
     test_character_ranges(test);
 }
@@ -44,7 +44,7 @@ fn test_md011_reversed_links() {
     let test = simple_test(
         "MD011",
         "(Reversed link)[http://example.com]",
-        ExpectedWarning::new(1, 1, 1, 36, "(Reversed link)[http://example.com]")
+        ExpectedWarning::new(1, 1, 1, 36, "(Reversed link)[http://example.com]"),
     );
     test_character_ranges(test);
 }
@@ -55,7 +55,7 @@ fn test_md023_heading_start_left() {
     let test = simple_test(
         "MD023",
         "  # Indented heading",
-        ExpectedWarning::new(1, 1, 1, 3, "  ")
+        ExpectedWarning::new(1, 1, 1, 3, "  "),
     );
     test_character_ranges(test);
 }
@@ -77,7 +77,7 @@ fn test_md025_single_title() {
     let test = simple_test(
         "MD025",
         "# First Title\n\n# Second Title",
-        ExpectedWarning::new(3, 3, 3, 15, "Second Title")
+        ExpectedWarning::new(3, 3, 3, 15, "Second Title"),
     );
     test_character_ranges(test);
 }
@@ -88,7 +88,7 @@ fn test_md027_multiple_space_blockquote() {
     let test = simple_test(
         "MD027",
         ">  Multiple spaces",
-        ExpectedWarning::new(1, 3, 1, 4, " ")
+        ExpectedWarning::new(1, 3, 1, 4, " "),
     );
     test_character_ranges(test);
 }
@@ -99,7 +99,7 @@ fn test_md028_no_blank_line_blockquote() {
     let test = simple_test(
         "MD028",
         "> First line\n>\n> Second line",
-        ExpectedWarning::new(2, 1, 2, 2, ">")
+        ExpectedWarning::new(2, 1, 2, 2, ">"),
     );
     test_character_ranges(test);
 }
@@ -121,7 +121,7 @@ fn test_md030_list_marker_space() {
     let test = simple_test(
         "MD030",
         "-  Two spaces",
-        ExpectedWarning::new(1, 3, 1, 4, " ")
+        ExpectedWarning::new(1, 3, 1, 4, " "),
     );
     test_character_ranges(test);
 }
@@ -135,7 +135,7 @@ fn test_md031_blanks_around_fences() {
         vec![
             ExpectedWarning::new(2, 1, 2, 4, "```"),
             ExpectedWarning::new(4, 1, 4, 4, "```"),
-        ]
+        ],
     );
     test_character_ranges(test);
 }
@@ -149,7 +149,7 @@ fn test_md032_blanks_around_lists() {
         vec![
             ExpectedWarning::new(2, 1, 2, 12, "- List item"),
             ExpectedWarning::new(2, 1, 2, 12, "- List item"),
-        ]
+        ],
     );
     test_character_ranges(test);
 }
@@ -163,7 +163,7 @@ fn test_md033_no_inline_html() {
         vec![
             ExpectedWarning::new(1, 6, 1, 9, "<b>"),
             ExpectedWarning::new(1, 13, 1, 17, "</b>"),
-        ]
+        ],
     );
     test_character_ranges(test);
 }
@@ -174,7 +174,7 @@ fn test_md034_no_bare_urls() {
     let test = simple_test(
         "MD034",
         "Visit http://example.com for more info",
-        ExpectedWarning::new(1, 7, 1, 25, "http://example.com")
+        ExpectedWarning::new(1, 7, 1, 25, "http://example.com"),
     );
     test_character_ranges(test);
 }
@@ -185,7 +185,7 @@ fn test_md035_hr_style() {
     let test = simple_test(
         "MD035",
         "---\n\n***",
-        ExpectedWarning::new(3, 1, 3, 4, "***")
+        ExpectedWarning::new(3, 1, 3, 4, "***"),
     );
     test_character_ranges(test);
 }
@@ -196,7 +196,7 @@ fn test_md039_no_space_in_links() {
     let test = simple_test(
         "MD039",
         "[ link text ](http://example.com)",
-        ExpectedWarning::new(1, 1, 1, 34, "[ link text ](http://example.com)")
+        ExpectedWarning::new(1, 1, 1, 34, "[ link text ](http://example.com)"),
     );
     test_character_ranges(test);
 }
@@ -207,7 +207,7 @@ fn test_md042_no_empty_links() {
     let test = simple_test(
         "MD042",
         "[empty link]()",
-        ExpectedWarning::new(1, 1, 1, 15, "[empty link]()")
+        ExpectedWarning::new(1, 1, 1, 15, "[empty link]()"),
     );
     test_character_ranges(test);
 }
@@ -218,7 +218,7 @@ fn test_md045_no_alt_text() {
     let test = simple_test(
         "MD045",
         "![](image.png)",
-        ExpectedWarning::new(1, 1, 1, 15, "![](image.png)")
+        ExpectedWarning::new(1, 1, 1, 15, "![](image.png)"),
     );
     test_character_ranges(test);
 }
@@ -229,7 +229,7 @@ fn test_md047_file_end_newline() {
     let test = simple_test(
         "MD047",
         "Text without newline",
-        ExpectedWarning::new(1, 1, 1, 21, "Text without newline")
+        ExpectedWarning::new(1, 1, 1, 21, "Text without newline"),
     );
     test_character_ranges(test);
 }
@@ -240,7 +240,7 @@ fn test_md051_link_fragments() {
     let test = simple_test(
         "MD051",
         "[link](#nonexistent)",
-        ExpectedWarning::new(1, 1, 1, 21, "[link](#nonexistent)")
+        ExpectedWarning::new(1, 1, 1, 21, "[link](#nonexistent)"),
     );
     test_character_ranges(test);
 }
@@ -251,7 +251,7 @@ fn test_md053_link_image_reference_definitions() {
     let test = simple_test(
         "MD053",
         "[unused]: http://example.com",
-        ExpectedWarning::new(1, 1, 1, 29, "[unused]: http://example.com")
+        ExpectedWarning::new(1, 1, 1, 29, "[unused]: http://example.com"),
     );
     test_character_ranges(test);
 }

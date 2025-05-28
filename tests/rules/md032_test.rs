@@ -51,9 +51,18 @@ fn test_emphasis_not_list_marker_simple() {
 
     // Should only flag the list items (lines 2-3) for missing blank line before,
     // NOT the emphasis text on line 1
-    assert_eq!(result.len(), 1, "Should only detect one warning for the list missing blank line before");
-    assert_eq!(result[0].line, 2, "Warning should be on line 2 (first list item)");
-    assert!(result[0].message.contains("Lists should be preceded by a blank line"));
+    assert_eq!(
+        result.len(),
+        1,
+        "Should only detect one warning for the list missing blank line before"
+    );
+    assert_eq!(
+        result[0].line, 2,
+        "Warning should be on line 2 (first list item)"
+    );
+    assert!(result[0]
+        .message
+        .contains("Lists should be preceded by a blank line"));
 }
 
 #[test]
@@ -65,7 +74,10 @@ fn test_emphasis_not_list_marker_multiple_stars() {
     let result = rule.check(&ctx).unwrap();
 
     // Should have no warnings - the list is properly surrounded by blank lines
-    assert!(result.is_empty(), "Emphasis text should not be detected as list markers");
+    assert!(
+        result.is_empty(),
+        "Emphasis text should not be detected as list markers"
+    );
 }
 
 #[test]
@@ -82,7 +94,10 @@ fn test_emphasis_followed_by_list_needs_blank() {
 
     // Test the fix
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "**Problem: Permission errors**\n\n- On Windows: Run as administrator");
+    assert_eq!(
+        fixed,
+        "**Problem: Permission errors**\n\n- On Windows: Run as administrator"
+    );
 }
 
 #[test]
@@ -162,7 +177,10 @@ fn test_list_with_content() {
 
     // --- Temporary Debugging ---
     let temp_structure = rumdl::utils::document_structure::document_structure_from_str(ctx.content);
-    println!("DEBUG MD032 - test_list_with_content - structure.list_lines: {:?}", temp_structure.list_lines);
+    println!(
+        "DEBUG MD032 - test_list_with_content - structure.list_lines: {:?}",
+        temp_structure.list_lines
+    );
 
     let lines_vec: Vec<&str> = ctx.content.lines().collect();
     let num_lines_vec = lines_vec.len();
@@ -170,7 +188,9 @@ fn test_list_with_content() {
     let mut current_block_start_debug: Option<usize> = None;
     for i_debug in 0..num_lines_vec {
         let current_line_idx_1_debug = i_debug + 1;
-        let is_list_related_debug = temp_structure.list_lines.contains(&current_line_idx_1_debug);
+        let is_list_related_debug = temp_structure
+            .list_lines
+            .contains(&current_line_idx_1_debug);
         let is_excluded_debug = temp_structure.is_in_code_block(current_line_idx_1_debug)
             || temp_structure.is_in_front_matter(current_line_idx_1_debug);
         if is_list_related_debug && !is_excluded_debug {
@@ -182,14 +202,15 @@ fn test_list_with_content() {
                     calculated_blocks.push((start, current_line_idx_1_debug));
                 }
             }
-        } else {
-            if let Some(start) = current_block_start_debug {
-                calculated_blocks.push((start, i_debug));
-                current_block_start_debug = None;
-            }
+        } else if let Some(start) = current_block_start_debug {
+            calculated_blocks.push((start, i_debug));
+            current_block_start_debug = None;
         }
     }
-    println!("DEBUG MD032 - test_list_with_content - calculated_blocks: {:?}", calculated_blocks);
+    println!(
+        "DEBUG MD032 - test_list_with_content - calculated_blocks: {:?}",
+        calculated_blocks
+    );
     // --- End Temporary Debugging ---
 
     let result = rule.check(&ctx).unwrap();

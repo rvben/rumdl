@@ -1,7 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_block_utils::CodeBlockStyle;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::{calculate_line_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -63,10 +63,10 @@ impl MD046CodeBlockStyle {
         // Check if preceded by a blank line (typical for code blocks)
         // OR if the previous line is also an indented code block (continuation)
         let has_blank_line_before = i == 0 || lines[i - 1].trim().is_empty();
-        let prev_is_indented_code = i > 0 &&
-            (lines[i - 1].starts_with("    ") || lines[i - 1].starts_with("\t")) &&
-            !self.is_part_of_list_structure(lines, i - 1) &&
-            !self.is_part_of_formatted_text_block(lines, i - 1);
+        let prev_is_indented_code = i > 0
+            && (lines[i - 1].starts_with("    ") || lines[i - 1].starts_with("\t"))
+            && !self.is_part_of_list_structure(lines, i - 1)
+            && !self.is_part_of_formatted_text_block(lines, i - 1);
 
         // If no blank line before and previous line is not indented code,
         // it's likely list continuation, not a code block
@@ -86,29 +86,30 @@ impl MD046CodeBlockStyle {
         // Look for patterns that suggest this is formatted text, not code:
 
         // 1. License/legal text patterns
-        if trimmed.contains("Copyright") ||
-           trimmed.contains("License") ||
-           trimmed.contains("Foundation") ||
-           trimmed.contains("Certificate") ||
-           trimmed.contains("Origin") ||
-           trimmed.starts_with("Version ") ||
-           trimmed.contains("permitted") ||
-           trimmed.contains("contribution") ||
-           trimmed.contains("certify") {
+        if trimmed.contains("Copyright")
+            || trimmed.contains("License")
+            || trimmed.contains("Foundation")
+            || trimmed.contains("Certificate")
+            || trimmed.contains("Origin")
+            || trimmed.starts_with("Version ")
+            || trimmed.contains("permitted")
+            || trimmed.contains("contribution")
+            || trimmed.contains("certify")
+        {
             return true;
         }
 
         // 2. Address/contact information patterns
-        if trimmed.contains("Drive") ||
-           trimmed.contains("Suite") ||
-           trimmed.contains("CA,") ||
-           trimmed.contains("San Francisco") {
+        if trimmed.contains("Drive")
+            || trimmed.contains("Suite")
+            || trimmed.contains("CA,")
+            || trimmed.contains("San Francisco")
+        {
             return true;
         }
 
         // 3. Email signature patterns
-        if trimmed.contains("Signed-off-by:") ||
-           trimmed.contains("@") && trimmed.contains(".com") {
+        if trimmed.contains("Signed-off-by:") || trimmed.contains("@") && trimmed.contains(".com") {
             return true;
         }
 
@@ -119,23 +120,27 @@ impl MD046CodeBlockStyle {
 
         // Look at surrounding lines to see if this is part of a prose block
         let start = if i >= 5 { i - 5 } else { 0 };
-        let end = if i + 5 < lines.len() { i + 5 } else { lines.len() };
+        let end = if i + 5 < lines.len() {
+            i + 5
+        } else {
+            lines.len()
+        };
 
-        for j in start..end {
-            let check_line = lines[j];
+        for check_line in lines.iter().take(end).skip(start) {
             if check_line.starts_with("    ") || check_line.starts_with("\t") {
                 consecutive_indented_lines += 1;
                 let check_trimmed = check_line.trim();
                 // Look for prose indicators
-                if check_trimmed.len() > 20 &&
-                   (check_trimmed.contains(" the ") ||
-                    check_trimmed.contains(" and ") ||
-                    check_trimmed.contains(" or ") ||
-                    check_trimmed.contains(" to ") ||
-                    check_trimmed.contains(" of ") ||
-                    check_trimmed.contains(" in ") ||
-                    check_trimmed.contains(" is ") ||
-                    check_trimmed.contains(" that ")) {
+                if check_trimmed.len() > 20
+                    && (check_trimmed.contains(" the ")
+                        || check_trimmed.contains(" and ")
+                        || check_trimmed.contains(" or ")
+                        || check_trimmed.contains(" to ")
+                        || check_trimmed.contains(" of ")
+                        || check_trimmed.contains(" in ")
+                        || check_trimmed.contains(" is ")
+                        || check_trimmed.contains(" that "))
+                {
                     has_prose_content = true;
                 }
             }
@@ -150,7 +155,7 @@ impl MD046CodeBlockStyle {
         false
     }
 
-        /// Check if an indented line is part of a list structure
+    /// Check if an indented line is part of a list structure
     fn is_part_of_list_structure(&self, lines: &[&str], i: usize) -> bool {
         // Look backwards to find if we're in a list context
         // We need to be more aggressive about detecting list contexts
@@ -187,7 +192,8 @@ impl MD046CodeBlockStyle {
                 // If it's a paragraph that doesn't look like it's part of a list,
                 // we might not be in a list anymore, but let's be conservative
                 // and keep looking a bit more
-                if j > 0 && j < i - 5 { // Only break if we've looked back a reasonable distance
+                if j > 0 && j < i - 5 {
+                    // Only break if we've looked back a reasonable distance
                     break;
                 }
             }
@@ -288,7 +294,10 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // Quick check for code blocks before processing
-        if !ctx.content.contains("```") && !ctx.content.contains("~~~") && !ctx.content.contains("    ") {
+        if !ctx.content.contains("```")
+            && !ctx.content.contains("~~~")
+            && !ctx.content.contains("    ")
+        {
             return Ok(Vec::new());
         }
 
@@ -546,21 +555,22 @@ impl Rule for MD046CodeBlockStyle {
             {
                 if target_style == CodeBlockStyle::Indented {
                     // Calculate precise character range for the entire fence line
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_line_range(i + 1, line);
 
                     // Add warning for opening fence
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Code block style should be indented".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(i + 1, 1),
-                replacement: String::new(), // Remove the opening fence
-            }),
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "Code block style should be indented".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(i + 1, 1),
+                            replacement: String::new(), // Remove the opening fence
+                        }),
                     });
 
                     // Find closing fence and add warnings for all lines in the fenced block
@@ -570,24 +580,28 @@ impl Rule for MD046CodeBlockStyle {
                             || lines[j].trim_start().starts_with("~~~")
                         {
                             // Add warnings for content lines and closing fence
-                            for k in i + 1..=j {
+                            for (k, line_content) in
+                                lines.iter().enumerate().take(j + 1).skip(i + 1)
+                            {
                                 // Calculate precise character range for the entire line
-                                let (start_line, start_col, end_line, end_col) = calculate_line_range(k + 1, lines[k]);
+                                let (start_line, start_col, end_line, end_col) =
+                                    calculate_line_range(k + 1, line_content);
 
                                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Code block style should be indented".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(k + 1, 1),
-                replacement: if k == j {
-                String::new() // Remove closing fence
-            } else {
-                                            format!("    {}", lines[k].trim_start()) // Convert content to indented
+                                    rule_name: Some(self.name()),
+                                    line: start_line,
+                                    column: start_col,
+                                    end_line,
+                                    end_column: end_col,
+                                    message: "Code block style should be indented".to_string(),
+                                    severity: Severity::Warning,
+                                    fix: Some(Fix {
+                                        range: line_index.line_col_to_byte_range(k + 1, 1),
+                                        replacement: if k == j {
+                                            String::new() // Remove closing fence
+                                        } else {
+                                            format!("    {}", line_content.trim_start())
+                                            // Convert content to indented
                                         },
                                     }),
                                 });
@@ -629,21 +643,22 @@ impl Rule for MD046CodeBlockStyle {
 
                     if !prev_line_is_indented {
                         // Calculate precise character range for the entire indented line
-                        let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_line_range(i + 1, line);
 
                         // Add warning for indented block that should be fenced
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Code block style should be fenced".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(i + 1, 1),
-                replacement: "```\n".to_string() + line.trim_start(),
-            }),
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: "Code block style should be fenced".to_string(),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range(i + 1, 1),
+                                replacement: "```\n".to_string() + line.trim_start(),
+                            }),
                         });
                     }
                 }

@@ -2,6 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::rng;
 use rand::Rng;
 use rumdl::rule::Rule;
+use rumdl::LintContext;
 use rumdl::MD053LinkImageReferenceDefinitions;
 
 fn create_test_content(size: usize, ratio: f64) -> String {
@@ -90,7 +91,8 @@ fn bench_md053_legacy(c: &mut Criterion) {
 
     c.bench_function("MD053 Legacy (line/col)", |b| {
         b.iter(|| {
-            let warnings = rule.check(black_box(&content)).unwrap();
+            let ctx = LintContext::new(black_box(&content));
+            let warnings = rule.check(&ctx).unwrap();
             warnings.iter().for_each(|w| {
                 if let Some(fix) = &w.fix {
                     // Simulate old line/column calculation overhead
@@ -109,7 +111,8 @@ fn bench_md053_range_based(c: &mut Criterion) {
 
     c.bench_function("MD053 Byte Ranges", |b| {
         b.iter(|| {
-            rule.check(black_box(&content)).unwrap();
+            let ctx = LintContext::new(black_box(&content));
+            rule.check(&ctx).unwrap();
         })
     });
 }
@@ -120,7 +123,8 @@ fn bench_md053_many_references(c: &mut Criterion) {
 
     c.bench_function("MD053 Many References", |b| {
         b.iter(|| {
-            let _ = rule.check(&content);
+            let ctx = LintContext::new(&content);
+            let _ = rule.check(&ctx);
         });
     });
 }
@@ -131,7 +135,8 @@ fn bench_md053_fix_many_references(c: &mut Criterion) {
 
     c.bench_function("MD053 Fix Many References", |b| {
         b.iter(|| {
-            let _ = rule.fix(&content);
+            let ctx = LintContext::new(&content);
+            let _ = rule.fix(&ctx);
         });
     });
 }

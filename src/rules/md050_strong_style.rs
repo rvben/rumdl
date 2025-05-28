@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::{calculate_match_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
@@ -103,21 +103,25 @@ impl Rule for MD050StrongStyle {
                     };
 
                     // Calculate precise character range for the entire strong emphasis
-                    let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, m.start(), m.len());
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_match_range(line_num + 1, line, m.start(), m.len());
 
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: message.to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
-                replacement: match target_style {
-                StrongStyle::Asterisk => format!("**{
-            }**", text),
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: message.to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: _line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
+                            replacement: match target_style {
+                                StrongStyle::Asterisk => format!(
+                                    "**{
+            }**",
+                                    text
+                                ),
                                 StrongStyle::Underscore => format!("__{}__", text),
                                 StrongStyle::Consistent => unreachable!(),
                             },

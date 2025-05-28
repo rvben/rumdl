@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::{calculate_line_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
@@ -50,7 +50,12 @@ impl Rule for MD047SingleTrailingNewline {
                 } else {
                     let line_num = last_content_lines.len();
                     let line_content = last_content_lines.last().unwrap_or(&"");
-                    (line_num, line_content.len() + 1, line_num, line_content.len() + 2)
+                    (
+                        line_num,
+                        line_content.len() + 1,
+                        line_num,
+                        line_content.len() + 2,
+                    )
                 }
             } else {
                 // For missing newline, highlight the end of the last line
@@ -62,17 +67,17 @@ impl Rule for MD047SingleTrailingNewline {
                 message: String::from("File should end with a single newline character"),
                 line: start_line,
                 column: start_col,
-                end_line: end_line,
+                end_line,
                 end_column: end_col,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(start_line, start_col),
-                replacement: if has_trailing_newline {
-                // If there are multiple newlines, fix by ensuring just one
-                let trimmed = content.trim_end();
-                if !trimmed.is_empty() {
-                trimmed.to_string() + "\n"
-            } else {
+                    range: line_index.line_col_to_byte_range(start_line, start_col),
+                    replacement: if has_trailing_newline {
+                        // If there are multiple newlines, fix by ensuring just one
+                        let trimmed = content.trim_end();
+                        if !trimmed.is_empty() {
+                            trimmed.to_string() + "\n"
+                        } else {
                             // Handle the case where content is just whitespace and newlines
                             String::new()
                         }

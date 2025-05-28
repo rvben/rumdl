@@ -1,7 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::regex_cache::*;
 use crate::utils::range_utils::calculate_match_range;
+use crate::utils::regex_cache::*;
 use std::collections::HashSet;
 
 /// Rule MD051: Link fragments should match document headings
@@ -25,7 +25,11 @@ impl MD051LinkFragments {
     }
 
     /// Extract headings from pre-computed DocumentStructure data
-    fn extract_headings_from_structure(&self, content: &str, structure: &DocumentStructure) -> HashSet<String> {
+    fn extract_headings_from_structure(
+        &self,
+        content: &str,
+        structure: &DocumentStructure,
+    ) -> HashSet<String> {
         let mut headings = HashSet::new();
 
         // Early return: if no headings at all, skip processing
@@ -104,9 +108,15 @@ impl MD051LinkFragments {
 
         // Remove emphasis and bold formatting more comprehensively
         stripped = BOLD_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = BOLD_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = ITALIC_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = ITALIC_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = BOLD_UNDERSCORE_REGEX
+            .replace_all(&stripped, "$1")
+            .to_string();
+        stripped = ITALIC_ASTERISK_REGEX
+            .replace_all(&stripped, "$1")
+            .to_string();
+        stripped = ITALIC_UNDERSCORE_REGEX
+            .replace_all(&stripped, "$1")
+            .to_string();
         stripped = STRIKETHROUGH_REGEX.replace_all(&stripped, "$1").to_string();
 
         // Remove code spans by replacing with their content (simplified)
@@ -140,9 +150,15 @@ impl MD051LinkFragments {
         let mut stripped = heading.to_string();
         stripped = INLINE_LINK_REGEX.replace_all(&stripped, "$1").to_string();
         stripped = BOLD_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = BOLD_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = ITALIC_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = ITALIC_UNDERSCORE_REGEX.replace_all(&stripped, "$1").to_string();
+        stripped = BOLD_UNDERSCORE_REGEX
+            .replace_all(&stripped, "$1")
+            .to_string();
+        stripped = ITALIC_ASTERISK_REGEX
+            .replace_all(&stripped, "$1")
+            .to_string();
+        stripped = ITALIC_UNDERSCORE_REGEX
+            .replace_all(&stripped, "$1")
+            .to_string();
         stripped = STRIKETHROUGH_REGEX.replace_all(&stripped, "$1").to_string();
         stripped = stripped.replace("`", "");
 
@@ -238,44 +254,42 @@ impl Rule for MD051LinkFragments {
             }
 
             // Use regex to find all links with fragments
-            let mut link_iter = LINK_REGEX.captures_iter(line);
-            while let Some(cap_result) = link_iter.next() {
-                if let Ok(cap) = cap_result {
-                    let full_match = cap.get(0).unwrap();
-                    let url = cap.get(2).map(|m| m.as_str()).unwrap_or("");
-                    let fragment = cap.get(3).map(|m| m.as_str()).unwrap_or("");
+            let link_iter = LINK_REGEX.captures_iter(line);
+            for cap in link_iter.flatten() {
+                let full_match = cap.get(0).unwrap();
+                let url = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+                let fragment = cap.get(3).map(|m| m.as_str()).unwrap_or("");
 
-                    // Only check internal links (not external URLs)
-                    if self.is_external_url(url) {
-                        continue;
-                    }
+                // Only check internal links (not external URLs)
+                if self.is_external_url(url) {
+                    continue;
+                }
 
-                    // Skip if the link is inside a code span
-                    if structure.is_in_code_span(line_num + 1, full_match.start() + 1) {
-                        continue;
-                    }
+                // Skip if the link is inside a code span
+                if structure.is_in_code_span(line_num + 1, full_match.start() + 1) {
+                    continue;
+                }
 
-                    // Check if the fragment exists in headings
-                    if !headings.contains(&fragment.to_lowercase()) {
-                        // Calculate precise character range for the entire link
-                        let match_len = full_match.end() - full_match.start();
-                        let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, full_match.start(), match_len);
+                // Check if the fragment exists in headings
+                if !headings.contains(&fragment.to_lowercase()) {
+                    // Calculate precise character range for the entire link
+                    let match_len = full_match.end() - full_match.start();
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_match_range(line_num + 1, line, full_match.start(), match_len);
 
-                        warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: format!(
-                "Link fragment '#{
-            }' does not exist in document headings.",
-                                fragment
-                            ),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    }
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: format!(
+                            "Link fragment '#{}' does not exist in document headings.",
+                            fragment
+                        ),
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
                 }
             }
         }

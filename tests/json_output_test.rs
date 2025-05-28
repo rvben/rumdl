@@ -13,7 +13,7 @@ fn test_cli_output_json_is_valid() {
     // Run rumdl with --output json
     let output = Command::cargo_bin("rumdl")
         .unwrap()
-        .args(&["check", md_path.to_str().unwrap(), "--output", "json"])
+        .args(["check", md_path.to_str().unwrap(), "--output", "json"])
         .output()
         .unwrap();
 
@@ -25,7 +25,7 @@ fn test_cli_output_json_is_valid() {
 
     // Optionally: check that it's an array and has expected fields
     assert!(parsed.is_array());
-    if let Some(first) = parsed.as_array().and_then(|arr| arr.get(0)) {
+    if let Some(first) = parsed.as_array().and_then(|arr| arr.first()) {
         assert!(first.get("rule_name").is_some());
         assert!(first.get("line").is_some());
         assert!(first.get("column").is_some());

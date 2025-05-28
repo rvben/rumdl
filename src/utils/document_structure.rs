@@ -256,14 +256,25 @@ impl DocumentStructure {
         let has_html_blocks = CONTAINS_HTML_BLOCK.is_match(content);
         let has_backticks = content.contains('`');
         let has_brackets = content.contains('[');
-        let has_headings = CONTAINS_ATX_HEADING.is_match(content) || CONTAINS_SETEXT_UNDERLINE.is_match(content);
+        let has_headings =
+            CONTAINS_ATX_HEADING.is_match(content) || CONTAINS_SETEXT_UNDERLINE.is_match(content);
         // More comprehensive list detection to handle edge cases
-        let has_list_markers = CONTAINS_LIST_MARKERS.is_match(content) ||
-                              content.contains("- ") || content.contains("* ") || content.contains("+ ") ||
-                              content.contains("1. ") || content.contains("2. ") || content.contains("3. ") ||
-                              content.contains("4. ") || content.contains("5. ") || content.contains("6. ") ||
-                              content.contains("7. ") || content.contains("8. ") || content.contains("9. ") ||
-                              content.contains("10. ") || content.contains("11. ") || content.contains("12. ");
+        let has_list_markers = CONTAINS_LIST_MARKERS.is_match(content)
+            || content.contains("- ")
+            || content.contains("* ")
+            || content.contains("+ ")
+            || content.contains("1. ")
+            || content.contains("2. ")
+            || content.contains("3. ")
+            || content.contains("4. ")
+            || content.contains("5. ")
+            || content.contains("6. ")
+            || content.contains("7. ")
+            || content.contains("8. ")
+            || content.contains("9. ")
+            || content.contains("10. ")
+            || content.contains("11. ")
+            || content.contains("12. ");
 
         // OPTIMIZATION 4: Detect blockquotes only if needed
         if has_blockquote_markers {
@@ -296,7 +307,8 @@ impl DocumentStructure {
         }
 
         // Check for URLs only if needed
-        if content.contains("http://") || content.contains("https://") || content.contains("ftp://") {
+        if content.contains("http://") || content.contains("https://") || content.contains("ftp://")
+        {
             self.has_urls = true;
         }
 
@@ -486,7 +498,11 @@ impl DocumentStructure {
                     let trimmed = line.trim_start();
                     if trimmed.starts_with('<') && trimmed.len() > 1 {
                         let second_char = trimmed.chars().nth(1).unwrap();
-                        if second_char.is_ascii_alphabetic() || (second_char == '/' && trimmed.len() > 2 && trimmed.chars().nth(2).unwrap().is_ascii_alphabetic()) {
+                        if second_char.is_ascii_alphabetic()
+                            || (second_char == '/'
+                                && trimmed.len() > 2
+                                && trimmed.chars().nth(2).unwrap().is_ascii_alphabetic())
+                        {
                             // This looks like an HTML tag, don't treat as code block
                             // Skip this line and continue
                         } else {
@@ -501,7 +517,15 @@ impl DocumentStructure {
                                     let next_trimmed = lines[end_line + 1].trim_start();
                                     if next_trimmed.starts_with('<') && next_trimmed.len() > 1 {
                                         let next_second_char = next_trimmed.chars().nth(1).unwrap();
-                                        if next_second_char.is_ascii_alphabetic() || (next_second_char == '/' && next_trimmed.len() > 2 && next_trimmed.chars().nth(2).unwrap().is_ascii_alphabetic()) {
+                                        if next_second_char.is_ascii_alphabetic()
+                                            || (next_second_char == '/'
+                                                && next_trimmed.len() > 2
+                                                && next_trimmed
+                                                    .chars()
+                                                    .nth(2)
+                                                    .unwrap()
+                                                    .is_ascii_alphabetic())
+                                        {
                                             // Next line is also HTML, break the code block here
                                             break;
                                         }
@@ -1132,14 +1156,70 @@ impl DocumentStructure {
 
         // List of HTML block elements (based on CommonMark and markdownlint)
         const BLOCK_ELEMENTS: &[&str] = &[
-            "address", "article", "aside", "base", "basefont", "blockquote", "body",
-            "caption", "center", "col", "colgroup", "dd", "details", "dialog", "dir",
-            "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
-            "frame", "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
-            "hr", "html", "iframe", "legend", "li", "link", "main", "menu", "menuitem",
-            "nav", "noframes", "ol", "optgroup", "option", "p", "param", "section",
-            "source", "summary", "table", "tbody", "td", "tfoot", "th", "thead",
-            "title", "tr", "track", "ul", "img", "picture"
+            "address",
+            "article",
+            "aside",
+            "base",
+            "basefont",
+            "blockquote",
+            "body",
+            "caption",
+            "center",
+            "col",
+            "colgroup",
+            "dd",
+            "details",
+            "dialog",
+            "dir",
+            "div",
+            "dl",
+            "dt",
+            "fieldset",
+            "figcaption",
+            "figure",
+            "footer",
+            "form",
+            "frame",
+            "frameset",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "head",
+            "header",
+            "hr",
+            "html",
+            "iframe",
+            "legend",
+            "li",
+            "link",
+            "main",
+            "menu",
+            "menuitem",
+            "nav",
+            "noframes",
+            "ol",
+            "optgroup",
+            "option",
+            "p",
+            "param",
+            "section",
+            "source",
+            "summary",
+            "table",
+            "tbody",
+            "td",
+            "tfoot",
+            "th",
+            "thead",
+            "title",
+            "tr",
+            "track",
+            "ul",
+            "img",
+            "picture",
         ];
 
         BLOCK_ELEMENTS.contains(&tag_name.to_ascii_lowercase().as_str())
@@ -1153,8 +1233,7 @@ impl DocumentStructure {
         let tag_name = self.extract_tag_name(start_trimmed);
 
         // Look for the closing tag or blank line
-        for i in (start_line + 1)..lines.len() {
-            let line = lines[i];
+        for (i, line) in lines.iter().enumerate().skip(start_line + 1) {
             let trimmed = line.trim();
 
             // HTML block ends on blank line

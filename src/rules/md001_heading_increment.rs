@@ -1,7 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingUtils;
 use crate::utils::document_structure::DocumentStructure;
-use crate::utils::range_utils::{LineIndex, calculate_heading_range};
+use crate::utils::range_utils::{calculate_heading_range, LineIndex};
 use crate::HeadingStyle;
 
 /// Rule MD001: Heading levels should only increment by one level at a time
@@ -153,16 +153,14 @@ impl Rule for MD001HeadingIncrement {
                 } else {
                     ""
                 };
-                let (start_line, start_col, end_line, end_col) = calculate_heading_range(
-                    line_num,
-                    line_content
-                );
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_heading_range(line_num, line_content);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: start_line,
                     column: start_col,
-                    end_line: end_line,
+                    end_line,
                     end_column: end_col,
                     message: format!("Heading level should be {} for this level", prev_level + 1),
                     severity: Severity::Warning,
@@ -210,17 +208,16 @@ impl Rule for MD001HeadingIncrement {
                     HeadingStyle::Atx
                 };
 
-                let heading_text: String;
-                if is_setext && start + 1 < lines.len() {
+                let heading_text: String = if is_setext && start + 1 < lines.len() {
                     let joined = lines[start..end].join(" ");
-                    heading_text = joined.trim().to_string();
+                    joined.trim().to_string()
                 } else {
-                    heading_text = lines[start]
+                    lines[start]
                         .trim_start()
                         .trim_start_matches('#')
                         .trim()
-                        .to_string();
-                }
+                        .to_string()
+                };
 
                 let mut fixed_level = level;
                 if prev_level > 0 && level > prev_level + 1 {

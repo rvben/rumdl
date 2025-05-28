@@ -1,5 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_trailing_range};
+use crate::utils::range_utils::{calculate_trailing_range, LineIndex};
 use crate::utils::regex_cache::get_cached_regex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -98,7 +98,7 @@ impl Rule for MD009TrailingSpaces {
                         rule_name: Some(self.name()),
                         line: start_line,
                         column: start_col,
-                        end_line: end_line,
+                        end_line,
                         end_column: end_col,
                         message: "Empty line should not have trailing spaces".to_string(),
                         severity: Severity::Warning,
@@ -132,7 +132,7 @@ impl Rule for MD009TrailingSpaces {
                     rule_name: Some(self.name()),
                     line: start_line,
                     column: start_col,
-                    end_line: end_line,
+                    end_line,
                     end_column: end_col,
                     message: "Empty blockquote line should have a space after >".to_string(),
                     severity: Severity::Warning,
@@ -153,7 +153,7 @@ impl Rule for MD009TrailingSpaces {
                 rule_name: Some(self.name()),
                 line: start_line,
                 column: start_col,
-                end_line: end_line,
+                end_line,
                 end_column: end_col,
                 message: if trailing_spaces == 1 {
                     "Trailing space found".to_string()
@@ -264,8 +264,8 @@ impl Rule for MD009TrailingSpaces {
         Self: Sized,
     {
         // get_rule_config_value now automatically tries both underscore and kebab-case variants
-        let br_spaces = crate::config::get_rule_config_value::<u32>(config, "MD009", "br_spaces")
-            .unwrap_or(2);
+        let br_spaces =
+            crate::config::get_rule_config_value::<u32>(config, "MD009", "br_spaces").unwrap_or(2);
 
         let strict = crate::config::get_rule_config_value::<bool>(config, "MD009", "strict")
             .unwrap_or(false);

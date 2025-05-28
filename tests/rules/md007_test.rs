@@ -95,7 +95,12 @@ fn test_blockquoted_list_invalid_indent() {
     let content = "> * Item 1\n>    * Item 2\n>       * Item 3";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2, "Expected 2 warnings for invalid blockquoted list indentation, got {:?}", result);
+    assert_eq!(
+        result.len(),
+        2,
+        "Expected 2 warnings for invalid blockquoted list indentation, got {:?}",
+        result
+    );
     assert_eq!(result[0].line, 2);
     assert_eq!(result[1].line, 3);
 }
@@ -127,9 +132,9 @@ fn test_blockquote_list_with_code_block() {
 }
 
 mod parity_with_markdownlint {
-    use rumdl::rules::MD007ULIndent;
     use rumdl::lint_context::LintContext;
     use rumdl::rule::Rule;
+    use rumdl::rules::MD007ULIndent;
 
     #[test]
     fn parity_flat_list_default_indent() {
@@ -247,7 +252,10 @@ mod parity_with_markdownlint {
         let ctx = LintContext::new(input);
         let rule = MD007ULIndent::default();
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, expected, "Nested items should maintain proper indentation even after blank lines");
+        assert_eq!(
+            fixed, expected,
+            "Nested items should maintain proper indentation even after blank lines"
+        );
     }
 
     #[test]

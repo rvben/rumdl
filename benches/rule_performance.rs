@@ -1,8 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use rumdl::rule::Rule;
 use rumdl::rules::{
-    MD013LineLength, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD044ProperNames, MD051LinkFragments,
-    MD053LinkImageReferenceDefinitions,
+    MD013LineLength, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD044ProperNames,
+    MD051LinkFragments, MD053LinkImageReferenceDefinitions,
 };
 
 /// Benchmark MD013 rule on a large content with long lines

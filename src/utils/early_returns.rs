@@ -72,7 +72,6 @@ pub fn should_skip_blockquote_rule(content: &str) -> bool {
 
 /// Early return utilities for performance optimization
 /// These functions provide fast content analysis to skip expensive processing
-
 /// Check if content has any URLs (http, https, ftp)
 #[inline]
 pub fn has_urls(content: &str) -> bool {
@@ -90,7 +89,9 @@ pub fn has_headings(content: &str) -> bool {
 pub fn has_setext_headings(content: &str) -> bool {
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed.len() > 1 && (trimmed.chars().all(|c| c == '=') || trimmed.chars().all(|c| c == '-')) {
+        if trimmed.len() > 1
+            && (trimmed.chars().all(|c| c == '=') || trimmed.chars().all(|c| c == '-'))
+        {
             return true;
         }
     }
@@ -100,7 +101,10 @@ pub fn has_setext_headings(content: &str) -> bool {
 /// Check if content has any list markers
 #[inline]
 pub fn has_lists(content: &str) -> bool {
-    content.contains("* ") || content.contains("- ") || content.contains("+ ") || has_ordered_lists(content)
+    content.contains("* ")
+        || content.contains("- ")
+        || content.contains("+ ")
+        || has_ordered_lists(content)
 }
 
 /// Check if content has ordered lists
@@ -219,12 +223,13 @@ impl ContentAnalysis {
             let trimmed_start = line.trim_start();
 
             // Headings
-            if !analysis.has_headings {
-                if trimmed.starts_with('#') {
-                    analysis.has_headings = true;
-                } else if trimmed.len() > 1 && (trimmed.chars().all(|c| c == '=') || trimmed.chars().all(|c| c == '-')) {
-                    analysis.has_headings = true;
-                }
+            if !analysis.has_headings
+                && (trimmed.starts_with('#')
+                    || (trimmed.len() > 1
+                        && (trimmed.chars().all(|c| c == '=')
+                            || trimmed.chars().all(|c| c == '-'))))
+            {
+                analysis.has_headings = true;
             }
 
             // Lists
@@ -239,7 +244,10 @@ impl ContentAnalysis {
             }
 
             // Links and images
-            if !analysis.has_links && line.contains('[') && (line.contains("](") || line.contains("]:")) {
+            if !analysis.has_links
+                && line.contains('[')
+                && (line.contains("](") || line.contains("]:"))
+            {
                 analysis.has_links = true;
             }
 

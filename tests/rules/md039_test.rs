@@ -89,9 +89,9 @@ fn test_link_with_punctuation() {
 }
 
 mod parity_with_markdownlint {
-    use rumdl::rules::MD039NoSpaceInLinks;
     use rumdl::lint_context::LintContext;
     use rumdl::rule::Rule;
+    use rumdl::rules::MD039NoSpaceInLinks;
 
     #[test]
     fn parity_leading_trailing_space() {

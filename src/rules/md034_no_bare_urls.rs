@@ -1,15 +1,18 @@
 /// Rule MD034: No bare URLs
 ///
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity, MarkdownAst, AstExtensions, MaybeAst};
+use crate::rule::{
+    AstExtensions, Fix, LintError, LintResult, LintWarning, MarkdownAst, MaybeAst, Rule,
+    RuleCategory, Severity,
+};
 use crate::utils::early_returns;
 use crate::utils::range_utils::calculate_url_range;
 
+use crate::lint_context::LintContext;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
-use regex::Regex;
-use crate::lint_context::LintContext;
 use markdown::mdast::Node;
+use regex::Regex;
 
 lazy_static! {
     // Simple pattern to quickly check if a line might contain a URL or email
@@ -191,7 +194,9 @@ impl MD034NoBareUrls {
                 continue;
             }
             // --- NEW: Skip if URL is within any excluded range (link/image dest) ---
-            let in_any_range = merged.iter().any(|(start, end)| url_start >= *start && url_end <= *end);
+            let in_any_range = merged
+                .iter()
+                .any(|(start, end)| url_start >= *start && url_end <= *end);
             if in_any_range {
                 continue;
             }
@@ -236,7 +241,9 @@ impl MD034NoBareUrls {
                 continue;
             }
             // Skip if email is within any excluded range (link/image dest)
-            let in_any_range = merged.iter().any(|(start, end)| email_start >= *start && email_end <= *end);
+            let in_any_range = merged
+                .iter()
+                .any(|(start, end)| email_start >= *start && email_end <= *end);
             if in_any_range {
                 continue;
             }
@@ -248,7 +255,10 @@ impl MD034NoBareUrls {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!("Bare email address found: {}", &line[email_start..email_end]),
+                message: format!(
+                    "Bare email address found: {}",
+                    &line[email_start..email_end]
+                ),
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: email_start..email_end,
@@ -274,8 +284,13 @@ impl MD034NoBareUrls {
 
         let mut warnings = Vec::new();
         for (i, line) in content.lines().enumerate() {
-            // Early return: skip empty lines
+            // Fast path: Skip empty lines
             if line.trim().is_empty() {
+                continue;
+            }
+
+            // Fast path: Skip lines without potential URLs or emails
+            if !line.contains("http") && !line.contains("ftp") && !line.contains('@') {
                 continue;
             }
 
@@ -284,7 +299,7 @@ impl MD034NoBareUrls {
                 continue;
             }
 
-            // Skip reference link definitions (moved here for efficiency)
+            // Fast path: Skip reference link definitions
             if REFERENCE_DEF_RE.is_match(line) {
                 continue;
             }
@@ -299,7 +314,7 @@ impl MD034NoBareUrls {
         &self,
         node: &Node,
         parent_is_link_or_image: bool,
-        content: &str,
+        _content: &str,
         warnings: &mut Vec<LintWarning>,
         ctx: &LintContext,
     ) {
@@ -344,12 +359,12 @@ impl MD034NoBareUrls {
                         let (start_line, start_col, end_line, end_col) =
                             (line, column, line, column + url_text.chars().count());
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                message: format!("Bare URL found: {}", url_text),
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: format!("Bare URL found: {}", url_text),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
@@ -384,12 +399,12 @@ impl MD034NoBareUrls {
                         let (start_line, start_col, end_line, end_col) =
                             (line, column, line, column + email_text.chars().count());
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                message: format!("Bare email address found: {}", email_text),
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: format!("Bare email address found: {}", email_text),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + email_text.len()),
@@ -401,7 +416,7 @@ impl MD034NoBareUrls {
             }
             Link(link) => {
                 for child in &link.children {
-                    self.find_bare_urls_in_ast(child, true, content, warnings, ctx);
+                    self.find_bare_urls_in_ast(child, true, _content, warnings, ctx);
                 }
             }
             Image(image) => {
@@ -442,12 +457,12 @@ impl MD034NoBareUrls {
                         let (start_line, start_col, end_line, end_col) =
                             (line, column, line, column + url_text.chars().count());
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                message: format!("Bare URL found: {}", url_text),
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: format!("Bare URL found: {}", url_text),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
@@ -463,7 +478,7 @@ impl MD034NoBareUrls {
             _ => {
                 if let Some(children) = node.children() {
                     for child in children {
-                        self.find_bare_urls_in_ast(child, false, content, warnings, ctx);
+                        self.find_bare_urls_in_ast(child, false, _content, warnings, ctx);
                     }
                 }
             }
@@ -498,7 +513,11 @@ impl Rule for MD034NoBareUrls {
         }
 
         // Fast path: Early return if no potential URLs or emails
-        if !content.contains("http://") && !content.contains("https://") && !content.contains("ftp://") && !content.contains('@') {
+        if !content.contains("http://")
+            && !content.contains("https://")
+            && !content.contains("ftp://")
+            && !content.contains('@')
+        {
             return Ok(Vec::new());
         }
 
@@ -543,7 +562,8 @@ impl Rule for MD034NoBareUrls {
 
         // Sort warnings by byte offset in reverse order (rightmost first) to avoid offset issues
         let mut sorted_warnings = warnings.clone();
-        sorted_warnings.sort_by_key(|w| std::cmp::Reverse(w.fix.as_ref().map(|f| f.range.start).unwrap_or(0)));
+        sorted_warnings
+            .sort_by_key(|w| std::cmp::Reverse(w.fix.as_ref().map(|f| f.range.start).unwrap_or(0)));
 
         let mut result = content.to_string();
         for warning in sorted_warnings {
@@ -598,7 +618,11 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD034NoBa
     ) -> bool {
         // This rule is only relevant if there might be URLs or emails in the content
         let content = ctx.content;
-        !content.is_empty() && (content.contains("http://") || content.contains("https://") || content.contains("ftp://") || content.contains('@'))
+        !content.is_empty()
+            && (content.contains("http://")
+                || content.contains("https://")
+                || content.contains("ftp://")
+                || content.contains('@'))
     }
 }
 
@@ -614,7 +638,6 @@ impl AstExtensions for MD034NoBareUrls {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
-
 
     #[test]
     fn test_url_quick_check() {
@@ -639,7 +662,10 @@ mod tests {
         if !result.is_empty() {
             log::debug!("MD034 warnings: {:#?}", result);
         }
-        assert!(result.is_empty(), "Multiple badges and links on one line should not be flagged as bare URLs");
+        assert!(
+            result.is_empty(),
+            "Multiple badges and links on one line should not be flagged as bare URLs"
+        );
     }
 
     #[test]
@@ -662,35 +688,52 @@ mod tests {
 
         // Add content with bare URLs (should be detected)
         for i in 0..250 {
-            content.push_str(&format!("Line {} with bare URL https://example{}.com/path\n", i, i));
+            content.push_str(&format!(
+                "Line {} with bare URL https://example{}.com/path\n",
+                i, i
+            ));
         }
 
         // Add content with proper markdown links (should not be detected)
         for i in 0..250 {
-            content.push_str(&format!("Line {} with [proper link](https://example{}.com/path)\n", i + 250, i));
+            content.push_str(&format!(
+                "Line {} with [proper link](https://example{}.com/path)\n",
+                i + 250,
+                i
+            ));
         }
 
         // Add content with no URLs (should be fast)
         for i in 0..500 {
-            content.push_str(&format!("Line {} with no URLs, just regular text content\n", i + 500));
+            content.push_str(&format!(
+                "Line {} with no URLs, just regular text content\n",
+                i + 500
+            ));
         }
 
         // Add content with emails
         for i in 0..100 {
-            content.push_str(&format!("Contact user{}@example{}.com for more info\n", i, i));
+            content.push_str(&format!(
+                "Contact user{}@example{}.com for more info\n",
+                i, i
+            ));
         }
 
-        println!("MD034 Performance Test - Content: {} bytes, {} lines", content.len(), content.lines().count());
+        println!(
+            "MD034 Performance Test - Content: {} bytes, {} lines",
+            content.len(),
+            content.lines().count()
+        );
 
-        let rule = MD034NoBareUrls::default();
+        let rule = MD034NoBareUrls;
         let ctx = LintContext::new(&content);
 
         // Warm up
         let _ = rule.check(&ctx).unwrap();
 
-        // Measure check performance (multiple runs for accuracy)
+        // Measure check performance (more runs for accuracy)
         let mut total_duration = std::time::Duration::ZERO;
-        let runs = 5;
+        let runs = 10;
         let mut warnings_count = 0;
 
         for _ in 0..runs {
@@ -702,14 +745,33 @@ mod tests {
 
         let avg_check_duration = total_duration / runs;
 
-        println!("MD034 Baseline Performance:");
-        println!("- Average check time: {:?} ({:.2} ms)", avg_check_duration, avg_check_duration.as_secs_f64() * 1000.0);
+        println!("MD034 Optimized Performance:");
+        println!(
+            "- Average check time: {:?} ({:.2} ms)",
+            avg_check_duration,
+            avg_check_duration.as_secs_f64() * 1000.0
+        );
         println!("- Found {} warnings", warnings_count);
-        println!("- Lines per second: {:.0}", content.lines().count() as f64 / avg_check_duration.as_secs_f64());
+        println!(
+            "- Lines per second: {:.0}",
+            content.lines().count() as f64 / avg_check_duration.as_secs_f64()
+        );
+        println!(
+            "- Microseconds per line: {:.2}",
+            avg_check_duration.as_micros() as f64 / content.lines().count() as f64
+        );
 
         // Performance assertion - should complete reasonably fast
-        assert!(avg_check_duration.as_millis() < 100,
-                "MD034 check should complete in under 100ms, took {}ms",
-                avg_check_duration.as_millis());
+        assert!(
+            avg_check_duration.as_millis() < 100,
+            "MD034 check should complete in under 100ms, took {}ms",
+            avg_check_duration.as_millis()
+        );
+
+        // Verify we're finding the expected number of warnings
+        assert_eq!(
+            warnings_count, 350,
+            "Should find 250 URLs + 100 emails = 350 warnings"
+        );
     }
 }

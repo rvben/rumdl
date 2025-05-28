@@ -4,10 +4,7 @@
 //! mirror how editors like VS Code, Neovim, etc. would interact with rumdl.
 
 use rumdl::lsp::types::{warning_to_diagnostic, RumdlLspConfig};
-use rumdl::rule::LintWarning;
 use std::time::Duration;
-use tokio::time::timeout;
-use tower_lsp::lsp_types::*;
 
 /// Test the core LSP workflow without full server setup
 #[tokio::test]
@@ -44,13 +41,17 @@ Here's some `inline code` and a [link](https://example.com).
     let warnings = rumdl::lint(content, &rules, false).unwrap();
 
     // Should find some issues in this content
-    assert!(!warnings.is_empty(), "Expected to find linting issues in test content");
+    assert!(
+        !warnings.is_empty(),
+        "Expected to find linting issues in test content"
+    );
 
     // Test converting warnings to LSP diagnostics
     for warning in &warnings {
         let diagnostic = warning_to_diagnostic(warning);
         assert!(!diagnostic.message.is_empty());
-        assert!(diagnostic.range.start.line < 100); // Reasonable line number
+        assert!(diagnostic.range.start.line < 100); // Reasonable upper bound
+        assert!(diagnostic.range.start.character < 1000); // Reasonable upper bound
     }
 }
 
@@ -118,7 +119,10 @@ async fn test_error_recovery() {
     let result = rumdl::lint(invalid_content, &rules, false);
 
     // Should not panic or fail catastrophically
-    assert!(result.is_ok(), "Linting should handle edge cases gracefully");
+    assert!(
+        result.is_ok(),
+        "Linting should handle edge cases gracefully"
+    );
 }
 
 /// Test performance with larger documents
@@ -148,12 +152,19 @@ async fn test_performance_with_large_document() {
     let warnings = rumdl::lint(&large_content, &rules, false).unwrap();
 
     let elapsed = start.elapsed();
-    println!("Processed large document ({} chars) in {:?} with {} warnings",
-             large_content.len(), elapsed, warnings.len());
+    println!(
+        "Processed large document ({} chars) in {:?} with {} warnings",
+        large_content.len(),
+        elapsed,
+        warnings.len()
+    );
 
     // Should complete reasonably quickly (within 2 seconds for this size)
-    assert!(elapsed < Duration::from_secs(2),
-            "Large document processing took too long: {:?}", elapsed);
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "Large document processing took too long: {:?}",
+        elapsed
+    );
 }
 
 /// Test rapid editing simulation
@@ -178,8 +189,11 @@ async fn test_rapid_editing_simulation() {
     println!("Rapid editing simulation completed in {:?}", elapsed);
 
     // Should handle rapid changes efficiently
-    assert!(elapsed < Duration::from_secs(1),
-            "Rapid editing simulation took too long: {:?}", elapsed);
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "Rapid editing simulation took too long: {:?}",
+        elapsed
+    );
 }
 
 /// Test workspace-like scenarios
@@ -188,10 +202,22 @@ async fn test_workspace_scenarios() {
     // Simulate a workspace with different types of markdown files
     let workspace_files = vec![
         ("README.md", "# Project\n\nMain project documentation."),
-        ("docs/getting-started.md", "# Getting Started\n\n## Installation\n\nRun `npm install`."),
-        ("docs/api/endpoints.md", "# API Endpoints\n\n### GET /users\n\nReturns users."),
-        ("CONTRIBUTING.md", "# Contributing\n\n## Guidelines\n\n- Be nice\n- Write tests"),
-        ("CHANGELOG.md", "# Changelog\n\n## [1.0.0] - 2024-01-01\n\n### Added\n- Initial release"),
+        (
+            "docs/getting-started.md",
+            "# Getting Started\n\n## Installation\n\nRun `npm install`.",
+        ),
+        (
+            "docs/api/endpoints.md",
+            "# API Endpoints\n\n### GET /users\n\nReturns users.",
+        ),
+        (
+            "CONTRIBUTING.md",
+            "# Contributing\n\n## Guidelines\n\n- Be nice\n- Write tests",
+        ),
+        (
+            "CHANGELOG.md",
+            "# Changelog\n\n## [1.0.0] - 2024-01-01\n\n### Added\n- Initial release",
+        ),
     ];
 
     let rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
@@ -209,11 +235,17 @@ async fn test_workspace_scenarios() {
             assert!(diagnostic.source == Some("rumdl".to_string()));
         }
 
-        println!("File {} processed with {} warnings", filepath, warnings.len());
+        println!(
+            "File {} processed with {} warnings",
+            filepath,
+            warnings.len()
+        );
     }
 
-    println!("Workspace total: {} warnings across {} files",
-             total_warnings, file_count);
+    println!(
+        "Workspace total: {} warnings across {} files",
+        total_warnings, file_count
+    );
 }
 
 /// Test that diagnostic conversion preserves all necessary information
@@ -232,9 +264,9 @@ async fn test_diagnostic_conversion_completeness() {
         assert_eq!(diagnostic.source, Some("rumdl".to_string()));
 
         // Check that line/column mapping works correctly
-        assert!(diagnostic.range.start.line >= 0);
-        assert!(diagnostic.range.start.character >= 0);
         assert!(diagnostic.range.end.line >= diagnostic.range.start.line);
+        assert!(diagnostic.range.start.line < 1000); // Reasonable upper bound
+        assert!(diagnostic.range.start.character < 10000); // Reasonable upper bound
 
         // If warning has a rule name, diagnostic should have a code
         if warning.rule_name.is_some() {

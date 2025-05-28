@@ -285,7 +285,8 @@ fn test_mixed_urls_and_html() {
     assert_eq!(result.len(), 4); // <strong>, </strong>, <em>, </em>
 
     // Verify the flagged tags are the HTML ones
-    let flagged_content: Vec<String> = result.iter()
+    let flagged_content: Vec<String> = result
+        .iter()
         .map(|w| {
             let line_content = content.lines().nth(w.line - 1).unwrap();
             let start = w.column - 1;
@@ -316,12 +317,11 @@ fn test_edge_case_urls() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-        // Should flag <notaurl>, <https>, and <div> but not the real URL
+    // Should flag <notaurl>, <https>, and <div> but not the real URL
     assert_eq!(result.len(), 3);
 
-    let flagged_positions: Vec<(usize, usize)> = result.iter()
-        .map(|w| (w.line, w.column))
-        .collect();
+    let flagged_positions: Vec<(usize, usize)> =
+        result.iter().map(|w| (w.line, w.column)).collect();
 
     // <notaurl> should be flagged (line 1)
     assert!(flagged_positions.contains(&(1, 12)));

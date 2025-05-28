@@ -62,10 +62,7 @@ impl RumdlLanguageServer {
         // Run rumdl linting
         match crate::lint(text, &all_rules, false) {
             Ok(warnings) => {
-                let diagnostics = warnings
-                    .iter()
-                    .map(warning_to_diagnostic)
-                    .collect();
+                let diagnostics = warnings.iter().map(warning_to_diagnostic).collect();
                 Ok(diagnostics)
             }
             Err(e) => {
@@ -199,7 +196,10 @@ impl LanguageServer for RumdlLanguageServer {
         let text = params.text_document.text;
 
         // Store document
-        self.documents.write().await.insert(uri.clone(), text.clone());
+        self.documents
+            .write()
+            .await
+            .insert(uri.clone(), text.clone());
 
         // Update diagnostics
         self.update_diagnostics(uri, text).await;
@@ -213,7 +213,10 @@ impl LanguageServer for RumdlLanguageServer {
             let text = change.text;
 
             // Update stored document
-            self.documents.write().await.insert(uri.clone(), text.clone());
+            self.documents
+                .write()
+                .await
+                .insert(uri.clone(), text.clone());
 
             // Update diagnostics
             self.update_diagnostics(uri, text).await;
@@ -233,13 +236,17 @@ impl LanguageServer for RumdlLanguageServer {
 
         // Re-lint the document
         if let Some(text) = self.documents.read().await.get(&params.text_document.uri) {
-            self.update_diagnostics(params.text_document.uri, text.clone()).await;
+            self.update_diagnostics(params.text_document.uri, text.clone())
+                .await;
         }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         // Remove document from storage
-        self.documents.write().await.remove(&params.text_document.uri);
+        self.documents
+            .write()
+            .await
+            .remove(&params.text_document.uri);
 
         // Clear diagnostics
         self.client
@@ -247,7 +254,10 @@ impl LanguageServer for RumdlLanguageServer {
             .await;
     }
 
-    async fn code_action(&self, params: CodeActionParams) -> JsonRpcResult<Option<CodeActionResponse>> {
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> JsonRpcResult<Option<CodeActionResponse>> {
         let uri = params.text_document.uri;
         let range = params.range;
 

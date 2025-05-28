@@ -24,22 +24,22 @@ use std::time::Instant;
 /// Content characteristics for efficient rule filtering
 #[derive(Debug, Default)]
 struct ContentCharacteristics {
-    has_headings: bool,      // # or setext headings
-    has_lists: bool,         // *, -, +, 1. etc
-    has_links: bool,         // [text](url) or [text][ref]
-    has_code: bool,          // ``` or ~~~ or indented code
-    has_emphasis: bool,      // * or _ for emphasis
-    has_html: bool,          // < > tags
-    has_tables: bool,        // | pipes
-    has_blockquotes: bool,   // > markers
-    has_images: bool,        // ![alt](url)
-    line_count: usize,
+    has_headings: bool,    // # or setext headings
+    has_lists: bool,       // *, -, +, 1. etc
+    has_links: bool,       // [text](url) or [text][ref]
+    has_code: bool,        // ``` or ~~~ or indented code
+    has_emphasis: bool,    // * or _ for emphasis
+    has_html: bool,        // < > tags
+    has_tables: bool,      // | pipes
+    has_blockquotes: bool, // > markers
+    has_images: bool,      // ![alt](url)
 }
 
 impl ContentCharacteristics {
     fn analyze(content: &str) -> Self {
-        let mut chars = Self::default();
-        chars.line_count = content.lines().count();
+        let mut chars = Self {
+            ..Default::default()
+        };
 
         // Quick single-pass analysis
         let mut has_atx_heading = false;
@@ -52,15 +52,22 @@ impl ContentCharacteristics {
             if !has_atx_heading && trimmed.starts_with('#') {
                 has_atx_heading = true;
             }
-            if !has_setext_heading && (trimmed.chars().all(|c| c == '=' || c == '-') && trimmed.len() > 1) {
+            if !has_setext_heading
+                && (trimmed.chars().all(|c| c == '=' || c == '-') && trimmed.len() > 1)
+            {
                 has_setext_heading = true;
             }
 
             // Quick character-based detection (more efficient than regex)
-            if !chars.has_lists && (line.contains("* ") || line.contains("- ") || line.contains("+ ")) {
+            if !chars.has_lists
+                && (line.contains("* ") || line.contains("- ") || line.contains("+ "))
+            {
                 chars.has_lists = true;
             }
-            if !chars.has_lists && line.chars().next().map_or(false, |c| c.is_ascii_digit()) && line.contains(". ") {
+            if !chars.has_lists
+                && line.chars().next().map_or(false, |c| c.is_ascii_digit())
+                && line.contains(". ")
+            {
                 chars.has_lists = true;
             }
             if !chars.has_links && line.contains('[') {
@@ -137,7 +144,10 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
     let structure = DocumentStructure::new(content);
 
     // Parse AST once for rules that can benefit from it
-    let ast_rules_count = applicable_rules.iter().filter(|rule| rule.uses_ast()).count();
+    let ast_rules_count = applicable_rules
+        .iter()
+        .filter(|rule| rule.uses_ast())
+        .count();
     let ast = if ast_rules_count > 0 {
         Some(crate::utils::ast_utils::get_cached_ast(content))
     } else {
@@ -151,11 +161,18 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
         let _rule_start = Instant::now();
 
         // Try optimized paths in order of preference
-        let result = if rule.uses_ast() && ast.is_some() {
-            // 1. AST-based path
-            rule.as_maybe_ast()
-                .and_then(|ext| ext.check_with_ast_opt(&lint_ctx, ast.as_ref().unwrap()))
-                .unwrap_or_else(|| rule.check_with_ast(&lint_ctx, ast.as_ref().unwrap()))
+        let result = if rule.uses_ast() {
+            if let Some(ref ast_ref) = ast {
+                // 1. AST-based path
+                rule.as_maybe_ast()
+                    .and_then(|ext| ext.check_with_ast_opt(&lint_ctx, ast_ref))
+                    .unwrap_or_else(|| rule.check_with_ast(&lint_ctx, ast_ref))
+            } else {
+                // Fallback to regular check if no AST
+                rule.as_maybe_document_structure()
+                    .and_then(|ext| ext.check_with_structure_opt(&lint_ctx, &structure))
+                    .unwrap_or_else(|| rule.check(&lint_ctx))
+            }
         } else {
             // 2. Document structure path
             rule.as_maybe_document_structure()
@@ -197,7 +214,11 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
     if _verbose {
         let skipped_rules = _total_rules - _applicable_count;
         if skipped_rules > 0 {
-            log::debug!("Skipped {} of {} rules based on content analysis", skipped_rules, _total_rules);
+            log::debug!(
+                "Skipped {} of {} rules based on content analysis",
+                skipped_rules,
+                _total_rules
+            );
         }
         if ast.is_some() {
             log::debug!("Used shared AST for {} rules", ast_rules_count);
@@ -262,11 +283,16 @@ pub fn get_cache_performance_report() -> String {
             } else {
                 pattern.to_string()
             };
-            report.push_str(&format!("    {} ({}x): {}\n", count, pattern.len().min(50), truncated_pattern));
+            report.push_str(&format!(
+                "    {} ({}x): {}\n",
+                count,
+                pattern.len().min(50),
+                truncated_pattern
+            ));
         }
     }
 
-    report.push_str("\n");
+    report.push('\n');
 
     // AST cache statistics
     report.push_str("AST Cache:\n");
@@ -278,7 +304,8 @@ pub fn get_cache_performance_report() -> String {
         report.push_str(&format!("  Total usage: {}\n", total_usage));
 
         if total_usage > ast_stats.len() as u64 {
-            let cache_hit_rate = ((total_usage - ast_stats.len() as u64) as f64 / total_usage as f64) * 100.0;
+            let cache_hit_rate =
+                ((total_usage - ast_stats.len() as u64) as f64 / total_usage as f64) * 100.0;
             report.push_str(&format!("  Cache hit rate: {:.1}%\n", cache_hit_rate));
         }
     }

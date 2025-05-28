@@ -278,7 +278,11 @@ In Markdown tables, you can include or omit leading and trailing pipe characters
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Regular text mentioning pipe characters should not be flagged");
+    assert_eq!(
+        result.len(),
+        0,
+        "Regular text mentioning pipe characters should not be flagged"
+    );
 
     // Test 2: Bullet points with pipe characters should not be flagged
     let content = r#"
@@ -293,7 +297,11 @@ The `style` parameter can have the following values:
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Bullet points with pipe characters should not be flagged");
+    assert_eq!(
+        result.len(),
+        0,
+        "Bullet points with pipe characters should not be flagged"
+    );
 
     // Test 3: Inline code with pipe characters should not be flagged
     let content = r#"
@@ -304,7 +312,11 @@ Also backticks with pipes: ``| some | code |`` should be ignored.
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Inline code with pipe characters should not be flagged");
+    assert_eq!(
+        result.len(),
+        0,
+        "Inline code with pipe characters should not be flagged"
+    );
 
     // Test 4: Lines with pipes but no table structure should not be flagged
     let content = r#"
@@ -315,7 +327,11 @@ Another line | with | pipes | that | doesn't | form | a | table.
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Lines with pipes but no table structure should not be flagged");
+    assert_eq!(
+        result.len(),
+        0,
+        "Lines with pipes but no table structure should not be flagged"
+    );
 
     // Test 5: Single line with pipes (no delimiter row) should not be flagged
     let content = r#"
@@ -326,7 +342,11 @@ But there's no delimiter row, so it's not a table.
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Single line with pipes (no delimiter row) should not be flagged");
+    assert_eq!(
+        result.len(),
+        0,
+        "Single line with pipes (no delimiter row) should not be flagged"
+    );
 }
 
 #[test]
@@ -342,7 +362,11 @@ Cell 1   | Cell 2
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Actual tables with inconsistent styles should still be flagged");
+    assert_eq!(
+        result.len(),
+        1,
+        "Actual tables with inconsistent styles should still be flagged"
+    );
     assert_eq!(result[0].line, 4, "The inconsistent row should be flagged");
 }
 
@@ -360,7 +384,11 @@ fn test_table_detection_requires_delimiter_row() {
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Properly formatted table should not be flagged");
+    assert_eq!(
+        result.len(),
+        0,
+        "Properly formatted table should not be flagged"
+    );
 
     // Test that without delimiter row, it's not considered a table
     let content = r#"
@@ -371,7 +399,11 @@ fn test_table_detection_requires_delimiter_row() {
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Lines without delimiter row should not be considered a table");
+    assert_eq!(
+        result.len(),
+        0,
+        "Lines without delimiter row should not be considered a table"
+    );
 }
 
 #[test]
@@ -398,9 +430,19 @@ And more text with | pipes | that | aren't | tables.
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Only the actual table row should be flagged");
-    assert_eq!(result[0].line, 13, "The inconsistent table row should be flagged");
-    assert!(result[0].message.contains("Table pipe style"), "Should be a table pipe style warning");
+    assert_eq!(
+        result.len(),
+        1,
+        "Only the actual table row should be flagged"
+    );
+    assert_eq!(
+        result[0].line, 13,
+        "The inconsistent table row should be flagged"
+    );
+    assert!(
+        result[0].message.contains("Table pipe style"),
+        "Should be a table pipe style warning"
+    );
 }
 
 #[test]
@@ -423,7 +465,11 @@ This line has | some | pipes | but | isn't | a | table.
     let fixed = rule.fix(&ctx).unwrap();
 
     // The content should be unchanged since there are no actual tables
-    assert_eq!(content.trim(), fixed.trim(), "Non-table content should not be modified by fix");
+    assert_eq!(
+        content.trim(),
+        fixed.trim(),
+        "Non-table content should not be modified by fix"
+    );
 
     // Verify no warnings are generated
     let fixed_ctx = LintContext::new(&fixed);

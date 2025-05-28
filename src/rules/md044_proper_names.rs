@@ -8,8 +8,7 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-lazy_static! {
-}
+lazy_static! {}
 
 type WarningPosition = (usize, usize, String); // (line, column, found_name)
 
@@ -145,7 +144,8 @@ impl MD044ProperNames {
         let content_lower = content.to_lowercase();
         let has_potential_matches = self.names.iter().any(|name| {
             let name_lower = name.to_lowercase();
-            content_lower.contains(&name_lower) || content_lower.contains(&name_lower.replace('.', ""))
+            content_lower.contains(&name_lower)
+                || content_lower.contains(&name_lower.replace('.', ""))
         });
 
         if !has_potential_matches {
@@ -187,7 +187,8 @@ impl MD044ProperNames {
             let line_lower = line.to_lowercase();
             let has_line_matches = self.names.iter().any(|name| {
                 let name_lower = name.to_lowercase();
-                line_lower.contains(&name_lower) || line_lower.contains(&name_lower.replace('.', ""))
+                line_lower.contains(&name_lower)
+                    || line_lower.contains(&name_lower.replace('.', ""))
             });
 
             if !has_line_matches {
@@ -275,13 +276,13 @@ impl Rule for MD044ProperNames {
             .filter_map(|(line, column, found_name)| {
                 self.get_proper_name_for(&found_name)
                     .map(|proper_name| LintWarning {
-                rule_name: Some(self.name()),
-                line,
-                column,
-                end_line: line,
-                end_column: column + found_name.len(),
-                message: format!(
-                "Proper name '{
+                        rule_name: Some(self.name()),
+                        line,
+                        column,
+                        end_line: line,
+                        end_column: column + found_name.len(),
+                        message: format!(
+                            "Proper name '{
             }' should be '{}'",
                             found_name, proper_name
                         ),

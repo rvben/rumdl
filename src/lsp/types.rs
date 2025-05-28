@@ -54,7 +54,9 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
         Url::parse(&format!(
             "https://github.com/rvben/rumdl/blob/main/docs/{}.md",
             rule_name.to_lowercase()
-        )).ok().map(|href| CodeDescription { href })
+        ))
+        .ok()
+        .map(|href| CodeDescription { href })
     });
 
     Diagnostic {
@@ -63,7 +65,9 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
             end: end_position,
         },
         severity: Some(severity),
-        code: warning.rule_name.clone().map(|s| NumberOrString::String(s.to_string())),
+        code: warning
+            .rule_name
+            .map(|s| NumberOrString::String(s.to_string())),
         source: Some("rumdl".to_string()),
         message: warning.message.clone(),
         related_information: None,
@@ -74,10 +78,7 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
 }
 
 /// Create a code action from a rumdl warning with fix
-pub fn warning_to_code_action(
-    warning: &crate::rule::LintWarning,
-    uri: &Url,
-) -> Option<CodeAction> {
+pub fn warning_to_code_action(warning: &crate::rule::LintWarning, uri: &Url) -> Option<CodeAction> {
     if let Some(fix) = &warning.fix {
         let range = Range {
             start: Position {

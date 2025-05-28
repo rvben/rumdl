@@ -1,6 +1,6 @@
+use log::warn;
 use markdown::{mdast::Node, to_mdast, ParseOptions};
 use std::panic;
-use log::warn;
 
 pub struct LintContext<'a> {
     pub content: &'a str,
@@ -97,8 +97,10 @@ fn content_has_problematic_lists(content: &str) -> bool {
             let line2 = window[1].trim_start();
 
             // Check if both lines are list items with different markers
-            let is_list1 = line1.starts_with("* ") || line1.starts_with("+ ") || line1.starts_with("- ");
-            let is_list2 = line2.starts_with("* ") || line2.starts_with("+ ") || line2.starts_with("- ");
+            let is_list1 =
+                line1.starts_with("* ") || line1.starts_with("+ ") || line1.starts_with("- ");
+            let is_list2 =
+                line2.starts_with("* ") || line2.starts_with("+ ") || line2.starts_with("- ");
 
             if is_list1 && is_list2 {
                 let marker1 = line1.chars().next().unwrap_or(' ');

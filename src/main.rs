@@ -2,16 +2,16 @@ use clap::{Args, Parser, Subcommand};
 use colored::*;
 use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
+use memmap2::Mmap;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fs;
-use std::io::{self, Write, Read};
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process;
 use std::sync::Arc;
 use std::time::Instant;
-use memmap2::Mmap;
 
 use rumdl::config as rumdl_config;
 use rumdl::lint_context::LintContext;
@@ -66,14 +66,16 @@ struct Cli {
     config: Option<String>,
 
     /// Ignore all configuration files and use built-in defaults
-    #[arg(long, global = true, help = "Ignore all configuration files and use built-in defaults")]
+    #[arg(
+        long,
+        global = true,
+        help = "Ignore all configuration files and use built-in defaults"
+    )]
     no_config: bool,
 
     /// Fix issues automatically where possible
     #[arg(short, long, default_value = "false", hide = true)]
     _fix: bool,
-
-
 
     /// List all available rules
     #[arg(short, long, default_value = "false", hide = true)]
@@ -175,8 +177,6 @@ struct CheckArgs {
     #[arg(short, long, default_value = "false")]
     _fix: bool,
 
-
-
     /// List all available rules
     #[arg(short, long, default_value = "false")]
     list_rules: bool,
@@ -260,10 +260,10 @@ fn get_enabled_rules_from_checkargs(
 
     if let Some(enabled_cli) = &cli_enable_set {
         // Normalize CLI enable values
-        let enabled_cli_normalized: HashSet<String> = enabled_cli.iter()
-            .map(|s| normalize_key(s))
-            .collect();
-        let _all_rule_names: Vec<String> = all_rules.iter().map(|r| normalize_key(r.name())).collect();
+        let enabled_cli_normalized: HashSet<String> =
+            enabled_cli.iter().map(|s| normalize_key(s)).collect();
+        let _all_rule_names: Vec<String> =
+            all_rules.iter().map(|r| normalize_key(r.name())).collect();
         final_rules = all_rules
             .into_iter()
             .filter(|rule| enabled_cli_normalized.contains(&normalize_key(rule.name())))
@@ -955,14 +955,17 @@ build-backend = \"setuptools.build_meta\"
                 if let Some(ConfigSubcommand::Get { key }) = subcmd {
                     if let Some((section_part, field_part)) = key.split_once('.') {
                         // 1. Load the full SourcedConfig once
-                        let sourced =
-                            match rumdl_config::SourcedConfig::load_with_discovery(cli.config.as_deref(), None, cli.no_config) {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    eprintln!("{}: {}", "Config error".red().bold(), e);
-                                    std::process::exit(1);
-                                }
-                            };
+                        let sourced = match rumdl_config::SourcedConfig::load_with_discovery(
+                            cli.config.as_deref(),
+                            None,
+                            cli.no_config,
+                        ) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("{}: {}", "Config error".red().bold(), e);
+                                std::process::exit(1);
+                            }
+                        };
                         // 2. Convert to final Config once
                         let final_config: rumdl_config::Config = sourced.clone().into();
 
@@ -1102,7 +1105,11 @@ build-backend = \"setuptools.build_meta\"
                     let sourced_reg = if *defaults {
                         rumdl_config::SourcedConfig::default()
                     } else {
-                        match rumdl_config::SourcedConfig::load_with_discovery(cli.config.as_deref(), None, cli.no_config) {
+                        match rumdl_config::SourcedConfig::load_with_discovery(
+                            cli.config.as_deref(),
+                            None,
+                            cli.no_config,
+                        ) {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("{}: {}", "Config error".red().bold(), e);
@@ -1126,7 +1133,11 @@ build-backend = \"setuptools.build_meta\"
                         rumdl_config::SourcedConfig::default()
                     } else {
                         // Reload config if not defaults (necessary because we exited early in 'get' case)
-                        match rumdl_config::SourcedConfig::load_with_discovery(cli.config.as_deref(), None, cli.no_config) {
+                        match rumdl_config::SourcedConfig::load_with_discovery(
+                            cli.config.as_deref(),
+                            None,
+                            cli.no_config,
+                        ) {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("{}: {}", "Config error".red().bold(), e);
@@ -1155,7 +1166,11 @@ build-backend = \"setuptools.build_meta\"
                     }
                 }
             }
-            Some(Commands::Server { port, stdio, verbose }) => {
+            Some(Commands::Server {
+                port,
+                stdio,
+                verbose,
+            }) => {
                 // Setup logging for the LSP server
                 if *verbose {
                     env_logger::Builder::from_default_env()
@@ -1168,7 +1183,8 @@ build-backend = \"setuptools.build_meta\"
                 }
 
                 // Start the LSP server
-                let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+                let runtime =
+                    tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
 
                 runtime.block_on(async {
                     if let Some(port) = port {
@@ -1248,11 +1264,9 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs) {
     // Run all enabled rules on the content
     for rule in rules {
         match rule.check(&ctx) {
-            Ok(mut warnings) => {
+            Ok(warnings) => {
                 // Set file path to "<stdin>" for all warnings
-                for warning in &mut warnings {
-                    // The warnings already have the correct character ranges
-                }
+                // The warnings already have the correct character ranges
                 all_warnings.extend(warnings);
             }
             Err(e) => {
@@ -1270,7 +1284,10 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs) {
         for warning in all_warnings {
             let mut json_warning = serde_json::to_value(&warning).unwrap();
             if let Some(obj) = json_warning.as_object_mut() {
-                obj.insert("file".to_string(), serde_json::Value::String("<stdin>".to_string()));
+                obj.insert(
+                    "file".to_string(),
+                    serde_json::Value::String("<stdin>".to_string()),
+                );
             }
             json_warnings.push(json_warning);
         }
@@ -1289,7 +1306,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs) {
                         rumdl::rule::Severity::Warning => "warning".yellow(),
                     },
                     warning.message,
-                    warning.rule_name.as_deref().unwrap_or("unknown")
+                    warning.rule_name.unwrap_or("unknown")
                 );
             }
         }
@@ -1311,18 +1328,16 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs) {
 
 fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool) {
     // 1. Load sourced config (for provenance and validation)
-    let sourced = match rumdl_config::SourcedConfig::load_with_discovery(
-        global_config_path,
-        None,
-        no_config
-    ) {
-        Ok(sourced) => sourced,
-        Err(e) => {
-            // Syntax error or type mismatch: fail and exit
-            eprintln!("{}: {}", "Config error".red().bold(), e);
-            std::process::exit(1);
-        }
-    };
+    let sourced =
+        match rumdl_config::SourcedConfig::load_with_discovery(global_config_path, None, no_config)
+        {
+            Ok(sourced) => sourced,
+            Err(e) => {
+                // Syntax error or type mismatch: fail and exit
+                eprintln!("{}: {}", "Config error".red().bold(), e);
+                std::process::exit(1);
+            }
+        };
 
     // 2. Validate config (unknown keys/rules/options)
     let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
@@ -1388,7 +1403,14 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     // Choose processing strategy based on file count and fix mode
     let use_parallel = file_paths.len() > 1 && !args._fix; // Don't parallelize fixes due to file I/O conflicts
 
-    let (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed) = if use_parallel {
+    let (
+        has_issues,
+        files_with_issues,
+        total_issues,
+        total_issues_fixed,
+        total_fixable_issues,
+        total_files_processed,
+    ) = if use_parallel {
         // Parallel processing for multiple files without fixes
         let enabled_rules_arc = Arc::new(enabled_rules);
 
@@ -1424,7 +1446,14 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
             }
         }
 
-        (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed)
+        (
+            has_issues,
+            files_with_issues,
+            total_issues,
+            total_issues_fixed,
+            total_fixable_issues,
+            total_files_processed,
+        )
     } else {
         // Sequential processing for single files or when fixing
         let mut has_issues = false;
@@ -1454,7 +1483,14 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
             }
         }
 
-        (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed)
+        (
+            has_issues,
+            files_with_issues,
+            total_issues,
+            total_issues_fixed,
+            total_fixable_issues,
+            total_files_processed,
+        )
     };
 
     let duration = start_time.elapsed();

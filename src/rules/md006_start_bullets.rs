@@ -25,14 +25,14 @@ lazy_static! {
 }
 
 impl MD006StartBullets {
-    /// Checks if a line is a bullet list item and returns its indentation level
+    /// Check if a line is a bullet list item and return the indentation level
     fn is_bullet_list_item(line: &str) -> Option<usize> {
-        if let Some(captures) = BULLET_PATTERN.captures(line) {
-            if let Some(indent) = captures.get(1) {
-                return Some(indent.as_str().len());
-            }
+        if let Some(caps) = BULLET_PATTERN.captures(line) {
+            let indent = caps.get(1).unwrap().as_str().len();
+            Some(indent)
+        } else {
+            None
         }
-        None
     }
 
     /// Checks if a line is blank (empty or whitespace only)
@@ -40,8 +40,7 @@ impl MD006StartBullets {
         line.trim().is_empty()
     }
 
-    /// Returns the index and indentation of the closest previous bullet item
-    /// with indentation less than or equal to the current item's indentation.
+    /// Find the most relevant previous bullet item for nesting validation
     fn find_relevant_previous_bullet(lines: &[&str], line_idx: usize) -> Option<(usize, usize)> {
         let current_indent = match Self::is_bullet_list_item(lines[line_idx]) {
             Some(indent) => indent,
@@ -65,34 +64,6 @@ impl MD006StartBullets {
             }
         }
         None
-    }
-
-    /// Check if a list item is nested under a parent list item
-    fn is_nested_list_item(lines: &[&str], line_idx: usize) -> bool {
-        if let Some(current_indent) = Self::is_bullet_list_item(lines[line_idx]) {
-            // Look backwards for a parent list item with less indentation
-            for i in (0..line_idx).rev() {
-                let line = lines[i];
-
-                // Skip blank lines
-                if Self::is_blank_line(line) {
-                    continue;
-                }
-
-                // If we find a list item with less indentation, this is nested
-                if let Some(parent_indent) = Self::is_bullet_list_item(line) {
-                    if parent_indent < current_indent {
-                        return true;
-                    }
-                }
-
-                // If we hit non-list content, stop looking
-                if Self::is_bullet_list_item(line).is_none() {
-                    break;
-                }
-            }
-        }
-        false
     }
 }
 

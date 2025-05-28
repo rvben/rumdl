@@ -22,7 +22,7 @@ pub async fn start_server() -> Result<()> {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| RumdlLanguageServer::new(client));
+    let (service, socket) = LspService::new(RumdlLanguageServer::new);
 
     log::info!("Starting rumdl Language Server Protocol server");
 
@@ -38,7 +38,7 @@ pub async fn start_tcp_server(port: u16) -> Result<()> {
 
     loop {
         let (stream, _) = listener.accept().await?;
-        let (service, socket) = LspService::new(|client| RumdlLanguageServer::new(client));
+        let (service, socket) = LspService::new(RumdlLanguageServer::new);
 
         tokio::spawn(async move {
             let (read, write) = tokio::io::split(stream);

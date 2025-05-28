@@ -38,7 +38,6 @@ lazy_static! {
     static ref MULTI_LINE_EMPHASIS_END: Regex = Regex::new(r"^(.*?)(\*\*|\*|__|_)").unwrap();
 }
 
-
 // Enhanced inline code replacement to handle nested backticks
 fn replace_inline_code(line: &str) -> String {
     let mut result = line.to_string();
@@ -266,8 +265,8 @@ fn check_fancy_pattern(
         let fixed_text = format!("{}{}{}", marker, content, marker);
 
         let warning = LintWarning {
-                rule_name: Some(rule_name),
-                message: format!("Spaces inside emphasis markers: '{}'", match_text),
+            rule_name: Some(rule_name),
+            message: format!("Spaces inside emphasis markers: '{}'", match_text),
             line: line_num,
             column: start + 1, // +1 because columns are 1-indexed
             end_line: line_num,
@@ -532,8 +531,11 @@ impl MD037NoSpaceInEmphasis {
 
             let warning = LintWarning {
                 rule_name: Some(self.name()),
-                message: format!("Spaces inside emphasis markers: {:?
-            }", match_text),
+                message: format!(
+                    "Spaces inside emphasis markers: {:?
+            }",
+                    match_text
+                ),
                 line: line_num,
                 column: start_pos + 1, // +1 because columns are 1-indexed
                 end_line: line_num,
@@ -565,20 +567,29 @@ mod tests {
         let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert!(result.is_empty(), "No warnings expected for correct emphasis");
+        assert!(
+            result.is_empty(),
+            "No warnings expected for correct emphasis"
+        );
 
         // Test with actual spaces inside emphasis - use content that should warn
         let content = "This is * text with spaces * and more content";
         let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert!(!result.is_empty(), "Expected warnings for spaces in emphasis");
+        assert!(
+            !result.is_empty(),
+            "Expected warnings for spaces in emphasis"
+        );
 
         // Test with code blocks - emphasis in code should be ignored
         let content = "This is *correct* emphasis\n```\n* incorrect * in code block\n```\nOutside block with * spaces in emphasis *";
         let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert!(!result.is_empty(), "Expected warnings for spaces in emphasis outside code block");
+        assert!(
+            !result.is_empty(),
+            "Expected warnings for spaces in emphasis outside code block"
+        );
     }
 }

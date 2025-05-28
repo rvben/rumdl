@@ -172,7 +172,6 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
             if self.is_closed_atx_heading_without_space(line) {
                 let line_range = self.get_line_byte_range(_ctx.content, line_num);
 
-
                 let mut start_col = 1;
                 let mut length = 1;
                 let mut message = String::new();
@@ -210,18 +209,15 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     length = 1;
                 }
 
-                let (start_line, start_col_calc, end_line, end_col) = calculate_single_line_range(
-                    line_num,
-                    start_col,
-                    length
-                );
+                let (start_line, start_col_calc, end_line, end_col) =
+                    calculate_single_line_range(line_num, start_col, length);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     message,
                     line: start_line,
                     column: start_col_calc,
-                    end_line: end_line,
+                    end_line,
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
