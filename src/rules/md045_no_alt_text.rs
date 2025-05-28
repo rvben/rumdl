@@ -64,7 +64,7 @@ impl Rule for MD045NoAltText {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: "Image should have alternate text".to_string(),
+                        message: "Image missing alt text (add description for accessibility: ![description](url))".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: _line_index

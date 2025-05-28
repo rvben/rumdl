@@ -247,7 +247,7 @@ fn test_multi_issue_output_format() {
     );
     assert!(
         stdout_normal.contains("[MD040]")
-            && stdout_normal.contains("Fenced code blocks should have a language"),
+            && stdout_normal.contains("Fenced code block missing language"),
         "Should detect code block language issue"
     );
     assert!(

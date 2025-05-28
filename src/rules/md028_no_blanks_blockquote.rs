@@ -73,7 +73,7 @@ impl Rule for MD028NoBlanksBlockquote {
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
-                    message: "Blank line inside blockquote".to_string(),
+                    message: "Empty blockquote line should contain '>' marker".to_string(),
                     line: start_line,
                     column: start_col,
                     end_line,

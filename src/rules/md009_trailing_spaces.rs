@@ -100,7 +100,7 @@ impl Rule for MD009TrailingSpaces {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: "Empty line should not have trailing spaces".to_string(),
+                        message: "Empty line has trailing spaces".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: _line_index.line_col_to_byte_range(line_num + 1, 1),
@@ -134,7 +134,7 @@ impl Rule for MD009TrailingSpaces {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    message: "Empty blockquote line should have a space after >".to_string(),
+                    message: "Empty blockquote line needs a space after >".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: _line_index.line_col_to_byte_range(line_num + 1, trimmed.len() + 1),

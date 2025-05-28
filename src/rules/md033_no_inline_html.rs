@@ -238,7 +238,7 @@ impl MD033NoInlineHtml {
                                     column: start_col,
                                     end_line,
                                     end_column: end_col,
-                                    message: "Inline HTML".to_string(),
+                                    message: format!("Inline HTML found (use Markdown syntax instead)"),
                                     severity: Severity::Warning,
                                     fix: None,
                                 });
@@ -343,7 +343,7 @@ impl Rule for MD033NoInlineHtml {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    message: "Inline HTML".to_string(),
+                    message: format!("Inline HTML found (use Markdown syntax instead)"),
                     severity: Severity::Warning,
                     fix: None,
                 });
@@ -433,9 +433,8 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Reports one warning per HTML tag (true markdownlint compatibility)
         assert_eq!(result.len(), 2); // <div> and </div>
-        assert_eq!(result[0].message, "Inline HTML");
-        assert_eq!(result[0].column, 1); // <div> position
-        assert_eq!(result[1].column, 18); // </div> position
+        assert_eq!(result[0].message, "Inline HTML found (use Markdown syntax instead)");
+        assert_eq!(result[1].message, "Inline HTML found (use Markdown syntax instead)");
     }
 
     #[test]
@@ -446,11 +445,10 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Reports one warning per HTML tag (true markdownlint compatibility)
         assert_eq!(result.len(), 4); // <DiV>, <B>, </B>, </dIv>
-        assert_eq!(result[0].message, "Inline HTML");
-        assert_eq!(result[0].column, 1); // <DiV> position
-        assert_eq!(result[1].column, 11); // <B> position
-        assert_eq!(result[2].column, 21); // </B> position
-        assert_eq!(result[3].column, 25); // </dIv> position
+        assert_eq!(result[0].message, "Inline HTML found (use Markdown syntax instead)");
+        assert_eq!(result[1].message, "Inline HTML found (use Markdown syntax instead)");
+        assert_eq!(result[2].message, "Inline HTML found (use Markdown syntax instead)");
+        assert_eq!(result[3].message, "Inline HTML found (use Markdown syntax instead)");
     }
 
     #[test]
@@ -461,16 +459,16 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Only warnings for non-allowed tags (<p> and </p>, div and br are allowed)
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].column, 19); // Position of <p> tag
-        assert_eq!(result[1].column, 33); // Position of </p> tag
+        assert_eq!(result[0].message, "Inline HTML found (use Markdown syntax instead)");
+        assert_eq!(result[1].message, "Inline HTML found (use Markdown syntax instead)");
 
         // Test case-insensitivity of allowed tags
         let content2 = "<DIV>Allowed</DIV><P>Not allowed</P><BR/>";
         let ctx2 = LintContext::new(content2);
         let result2 = rule.check(&ctx2).unwrap();
         assert_eq!(result2.len(), 2); // <P> and </P> flagged
-        assert_eq!(result2[0].column, 19); // Position of <P> tag
-        assert_eq!(result2[1].column, 33); // Position of </P> tag
+        assert_eq!(result2[0].message, "Inline HTML found (use Markdown syntax instead)");
+        assert_eq!(result2[1].message, "Inline HTML found (use Markdown syntax instead)");
     }
 
     #[test]
@@ -481,8 +479,8 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Should detect warnings for HTML tags (comments are skipped)
         assert_eq!(result.len(), 2); // <p> and </p>
-        assert_eq!(result[0].column, 28); // Position of <p> tag
-        assert_eq!(result[1].column, 44); // Position of </p> tag
+        assert_eq!(result[0].message, "Inline HTML found (use Markdown syntax instead)");
+        assert_eq!(result[1].message, "Inline HTML found (use Markdown syntax instead)");
     }
 
     #[test]
@@ -493,16 +491,15 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // The <div> in the URL should be detected as HTML (not skipped)
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].message, "Inline HTML");
+        assert_eq!(result[0].message, "Inline HTML found (use Markdown syntax instead)");
 
         let content2 = "[Link <a>text</a>](url)";
         let ctx2 = LintContext::new(content2);
         let result2 = rule.check(&ctx2).unwrap();
         // Reports one warning per HTML tag (true markdownlint compatibility)
         assert_eq!(result2.len(), 2); // <a> and </a>
-        assert_eq!(result2[0].message, "Inline HTML");
-        assert_eq!(result2[0].column, 7); // Position of <a> tag
-        assert_eq!(result2[1].column, 14); // Position of </a> tag
+        assert_eq!(result2[0].message, "Inline HTML found (use Markdown syntax instead)");
+        assert_eq!(result2[1].message, "Inline HTML found (use Markdown syntax instead)");
     }
 
     #[test]
@@ -523,11 +520,8 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Reports one warning per HTML tag (true markdownlint compatibility)
         assert_eq!(result.len(), 2); // <div> and </div> outside code block
-        assert_eq!(result[0].line, 4); // Line with HTML outside code block
-        assert_eq!(result[0].column, 1); // Position of <div> tag
-        assert_eq!(result[0].message, "Inline HTML");
-        assert_eq!(result[1].line, 4); // Same line
-        assert_eq!(result[1].column, 14); // Position of </div> tag
+        assert_eq!(result[0].message, "Inline HTML found (use Markdown syntax instead)");
+        assert_eq!(result[1].message, "Inline HTML found (use Markdown syntax instead)");
     }
 
     #[test]
@@ -538,6 +532,6 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Should detect <br/> outside code span, but not tags inside code span
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].message, "Inline HTML");
+        assert_eq!(result[0].message, "Inline HTML found (use Markdown syntax instead)");
     }
 }

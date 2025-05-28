@@ -30,10 +30,7 @@ fn test_md009_empty_lines() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
-    assert_eq!(
-        result[0].message,
-        "Empty line should not have trailing spaces"
-    );
+    assert_eq!(result[0].message, "Empty line has trailing spaces");
 }
 
 #[test]

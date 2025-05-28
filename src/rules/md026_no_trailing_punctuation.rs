@@ -292,7 +292,7 @@ impl MD026NoTrailingPunctuation {
                                 end_line,
                                 end_column: end_col,
                                 message: format!(
-                                    "Heading '{}' should not end with punctuation '{}'",
+                                    "Heading '{}' ends with punctuation '{}'",
                                     heading_text.trim(),
                                     last_char
                                 ),
@@ -337,7 +337,7 @@ impl MD026NoTrailingPunctuation {
                             end_column: end_col,
                             message: format!(
                                 "Heading '{
-                }' should not end with punctuation '{}'",
+                }' ends with punctuation '{}'",
                                 lines[heading_line - 1].trim(),
                                 last_char
                             ),

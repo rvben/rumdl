@@ -70,9 +70,7 @@ impl MD014CommandsShowOutput {
         }
 
         let mut has_command = false;
-
         let mut has_output = false;
-
         let mut last_command = String::new();
 
         for line in block {
@@ -86,6 +84,16 @@ impl MD014CommandsShowOutput {
         }
 
         has_command && !has_output && !self.is_no_output_command(&last_command)
+    }
+
+    fn get_command_from_block(&self, block: &[&str]) -> String {
+        for line in block {
+            let trimmed = line.trim();
+            if self.is_command_line(line) {
+                return trimmed[1..].trim().to_string();
+            }
+        }
+        String::new()
     }
 
     fn fix_command_block(&self, block: &[&str]) -> String {
@@ -175,14 +183,21 @@ impl Rule for MD014CommandsShowOutput {
                                         match_obj.len(),
                                     );
 
+                                // Get the command for a more helpful message
+                                let command = self.get_command_from_block(&current_block);
+                                let message = if command.is_empty() {
+                                    "Command should show output (add example output or remove $ prompt)".to_string()
+                                } else {
+                                    format!("Command '{}' should show output (add example output or remove $ prompt)", command)
+                                };
+
                                 warnings.push(LintWarning {
                                     rule_name: Some(self.name()),
                                     line: start_line,
                                     column: start_col,
                                     end_line,
                                     end_column: end_col,
-                                    message: "Commands in code blocks should show output"
-                                        .to_string(),
+                                    message,
                                     severity: Severity::Warning,
                                     fix: Some(Fix {
                                         range: _line_index

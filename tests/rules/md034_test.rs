@@ -476,7 +476,7 @@ fn test_email_addresses_various_formats() {
             assert!(
                 result
                     .iter()
-                    .any(|w| w.message.contains("Bare email address found:")),
+                    .any(|w| w.message.contains("Bare email address found")),
                 "Email detection failed for: {}",
                 content
             );
@@ -531,7 +531,7 @@ fn test_localhost_urls() {
         "Localhost URLs should be flagged as bare URLs"
     );
     assert!(
-        result.iter().any(|w| w.message.contains("localhost")),
+        result.iter().any(|w| w.message.contains("Bare URL found")),
         "Localhost URL detection failed"
     );
 
@@ -573,7 +573,7 @@ fn test_localhost_variations() {
             assert!(
                 result
                     .iter()
-                    .any(|w| w.message.contains("localhost") || w.message.contains("ftp")),
+                    .any(|w| w.message.contains("Bare URL found") || w.message.contains("ftp")),
                 "Localhost/protocol detection failed for: {}",
                 content
             );

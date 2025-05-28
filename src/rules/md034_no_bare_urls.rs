@@ -208,7 +208,7 @@ impl MD034NoBareUrls {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!("Bare URL found: {}", &line[url_start..url_end]),
+                message: format!("Bare URL found (wrap in angle brackets: <URL> or use link syntax: [text](URL))"),
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: url_start..url_end,
@@ -364,7 +364,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Bare URL found: {}", url_text),
+                            message: format!("Bare URL found (wrap in angle brackets: <URL> or use link syntax: [text](URL))"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
@@ -404,7 +404,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Bare email address found: {}", email_text),
+                            message: format!("Bare email address found (wrap in angle brackets: <email>)"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + email_text.len()),
@@ -462,7 +462,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Bare URL found: {}", url_text),
+                            message: format!("Bare URL found (wrap in angle brackets: <URL> or use link syntax: [text](URL))"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
