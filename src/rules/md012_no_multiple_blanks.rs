@@ -23,34 +23,60 @@ impl MD012NoMultipleBlanks {
         Self { maximum }
     }
 
-    fn is_in_code_block(lines: &[&str], current_line: usize) -> bool {
-        let mut fence_count = 0;
-        for (i, line) in lines.iter().take(current_line + 1).enumerate() {
+    /// Pre-compute code block regions for efficient lookup
+    fn compute_code_block_regions(lines: &[&str]) -> Vec<(usize, usize)> {
+        let mut regions = Vec::new();
+        let mut in_code_block = false;
+        let mut start_line = 0;
+
+        for (i, line) in lines.iter().enumerate() {
             if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
-                fence_count += 1;
-            }
-            if i == current_line && fence_count % 2 == 1 {
-                return true;
+                if in_code_block {
+                    // End of code block
+                    regions.push((start_line, i));
+                    in_code_block = false;
+                } else {
+                    // Start of code block
+                    start_line = i;
+                    in_code_block = true;
+                }
             }
         }
-        false
+
+        // Handle unclosed code block
+        if in_code_block {
+            regions.push((start_line, lines.len() - 1));
+        }
+
+        regions
     }
 
-    fn is_in_front_matter(lines: &[&str], current_line: usize) -> bool {
-        if current_line == 0 {
-            return lines[0].trim() == "---";
+    /// Pre-compute front matter regions for efficient lookup
+    fn compute_front_matter_regions(lines: &[&str]) -> Vec<(usize, usize)> {
+        let mut regions = Vec::new();
+        let mut in_front_matter = false;
+        let mut start_line = 0;
+
+        for (i, line) in lines.iter().enumerate() {
+            if line.trim() == "---" {
+                if in_front_matter {
+                    // End of front matter
+                    regions.push((start_line, i));
+                    in_front_matter = false;
+                } else if i == 0 {
+                    // Start of front matter (only at beginning of file)
+                    start_line = i;
+                    in_front_matter = true;
+                }
+            }
         }
 
-        let mut dashes = 0;
-        for (i, line) in lines.iter().take(current_line + 1).enumerate() {
-            if line.trim() == "---" {
-                dashes += 1;
-            }
-            if i == current_line && dashes == 1 {
-                return true;
-            }
-        }
-        false
+        regions
+    }
+
+    /// Check if a line is in any of the given regions
+    fn is_in_regions(line_num: usize, regions: &[(usize, usize)]) -> bool {
+        regions.iter().any(|(start, end)| line_num >= *start && line_num <= *end)
     }
 }
 
@@ -90,13 +116,17 @@ impl Rule for MD012NoMultipleBlanks {
 
         let mut warnings = Vec::new();
 
+        // Pre-compute regions once for efficiency
+        let code_block_regions = Self::compute_code_block_regions(&lines);
+        let front_matter_regions = Self::compute_front_matter_regions(&lines);
+
         let mut blank_count = 0;
         let mut blank_start = 0;
 
         for (line_num, &line) in lines.iter().enumerate() {
             // Skip code blocks and front matter
-            if Self::is_in_code_block(&lines, line_num)
-                || Self::is_in_front_matter(&lines, line_num)
+            if Self::is_in_regions(line_num, &code_block_regions)
+                || Self::is_in_regions(line_num, &front_matter_regions)
             {
                 continue;
             }

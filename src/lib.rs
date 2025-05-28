@@ -3,6 +3,8 @@ pub mod init;
 pub mod lint_context;
 pub mod lsp;
 pub mod markdownlint_config;
+pub mod parallel;
+pub mod performance;
 pub mod profiling;
 pub mod rule;
 pub mod rules;

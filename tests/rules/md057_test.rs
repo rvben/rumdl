@@ -269,11 +269,11 @@ More content.
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-    // Should have three warnings including fragment links
+    // Should have one warning for external file link only (fragment-only links are skipped)
     assert_eq!(
         result.len(),
-        3,
-        "Expected 3 warning for external file link, got {}",
+        1,
+        "Expected 1 warning for external file link, got {}",
         result.len()
     );
 

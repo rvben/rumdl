@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::LineIndex;
+use crate::utils::table_utils::TableUtils;
 
 /// Rule MD058: Blanks around tables
 ///
@@ -131,47 +132,50 @@ impl Rule for MD058BlanksAroundTables {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
-
         let mut warnings = Vec::new();
+
+        // Early return for empty content or content without tables
+        if content.is_empty() || !content.contains('|') {
+            return Ok(Vec::new());
+        }
 
         let lines: Vec<&str> = content.lines().collect();
 
-        let tables = self.identify_tables(&lines);
+        // Use shared table detection for better performance
+        let table_blocks = TableUtils::find_table_blocks(content);
 
-        for (table_start, table_end) in tables {
+        for table_block in table_blocks {
             // Check for blank line before table
-            if table_start > 0 && !self.is_blank_line(lines[table_start - 1]) {
+            if table_block.start_line > 0 && !self.is_blank_line(lines[table_block.start_line - 1]) {
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: "Missing blank line before table".to_string(),
-                line: table_start + 1,
-                column: 1,
-                end_line: table_start + 1,
-                end_column: 1 + 1,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index.line_col_to_byte_range(table_start + 1, 1),
-                replacement: format!("\n{
-            }", lines[table_start]),
+                    rule_name: Some(self.name()),
+                    message: "Missing blank line before table".to_string(),
+                    line: table_block.start_line + 1,
+                    column: 1,
+                    end_line: table_block.start_line + 1,
+                    end_column: 2,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: _line_index.line_col_to_byte_range(table_block.start_line + 1, 1),
+                        replacement: format!("\n{}", lines[table_block.start_line]),
                     }),
                 });
             }
 
             // Check for blank line after table
-            if table_end < lines.len() - 1 && !self.is_blank_line(lines[table_end + 1]) {
+            if table_block.end_line < lines.len() - 1 && !self.is_blank_line(lines[table_block.end_line + 1]) {
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: "Missing blank line after table".to_string(),
-                line: table_end + 1,
-                column: lines[table_end].len() + 1,
-                end_line: table_end + 1,
-                end_column: lines[table_end].len() + 1 + 1,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index
-                .line_col_to_byte_range(table_end + 1, lines[table_end].len() + 1),
-                replacement: format!("{
-            }\n", lines[table_end]),
+                    rule_name: Some(self.name()),
+                    message: "Missing blank line after table".to_string(),
+                    line: table_block.end_line + 1,
+                    column: lines[table_block.end_line].len() + 1,
+                    end_line: table_block.end_line + 1,
+                    end_column: lines[table_block.end_line].len() + 2,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: _line_index
+                            .line_col_to_byte_range(table_block.end_line + 1, lines[table_block.end_line].len() + 1),
+                        replacement: format!("{}\n", lines[table_block.end_line]),
                     }),
                 });
             }
@@ -190,9 +194,7 @@ impl Rule for MD058BlanksAroundTables {
         }
 
         let lines: Vec<&str> = content.lines().collect();
-
         let mut result = Vec::new();
-
         let mut i = 0;
 
         while i < lines.len() {

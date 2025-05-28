@@ -128,8 +128,26 @@ impl Rule for MD004UnorderedListStyle {
         let mut in_front_matter = false;
         let mut first_marker: Option<char> = None;
 
-        for (i, line) in content.lines().enumerate() {
-            // Handle front matter
+        // Pre-compute line positions for efficient offset calculation
+        let lines: Vec<&str> = content.lines().collect();
+        let mut line_positions = Vec::with_capacity(lines.len());
+        let mut pos = 0;
+        for line in &lines {
+            line_positions.push(pos);
+            pos += line.len() + 1; // +1 for newline
+        }
+
+        for (i, line) in lines.iter().enumerate() {
+            // Check for code block markers
+            if CODE_BLOCK_START.is_match(line) {
+                in_code_block = !in_code_block;
+                continue;
+            }
+            if in_code_block {
+                continue;
+            }
+
+            // Check for front matter
             if FRONT_MATTER_DELIM.is_match(line) {
                 in_front_matter = !in_front_matter;
                 continue;
@@ -138,16 +156,7 @@ impl Rule for MD004UnorderedListStyle {
                 continue;
             }
 
-            // Handle code blocks
-            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if in_code_block {
-                continue;
-            }
-
-            // Skip ordered list items
+            // Skip ordered lists
             if ORDERED_LIST_REGEX.is_match(line) {
                 continue;
             }
@@ -157,9 +166,8 @@ impl Rule for MD004UnorderedListStyle {
                 let indent = caps.name("indent").map(|m| m.as_str().to_string()).unwrap_or_default();
                 let blockquote = caps.name("blockquote").map(|m| m.as_str().to_string()).unwrap_or_default();
                 let marker = caps.name("marker").unwrap().as_str().chars().next().unwrap();
-                // Calculate byte offset to the marker character
-                let line_start_offset: usize = content.lines().take(i).map(|l| l.len() + 1).sum();
-                let offset = line_start_offset + indent.len() + blockquote.len();
+                // Use pre-computed line position
+                let offset = line_positions[i] + indent.len() + blockquote.len();
 
                 match self.style {
                     UnorderedListStyle::Consistent => {
@@ -168,11 +176,11 @@ impl Rule for MD004UnorderedListStyle {
                             if marker != first {
                                 let (line, col) = ctx.offset_to_line_col(offset);
                                 warnings.push(LintWarning {
-                line,
-                column: col,
-                end_line: line,
-                end_column: col + 1,
-                message: format!("marker '{}' does not match expected style '{}'", marker, first),
+                                    line,
+                                    column: col,
+                                    end_line: line,
+                                    end_column: col + 1,
+                                    message: format!("marker '{}' does not match expected style '{}'", marker, first),
                                     severity: Severity::Warning,
                                     rule_name: Some(self.name()),
                                     fix: Some(Fix {
@@ -197,11 +205,11 @@ impl Rule for MD004UnorderedListStyle {
                         if marker != target_marker {
                             let (line, col) = ctx.offset_to_line_col(offset);
                             warnings.push(LintWarning {
-                line,
-                column: col,
-                end_line: line,
-                end_column: col + 1,
-                message: format!("marker '{}' does not match expected style '{}'", marker, target_marker),
+                                line,
+                                column: col,
+                                end_line: line,
+                                end_column: col + 1,
+                                message: format!("marker '{}' does not match expected style '{}'", marker, target_marker),
                                 severity: Severity::Warning,
                                 rule_name: Some(self.name()),
                                 fix: Some(Fix {
@@ -219,55 +227,33 @@ impl Rule for MD004UnorderedListStyle {
     }
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
-        // Use the same regex-based approach as check() for consistency
         let content = &ctx.content;
         let mut result = content.to_string();
         let mut in_code_block = false;
         let mut in_front_matter = false;
-        let mut edits = Vec::new();
         let mut first_marker: Option<char> = None;
+        let mut edits = Vec::new();
 
-        // First pass: find the first marker for consistent mode
-        if matches!(self.style, UnorderedListStyle::Consistent) {
-            let mut temp_in_code_block = false;
-            let mut temp_in_front_matter = false;
-
-            for line in content.lines() {
-                // Handle front matter
-                if FRONT_MATTER_DELIM.is_match(line) {
-                    temp_in_front_matter = !temp_in_front_matter;
-                    continue;
-                }
-                if temp_in_front_matter {
-                    continue;
-                }
-
-                // Handle code blocks
-                if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
-                    temp_in_code_block = !temp_in_code_block;
-                    continue;
-                }
-                if temp_in_code_block {
-                    continue;
-                }
-
-                // Skip ordered list items
-                if ORDERED_LIST_REGEX.is_match(line) {
-                    continue;
-                }
-
-                // Find first unordered list marker
-                if let Some(caps) = UNORDERED_LIST_REGEX.captures(line) {
-                    let marker = caps.name("marker").unwrap().as_str().chars().next().unwrap();
-                    first_marker = Some(marker);
-                    break;
-                }
-            }
+        // Pre-compute line positions for efficient offset calculation
+        let lines: Vec<&str> = content.lines().collect();
+        let mut line_positions = Vec::with_capacity(lines.len());
+        let mut pos = 0;
+        for line in &lines {
+            line_positions.push(pos);
+            pos += line.len() + 1; // +1 for newline
         }
 
-        // Second pass: apply fixes
-        for (i, line) in content.lines().enumerate() {
-            // Handle front matter
+        for (i, line) in lines.iter().enumerate() {
+            // Check for code block markers
+            if CODE_BLOCK_START.is_match(line) {
+                in_code_block = !in_code_block;
+                continue;
+            }
+            if in_code_block {
+                continue;
+            }
+
+            // Check for front matter
             if FRONT_MATTER_DELIM.is_match(line) {
                 in_front_matter = !in_front_matter;
                 continue;
@@ -276,16 +262,7 @@ impl Rule for MD004UnorderedListStyle {
                 continue;
             }
 
-            // Handle code blocks
-            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if in_code_block {
-                continue;
-            }
-
-            // Skip ordered list items
+            // Skip ordered lists
             if ORDERED_LIST_REGEX.is_match(line) {
                 continue;
             }
@@ -295,9 +272,8 @@ impl Rule for MD004UnorderedListStyle {
                 let indent = caps.name("indent").map(|m| m.as_str().to_string()).unwrap_or_default();
                 let blockquote = caps.name("blockquote").map(|m| m.as_str().to_string()).unwrap_or_default();
                 let marker = caps.name("marker").unwrap().as_str().chars().next().unwrap();
-                // Calculate byte offset to the marker character
-                let line_start_offset: usize = content.lines().take(i).map(|l| l.len() + 1).sum();
-                let offset = line_start_offset + indent.len() + blockquote.len();
+                // Use pre-computed line position
+                let offset = line_positions[i] + indent.len() + blockquote.len();
 
                 match self.style {
                     UnorderedListStyle::Consistent => {
@@ -305,6 +281,8 @@ impl Rule for MD004UnorderedListStyle {
                             if marker != first {
                                 edits.push((offset, first));
                             }
+                        } else {
+                            first_marker = Some(marker);
                         }
                     },
                     UnorderedListStyle::Asterisk => {

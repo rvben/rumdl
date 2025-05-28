@@ -144,24 +144,41 @@ impl Rule for MD054LinkImageStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+
+        // Early returns for performance
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for any link patterns before expensive processing
+        if !content.contains('[') && !content.contains('<') {
+            return Ok(Vec::new());
+        }
+
         let structure = DocumentStructure::new(content);
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, line) in lines.iter().enumerate() {
+            // Skip code blocks and reference definitions early
             if structure.is_in_code_block(line_num + 1) {
                 continue;
             }
-            // Skip reference definition lines
             if REFERENCE_DEF_RE.is_match(line) {
                 continue;
             }
-            // Skip HTML comments
             if line.trim_start().starts_with("<!--") {
                 continue;
             }
+
+            // Quick check for any link patterns in this line
+            if !line.contains('[') && !line.contains('<') {
+                continue;
+            }
+
             let mut idx = 0;
             let line_chars: Vec<char> = line.chars().collect();
+
             while idx < line_chars.len() {
                 let byte_idx = line_chars[..idx]
                     .iter()
@@ -177,27 +194,26 @@ impl Rule for MD054LinkImageStyle {
                     let match_end_byte = byte_idx + m.end();
                     let match_start_char = line[..match_start_byte].chars().count();
                     let match_end_char = line[..match_end_byte].chars().count();
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.full
-                    {
-                        // Calculate precise character range for the entire link/image
+
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.full {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_start_char, match_len);
 
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Link/image style 'full' is not consistent with document"
-                .to_string(),
-                severity: Severity::Warning,
-                fix: None,
-            });
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line: end_line,
+                            end_column: end_col,
+                            message: "Link/image style 'full' is not consistent with document".to_string(),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
                     }
                     idx = match_end_char;
                     continue;
                 }
+
                 // 2. Collapsed reference
                 if let Some(cap) = COLLAPSED_RE.captures(slice) {
                     let m = cap.get(0).unwrap();
@@ -205,28 +221,26 @@ impl Rule for MD054LinkImageStyle {
                     let match_end_byte = byte_idx + m.end();
                     let match_start_char = line[..match_start_byte].chars().count();
                     let match_end_char = line[..match_end_byte].chars().count();
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
-                        && !self.collapsed
-                    {
-                        // Calculate precise character range for the entire link/image
+
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.collapsed {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_start_char, match_len);
 
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Link/image style 'collapsed' is not consistent with document"
-                .to_string(),
-                severity: Severity::Warning,
-                fix: None,
-            });
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line: end_line,
+                            end_column: end_col,
+                            message: "Link/image style 'collapsed' is not consistent with document".to_string(),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
                     }
                     idx = match_end_char;
                     continue;
                 }
+
                 // 3. Inline/url_inline
                 if let Some(cap) = INLINE_RE.captures(slice) {
                     let m = cap.get(0).unwrap();
@@ -234,26 +248,23 @@ impl Rule for MD054LinkImageStyle {
                     let match_end_byte = byte_idx + m.end();
                     let match_start_char = line[..match_start_byte].chars().count();
                     let match_end_char = line[..match_end_byte].chars().count();
+
                     if !structure.is_in_code_span(line_num + 1, match_start_char + 1) {
                         let text = cap.get(1).unwrap().as_str();
                         let url = cap.get(2).unwrap().as_str();
                         let style = if text == url { "url_inline" } else { "inline" };
+
                         if !self.is_style_allowed(style) {
-                            // Calculate precise character range for the entire link/image
                             let match_len = match_end_char - match_start_char;
                             let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_start_char, match_len);
 
                             warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: format!(
-                "Link/image style '{
-            }' is not consistent with document",
-                                    style
-                                ),
+                                rule_name: Some(self.name()),
+                                line: start_line,
+                                column: start_col,
+                                end_line: end_line,
+                                end_column: end_col,
+                                message: format!("Link/image style '{}' is not consistent with document", style),
                                 severity: Severity::Warning,
                                 fix: None,
                             });
@@ -262,6 +273,7 @@ impl Rule for MD054LinkImageStyle {
                     idx = match_end_char;
                     continue;
                 }
+
                 // 4. Autolink
                 if let Some(cap) = AUTOLINK_RE.captures(slice) {
                     let m = cap.get(0).unwrap();
@@ -269,28 +281,26 @@ impl Rule for MD054LinkImageStyle {
                     let match_end_byte = byte_idx + m.end();
                     let match_start_char = line[..match_start_byte].chars().count();
                     let match_end_char = line[..match_end_byte].chars().count();
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
-                        && !self.autolink
-                    {
-                        // Calculate precise character range for the entire link/image
+
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.autolink {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_start_char, match_len);
 
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Link/image style 'autolink' is not consistent with document"
-                .to_string(),
-                severity: Severity::Warning,
-                fix: None,
-            });
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line: end_line,
+                            end_column: end_col,
+                            message: "Link/image style 'autolink' is not consistent with document".to_string(),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
                     }
                     idx = match_end_char;
                     continue;
                 }
+
                 // 5. Shortcut (only if not followed by '[', '[]', or '][')
                 if let Some(cap) = SHORTCUT_RE.captures(slice) {
                     let m = cap.get(0).unwrap();
@@ -299,34 +309,32 @@ impl Rule for MD054LinkImageStyle {
                     let match_start_char = line[..match_start_byte].chars().count();
                     let match_end_char = line[..match_end_byte].chars().count();
                     let after = &line[match_end_byte..];
+
                     // Only match as shortcut if not followed by '[', '[]', or ']['
-                    if after.starts_with('[') || after.starts_with("[]") || after.starts_with("][")
-                    {
+                    if after.starts_with('[') || after.starts_with("[]") || after.starts_with("][") {
                         idx += 1;
                         continue;
                     }
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
-                        && !self.shortcut
-                    {
-                        // Calculate precise character range for the entire link/image
+
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.shortcut {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, match_start_char, match_len);
 
                         warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Link/image style 'shortcut' is not consistent with document"
-                .to_string(),
-                severity: Severity::Warning,
-                fix: None,
-            });
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line: end_line,
+                            end_column: end_col,
+                            message: "Link/image style 'shortcut' is not consistent with document".to_string(),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
                     }
                     idx = match_end_char;
                     continue;
                 }
+
                 // No match, advance by 1
                 idx += 1;
             }

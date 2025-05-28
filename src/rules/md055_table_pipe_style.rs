@@ -1,6 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::table_utils::{TableUtils, TableBlock};
 use toml;
 
 /// Rule MD055: Table pipe style
@@ -89,214 +90,65 @@ impl Default for MD055TablePipeStyle {
 }
 
 impl MD055TablePipeStyle {
-    pub fn new(style: &str) -> Self {
-        Self {
-            style: style.to_string(),
-        }
-    }
-
-    /// Check if a line is a valid table delimiter row (contains only |, -, :, and whitespace)
-    fn is_delimiter_row(&self, line: &str) -> bool {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || !trimmed.contains('|') {
-            return false;
-        }
-
-        // Must contain at least one dash to be a delimiter
-        if !trimmed.contains('-') {
-            return false;
-        }
-
-        // All characters must be valid delimiter characters
-        trimmed.chars().all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
-    }
-
-    /// Check if a line could be a table row (contains pipes and has table-like structure)
-    fn is_potential_table_row(&self, line: &str) -> bool {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || !trimmed.contains('|') {
-            return false;
-        }
-
-        // Skip lines that are clearly not table rows
-        // - Lines that start with list markers
-        if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
-            return false;
-        }
-
-        // - Lines that are clearly code or inline code
-        if trimmed.starts_with("`") || trimmed.contains("``") {
-            return false;
-        }
-
-        // Must have at least 2 parts when split by |
-        let parts: Vec<&str> = trimmed.split('|').collect();
-        if parts.len() < 2 {
-            return false;
-        }
-
-        // Check if it looks like a table row by having reasonable content between pipes
-        let mut valid_parts = 0;
-        for part in &parts {
-            let part_trimmed = part.trim();
-            // Skip empty parts (from leading/trailing pipes)
-            if part_trimmed.is_empty() {
-                continue;
-            }
-            // Count parts that look like table cells (not too long, reasonable content)
-            if part_trimmed.len() <= 100 && !part_trimmed.contains('\n') {
-                valid_parts += 1;
-            }
-        }
-
-        // Must have at least 2 valid cell-like parts
-        valid_parts >= 2
-    }
-
-    /// Find all table blocks in the content
-    fn find_table_blocks(&self, lines: &[&str], code_blocks: &[(usize, usize)]) -> Vec<(usize, usize)> {
-        let mut tables = Vec::new();
-        let mut i = 0;
-
-        while i < lines.len() {
-            // Skip lines in code blocks
-            let line_start = if i == 0 { 0 } else { lines.iter().take(i).map(|l| l.len() + 1).sum() };
-            if code_blocks.iter().any(|(start, end)| line_start >= *start && line_start < *end) {
-                i += 1;
-                continue;
-            }
-
-            // Look for potential table start
-            if self.is_potential_table_row(lines[i]) {
-                // Check if the next line is a delimiter row
-                if i + 1 < lines.len() && self.is_delimiter_row(lines[i + 1]) {
-                    // Found a table! Find its end
-                    let table_start = i;
-                    let mut table_end = i + 1; // Include the delimiter row
-
-                    // Continue while we have table rows
-                    let mut j = i + 2;
-                    while j < lines.len() {
-                        let line = lines[j];
-                        if line.trim().is_empty() {
-                            // Empty line ends the table
-                            break;
-                        }
-                        if self.is_potential_table_row(line) {
-                            table_end = j;
-                            j += 1;
-                        } else {
-                            // Non-table line ends the table
-                            break;
-                        }
-                    }
-
-                    tables.push((table_start, table_end));
-                    i = table_end + 1;
-                } else {
-                    i += 1;
-                }
-            } else {
-                i += 1;
-            }
-        }
-
-        tables
-    }
-
-    /// Determine the pipe style of a table row
-    fn determine_pipe_style(&self, line: &str) -> Option<&'static str> {
-        if !self.is_potential_table_row(line) && !self.is_delimiter_row(line) {
-            return None;
-        }
-
-        let trimmed = line.trim();
-        if trimmed.starts_with('|') && trimmed.ends_with('|') {
-            Some("leading_and_trailing")
-        } else if trimmed.starts_with('|') {
-            Some("leading_only")
-        } else if trimmed.ends_with('|') {
-            Some("trailing_only")
-        } else {
-            Some("no_leading_or_trailing")
-        }
+    pub fn new(style: String) -> Self {
+        Self { style }
     }
 
     /// Fix a table row to match the target style
     fn fix_table_row(&self, line: &str, target_style: &str) -> String {
         let trimmed = line.trim();
-
-        // Don't modify empty lines
-        if trimmed.is_empty() {
+        if !trimmed.contains('|') {
             return line.to_string();
         }
 
-        // Preserve leading whitespace
-        let leading_whitespace = line
-            .chars()
-            .take_while(|c| c.is_whitespace())
-            .collect::<String>();
+        // Check if this is a delimiter row (contains dashes)
+        let is_delimiter_row = trimmed.contains('-') &&
+            trimmed.chars().all(|c| c == '-' || c == ':' || c == '|' || c.is_whitespace());
 
-        // Handle delimiter rows properly
-        if self.is_delimiter_row(line) {
-            // Extract the core content of the delimiter row without pipes
-            let row_content = trimmed
-                .trim_start_matches('|')
-                .trim_end_matches('|')
-                .trim()
-                .to_string();
+        // Split the line by pipes to get the content
+        let parts: Vec<&str> = trimmed.split('|').collect();
+        let mut content_parts = Vec::new();
 
-            // Apply the appropriate style
-            match target_style {
-                "leading_and_trailing" => format!("{}| {} |", leading_whitespace, row_content),
-                "no_leading_or_trailing" => format!("{}{}", leading_whitespace, row_content),
-                "leading_only" => format!("{}| {}", leading_whitespace, row_content),
-                "trailing_only" => format!("{}{} |", leading_whitespace, row_content),
-                _ => format!("{}| {} |", leading_whitespace, row_content), // Default to leading_and_trailing
-            }
-        } else {
-            // Split the line by pipes to get cells
-            let parts: Vec<&str> = trimmed.split('|').collect();
-            let mut cells = Vec::new();
+        // Extract the actual content (skip empty leading/trailing parts)
+        let start_idx = if parts.first().map_or(false, |p| p.trim().is_empty()) { 1 } else { 0 };
+        let end_idx = if parts.last().map_or(false, |p| p.trim().is_empty()) { parts.len() - 1 } else { parts.len() };
 
-            let has_leading_pipe = trimmed.starts_with('|');
-            let has_trailing_pipe = trimmed.ends_with('|');
+        for i in start_idx..end_idx {
+            // Trim each part to remove extra spaces, but preserve the content
+            content_parts.push(parts[i].trim());
+        }
 
-            // Process the cells correctly, accounting for leading/trailing pipes
-            for (i, part) in parts.iter().enumerate() {
-                // Skip empty leading part if there's a leading pipe
-                if i == 0 && part.trim().is_empty() && has_leading_pipe {
-                    continue;
+        // Rebuild the line with the target style
+        match target_style {
+            "leading_and_trailing" => {
+                if is_delimiter_row {
+                    format!("| {} |", content_parts.join("|"))
+                } else {
+                    format!("| {} |", content_parts.join(" | "))
                 }
-
-                // Skip empty trailing part if there's a trailing pipe
-                if i == parts.len() - 1 && part.trim().is_empty() && has_trailing_pipe {
-                    continue;
+            },
+            "leading_only" => {
+                if is_delimiter_row {
+                    format!("| {}", content_parts.join("|"))
+                } else {
+                    format!("| {}", content_parts.join(" | "))
                 }
-
-                cells.push(part.trim());
-            }
-
-            // Rebuild the table row with the target style
-            let result = match target_style {
-                "leading_and_trailing" => {
-                    format!("| {} |", cells.join(" | "))
+            },
+            "trailing_only" => {
+                if is_delimiter_row {
+                    format!("{} |", content_parts.join("|"))
+                } else {
+                    format!("{} |", content_parts.join(" | "))
                 }
-                "no_leading_or_trailing" => cells.join(" | "),
-                "leading_only" => {
-                    format!("| {}", cells.join(" | "))
+            },
+            "no_leading_or_trailing" => {
+                if is_delimiter_row {
+                    content_parts.join("|")
+                } else {
+                    content_parts.join(" | ")
                 }
-                "trailing_only" => {
-                    format!("{} |", cells.join(" | "))
-                }
-                _ => {
-                    // Default to leading_and_trailing if an unsupported style is provided
-                    format!("| {} |", cells.join(" | "))
-                }
-            };
-
-            // Reapply the original indentation
-            format!("{}{}", leading_whitespace, result)
+            },
+            _ => line.to_string(),
         }
     }
 }
@@ -314,10 +166,13 @@ impl Rule for MD055TablePipeStyle {
         let content = ctx.content;
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
 
-        // Use CodeBlockUtils to properly detect code blocks
-        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
+        // Early return for empty content or content without tables
+        if content.is_empty() || !content.contains('|') {
+            return Ok(Vec::new());
+        }
+
+        let lines: Vec<&str> = content.lines().collect();
 
         // Get the configured style explicitly and validate it
         let configured_style = match self.style.as_str() {
@@ -332,18 +187,22 @@ impl Rule for MD055TablePipeStyle {
             }
         };
 
-        // Find all table blocks in the document
-        let table_blocks = self.find_table_blocks(&lines, &code_blocks);
+        // Use shared table detection for better performance
+        let table_blocks = TableUtils::find_table_blocks(content);
 
         // Process each table block
-        for (table_start, table_end) in table_blocks {
+        for table_block in table_blocks {
             let mut table_style = None;
 
             // First pass: determine the table's style for "consistent" mode
             if configured_style == "consistent" {
-                for i in table_start..=table_end {
-                    if !self.is_delimiter_row(lines[i]) {
-                        if let Some(style) = self.determine_pipe_style(lines[i]) {
+                // Check header row first
+                if let Some(style) = TableUtils::determine_pipe_style(lines[table_block.header_line]) {
+                    table_style = Some(style);
+                } else {
+                    // Check content rows if header doesn't have a clear style
+                    for &line_idx in &table_block.content_lines {
+                        if let Some(style) = TableUtils::determine_pipe_style(lines[line_idx]) {
                             table_style = Some(style);
                             break;
                         }
@@ -358,53 +217,40 @@ impl Rule for MD055TablePipeStyle {
                 configured_style
             };
 
-            // Second pass: check each row in the table
-            for i in table_start..=table_end {
-                let line = lines[i];
+            // Check all rows in the table
+            let all_lines = std::iter::once(table_block.header_line)
+                .chain(std::iter::once(table_block.delimiter_line))
+                .chain(table_block.content_lines.iter().copied());
 
-                // Determine current style of this row
-                let current_style = if self.is_delimiter_row(line) {
-                    // For delimiter rows, determine style directly
-                    let trimmed = line.trim();
-                    if trimmed.starts_with('|') && trimmed.ends_with('|') {
-                        "leading_and_trailing"
-                    } else if !trimmed.starts_with('|') && !trimmed.ends_with('|') {
-                        "no_leading_or_trailing"
-                    } else if trimmed.starts_with('|') {
-                        "leading_only"
-                    } else {
-                        "trailing_only"
+            for line_idx in all_lines {
+                let line = lines[line_idx];
+                if let Some(current_style) = TableUtils::determine_pipe_style(line) {
+                    if current_style != target_style {
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_line_range(line_idx + 1, line);
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            severity: Severity::Warning,
+                            message: format!("Table pipe style should be {}",
+                                match target_style {
+                                    "leading_and_trailing" => "leading and trailing",
+                                    "no_leading_or_trailing" => "no leading or trailing",
+                                    "leading_only" => "leading only",
+                                    "trailing_only" => "trailing only",
+                                    _ => target_style,
+                                }
+                            ),
+                            line: start_line,
+                            column: start_col,
+                            end_line: end_line,
+                            end_column: end_col,
+                            fix: Some(crate::rule::Fix {
+                                range: line_index.line_col_to_byte_range(line_idx + 1, 1),
+                                replacement: self.fix_table_row(line, target_style),
+                            }),
+                        });
                     }
-                } else {
-                    // For normal rows, use the determine_pipe_style method
-                    match self.determine_pipe_style(line) {
-                        Some(style) => style,
-                        None => continue, // Skip if style can't be determined
-                    }
-                };
-
-                // Check if this row needs fixing
-                if current_style != target_style {
-                    // Calculate precise character range for the entire table row
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
-
-                    warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: format!(
-                "Table pipe style should be {
-            }",
-                            target_style.replace('_', " ")
-                        ),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: self.fix_table_row(line, target_style),
-                        }),
-                    });
                 }
             }
         }
@@ -415,7 +261,6 @@ impl Rule for MD055TablePipeStyle {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
         let lines: Vec<&str> = content.lines().collect();
-        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
         // Use the configured style but validate it first
         let configured_style = match self.style.as_str() {
@@ -430,21 +275,25 @@ impl Rule for MD055TablePipeStyle {
             }
         };
 
-        // Find all table blocks in the document
-        let table_blocks = self.find_table_blocks(&lines, &code_blocks);
+        // Use shared table detection for better performance
+        let table_blocks = TableUtils::find_table_blocks(content);
 
         // Create a copy of lines that we can modify
         let mut result_lines = lines.iter().map(|&s| s.to_string()).collect::<Vec<String>>();
 
         // Process each table block
-        for (table_start, table_end) in table_blocks {
+        for table_block in table_blocks {
             let mut table_style = None;
 
             // First pass: determine the table's style for "consistent" mode
             if configured_style == "consistent" {
-                for i in table_start..=table_end {
-                    if !self.is_delimiter_row(lines[i]) {
-                        if let Some(style) = self.determine_pipe_style(lines[i]) {
+                // Check header row first
+                if let Some(style) = TableUtils::determine_pipe_style(lines[table_block.header_line]) {
+                    table_style = Some(style);
+                } else {
+                    // Check content rows if header doesn't have a clear style
+                    for &line_idx in &table_block.content_lines {
+                        if let Some(style) = TableUtils::determine_pipe_style(lines[line_idx]) {
                             table_style = Some(style);
                             break;
                         }
@@ -459,11 +308,15 @@ impl Rule for MD055TablePipeStyle {
                 configured_style
             };
 
-            // Second pass: fix each row in the table
-            for i in table_start..=table_end {
-                let line = lines[i];
+            // Fix all rows in the table
+            let all_lines = std::iter::once(table_block.header_line)
+                .chain(std::iter::once(table_block.delimiter_line))
+                .chain(table_block.content_lines.iter().copied());
+
+            for line_idx in all_lines {
+                let line = lines[line_idx];
                 let fixed_line = self.fix_table_row(line, target_style);
-                result_lines[i] = fixed_line;
+                result_lines[line_idx] = fixed_line;
             }
         }
 
@@ -498,7 +351,7 @@ impl Rule for MD055TablePipeStyle {
         } else {
             "consistent".to_string() // Default to consistent if invalid
         };
-        Box::new(MD055TablePipeStyle::new(&style))
+        Box::new(MD055TablePipeStyle::new(style))
     }
 }
 
@@ -509,7 +362,7 @@ mod tests {
     #[test]
     fn test_md055_delimiter_row_handling() {
         // Test with no_leading_or_trailing style
-        let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
+        let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
 
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
         let ctx = crate::lint_context::LintContext::new(content);
@@ -530,7 +383,7 @@ mod tests {
         );
 
         // Test with leading_and_trailing style
-        let rule = MD055TablePipeStyle::new("leading_and_trailing");
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
 
         let content = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1   | Data 2   | Data 3";
         let ctx = crate::lint_context::LintContext::new(content);
@@ -551,7 +404,7 @@ mod tests {
     #[test]
     fn test_md055_check_finds_delimiter_row_issues() {
         // Test that check() correctly identifies delimiter rows that don't match style
-        let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
+        let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
 
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
         let ctx = crate::lint_context::LintContext::new(content);
@@ -572,7 +425,7 @@ mod tests {
     #[test]
     fn test_md055_real_world_example() {
         // Test with a real-world example having content before and after the table
-        let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
+        let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
 
         let content = "# Table Example\n\nHere's a table with leading and trailing pipes:\n\n| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |\n| Data 4   | Data 5   | Data 6   |\n\nMore content after the table.";
         let ctx = crate::lint_context::LintContext::new(content);
@@ -597,7 +450,7 @@ mod tests {
     #[test]
     fn test_md055_invalid_style() {
         // Test with an invalid style setting
-        let rule = MD055TablePipeStyle::new("leading_or_trailing"); // Invalid style
+        let rule = MD055TablePipeStyle::new("leading_or_trailing".to_string()); // Invalid style
 
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
         let ctx = crate::lint_context::LintContext::new(content);

@@ -5,13 +5,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
 
-
 lazy_static! {
-    // Use cached regex patterns for better performance
-    static ref FENCED_CODE_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"^(\s*)```").unwrap();
-    static ref ALTERNATE_FENCED_CODE_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"^(\s*)~~~").unwrap();
-    static ref BLOCKQUOTE_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"^\s*>\s*$").unwrap();
-
     // Optimized regex patterns for fix operations
     static ref TRAILING_SPACES_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"(?m) +$").unwrap();
 }
@@ -66,8 +60,6 @@ impl MD009TrailingSpaces {
         }
         count
     }
-
-
 }
 
 impl Rule for MD009TrailingSpaces {
@@ -98,22 +90,22 @@ impl Rule for MD009TrailingSpaces {
             // Handle empty lines
             if line.trim().is_empty() {
                 if trailing_spaces > 0 {
-                                        // Calculate precise character range for all trailing spaces on empty line
+                    // Calculate precise character range for all trailing spaces on empty line
                     let (start_line, start_col, end_line, end_col) =
                         calculate_trailing_range(line_num + 1, line, 0);
 
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Empty line should not have trailing spaces".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index.line_col_to_byte_range(line_num + 1, 1),
-                replacement: String::new(),
-            }),
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line: end_line,
+                        end_column: end_col,
+                        message: "Empty line should not have trailing spaces".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: _line_index.line_col_to_byte_range(line_num + 1, 1),
+                            replacement: String::new(),
+                        }),
                     });
                 }
                 continue;
@@ -132,28 +124,28 @@ impl Rule for MD009TrailingSpaces {
             // Special handling for empty blockquote lines
             if Self::is_empty_blockquote_line(line) {
                 let trimmed = line.trim_end();
-                                // Calculate precise character range for trailing spaces after blockquote marker
+                // Calculate precise character range for trailing spaces after blockquote marker
                 let (start_line, start_col, end_line, end_col) =
                     calculate_trailing_range(line_num + 1, line, trimmed.len());
 
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Empty blockquote line should have a space after >".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: _line_index.line_col_to_byte_range(line_num + 1, trimmed.len() + 1),
-                replacement: format!("{} ", trimmed),
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line: end_line,
+                    end_column: end_col,
+                    message: "Empty blockquote line should have a space after >".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: _line_index.line_col_to_byte_range(line_num + 1, trimmed.len() + 1),
+                        replacement: format!("{} ", trimmed),
                     }),
                 });
                 continue;
             }
 
             let trimmed = line.trim_end();
-                        // Calculate precise character range for all trailing spaces
+            // Calculate precise character range for all trailing spaces
             let (start_line, start_col, end_line, end_col) =
                 calculate_trailing_range(line_num + 1, line, trimmed.len());
 
@@ -164,8 +156,8 @@ impl Rule for MD009TrailingSpaces {
                 end_line: end_line,
                 end_column: end_col,
                 message: if trailing_spaces == 1 {
-                "Trailing space found".to_string()
-            } else {
+                    "Trailing space found".to_string()
+                } else {
                     format!("{} trailing spaces found", trailing_spaces)
                 },
                 severity: Severity::Warning,

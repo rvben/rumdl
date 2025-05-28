@@ -1,9 +1,8 @@
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use lazy_static::lazy_static;
-use markdown::mdast::{Blockquote, List, ListItem, Node};
 use regex::Regex;
 
 /// Rule MD006: Consider starting bulleted lists at the leftmost column
@@ -108,98 +107,20 @@ impl Rule for MD006StartBullets {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let mut result = Vec::new();
-        let ast = match markdown::to_mdast(content, &markdown::ParseOptions::gfm()) {
-            Ok(Node::Root(root)) => root,
-            _ => return Ok(result),
-        };
-        let lines: Vec<&str> = content.lines().collect();
-        // Walk the AST
-        fn walk(
-            node: &Node,
-            depth: usize,
-            in_blockquote: bool,
-            lines: &[&str],
-            result: &mut Vec<LintWarning>,
-        ) {
-            match node {
-                Node::List(List {
-                    ordered: false,
-                    children,
-                    ..
-                }) => {
-                    for item in children {
-                        walk(item, depth + 1, in_blockquote, lines, result);
-                    }
-                }
-                Node::List(List {
-                    ordered: true,
-                    children,
-                    ..
-                }) => {
-                    for item in children {
-                        walk(item, depth + 1, in_blockquote, lines, result);
-                    }
-                }
-                Node::ListItem(ListItem {
-                    position, children, ..
-                }) => {
-                    // Only flag top-level list items (depth == 1) that are indented
-                    // but make sure they're actually top-level and not nested sub-lists
-                    if depth == 1 && !in_blockquote {
-                        if let Some(pos) = position {
-                            let line_idx = pos.start.line.saturating_sub(1);
-                            if let Some(line) = lines.get(line_idx) {
-                                if let Some(cap) = BULLET_PATTERN.captures(line) {
-                                    let indent = cap[1].len();
-                                    if indent > 0 {
-                                        // Check if this is actually a nested list item
-                                        // by looking for a parent list item above it
-                                        let is_nested = MD006StartBullets::is_nested_list_item(lines, line_idx);
 
-                                        if !is_nested {
-                                            // Calculate precise character range for the incorrect indentation
-                                            let (start_line, start_col, end_line, end_col) =
-                                                calculate_match_range(line_idx + 1, line, 1, indent + 1);
-
-                                            result.push(LintWarning {
-                rule_name: Some("MD006"),
-                severity: Severity::Warning,
-                line: start_line,
-                column: start_col,
-                end_line: end_line,
-                end_column: end_col,
-                message: "Consider starting bulleted lists at the beginning of the line".to_string(),
-                fix: Some(Fix {
-                range: 0..indent,
-                replacement: "".to_string(),
-            }),
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    for child in children {
-                        walk(child, depth, in_blockquote, lines, result);
-                    }
-                }
-                Node::Blockquote(Blockquote { children, .. }) => {
-                    for child in children {
-                        walk(child, depth, true, lines, result);
-                    }
-                }
-                Node::Root(root) => {
-                    for child in &root.children {
-                        walk(child, 0, false, lines, result);
-                    }
-                }
-                _ => {}
-            }
+        // Early returns for performance
+        if content.is_empty() {
+            return Ok(Vec::new());
         }
-        walk(&Node::Root(ast), 0, false, &lines, &mut result);
-        Ok(result)
+
+        // Quick check for any list markers before processing
+        if !content.contains('*') && !content.contains('-') && !content.contains('+') {
+            return Ok(Vec::new());
+        }
+
+        // Use the optimized document structure approach instead of expensive AST parsing
+        let structure = DocumentStructure::new(content);
+        self.check_with_structure(ctx, &structure)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -264,25 +185,36 @@ impl Rule for MD006StartBullets {
         doc_structure: &DocumentStructure,
     ) -> LintResult {
         let content = _ctx.content;
-        if doc_structure.list_lines.is_empty() {
+
+        // Early returns for performance
+        if content.is_empty() || doc_structure.list_lines.is_empty() {
             return Ok(Vec::new());
         }
+
+        // Quick check for any list markers before processing
         if !content.contains('*') && !content.contains('-') && !content.contains('+') {
             return Ok(Vec::new());
         }
+
+        // Pre-compute LineIndex once for all operations
         let line_index = LineIndex::new(content.to_string());
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         let mut valid_bullet_lines = vec![false; lines.len()];
+
+        // Process list lines in order for better cache locality
         for &line_num in &doc_structure.list_lines {
             let line_idx = line_num - 1;
             if line_idx >= lines.len() {
                 continue;
             }
             let line = lines[line_idx];
+
+            // Skip lines in code blocks
             if doc_structure.is_in_code_block(line_num) {
                 continue;
             }
+
             if let Some(indent) = Self::is_bullet_list_item(line) {
                 let mut is_valid = false; // Assume invalid initially
                 if indent == 0 {
@@ -318,18 +250,18 @@ impl Rule for MD006StartBullets {
                         fixed_line.to_string()
                     };
                     result.push(LintWarning {
-                rule_name: Some(self.name()),
-                severity: Severity::Warning,
-                line: line_num,
-                column: 1,
-                end_line: line_num,
-                end_column: 1 + 1,
-                message: "Consider starting bulleted lists at the beginning of the line"
-                .to_string(),
-                fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(line_num, 1),
-                replacement,
-            }),
+                        rule_name: Some(self.name()),
+                        severity: Severity::Warning,
+                        line: line_num,
+                        column: indent,
+                        end_line: line_num,
+                        end_column: indent + 3,
+                        message: "Consider starting bulleted lists at the beginning of the line"
+                            .to_string(),
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(line_num, 1),
+                            replacement,
+                        }),
                     });
                 }
             }

@@ -63,6 +63,8 @@ tokio-util = "0.7"
 tower = "0.5.2"
 tower-service = "0.3"
 env_logger = "0.11"
+num_cpus = "1.16"
+chrono = { version = "0.4", features = ["serde"] }
 
 [features]
 default = ["parallel"]
@@ -85,11 +87,3 @@ unicode-segmentation = "1.12"
 unicode-width = "0.2"
 unicode-blocks = "0.1"
 unicode-bidi = "0.3"
-
-[[bench]]
-name = "rule_performance"
-harness = false
-
-[[bench]]
-name = "range_utils_benchmark"
-harness = false

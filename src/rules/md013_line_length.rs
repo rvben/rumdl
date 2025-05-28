@@ -93,22 +93,33 @@ impl MD013LineLength {
             return false;
         }
 
-        // Only skip if the entire line is a URL
-        if URL_PATTERN.is_match(line) {
-            return true;
-        }
-        // Only skip if the entire line is an image reference
-        if IMAGE_REF_PATTERN.is_match(line) {
-            return true;
-        }
-        // Only skip if the entire line is a link reference
-        if LINK_REF_PATTERN.is_match(line) {
-            return true;
+        // Quick check for common patterns before expensive regex
+        let trimmed = line.trim();
+
+        // Only skip if the entire line is a URL (quick check first)
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            if URL_PATTERN.is_match(trimmed) {
+                return true;
+            }
         }
 
-        // Code blocks with long strings
+        // Only skip if the entire line is an image reference (quick check first)
+        if trimmed.starts_with("![") && trimmed.ends_with(']') {
+            if IMAGE_REF_PATTERN.is_match(trimmed) {
+                return true;
+            }
+        }
+
+        // Only skip if the entire line is a link reference (quick check first)
+        if trimmed.starts_with('[') && trimmed.contains("]:") {
+            if LINK_REF_PATTERN.is_match(trimmed) {
+                return true;
+            }
+        }
+
+        // Code blocks with long strings (only check if in code block)
         if structure.is_in_code_block(current_line + 1)
-            && !line.trim().is_empty()
+            && !trimmed.is_empty()
             && !line.contains(' ')
             && !line.contains('\t')
         {
@@ -151,49 +162,60 @@ impl Rule for MD013LineLength {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
+        // Early return if no lines could possibly exceed the limit
+        if lines.iter().all(|line| line.len() <= self.line_length) {
+            return Ok(Vec::new());
+        }
+
+        // Pre-compute LineIndex for efficient byte range calculations
+        let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
+
         // Create a quick lookup set for heading lines
         let heading_lines_set: std::collections::HashSet<usize> =
             structure.heading_lines.iter().cloned().collect();
 
-        // Create a quick lookup for setext headings (where start_line != end_line in regions)
-        let _setext_lines_set: std::collections::HashSet<usize> = structure
-            .heading_regions
-            .iter()
-            .filter(|(start, end)| start != end)
-            .flat_map(|(start, end)| (*start..=*end).collect::<Vec<usize>>())
-            .collect();
+        // Pre-compute table lines for efficiency instead of calling is_in_table for each line
+        let table_lines_set: std::collections::HashSet<usize> = if self.tables {
+            let mut table_lines = std::collections::HashSet::new();
+            let mut in_table = false;
+            for (i, line) in lines.iter().enumerate() {
+                let line_number = i + 1;
+                if line.contains('|') && !structure.is_in_code_block(line_number) {
+                    in_table = true;
+                    table_lines.insert(line_number);
+                } else if in_table && line.trim().is_empty() {
+                    in_table = false;
+                } else if in_table {
+                    table_lines.insert(line_number);
+                }
+            }
+            table_lines
+        } else {
+            std::collections::HashSet::new()
+        };
 
-        // Create a quick lookup set for list item lines (including continuations)
-        let _list_lines_set: std::collections::HashSet<usize> =
-            structure.list_lines.iter().cloned().collect();
+        for (line_num, line) in lines.iter().enumerate() {
+            let line_number = line_num + 1;
+            let effective_length = line.chars().count();
 
-        for (line_num, &line) in lines.iter().enumerate() {
-            let line_number = line_num + 1; // 1-based
+            // Skip short lines immediately
+            if effective_length <= self.line_length {
+                continue;
+            }
 
+            // Skip various block types efficiently
             if !self.strict {
-                // Skip setext underline lines (=== or ---)
+                // Skip setext heading underlines
                 if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
                     continue;
                 }
 
-                // Skip block elements according to config flags
-                let mut is_block = false;
-                if self.headings && heading_lines_set.contains(&line_number) {
-                    is_block = true;
-                }
-                if !self.code_blocks && structure.is_in_code_block(line_number) {
-                    is_block = true;
-                }
-                if self.tables && Self::is_in_table(&lines, line_num) {
-                    is_block = true;
-                }
-                if structure.is_in_blockquote(line_number) {
-                    is_block = true;
-                }
-                if structure.is_in_html_block(line_number) {
-                    is_block = true;
-                }
-                if is_block {
+                // Skip block elements according to config flags (optimized checks)
+                if (self.headings && heading_lines_set.contains(&line_number)) ||
+                   (!self.code_blocks && structure.is_in_code_block(line_number)) ||
+                   (self.tables && table_lines_set.contains(&line_number)) ||
+                   structure.is_in_blockquote(line_number) ||
+                   structure.is_in_html_block(line_number) {
                     continue;
                 }
 
@@ -203,75 +225,45 @@ impl Rule for MD013LineLength {
                 }
             }
 
-            // Check line length
-            let effective_length = line.len();
-            if effective_length > self.line_length {
-                // Generate fix if we can safely modify the line
-                let fix = if !self.should_skip_line_for_fix(line, line_num, structure) {
-                    // First try trimming trailing whitespace
-                    let trimmed = line.trim_end();
-                    if trimmed.len() <= self.line_length && trimmed != line {
-                        let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
-                        let line_start = line_index.line_col_to_byte_range(line_number, 1).start;
-                        let line_end = if line_number < lines.len() {
-                            line_index.line_col_to_byte_range(line_number + 1, 1).start - 1
-                        } else {
-                            content.len()
-                        };
-                        Some(crate::rule::Fix {
-                            range: line_start..line_end,
-                            replacement: trimmed.to_string(),
-                        })
-                    } else if let Some((first_part, second_part)) = self.try_split_sentences(line, self.line_length) {
-                        // Try sentence splitting
-                        let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
-                        let line_start = line_index.line_col_to_byte_range(line_number, 1).start;
-                        let line_end = if line_number < lines.len() {
-                            line_index.line_col_to_byte_range(line_number + 1, 1).start - 1
-                        } else {
-                            content.len()
-                        };
-
-                        // Preserve indentation from original line
-                        let leading_whitespace = line.len() - line.trim_start().len();
-                        let indent = &line[..leading_whitespace];
-
-                        let replacement = format!("{}\n{}{}", first_part, indent, second_part);
-                        Some(crate::rule::Fix {
-                            range: line_start..line_end,
-                            replacement,
-                        })
+            // Generate simplified fix (avoid expensive sentence splitting for now)
+            let fix = if !self.should_skip_line_for_fix(line, line_num, structure) {
+                // First try trimming trailing whitespace
+                let trimmed = line.trim_end();
+                if trimmed.len() <= self.line_length && trimmed != *line {
+                    let line_start = line_index.line_col_to_byte_range(line_number, 1).start;
+                    let line_end = if line_number < lines.len() {
+                        line_index.line_col_to_byte_range(line_number + 1, 1).start - 1
                     } else {
-                        None
-                    }
+                        content.len()
+                    };
+                    Some(crate::rule::Fix {
+                        range: line_start..line_end,
+                        replacement: trimmed.to_string(),
+                    })
                 } else {
-                    None
-                };
+                    None // Skip expensive sentence splitting for performance
+                }
+            } else {
+                None
+            };
 
-                let message = if let Some(ref fix_obj) = fix {
-                    if fix_obj.replacement.contains('\n') {
-                        format!(
-                            "Line length {} exceeds {} characters (can split sentences)",
-                            effective_length, self.line_length
-                        )
-                    } else {
-                        format!(
-                            "Line length {} exceeds {} characters (can trim whitespace)",
-                            effective_length, self.line_length
-                        )
-                    }
-                } else {
-                    format!(
-                        "Line length {} exceeds {} characters",
-                        effective_length, self.line_length
-                    )
-                };
+            let message = if let Some(ref fix_obj) = fix {
+                format!(
+                    "Line length {} exceeds {} characters (can trim whitespace)",
+                    effective_length, self.line_length
+                )
+            } else {
+                format!(
+                    "Line length {} exceeds {} characters",
+                    effective_length, self.line_length
+                )
+            };
 
-                // Calculate precise character range for the excess portion
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_excess_range(line_number, line, self.line_length);
+            // Calculate precise character range for the excess portion
+            let (start_line, start_col, end_line, end_col) =
+                calculate_excess_range(line_number, line, self.line_length);
 
-                warnings.push(LintWarning {
+            warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 message,
                 line: start_line,
@@ -281,7 +273,6 @@ impl Rule for MD013LineLength {
                 severity: Severity::Warning,
                 fix,
             });
-            }
         }
         Ok(warnings)
     }

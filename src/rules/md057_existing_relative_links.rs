@@ -226,28 +226,45 @@ impl MD057ExistingRelativeLinks {
         element_cache: &ElementCache,
         warnings: &mut Vec<LintWarning>,
     ) {
-        // Get all potential link starts
-        for link_match in LINK_START_REGEX.find_iter(content) {
-            let start_pos = link_match.start();
-            let end_pos = link_match.end();
+        // Use DocumentStructure links instead of expensive regex parsing
+        if !doc_structure.links.is_empty() {
+            // Create element cache for code span detection
+            let element_cache = ElementCache::new(content);
 
-            // Skip if this is in a code span or code block
-            if element_cache.is_in_code_span(start_pos)
-                || doc_structure.is_in_code_block(content[..start_pos].lines().count() + 1)
-            {
-                continue;
-            }
+            for link in &doc_structure.links {
+                let line_idx = link.line - 1;
+                if let Some(line) = content.lines().nth(line_idx) {
+                    // Quick check for link pattern in this line
+                    if !line.contains("](") {
+                        continue;
+                    }
 
-            // Find the URL part after the link text
-            if let Some(_url_match) = URL_EXTRACT_REGEX.find_at(content, end_pos - 1) {
-                if let Some(caps) = URL_EXTRACT_REGEX.captures_at(content, end_pos - 1) {
-                    if let Some(url_group) = caps.get(1) {
-                        let url = url_group.as_str().trim();
-                        let line_num =
-                            content[..start_pos].chars().filter(|&c| c == '\n').count() + 1;
+                    // Find all links in this line using optimized regex
+                    for link_match in LINK_START_REGEX.find_iter(line) {
+                        let start_pos = link_match.start();
+                        let end_pos = link_match.end();
 
-                        // Process and validate the link
-                        self.process_link(url, line_num, start_pos + 1, warnings);
+                        // Calculate absolute position in content for code span detection
+                        let line_start_pos = content.lines().take(line_idx).map(|l| l.len() + 1).sum::<usize>();
+                        let absolute_start_pos = line_start_pos + start_pos;
+
+                        // Skip if this link is in a code span
+                        if element_cache.is_in_code_span(absolute_start_pos) {
+                            continue;
+                        }
+
+                        // Find the URL part after the link text
+                        if let Some(caps) = URL_EXTRACT_REGEX.captures_at(line, end_pos - 1) {
+                            if let Some(url_group) = caps.get(1) {
+                                let url = url_group.as_str().trim();
+
+                                // Calculate column position
+                                let column = start_pos + 1;
+
+                                // Process and validate the link
+                                self.process_link(url, link.line, column, warnings);
+                            }
+                        }
                     }
                 }
             }
@@ -270,7 +287,7 @@ impl Rule for MD057ExistingRelativeLinks {
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         let content = ctx.content;
-        content.is_empty() || !content.contains('[')
+        content.is_empty() || !content.contains('[') || !content.contains("](")
     }
 
     /// Optimized implementation using document structure
@@ -280,7 +297,14 @@ impl Rule for MD057ExistingRelativeLinks {
         structure: &DocumentStructure,
     ) -> LintResult {
         let content = ctx.content;
-        if self.should_skip(ctx) {
+
+        // Early returns for performance
+        if content.is_empty() || !content.contains('[') {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for any potential links before expensive operations
+        if !content.contains("](") {
             return Ok(Vec::new());
         }
 
@@ -289,22 +313,28 @@ impl Rule for MD057ExistingRelativeLinks {
 
         let mut warnings = Vec::new();
 
-        // Check if we have a base path
-        let base_path = if self.base_path.lock().unwrap().is_some() {
-            self.base_path.lock().unwrap().clone()
-        } else {
-            // Try to determine the base path from the file being processed
-            if let Ok(file_path) = env::var("RUMDL_FILE_PATH") {
-                let path = Path::new(&file_path);
-                if path.exists() {
-                    path.parent()
-                        .map(|p| p.to_path_buf())
-                        .or_else(|| Some(CURRENT_DIR.clone()))
-                } else {
-                    Some(CURRENT_DIR.clone())
-                }
+        // Cache base path lookup to avoid repeated mutex operations
+        let base_path = {
+            let base_path_guard = self.base_path.lock().unwrap();
+            if base_path_guard.is_some() {
+                base_path_guard.clone()
             } else {
-                Some(CURRENT_DIR.clone())
+                // Try to determine the base path from the file being processed (cached)
+                static CACHED_FILE_PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+                CACHED_FILE_PATH.get_or_init(|| {
+                    if let Ok(file_path) = env::var("RUMDL_FILE_PATH") {
+                        let path = Path::new(&file_path);
+                        if path.exists() {
+                            path.parent()
+                                .map(|p| p.to_path_buf())
+                                .or_else(|| Some(CURRENT_DIR.clone()))
+                        } else {
+                            Some(CURRENT_DIR.clone())
+                        }
+                    } else {
+                        Some(CURRENT_DIR.clone())
+                    }
+                }).clone()
             }
         };
 
@@ -313,11 +343,71 @@ impl Rule for MD057ExistingRelativeLinks {
             return Ok(warnings);
         }
 
-        // Get the element cache for efficient code span detection
-        let element_cache = ElementCache::new(content);
+        // Use DocumentStructure links instead of expensive regex parsing
+        if !structure.links.is_empty() {
+            // Pre-compute line positions for efficient absolute position calculation
+            let mut line_positions = Vec::new();
+            let mut pos = 0;
+            line_positions.push(0);
+            for ch in content.chars() {
+                pos += ch.len_utf8();
+                if ch == '\n' {
+                    line_positions.push(pos);
+                }
+            }
 
-        // Process links using structure and element cache
-        self.process_links_with_structure(content, structure, &element_cache, &mut warnings);
+            // Create element cache once for all links
+            let element_cache = ElementCache::new(content);
+
+            // Pre-collect lines to avoid repeated line iteration
+            let lines: Vec<&str> = content.lines().collect();
+
+            for link in &structure.links {
+                let line_idx = link.line - 1;
+                if line_idx >= lines.len() {
+                    continue;
+                }
+
+                let line = lines[line_idx];
+
+                // Quick check for link pattern in this line
+                if !line.contains("](") {
+                    continue;
+                }
+
+                // Find all links in this line using optimized regex
+                for link_match in LINK_START_REGEX.find_iter(line) {
+                    let start_pos = link_match.start();
+                    let end_pos = link_match.end();
+
+                    // Calculate absolute position efficiently using pre-computed positions
+                    let absolute_start_pos = if line_idx < line_positions.len() {
+                        line_positions[line_idx] + start_pos
+                    } else {
+                        // Fallback for edge cases
+                        content.lines().take(line_idx).map(|l| l.len() + 1).sum::<usize>() + start_pos
+                    };
+
+                    // Skip if this link is in a code span
+                    if element_cache.is_in_code_span(absolute_start_pos) {
+                        continue;
+                    }
+
+                    // Find the URL part after the link text
+                    if let Some(caps) = URL_EXTRACT_REGEX.captures_at(line, end_pos - 1) {
+                        if let Some(url_group) = caps.get(1) {
+                            let url = url_group.as_str().trim();
+
+                            // Calculate column position
+                            let column = start_pos + 1;
+
+                            // Process and validate the link
+                            self.process_link(url, link.line, column, &mut warnings);
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(warnings)
     }

@@ -1,5 +1,5 @@
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
-
+use crate::utils::table_utils::TableUtils;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 /// Rule MD056: Table column count
@@ -127,13 +127,13 @@ impl MD056TableColumnCount {
 
     /// Try to fix a table row to match the expected column count
     fn fix_table_row(&self, row: &str, expected_count: usize) -> Option<String> {
-        let trimmed = row.trim();
-        let current_count = self.count_cells(trimmed);
+        let current_count = TableUtils::count_cells(row);
 
         if current_count == expected_count || current_count == 0 {
             return None;
         }
 
+        let trimmed = row.trim();
         let has_leading_pipe = trimmed.starts_with('|');
         let has_trailing_pipe = trimmed.ends_with('|');
 
@@ -197,49 +197,57 @@ impl Rule for MD056TableColumnCount {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let mut warnings = Vec::new();
+
+        // Early return for empty content or content without tables
+        if content.is_empty() || !content.contains('|') {
+            return Ok(Vec::new());
+        }
+
         let lines: Vec<&str> = content.lines().collect();
-        let tables = self.identify_tables(&lines);
 
-        for (table_start, table_end) in tables {
-            // Find first non-empty row to determine expected column count
-            let mut expected_count = 0;
-            let mut found_header = false;
+        // Use shared table detection for better performance
+        let table_blocks = TableUtils::find_table_blocks(content);
 
-            for i in table_start..=table_end {
-                if self.is_in_code_block(&lines, i) {
-                    continue;
-                }
+        for table_block in table_blocks {
+            // Determine expected column count from header row
+            let expected_count = TableUtils::count_cells(lines[table_block.header_line]);
 
-                let count = self.count_cells(lines[i]);
-                if count > 0 {
-                    if !found_header {
-                        expected_count = count;
-                        found_header = true;
-                    } else if count != expected_count {
-                        let fix_result = self.fix_table_row(lines[i], expected_count);
+            if expected_count == 0 {
+                continue; // Skip invalid tables
+            }
 
-                        // Calculate precise character range for the entire table row
-                        let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
+            // Check all rows in the table
+            let all_lines = std::iter::once(table_block.header_line)
+                .chain(std::iter::once(table_block.delimiter_line))
+                .chain(table_block.content_lines.iter().copied());
 
-                        warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!(
-                "Table row has {
-            } cells, but expected {}",
-                                count, expected_count
-                            ),
-                            line: start_line,
-                            column: start_col,
-                            end_line: end_line,
-                            end_column: end_col,
-                            severity: Severity::Warning,
-                            fix: fix_result.map(|fixed_row| Fix {
-                                range: LineIndex::new(content.to_string())
-                                    .line_col_to_byte_range(i + 1, 1),
-                                replacement: fixed_row,
-                            }),
-                        });
-                    }
+            for line_idx in all_lines {
+                let line = lines[line_idx];
+                let count = TableUtils::count_cells(line);
+
+                if count > 0 && count != expected_count {
+                    let fix_result = self.fix_table_row(line, expected_count);
+
+                    // Calculate precise character range for the entire table row
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        message: format!(
+                            "Table row has {} cells, but expected {}",
+                            count, expected_count
+                        ),
+                        line: start_line,
+                        column: start_col,
+                        end_line: end_line,
+                        end_column: end_col,
+                        severity: Severity::Warning,
+                        fix: fix_result.map(|fixed_row| Fix {
+                            range: LineIndex::new(content.to_string())
+                                .line_col_to_byte_range(line_idx + 1, 1),
+                            replacement: fixed_row,
+                        }),
+                    });
                 }
             }
         }

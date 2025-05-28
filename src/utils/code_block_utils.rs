@@ -19,13 +19,18 @@ impl CodeBlockUtils {
         let mut in_code_block = false;
         let mut code_block_start = 0;
 
+        // Pre-compute line positions for efficient offset calculation
+        let lines: Vec<&str> = content.lines().collect();
+        let mut line_positions = Vec::with_capacity(lines.len());
+        let mut pos = 0;
+        for line in &lines {
+            line_positions.push(pos);
+            pos += line.len() + 1; // +1 for newline
+        }
+
         // Find fenced code blocks
-        for (i, line) in content.lines().enumerate() {
-            let line_start = if i == 0 {
-                0
-            } else {
-                content.lines().take(i).map(|l| l.len() + 1).sum()
-            };
+        for (i, line) in lines.iter().enumerate() {
+            let line_start = line_positions[i];
 
             if CODE_BLOCK_PATTERN.is_match(line.trim()) {
                 if !in_code_block {

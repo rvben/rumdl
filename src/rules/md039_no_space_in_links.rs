@@ -24,72 +24,30 @@ impl MD039NoSpaceInLinks {
     }
 
     /// Shared parser: yields (is_image, text, url, link_start, link_end, text_start, text_end)
-    fn parse_links_and_images<'a>(content: &'a str) -> Vec<(bool, &'a str, &'a str, usize, usize, usize, usize)> {
-        let bytes = content.as_bytes();
-        let mut code_block_ranges = Vec::new();
-        // --- Pass 1: Find code block regions (fenced and indented) as byte ranges ---
-        let mut in_fenced = false;
-        let mut fence_marker = String::new();
-        let mut code_block_start = 0;
-        let mut i = 0;
-        while i < content.len() {
-            // Fenced code block start
-            if !in_fenced && (content[i..].starts_with("```") || content[i..].starts_with("~~~")) {
-                in_fenced = true;
-                fence_marker = content[i..].chars().take(3).collect::<String>();
-                code_block_start = i;
-                while i < content.len() && bytes[i] != b'\n' { i += 1; }
-                i += 1;
-                continue;
-            }
-            // Fenced code block end
-            if in_fenced && content[i..].starts_with(&fence_marker) {
-                while i < content.len() && bytes[i] != b'\n' { i += 1; }
-                i += 1;
-                code_block_ranges.push((code_block_start, i));
-                in_fenced = false;
-                continue;
-            }
-            // Indented code block (4 spaces or tab at start of line)
-            if !in_fenced {
-                let line_start = i;
-                let mut j = i;
-                while j < content.len() && bytes[j] != b'\n' { j += 1; }
-                let line = &content[line_start..j];
-                if line.starts_with("    ") || line.starts_with("\t") {
-                    let indented_start = line_start;
-                    let mut indented_end = j + 1;
-                    let mut k = indented_end;
-                    while k < content.len() {
-                        let next_line_start = k;
-                        let mut l = k;
-                        while l < content.len() && bytes[l] != b'\n' { l += 1; }
-                        let next_line = &content[next_line_start..l];
-                        if next_line.starts_with("    ") || next_line.starts_with("\t") {
-                            indented_end = l + 1;
-                            k = l + 1;
-                        } else { break; }
-                    }
-                    code_block_ranges.push((indented_start, indented_end));
-                    i = indented_end;
-                    continue;
-                }
-                i = j + 1;
-                continue;
-            }
-            while i < content.len() && bytes[i] != b'\n' { i += 1; }
-            i += 1;
-        }
-        // --- Pass 2: Parse for links/images outside code blocks using char_indices ---
+    fn parse_links_and_images(content: &str) -> Vec<(bool, &str, &str, usize, usize, usize, usize)> {
         let mut results = Vec::new();
+
+        // Early return if no potential links
+        if !content.contains('[') || !content.contains("](") {
+            return results;
+        }
+
+        // Pre-compute code block ranges once for efficiency
+        let code_block_ranges = crate::utils::code_block_utils::CodeBlockUtils::detect_code_blocks(content);
+
+        // Convert to char indices for efficient processing
         let chars: Vec<(usize, char)> = content.char_indices().collect();
         let mut idx = 0;
+
         while idx < chars.len() {
             let (byte_i, c) = chars[idx];
+
+            // Skip if in code block (optimized check)
             if code_block_ranges.iter().any(|&(start, end)| byte_i >= start && byte_i < end) {
                 idx += 1;
                 continue;
             }
+
             let is_image = c == '!' && idx + 1 < chars.len() && chars[idx + 1].1 == '[';
             let start_bracket = if is_image {
                 if idx + 1 < chars.len() && chars[idx + 1].1 == '[' { idx + 1 } else { usize::MAX }
@@ -98,10 +56,12 @@ impl MD039NoSpaceInLinks {
             } else {
                 usize::MAX
             };
+
             if start_bracket == usize::MAX {
                 idx += 1;
                 continue;
             }
+
             // Find matching closing bracket (not escaped), allowing multi-line
             let mut j = start_bracket + 1;
             while j < chars.len() {
@@ -118,10 +78,12 @@ impl MD039NoSpaceInLinks {
                 }
                 j += 1;
             }
+
             if j >= chars.len() {
                 idx = j + 1;
                 continue;
             }
+
             // Check for ( after ] (allow whitespace)
             let mut k = j + 1;
             while k < chars.len() && chars[k].1.is_whitespace() { k += 1; }
@@ -129,6 +91,7 @@ impl MD039NoSpaceInLinks {
                 idx = j + 1;
                 continue;
             }
+
             // Find matching ) for url
             let mut l = k + 1;
             let mut paren_count = 1;
@@ -140,22 +103,27 @@ impl MD039NoSpaceInLinks {
                 }
                 l += 1;
             }
+
             if paren_count != 0 || l >= chars.len() {
                 idx = l + 1;
                 continue;
             }
+
             let text_start = chars[start_bracket].0 + chars[start_bracket].1.len_utf8();
             let text_end = chars[j].0;
             let url_start = chars[k].0 + chars[k].1.len_utf8();
             let url_end = chars[l].0;
+
             if text_end < text_start || url_end < url_start || text_end > content.len() || url_end > content.len() {
                 idx = l + 1;
                 continue;
             }
+
             let text = &content[text_start..text_end];
             let url = &content[url_start..url_end];
             let link_start = if is_image { chars[idx].0 } else { chars[start_bracket].0 };
             let link_end = chars[l].0 + chars[l].1.len_utf8();
+
             results.push((is_image, text, url, link_start, link_end, text_start, text_end));
             idx = l + 1;
         }
@@ -208,9 +176,19 @@ impl Rule for MD039NoSpaceInLinks {
         if self.should_skip(ctx) {
             return Ok(Vec::new());
         }
+
         let content = ctx.content;
         let mut warnings = Vec::new();
-        for (is_image, text, url, link_start, _link_end, _text_start, _text_end) in Self::parse_links_and_images(content) {
+
+        // Parse links and images once
+        let links_and_images = Self::parse_links_and_images(content);
+
+        // Early return if no links found
+        if links_and_images.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        for (is_image, text, url, link_start, _link_end, _text_start, _text_end) in links_and_images {
             // Unescape for whitespace check
             let mut unesc = String::with_capacity(text.len());
             let mut tchars = text.chars().peekable();
@@ -224,12 +202,14 @@ impl Rule for MD039NoSpaceInLinks {
                     unesc.push(c);
                 }
             }
+
             let needs_warning = if unesc.chars().all(|c| c.is_whitespace()) {
                 true
             } else {
                 let trimmed = text.trim_matches(|c: char| c.is_whitespace());
                 text != trimmed
             };
+
             if needs_warning {
                 let original = if is_image {
                     format!("![{}]({})", text, url)
@@ -252,17 +232,17 @@ impl Rule for MD039NoSpaceInLinks {
                 };
                 let (line, column) = ctx.offset_to_line_col(link_start);
                 warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line,
-                column,
-                end_line: line,
-                end_column: column + original.len(),
-                message: WARNING_MESSAGE.to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                range: link_start..link_start + original.len(),
-                replacement: fixed,
-            }),
+                    rule_name: Some(self.name()),
+                    line,
+                    column,
+                    end_line: line,
+                    end_column: column + original.len(),
+                    message: WARNING_MESSAGE.to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: link_start..link_start + original.len(),
+                        replacement: fixed,
+                    }),
                 });
             }
         }

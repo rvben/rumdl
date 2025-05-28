@@ -11,6 +11,7 @@ pub mod markdown_elements;
 pub mod range_utils;
 pub mod regex_cache;
 pub mod string_interner;
+pub mod table_utils;
 
 pub use ast_utils::AstCache;
 pub use code_block_utils::CodeBlockUtils;

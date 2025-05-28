@@ -54,7 +54,7 @@ Cell 1   | Cell 2
 
 #[test]
 fn test_leading_and_trailing_style() {
-    let rule = MD055TablePipeStyle::new("leading_and_trailing");
+    let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
 
     // Consistent with leading_and_trailing style
     let content = r#"
@@ -81,7 +81,7 @@ Cell 1   | Cell 2
 
 #[test]
 fn test_no_leading_or_trailing_style() {
-    let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
+    let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
 
     // Consistent with no_leading_or_trailing style
     let content = r#"
@@ -108,7 +108,7 @@ Cell 1   | Cell 2
 
 #[test]
 fn test_leading_only_style() {
-    let rule = MD055TablePipeStyle::new("leading_only");
+    let rule = MD055TablePipeStyle::new("leading_only".to_string());
 
     // Consistent with leading_only style
     let content = r#"
@@ -150,7 +150,7 @@ fn test_leading_only_style() {
 
 #[test]
 fn test_trailing_only_style() {
-    let rule = MD055TablePipeStyle::new("trailing_only");
+    let rule = MD055TablePipeStyle::new("trailing_only".to_string());
 
     // Consistent with trailing_only style
     let content = r#"
@@ -209,7 +209,7 @@ Header with inconsistent style | that should be ignored
 #[test]
 fn test_fix() {
     // Test fix for leading_and_trailing style
-    let rule = MD055TablePipeStyle::new("leading_and_trailing");
+    let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
     let content = r#"
 Header 1 | Header 2
 -------- | --------
@@ -222,7 +222,7 @@ Cell 1   | Cell 2
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 
     // Test fix for no_leading_or_trailing style
-    let rule = MD055TablePipeStyle::new("no_leading_or_trailing");
+    let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
     let content = r#"
 | Header 1 | Header 2 |
 | -------- | -------- |
@@ -235,7 +235,7 @@ Cell 1   | Cell 2
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 
     // Test fix for leading_only style
-    let rule = MD055TablePipeStyle::new("leading_only");
+    let rule = MD055TablePipeStyle::new("leading_only".to_string());
     let content = r#"
 Header 1 | Header 2 |
 -------- | -------- |
@@ -248,7 +248,7 @@ Cell 1   | Cell 2   |
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 
     // Test fix for trailing_only style
-    let rule = MD055TablePipeStyle::new("trailing_only");
+    let rule = MD055TablePipeStyle::new("trailing_only".to_string());
     let content = r#"
 | Header 1 | Header 2 |
 | -------- | -------- |
@@ -405,7 +405,7 @@ And more text with | pipes | that | aren't | tables.
 
 #[test]
 fn test_fix_does_not_corrupt_non_tables() {
-    let rule = MD055TablePipeStyle::new("leading_and_trailing");
+    let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
 
     // Test that fix doesn't corrupt non-table content
     let content = r#"

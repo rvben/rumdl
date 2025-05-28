@@ -62,8 +62,20 @@ impl Rule for MD007ULIndent {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+
+        // Early returns for performance
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for any list markers before expensive processing
+        if !content.contains('*') && !content.contains('-') && !content.contains('+') {
+            return Ok(Vec::new());
+        }
+
         let element_cache = ElementCache::new(content);
         let mut warnings = Vec::new();
+
         for item in element_cache.get_list_items() {
             // Only unordered list items
             // Skip list items inside code blocks (including YAML/front matter)
@@ -106,9 +118,9 @@ impl Rule for MD007ULIndent {
                     };
 
                     warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!(
-                "Incorrect indentation: expected {} spaces for nesting level {}, found {}",
+                        rule_name: Some(self.name()),
+                        message: format!(
+                            "Incorrect indentation: expected {} spaces for nesting level {}, found {}",
                             expected_indent, item.nesting_level, item.indentation
                         ),
                         line: item.line_number,
@@ -128,9 +140,82 @@ impl Rule for MD007ULIndent {
     fn check_with_structure(
         &self,
         ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
+        doc_structure: &DocumentStructure,
     ) -> LintResult {
-        self.check(ctx)
+        let content = ctx.content;
+
+        // Early return if no list items
+        if doc_structure.list_lines.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Use ElementCache for detailed list analysis (still needed for nesting levels)
+        let element_cache = ElementCache::new(content);
+        let mut warnings = Vec::new();
+
+        for item in element_cache.get_list_items() {
+            // Only process unordered list items that are in our structure
+            if !doc_structure.list_lines.contains(&item.line_number) {
+                continue;
+            }
+
+            // Skip list items inside code blocks
+            if doc_structure.is_in_code_block(item.line_number) {
+                continue;
+            }
+
+            if matches!(item.marker_type, ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus) {
+                let expected_indent = item.nesting_level * self.indent;
+                if item.indentation != expected_indent {
+                    // Generate fix for this list item
+                    let fix = {
+                        let lines: Vec<&str> = content.lines().collect();
+                        if let Some(line) = lines.get(item.line_number - 1) {
+                            // Extract the marker and content
+                            let re = regex::Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
+                            if let Some(caps) = re.captures(line) {
+                                let content_part = caps.get(4).map_or("", |m| m.as_str());
+                                let space_after_marker = caps.get(3).map_or(" ", |m| m.as_str());
+                                let marker_char = caps.get(2).map_or("*", |m| m.as_str());
+                                let correct_indent = " ".repeat(expected_indent);
+                                let fixed_line = format!("{}{}{}{}{}", item.blockquote_prefix, correct_indent, marker_char, space_after_marker, content_part);
+
+                                let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
+                                let line_start = line_index.line_col_to_byte_range(item.line_number, 1).start;
+                                let line_end = if item.line_number < lines.len() {
+                                    line_index.line_col_to_byte_range(item.line_number + 1, 1).start - 1
+                                } else {
+                                    content.len()
+                                };
+                                Some(crate::rule::Fix {
+                                    range: line_start..line_end,
+                                    replacement: fixed_line,
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    };
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        message: format!(
+                            "Incorrect indentation: expected {} spaces for nesting level {}, found {}",
+                            expected_indent, item.nesting_level, item.indentation
+                        ),
+                        line: item.line_number,
+                        column: item.blockquote_prefix.len() + item.indentation + 1, // correct column for marker
+                        end_line: item.line_number,
+                        end_column: item.blockquote_prefix.len() + item.indentation + 2,
+                        severity: Severity::Warning,
+                        fix,
+                    });
+                }
+            }
+        }
+        Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
