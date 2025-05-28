@@ -3,20 +3,12 @@
 /// See [docs/md037.md](../../docs/md037.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::regex_cache::*;
-use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
     // Front matter detection
     static ref FRONT_MATTER_DELIM: Regex = Regex::new(r"^---\s*$").unwrap();
-
-    // Detection patterns for valid content that should not be treated as emphasis errors
-    static ref UNBALANCED_ASTERISK: Regex = Regex::new(r"\*([^*]+)$|^([^*]*)\*").unwrap();
-    static ref UNBALANCED_DOUBLE_ASTERISK: Regex = Regex::new(r"\*\*([^*]+)$|^([^*]*)\*\*").unwrap();
-    static ref UNBALANCED_UNDERSCORE: Regex = Regex::new(r"_([^_]+)$|^([^_]*)_").unwrap();
-    static ref UNBALANCED_DOUBLE_UNDERSCORE: Regex = Regex::new(r"__([^_]+)$|^([^_]*)__").unwrap();
 
     // Better detection of inline code with support for multiple backticks
     static ref INLINE_CODE: Regex = Regex::new(r"(`+)([^`]|[^`].*?[^`])(`+)").unwrap();
@@ -30,12 +22,8 @@ lazy_static! {
     // Documentation style patterns
     static ref DOC_METADATA_PATTERN: Regex = Regex::new(r"^\s*\*?\s*\*\*[^*]+\*\*\s*:").unwrap();
 
-    // Bold text pattern (for preserving bold text in documentation)
-    static ref BOLD_TEXT_PATTERN: Regex = Regex::new(r"\*\*[^*]+\*\*").unwrap();
-
-    // Multi-line emphasis detection (for potential future use)
-    static ref MULTI_LINE_EMPHASIS_START: Regex = Regex::new(r"(\*\*|\*|__|_)([^*_\s].*?)$").unwrap();
-    static ref MULTI_LINE_EMPHASIS_END: Regex = Regex::new(r"^(.*?)(\*\*|\*|__|_)").unwrap();
+    // Bold text pattern (for preserving bold text in documentation) - only match valid bold without spaces
+    static ref BOLD_TEXT_PATTERN: Regex = Regex::new(r"\*\*[^*\s][^*]*[^*\s]\*\*|\*\*[^*\s]\*\*").unwrap();
 }
 
 // Enhanced inline code replacement to handle nested backticks
@@ -59,6 +47,186 @@ fn replace_inline_code(line: &str) -> String {
     result
 }
 
+/// Represents an emphasis marker found in text
+#[derive(Debug, Clone, PartialEq)]
+struct EmphasisMarker {
+    marker_type: char,  // '*' or '_'
+    count: usize,       // 1 for single, 2 for double
+    start_pos: usize,   // Position in the line
+    end_pos: usize,     // End position of the marker
+}
+
+/// Represents a complete emphasis span
+#[derive(Debug, Clone)]
+struct EmphasisSpan {
+    opening: EmphasisMarker,
+    closing: EmphasisMarker,
+    content: String,
+    has_leading_space: bool,
+    has_trailing_space: bool,
+}
+
+/// Parse emphasis markers from a line of text
+fn find_emphasis_markers(line: &str) -> Vec<EmphasisMarker> {
+    let mut markers = Vec::new();
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '*' || chars[i] == '_' {
+            let marker_char = chars[i];
+            let start_pos = i;
+            let mut count = 1;
+
+            // Count consecutive markers
+            while i + count < chars.len() && chars[i + count] == marker_char {
+                count += 1;
+            }
+
+            // Only consider single (*) and double (**) markers
+            if count == 1 || count == 2 {
+                markers.push(EmphasisMarker {
+                    marker_type: marker_char,
+                    count,
+                    start_pos,
+                    end_pos: start_pos + count,
+                });
+            }
+
+            i += count;
+        } else {
+            i += 1;
+        }
+    }
+
+    markers
+}
+
+/// Find valid emphasis spans by pairing opening and closing markers
+fn find_emphasis_spans(line: &str, markers: Vec<EmphasisMarker>) -> Vec<EmphasisSpan> {
+    let mut spans = Vec::new();
+    let mut used_markers = vec![false; markers.len()];
+
+    for i in 0..markers.len() {
+        if used_markers[i] {
+            continue;
+        }
+
+        let opening = &markers[i];
+
+        // Look for the nearest matching closing marker (not the farthest)
+        // This prevents creating spans that cross multiple emphasis boundaries
+        for j in (i + 1)..markers.len() {
+            if used_markers[j] {
+                continue;
+            }
+
+            let closing = &markers[j];
+
+            // Must be same type and count
+            if closing.marker_type == opening.marker_type && closing.count == opening.count {
+                // Extract content between markers
+                let content_start = opening.end_pos;
+                let content_end = closing.start_pos;
+
+                if content_end > content_start {
+                    let content = line[content_start..content_end].to_string();
+
+                    // Check if this is a valid emphasis span
+                    if is_valid_emphasis_content(&content) && is_valid_emphasis_span(line, opening, closing) {
+                        // Additional check: make sure we're not crossing other emphasis markers
+                        let crosses_markers = markers.iter().enumerate().any(|(idx, marker)| {
+                            idx != i && idx != j && !used_markers[idx] &&
+                            marker.start_pos > opening.end_pos && marker.end_pos < closing.start_pos &&
+                            marker.marker_type == opening.marker_type
+                        });
+
+                        if !crosses_markers {
+                            let has_leading_space = content.starts_with(' ') || content.starts_with('\t');
+                            let has_trailing_space = content.ends_with(' ') || content.ends_with('\t');
+
+                            spans.push(EmphasisSpan {
+                                opening: opening.clone(),
+                                closing: closing.clone(),
+                                content,
+                                has_leading_space,
+                                has_trailing_space,
+                            });
+
+                            // Mark both markers as used
+                            used_markers[i] = true;
+                            used_markers[j] = true;
+                            break; // Take the first valid match, not the farthest
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    spans
+}
+
+/// Check if this is a valid emphasis span by examining the context
+fn is_valid_emphasis_span(line: &str, opening: &EmphasisMarker, closing: &EmphasisMarker) -> bool {
+    let content_start = opening.end_pos;
+    let content_end = closing.start_pos;
+
+    // Content must exist
+    if content_end <= content_start {
+        return false;
+    }
+
+    let content = &line[content_start..content_end];
+
+    // Content cannot be just whitespace
+    if content.trim().is_empty() {
+        return false;
+    }
+
+    // Check for valid emphasis boundaries
+    // Opening marker should be preceded by whitespace or start of line
+    let before_opening = if opening.start_pos > 0 {
+        line.chars().nth(opening.start_pos - 1)
+    } else {
+        None
+    };
+
+    // Closing marker should be followed by whitespace, punctuation, or end of line
+    let after_closing = if closing.end_pos < line.len() {
+        line.chars().nth(closing.end_pos)
+    } else {
+        None
+    };
+
+    // Opening should be at start of line or after whitespace/punctuation/HTML
+    let valid_opening = opening.start_pos == 0
+        || before_opening.map_or(false, |c| c.is_whitespace() || "([{\"'>".contains(c));
+
+    // Closing should be at end of line or before whitespace/punctuation/HTML
+    let valid_closing = closing.end_pos == line.len()
+        || after_closing.map_or(false, |c| c.is_whitespace() || ")]}\"'.,!?;:<".contains(c));
+
+    // Content should not contain line breaks (for single-line emphasis)
+    let no_line_breaks = !content.contains('\n');
+
+    // Content should not start and end with the same emphasis marker (avoid nested conflicts)
+    let no_marker_conflict = !(content.starts_with(opening.marker_type) && content.ends_with(opening.marker_type));
+
+    valid_opening && valid_closing && no_line_breaks && no_marker_conflict
+}
+
+/// Check if content is valid for emphasis (not empty, not just whitespace)
+fn is_valid_emphasis_content(content: &str) -> bool {
+    let trimmed = content.trim();
+    !trimmed.is_empty() && trimmed.len() > 0
+}
+
+/// Check if an emphasis span has spacing issues that should be flagged
+fn has_spacing_issues(span: &EmphasisSpan) -> bool {
+    span.has_leading_space || span.has_trailing_space
+}
+
 /// Rule MD037: Spaces inside emphasis markers
 #[derive(Clone)]
 pub struct MD037NoSpaceInEmphasis;
@@ -77,7 +245,7 @@ impl Rule for MD037NoSpaceInEmphasis {
         let _timer = crate::profiling::ScopedTimer::new("MD037_check");
 
         // Early return: if no emphasis markers at all, skip processing
-        if !has_emphasis_markers(content) {
+        if !content.contains('*') && !content.contains('_') {
             return Ok(vec![]);
         }
 
@@ -120,8 +288,8 @@ impl Rule for MD037NoSpaceInEmphasis {
             // Replace inline code with placeholders to avoid false positives
             let line_no_code = replace_inline_code(line);
 
-            // Use the correct emphasis pattern checking logic
-            check_emphasis_patterns(&line_no_code, line_num + 1, line, &mut warnings);
+            // Use the new emphasis parsing logic
+            self.check_line_for_emphasis_issues(&line_no_code, line_num + 1, &mut warnings);
         }
 
         Ok(warnings)
@@ -222,332 +390,163 @@ impl DocumentStructureExtensions for MD037NoSpaceInEmphasis {
         _doc_structure: &DocumentStructure,
     ) -> bool {
         let content = ctx.content;
-        !content.is_empty() && (content.contains('*') || content.contains('_'))
-    }
-}
-
-// Add this function to check fancy-regex patterns
-fn check_fancy_pattern(
-    line: &str,
-    line_num: usize,
-    pattern: &FancyRegex,
-    warnings: &mut Vec<LintWarning>,
-    rule_name: &'static str,
-) {
-    // find_iter returns Matches directly, not a Result
-    let matches = pattern.find_iter(line);
-
-    for full_match in matches.flatten() {
-        let start = full_match.start();
-        let end = full_match.end();
-        let match_text = &line[start..end];
-
-        // Determine if this is asterisk or underscore emphasis
-        let (marker_type, is_double) = if match_text.contains('*') {
-            ('*', match_text.contains("**"))
-        } else {
-            ('_', match_text.contains("__"))
-        };
-
-        let marker = if is_double {
-            &format!("{}{}", marker_type, marker_type)
-        } else {
-            &format!("{}", marker_type)
-        };
-
-        // Extract the content without spaces
-        let content = match_text
-            .trim_start_matches(marker)
-            .trim_end_matches(marker)
-            .trim();
-
-        // Create the fixed version
-        let fixed_text = format!("{}{}{}", marker, content, marker);
-
-        let warning = LintWarning {
-            rule_name: Some(rule_name),
-            message: format!("Spaces inside emphasis markers: '{}'", match_text),
-            line: line_num,
-            column: start + 1, // +1 because columns are 1-indexed
-            end_line: line_num,
-            end_column: end + 1,
-            severity: Severity::Warning,
-            fix: Some(Fix {
-                range: start..end,
-                replacement: fixed_text,
-            }),
-        };
-
-        warnings.push(warning);
-    }
-}
-
-// Check for spaces inside emphasis markers with enhanced handling
-fn check_emphasis_patterns(
-    line: &str,
-    line_num: usize,
-    _original_line: &str,
-    warnings: &mut Vec<LintWarning>,
-) {
-    // Instance of the rule to call the check_pattern method
-    let rule = MD037NoSpaceInEmphasis;
-
-    // Skip documentation patterns
-    let trimmed = line.trim_start();
-    if (trimmed.starts_with("* *") && line.contains("*:"))
-        || (trimmed.starts_with("* **") && line.contains("**:"))
-        || DOC_METADATA_PATTERN.is_match(line)
-        || BOLD_TEXT_PATTERN.is_match(line)
-    {
-        return;
-    }
-
-    // Special handling for list items - only check content after list marker
-    if LIST_MARKER.is_match(line) {
-        if let Some(caps) = LIST_MARKER.captures(line) {
-            if let Some(full_match) = caps.get(0) {
-                let list_marker_end = full_match.end();
-                if list_marker_end < line.len() {
-                    // Process the content after the list marker
-                    let list_content = &line[list_marker_end..];
-                    if list_content.contains('*') {
-                        // Adjust column positions to account for list_marker_end
-                        let mut list_warnings = Vec::new();
-                        rule.check_pattern(
-                            list_content,
-                            line_num,
-                            &ASTERISK_EMPHASIS,
-                            &mut list_warnings,
-                        );
-
-                        // Add list_marker_end to column positions
-                        for warning in list_warnings {
-                            let mut adjusted_warning = warning;
-                            adjusted_warning.column += list_marker_end;
-                            if let Some(fix) = adjusted_warning.fix {
-                                adjusted_warning.fix = Some(Fix {
-                                    range: (fix.range.start + list_marker_end)
-                                        ..(fix.range.end + list_marker_end),
-                                    replacement: fix.replacement,
-                                });
-                            }
-                            warnings.push(adjusted_warning);
-                        }
-
-                        // Check double asterisk with fancy-regex
-                        if list_content.contains("**") {
-                            let mut fancy_warnings = Vec::new();
-                            check_fancy_pattern(
-                                list_content,
-                                line_num,
-                                &DOUBLE_ASTERISK_EMPHASIS,
-                                &mut fancy_warnings,
-                                rule.name(),
-                            );
-                            check_fancy_pattern(
-                                list_content,
-                                line_num,
-                                &DOUBLE_ASTERISK_SPACE_START,
-                                &mut fancy_warnings,
-                                rule.name(),
-                            );
-                            check_fancy_pattern(
-                                list_content,
-                                line_num,
-                                &DOUBLE_ASTERISK_SPACE_END,
-                                &mut fancy_warnings,
-                                rule.name(),
-                            );
-
-                            // Add list_marker_end to column positions
-                            for warning in fancy_warnings {
-                                let mut adjusted_warning = warning;
-                                adjusted_warning.column += list_marker_end;
-                                if let Some(fix) = adjusted_warning.fix {
-                                    adjusted_warning.fix = Some(Fix {
-                                        range: (fix.range.start + list_marker_end)
-                                            ..(fix.range.end + list_marker_end),
-                                        replacement: fix.replacement,
-                                    });
-                                }
-                                warnings.push(adjusted_warning);
-                            }
-                        }
-                    }
-                    if list_content.contains('_') {
-                        // Adjust column positions for underscores too
-                        let mut underscore_warnings = Vec::new();
-                        rule.check_pattern(
-                            list_content,
-                            line_num,
-                            &UNDERSCORE_EMPHASIS,
-                            &mut underscore_warnings,
-                        );
-                        rule.check_pattern(
-                            list_content,
-                            line_num,
-                            &DOUBLE_UNDERSCORE_EMPHASIS,
-                            &mut underscore_warnings,
-                        );
-
-                        // Add list_marker_end to column positions
-                        for warning in underscore_warnings {
-                            let mut adjusted_warning = warning;
-                            adjusted_warning.column += list_marker_end;
-                            if let Some(fix) = adjusted_warning.fix {
-                                adjusted_warning.fix = Some(Fix {
-                                    range: (fix.range.start + list_marker_end)
-                                        ..(fix.range.end + list_marker_end),
-                                    replacement: fix.replacement,
-                                });
-                            }
-                            warnings.push(adjusted_warning);
-                        }
-                    }
-                }
-            }
-        }
-        return;
-    }
-
-    // Check for double asterisk emphasis using fancy-regex
-    if line.contains("**") {
-        check_fancy_pattern(
-            line,
-            line_num,
-            &DOUBLE_ASTERISK_EMPHASIS,
-            warnings,
-            rule.name(),
-        );
-        check_fancy_pattern(
-            line,
-            line_num,
-            &DOUBLE_ASTERISK_SPACE_START,
-            warnings,
-            rule.name(),
-        );
-        check_fancy_pattern(
-            line,
-            line_num,
-            &DOUBLE_ASTERISK_SPACE_END,
-            warnings,
-            rule.name(),
-        );
-    }
-
-    // Skip valid emphasis at the start of a line
-    if VALID_START_EMPHASIS.is_match(line) {
-        // Still check the rest of the line for emphasis issues
-        if let Some(emphasis_start) = line.find(' ') {
-            let rest_of_line = &line[emphasis_start..];
-            if rest_of_line.contains('*') {
-                rule.check_pattern(rest_of_line, line_num, &ASTERISK_EMPHASIS, warnings);
-
-                // Check double asterisk with fancy-regex
-                if rest_of_line.contains("**") {
-                    check_fancy_pattern(
-                        rest_of_line,
-                        line_num,
-                        &DOUBLE_ASTERISK_EMPHASIS,
-                        warnings,
-                        rule.name(),
-                    );
-                    check_fancy_pattern(
-                        rest_of_line,
-                        line_num,
-                        &DOUBLE_ASTERISK_SPACE_START,
-                        warnings,
-                        rule.name(),
-                    );
-                    check_fancy_pattern(
-                        rest_of_line,
-                        line_num,
-                        &DOUBLE_ASTERISK_SPACE_END,
-                        warnings,
-                        rule.name(),
-                    );
-                }
-            }
-            if rest_of_line.contains('_') {
-                rule.check_pattern(rest_of_line, line_num, &UNDERSCORE_EMPHASIS, warnings);
-                rule.check_pattern(
-                    rest_of_line,
-                    line_num,
-                    &DOUBLE_UNDERSCORE_EMPHASIS,
-                    warnings,
-                );
-            }
-        }
-        return;
-    }
-
-    // Check emphasis patterns based on marker type
-    if line.contains('*') {
-        rule.check_pattern(line, line_num, &ASTERISK_EMPHASIS, warnings);
-    }
-
-    if line.contains('_') {
-        rule.check_pattern(line, line_num, &UNDERSCORE_EMPHASIS, warnings);
-        rule.check_pattern(line, line_num, &DOUBLE_UNDERSCORE_EMPHASIS, warnings);
+        content.contains('*') || content.contains('_')
     }
 }
 
 impl MD037NoSpaceInEmphasis {
-    // Check a specific emphasis pattern and add warnings
-    fn check_pattern(
+    /// Check a line for emphasis spacing issues using the new parsing logic
+    fn check_line_for_emphasis_issues(
         &self,
         line: &str,
         line_num: usize,
-        pattern: &Regex,
         warnings: &mut Vec<LintWarning>,
     ) {
-        for caps in pattern.captures_iter(line) {
-            let full_match = caps.get(0).unwrap();
-            let start_pos = full_match.start();
-            let end_pos = full_match.end();
-            let match_text = full_match.as_str();
+        // Skip documentation patterns
+        let trimmed = line.trim_start();
+        if (trimmed.starts_with("* *") && line.contains("*:"))
+            || (trimmed.starts_with("* **") && line.contains("**:"))
+            || DOC_METADATA_PATTERN.is_match(line)
+            || BOLD_TEXT_PATTERN.is_match(line)
+        {
+            return;
+        }
 
-            // Determine emphasis marker type (* or _) and if it's double
-            let (marker, _is_double) = if match_text.contains('*') {
-                if match_text.contains("**") {
-                    ("**", true)
-                } else {
-                    ("*", false)
+        // Improved list detection: only treat as list if it's actually a list item
+        // A list item should have content after the marker that doesn't look like emphasis
+        if LIST_MARKER.is_match(line) {
+            if let Some(caps) = LIST_MARKER.captures(line) {
+                if let Some(full_match) = caps.get(0) {
+                    let list_marker_end = full_match.end();
+                    if list_marker_end < line.len() {
+                        let remaining_content = &line[list_marker_end..];
+
+                        // Check if this is actually a list item or emphasis with spacing issues
+                        // A real list item should have substantial content that doesn't end with emphasis markers
+                        // and shouldn't look like "word *" or "word * word"
+                        let is_likely_list = self.is_likely_list_item(remaining_content);
+
+                        if is_likely_list {
+                            // Process the content after the list marker for emphasis
+                            self.check_line_content_for_emphasis(remaining_content, line_num, list_marker_end, warnings);
+                        } else {
+                            // This looks like emphasis with spacing issues, not a list item
+                            // Process the entire line as potential emphasis
+                            self.check_line_content_for_emphasis(line, line_num, 0, warnings);
+                        }
+                    }
                 }
-            } else if match_text.contains("__") {
-                ("__", true)
-            } else {
-                ("_", false)
-            };
+            }
+            return;
+        }
 
-            // Extract the content without spaces
-            let content = match_text
-                .trim_start_matches(marker)
-                .trim_end_matches(marker)
-                .trim();
+        // Check the entire line
+        self.check_line_content_for_emphasis(line, line_num, 0, warnings);
+    }
 
-            // Create the fixed version
-            let fixed_text = format!("{}{}{}", marker, content, marker);
+    /// Determine if content after a "* " marker is likely a list item or emphasis
+    fn is_likely_list_item(&self, content: &str) -> bool {
+        let trimmed = content.trim();
 
-            let warning = LintWarning {
-                rule_name: Some(self.name()),
-                message: format!(
-                    "Spaces inside emphasis markers: {:?
-            }",
-                    match_text
-                ),
-                line: line_num,
-                column: start_pos + 1, // +1 because columns are 1-indexed
-                end_line: line_num,
-                end_column: end_pos + 1,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: start_pos..end_pos,
-                    replacement: fixed_text,
-                }),
-            };
+        // Empty content is not a list item
+        if trimmed.is_empty() {
+            return false;
+        }
 
-            warnings.push(warning);
+        // If it's very short (1-2 words) and ends with *, it's likely emphasis
+        let words: Vec<&str> = trimmed.split_whitespace().collect();
+        if words.len() <= 2 && trimmed.ends_with('*') && !trimmed.ends_with("**") {
+            return false;
+        }
+
+        // Check for valid emphasis patterns within the content first
+        let markers = find_emphasis_markers(content);
+        let spans = find_emphasis_spans(content, markers.clone());
+
+        // If we find valid emphasis spans (without spacing issues), it's likely a list item
+        // Example: "List item with *emphasis*" should be treated as a list
+        for span in &spans {
+            if !has_spacing_issues(&span) {
+                // This contains valid emphasis, so it's a list item
+                return true;
+            }
+        }
+
+        // If all spans have spacing issues, check the pattern more carefully
+        if !spans.is_empty() {
+            // If the content looks like "text * and * text * here" (multiple emphasis with issues),
+            // it's likely emphasis, not a list
+            let emphasis_count = spans.len();
+            let total_markers = markers.len();
+
+            // If we have multiple emphasis spans with issues and many markers, it's likely emphasis
+            if emphasis_count >= 2 && total_markers >= 4 {
+                return false;
+            }
+
+            // If it's a single span with issues and short content, it's likely emphasis
+            if emphasis_count == 1 && words.len() <= 3 {
+                return false;
+            }
+        }
+
+        // If it contains multiple words (4+) and no emphasis issues, it's likely a list
+        if words.len() >= 4 && spans.is_empty() {
+            return true;
+        }
+
+        // Default to treating as emphasis for ambiguous cases
+        false
+    }
+
+    /// Check line content for emphasis issues with proper context awareness
+    fn check_line_content_for_emphasis(
+        &self,
+        content: &str,
+        line_num: usize,
+        offset: usize,
+        warnings: &mut Vec<LintWarning>,
+    ) {
+        // Find all emphasis markers
+        let markers = find_emphasis_markers(content);
+        if markers.is_empty() {
+            return;
+        }
+
+        // Find valid emphasis spans
+        let spans = find_emphasis_spans(content, markers.clone());
+
+        // Check each span for spacing issues
+        for span in spans {
+            if has_spacing_issues(&span) {
+                // Calculate the full span including markers
+                let full_start = span.opening.start_pos;
+                let full_end = span.closing.end_pos;
+                let full_text = &content[full_start..full_end];
+
+                // Create the marker string
+                let marker_str = span.opening.marker_type.to_string().repeat(span.opening.count);
+
+                // Create the fixed version by trimming spaces from content
+                let trimmed_content = span.content.trim();
+                let fixed_text = format!("{}{}{}", marker_str, trimmed_content, marker_str);
+
+                let warning = LintWarning {
+                    rule_name: Some(self.name()),
+                    message: format!("Spaces inside emphasis markers: {:?}", full_text),
+                    line: line_num,
+                    column: offset + full_start + 1, // +1 because columns are 1-indexed
+                    end_line: line_num,
+                    end_column: offset + full_end + 1,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: (offset + full_start)..(offset + full_end),
+                        replacement: fixed_text,
+                    }),
+                };
+
+                warnings.push(warning);
+            }
         }
     }
 }
@@ -557,6 +556,32 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use crate::utils::document_structure::DocumentStructure;
+
+    #[test]
+    fn test_emphasis_marker_parsing() {
+        let markers = find_emphasis_markers("This has *single* and **double** emphasis");
+        assert_eq!(markers.len(), 4); // *, *, **, **
+
+        let markers = find_emphasis_markers("*start* and *end*");
+        assert_eq!(markers.len(), 4); // *, *, *, *
+    }
+
+    #[test]
+    fn test_emphasis_span_detection() {
+        let markers = find_emphasis_markers("This has *valid* emphasis");
+        let spans = find_emphasis_spans("This has *valid* emphasis", markers);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].content, "valid");
+        assert!(!spans[0].has_leading_space);
+        assert!(!spans[0].has_trailing_space);
+
+        let markers = find_emphasis_markers("This has * invalid * emphasis");
+        let spans = find_emphasis_spans("This has * invalid * emphasis", markers);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].content, " invalid ");
+        assert!(spans[0].has_leading_space);
+        assert!(spans[0].has_trailing_space);
+    }
 
     #[test]
     fn test_with_document_structure() {

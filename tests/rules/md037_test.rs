@@ -17,7 +17,7 @@ fn test_spaces_inside_asterisk_emphasis() {
     let content = "* text * and *text * and * text*";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
+    assert_eq!(result.len(), 3); // All three emphasis spans have spacing issues
 }
 
 #[test]
@@ -26,7 +26,7 @@ fn test_spaces_inside_double_asterisk() {
     let content = "** text ** and **text ** and ** text**";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 3); // All three have spacing issues
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn test_spaces_inside_double_underscore() {
     let content = "__ text __ and __text __ and __ text__";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 8);
+    assert_eq!(result.len(), 3); // All three emphasis spans have spacing issues
 }
 
 #[test]
@@ -53,7 +53,8 @@ fn test_emphasis_in_code_block() {
     let content = "```\n* text *\n```\n* text *";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0);
+    // The emphasis inside the code block should be ignored, but the one outside should be flagged
+    assert_eq!(result.len(), 1);
 }
 
 #[test]
@@ -62,7 +63,7 @@ fn test_multiple_emphasis_on_line() {
     let content = "* text * and _ text _ in one line";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 2); // Both emphasis spans have spacing issues
 }
 
 #[test]
@@ -71,7 +72,7 @@ fn test_mixed_emphasis() {
     let content = "* text * and ** text ** mixed";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 2); // Both emphasis spans have spacing issues
 }
 
 #[test]
@@ -80,7 +81,7 @@ fn test_emphasis_with_punctuation() {
     let content = "* text! * and * text? * here";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 2); // Both emphasis spans have spacing issues
 }
 
 #[test]
@@ -242,7 +243,7 @@ fn test_emphasis_with_special_characters() {
     let content = "* Special: !@#$%^&() * and ** More: []{}<>\"' **";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 2); // Both emphasis spans have spacing issues
 }
 
 #[test]
@@ -259,18 +260,18 @@ fn test_emphasis_near_html() {
     let content = "<div>* Emphasis *</div> and ** Strong ** <span>text</span>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 2); // Both emphasis spans have spacing issues
 }
 
 #[test]
 fn test_emphasis_with_multiple_spaces() {
     let rule = MD037NoSpaceInEmphasis;
 
-    // Emphasis with multiple spaces
+    // Emphasis with multiple spaces - these SHOULD be flagged
     let content = "*   multiple spaces   * and **    more spaces    **";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 2); // Both emphasis spans have spacing issues
 }
 
 #[test]
@@ -323,7 +324,7 @@ fn test_emphasis_in_blockquotes() {
     let content = "> This is a * emphasized * text in a blockquote\n> And ** strong ** text too";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 2); // Both emphasis spans have spacing issues
 }
 
 #[test]
@@ -341,4 +342,196 @@ README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
         "MD037 should not trigger inside a code block, but got warnings: {:?}",
         result
     );
+}
+
+#[test]
+fn test_false_positive_punctuation_after_emphasis() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    // These should NOT be flagged as they are valid emphasis with punctuation
+    let test_cases = vec![
+        "This is *important*! And this is *also important*.",
+        "What about *this*? Or *that*?",
+        "Check this *out*, it's great.",
+        "The *result*; it was amazing.",
+        "Use *caution*: this is dangerous.",
+    ];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Print results for debugging
+        println!("Testing: {}", content);
+        println!("Found {} warnings:", result.len());
+        for warning in &result {
+            println!("  Line {}:{} - {}", warning.line, warning.column, warning.message);
+        }
+
+        // These should have NO warnings as they are valid emphasis
+        assert_eq!(result.len(), 0,
+            "False positive detected in: '{}'. Found {} warnings when expecting 0",
+            content, result.len());
+    }
+}
+
+#[test]
+fn test_false_positive_nested_emphasis() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    // These should NOT be flagged as they are valid nested emphasis
+    let test_cases = vec![
+        "This is **bold with *italic* inside**.",
+        "This is *italic with **bold** inside*.",
+        "Use ***triple emphasis*** for maximum impact.",
+        "Mix of **bold** and *italic* text.",
+    ];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Print results for debugging
+        println!("Testing nested emphasis: {}", content);
+        println!("Found {} warnings:", result.len());
+        for warning in &result {
+            println!("  Line {}:{} - {}", warning.line, warning.column, warning.message);
+        }
+
+        // These should have NO warnings as they are valid nested emphasis
+        assert_eq!(result.len(), 0,
+            "False positive detected in nested emphasis: '{}'. Found {} warnings when expecting 0",
+            content, result.len());
+    }
+}
+
+#[test]
+fn test_false_positive_multiple_emphasis_same_line() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    // These should NOT be flagged as they are valid multiple emphasis on same line
+    let test_cases = vec![
+        "This has *one* emphasis and *another* emphasis.",
+        "Mix of *italic* and **bold** and ***both***.",
+        "First *word* then *second* and *third* emphasis.",
+        "Use *this* or *that* approach.",
+    ];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Print results for debugging
+        println!("Testing multiple emphasis: {}", content);
+        println!("Found {} warnings:", result.len());
+        for warning in &result {
+            println!("  Line {}:{} - {}", warning.line, warning.column, warning.message);
+        }
+
+        // These should have NO warnings as they are valid multiple emphasis
+        assert_eq!(result.len(), 0,
+            "False positive detected in multiple emphasis: '{}'. Found {} warnings when expecting 0",
+            content, result.len());
+    }
+}
+
+#[test]
+fn test_true_positive_spaces_in_emphasis() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    // These SHOULD be flagged as they have spaces inside emphasis markers
+    let test_cases = vec![
+        ("This has * text with spaces * in it.", 1),
+        ("This has ** bold with spaces ** text.", 1),
+        ("This has _ underscore with spaces _ text.", 1),
+        ("This has __ double underscore with spaces __ text.", 1),
+        ("This has * start space* and *end space * issues.", 2),
+    ];
+
+    for (content, expected_warnings) in test_cases {
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Print results for debugging
+        println!("Testing true positive: {}", content);
+        println!("Found {} warnings (expected {}):", result.len(), expected_warnings);
+        for warning in &result {
+            println!("  Line {}:{} - {}", warning.line, warning.column, warning.message);
+        }
+
+        // These should have warnings as they have actual spacing issues
+        assert_eq!(result.len(), expected_warnings,
+            "Expected {} warnings for: '{}', but found {}",
+            expected_warnings, content, result.len());
+    }
+}
+
+#[test]
+fn test_emphasis_boundary_detection() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    // Test cases that should help identify the regex boundary issues
+    let test_cases = vec![
+        // Valid cases that should NOT be flagged
+        ("*word*", 0),
+        ("*word*.", 0),
+        ("*word*!", 0),
+        ("*word*?", 0),
+        ("*word*,", 0),
+        ("*word*;", 0),
+        ("*word*:", 0),
+        ("(*word*)", 0),
+        ("[*word*]", 0),
+        ("\"*word*\"", 0),
+
+        // Invalid cases that SHOULD be flagged
+        ("* word *", 1),
+        ("*word *", 1),
+        ("* word*", 1),
+    ];
+
+    for (content, expected_warnings) in test_cases {
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        println!("Testing boundary case: '{}' - expected {}, got {}",
+                content, expected_warnings, result.len());
+        for warning in &result {
+            println!("  Warning: {}", warning.message);
+        }
+
+        assert_eq!(result.len(), expected_warnings,
+            "Boundary test failed for: '{}'. Expected {} warnings, got {}",
+            content, expected_warnings, result.len());
+    }
+}
+
+#[test]
+fn test_math_expressions_not_flagged() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    // Mathematical expressions should NOT be flagged as emphasis issues
+    let test_cases = vec![
+        "The expression a*b + c*d should not be flagged.",
+        "Calculate x*y where x > 0 and y < 10.",
+        "Formula: a*b*c = result",
+        "Multiply by *2 for the answer.",
+        "The value is 3*4*5 = 60.",
+    ];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        println!("Testing math expression: {}", content);
+        println!("Found {} warnings:", result.len());
+        for warning in &result {
+            println!("  Line {}:{} - {}", warning.line, warning.column, warning.message);
+        }
+
+        // Math expressions should not be flagged as emphasis issues
+        assert_eq!(result.len(), 0,
+            "Math expression incorrectly flagged: '{}'. Found {} warnings when expecting 0",
+            content, result.len());
+    }
 }

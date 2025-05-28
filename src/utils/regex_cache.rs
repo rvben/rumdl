@@ -187,10 +187,12 @@ lazy_static! {
     pub static ref EMPHASIS_REGEX: FancyRegex = FancyRegex::new(r"(\s|^)(\*{1,2}|_{1,2})(?=\S)(.+?)(?<=\S)(\2)(\s|$)").unwrap();
     pub static ref SPACE_IN_EMPHASIS_REGEX: FancyRegex = FancyRegex::new(r"(\*|_)(\s+)(.+?)(\s+)(\1)").unwrap();
 
-    // MD037 specific emphasis patterns - simplified to avoid over-matching
-    pub static ref ASTERISK_EMPHASIS: Regex = Regex::new(r"\*(\s+[^*]*\s*|\s*[^*]*\s+)\*").unwrap();
-    pub static ref UNDERSCORE_EMPHASIS: Regex = Regex::new(r"_(\s+[^_]*\s*|\s*[^_]*\s+)_").unwrap();
-    pub static ref DOUBLE_UNDERSCORE_EMPHASIS: Regex = Regex::new(r"__(\s+[^_]*\s*|\s*[^_]*\s+)__").unwrap();
+    // MD037 specific emphasis patterns - improved to avoid false positives
+    // Only match emphasis with spaces that are actually complete emphasis blocks
+    // Use word boundaries and negative lookbehind/lookahead to avoid matching across emphasis boundaries
+    pub static ref ASTERISK_EMPHASIS: Regex = Regex::new(r"(?:^|[^*])\*(\s+[^*]+\s*|\s*[^*]+\s+)\*(?:[^*]|$)").unwrap();
+    pub static ref UNDERSCORE_EMPHASIS: Regex = Regex::new(r"(?:^|[^_])_(\s+[^_]+\s*|\s*[^_]+\s+)_(?:[^_]|$)").unwrap();
+    pub static ref DOUBLE_UNDERSCORE_EMPHASIS: Regex = Regex::new(r"(?:^|[^_])__(\s+[^_]+\s*|\s*[^_]+\s+)__(?:[^_]|$)").unwrap();
     pub static ref DOUBLE_ASTERISK_EMPHASIS: FancyRegex = FancyRegex::new(r"\*\*\s+([^*]+?)\s+\*\*").unwrap();
     pub static ref DOUBLE_ASTERISK_SPACE_START: FancyRegex = FancyRegex::new(r"\*\*\s+([^*]+?)\*\*").unwrap();
     pub static ref DOUBLE_ASTERISK_SPACE_END: FancyRegex = FancyRegex::new(r"\*\*([^*]+?)\s+\*\*").unwrap();
