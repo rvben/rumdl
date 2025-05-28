@@ -23,6 +23,19 @@ impl MD012NoMultipleBlanks {
         Self { maximum }
     }
 
+    #[cfg(test)]
+    pub fn debug_regions(lines: &[&str]) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
+        let code_regions = Self::compute_code_block_regions(lines);
+        let front_matter_regions = Self::compute_front_matter_regions(lines);
+        println!("Lines:");
+        for (i, line) in lines.iter().enumerate() {
+            println!("  {}: {:?}", i, line);
+        }
+        println!("Code block regions: {:?}", code_regions);
+        println!("Front matter regions: {:?}", front_matter_regions);
+        (code_regions, front_matter_regions)
+    }
+
     /// Pre-compute code block regions for efficient lookup
     fn compute_code_block_regions(lines: &[&str]) -> Vec<(usize, usize)> {
         let mut regions = Vec::new();
@@ -47,6 +60,43 @@ impl MD012NoMultipleBlanks {
         if in_code_block {
             regions.push((start_line, lines.len() - 1));
         }
+
+        // Second pass: detect indented code blocks (4+ spaces)
+        let mut in_indented_block = false;
+        let mut indented_start = 0;
+
+        for (i, line) in lines.iter().enumerate() {
+            // Skip lines that are already in fenced code blocks
+            if Self::is_in_regions(i, &regions) {
+                continue;
+            }
+
+            let is_indented_code = line.len() >= 4 && line.starts_with("    ") && !line.trim().is_empty();
+            let is_blank = line.trim().is_empty();
+
+            if is_indented_code {
+                if !in_indented_block {
+                    // Start of indented code block
+                    indented_start = i;
+                    in_indented_block = true;
+                }
+            } else if !is_blank {
+                // Non-blank, non-indented line ends the indented code block
+                if in_indented_block {
+                    regions.push((indented_start, i - 1));
+                    in_indented_block = false;
+                }
+            }
+            // Blank lines don't end indented code blocks, they're part of them
+        }
+
+        // Handle indented code block at end of file
+        if in_indented_block {
+            regions.push((indented_start, lines.len() - 1));
+        }
+
+        // Sort regions by start position
+        regions.sort_by(|a, b| a.0.cmp(&b.0));
 
         regions
     }
@@ -130,6 +180,11 @@ impl Rule for MD012NoMultipleBlanks {
             if Self::is_in_regions(line_num, &code_block_regions)
                 || Self::is_in_regions(line_num, &front_matter_regions)
             {
+                // Reset blank line counting when entering a code block or front matter
+                // to prevent counting blank lines across block boundaries
+                if blank_count > 0 {
+                    blank_count = 0;
+                }
                 continue;
             }
 

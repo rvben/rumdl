@@ -131,3 +131,95 @@ fn test_md012_whitespace_lines() {
         "Multiple consecutive blank lines between content (Expected: 1; Actual: 2)"
     );
 }
+
+#[test]
+fn test_md012_indented_code_blocks() {
+    let rule = MD012NoMultipleBlanks::default();
+    let content = "Line 1\n\n    code block\n\n    more code\n\nLine 2\n";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty()); // Multiple blank lines in indented code blocks are allowed
+}
+
+#[test]
+fn test_md012_indented_fenced_code_blocks() {
+    let rule = MD012NoMultipleBlanks::default();
+    let content = "Text\n\n    ```bash\n    code\n    ```\n\nMore text\n";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty()); // Should not flag blank lines around indented fenced code blocks
+}
+
+#[test]
+fn test_md012_debug_indented_fenced() {
+    let content = "Text\n\n    ```bash\n    code\n    ```\n\nMore text\n";
+    let lines: Vec<&str> = content.lines().collect();
+
+    // Debug the regions
+    println!("Lines:");
+    for (i, line) in lines.iter().enumerate() {
+        println!("  {}: {:?}", i, line);
+    }
+
+    // Test the rule
+    let rule = MD012NoMultipleBlanks::default();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    println!("Warnings: {:?}", result);
+    for warning in &result {
+        println!("  Line {}: {}", warning.line, warning.message);
+    }
+
+    // This should pass but currently fails
+    assert!(result.is_empty(), "Expected no warnings, got: {:?}", result);
+}
+
+#[test]
+fn test_md012_contributing_pattern() {
+    // This reproduces the exact pattern from the CONTRIBUTING file that's causing false positives
+    let content = "To set up the MLflow repository, run the following commands:\n\n    ```bash\n    # Clone the repository\n    git clone --recurse-submodules git@github.com:<username>/mlflow.git\n    # The alternative way of cloning through https may cause permission error during branch push\n";
+
+    let rule = MD012NoMultipleBlanks::default();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    println!("Content lines:");
+    for (i, line) in content.lines().enumerate() {
+        println!("  {}: {:?}", i, line);
+    }
+
+    println!("Warnings: {:?}", result);
+    for warning in &result {
+        println!("  Line {}: {}", warning.line, warning.message);
+    }
+
+    // This should pass - there's only 1 blank line before the indented fenced code block
+    assert!(result.is_empty(), "Expected no warnings, got: {:?}", result);
+}
+
+#[test]
+fn test_md012_region_calculation() {
+    // Test with a simple fenced code block to debug region calculation
+    let content = "Text\n\n```bash\ncode\n```\n\nMore text\n";
+    let lines: Vec<&str> = content.lines().collect();
+
+    println!("Lines:");
+    for (i, line) in lines.iter().enumerate() {
+        println!("  {}: {:?}", i, line);
+    }
+
+    // We need to access the compute_code_block_regions function somehow
+    // For now, let's just test the rule behavior
+    let rule = MD012NoMultipleBlanks::default();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    println!("Warnings: {:?}", result);
+    for warning in &result {
+        println!("  Line {}: {}", warning.line, warning.message);
+    }
+
+    // This should pass - there's only 1 blank line before and after the code block
+    assert!(result.is_empty(), "Expected no warnings, got: {:?}", result);
+}
