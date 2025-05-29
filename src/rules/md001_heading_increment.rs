@@ -162,7 +162,7 @@ impl Rule for MD001HeadingIncrement {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    message: format!("Heading level should be {} for this level", prev_level + 1),
+                    message: format!("Expected heading level {}", prev_level + 1),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(line_num, indentation + 1),

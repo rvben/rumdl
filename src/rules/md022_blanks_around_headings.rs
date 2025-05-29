@@ -582,7 +582,7 @@ impl Rule for MD022BlanksAroundHeadings {
                         } else {
                             "lines"
                         };
-                        issues.push(format!("Headings should be surrounded by blank lines. Expected at least {} blank {} between headings.", required_blanks, line_word));
+                        issues.push(format!("Expected {} blank {} between headings", required_blanks, line_word));
                     }
                 }
 
@@ -604,7 +604,7 @@ impl Rule for MD022BlanksAroundHeadings {
                             "lines"
                         };
                         issues.push(format!(
-                            "Heading should have at least {} blank {} above.",
+                            "Expected {} blank {} above heading",
                             self.lines_above, line_word
                         ));
                     }
@@ -663,7 +663,7 @@ impl Rule for MD022BlanksAroundHeadings {
                                 "lines"
                             };
                             issues.push(format!(
-                                "Heading should have at least {} blank {} below.",
+                                "Expected {} blank {} below heading",
                                 self.lines_below, line_word
                             ));
                         }
@@ -784,7 +784,7 @@ impl Rule for MD022BlanksAroundHeadings {
                     } else {
                         "lines"
                     };
-                    issues.push(format!("Headings should be surrounded by blank lines. Expected at least {} blank {} between headings.", required_blanks, line_word));
+                    issues.push(format!("Expected {} blank {} between headings", required_blanks, line_word));
                 }
             }
 
@@ -806,7 +806,7 @@ impl Rule for MD022BlanksAroundHeadings {
                         "lines"
                     };
                     issues.push(format!(
-                        "Heading should have at least {} blank {} above.",
+                        "Expected {} blank {} above heading",
                         self.lines_above, line_word
                     ));
                 }
@@ -865,7 +865,7 @@ impl Rule for MD022BlanksAroundHeadings {
                             "lines"
                         };
                         issues.push(format!(
-                            "Heading should have at least {} blank {} below.",
+                            "Expected {} blank {} below heading",
                             self.lines_below, line_word
                         ));
                     }

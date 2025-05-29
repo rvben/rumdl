@@ -21,7 +21,7 @@ pub fn test_md001_invalid() {
     assert_eq!(result[0].line, 2);
     assert_eq!(
         result[0].message,
-        "Heading level should be 2 for this level"
+        "Expected heading level 2"
     );
 }
 

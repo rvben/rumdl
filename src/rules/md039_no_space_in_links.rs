@@ -10,7 +10,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 pub struct MD039NoSpaceInLinks;
 
 // Static definition for the warning message
-const WARNING_MESSAGE: &str = "Spaces inside link text should be removed";
+const WARNING_MESSAGE: &str = "Remove spaces inside link text";
 
 impl MD039NoSpaceInLinks {
     pub fn new() -> Self {

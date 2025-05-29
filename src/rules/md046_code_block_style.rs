@@ -565,7 +565,7 @@ impl Rule for MD046CodeBlockStyle {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: "Code block style should be indented".to_string(),
+                        message: "Use fenced code blocks".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range(i + 1, 1),
@@ -593,7 +593,7 @@ impl Rule for MD046CodeBlockStyle {
                                     column: start_col,
                                     end_line,
                                     end_column: end_col,
-                                    message: "Code block style should be indented".to_string(),
+                                    message: "Use fenced code blocks".to_string(),
                                     severity: Severity::Warning,
                                     fix: Some(Fix {
                                         range: line_index.line_col_to_byte_range(k + 1, 1),
@@ -653,7 +653,7 @@ impl Rule for MD046CodeBlockStyle {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: "Code block style should be fenced".to_string(),
+                            message: "Use fenced code blocks".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: line_index.line_col_to_byte_range(i + 1, 1),

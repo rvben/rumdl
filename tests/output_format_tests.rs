@@ -233,7 +233,7 @@ fn test_multi_issue_output_format() {
 
     // Verify each type of expected issue is detected and marked as fixable
     assert!(
-        stdout_normal.contains("[MD022]") && stdout_normal.contains("Heading should have"),
+        stdout_normal.contains("[MD022]") && stdout_normal.contains("blank line"),
         "Should detect heading blank line issue"
     );
     assert!(

@@ -60,9 +60,7 @@ fn test_emphasis_not_list_marker_simple() {
         result[0].line, 2,
         "Warning should be on line 2 (first list item)"
     );
-    assert!(result[0]
-        .message
-        .contains("Lists should be preceded by a blank line"));
+    assert!(result[0].message.contains("preceded by blank line"));
 }
 
 #[test]
@@ -300,7 +298,7 @@ fn test_list_followed_by_heading_invalid() {
         1,
         "Should warn for missing blank line before heading"
     );
-    assert!(result[0].message.contains("followed by a blank line"));
+    assert!(result[0].message.contains("followed by blank line"));
 }
 
 #[test]
@@ -314,7 +312,7 @@ fn test_list_followed_by_code_block_invalid() {
         1,
         "Should warn for missing blank line before code block"
     );
-    assert!(result[0].message.contains("followed by a blank line"));
+    assert!(result[0].message.contains("followed by blank line"));
 }
 
 #[test]

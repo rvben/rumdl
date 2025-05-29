@@ -60,7 +60,7 @@ impl Rule for MD040FencedCodeLanguage {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: "Fenced code block missing language (add language like 'text', 'bash', 'python')"
+                        message: "Fenced code block missing language"
                             .to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
@@ -115,7 +115,7 @@ impl Rule for MD040FencedCodeLanguage {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: "Fenced code block missing language (add language like 'text', 'bash', 'python')"
+                            message: "Fenced code block missing language"
                                 .to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {

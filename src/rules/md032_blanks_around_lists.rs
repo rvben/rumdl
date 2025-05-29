@@ -254,7 +254,7 @@ impl MD032BlanksAroundLists {
                         end_column: end_col,
                         severity: Severity::Error,
                         rule_name: Some(self.name()),
-                        message: "Lists should be preceded by a blank line".to_string(),
+                        message: "List should be preceded by blank line".to_string(),
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range(start_line, 1),
                             replacement: format!("{}\n{}", prefix, lines[start_line - 1]),
@@ -288,7 +288,7 @@ impl MD032BlanksAroundLists {
                         end_column: end_col_last,
                         severity: Severity::Error,
                         rule_name: Some(self.name()),
-                        message: "Lists should be followed by a blank line".to_string(),
+                        message: "List should be followed by blank line".to_string(),
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range(end_line + 1, 1),
                             replacement: format!("{}\n{}", prefix, lines[end_line]),
@@ -577,7 +577,7 @@ mod tests {
             warnings[0].line, 2,
             "Warning should be on the last line of the list (line 2)"
         );
-        assert!(warnings[0].message.contains("followed by a blank line"));
+        assert!(warnings[0].message.contains("followed by blank line"));
 
         // Test that warning has fix
         check_warnings_have_fixes(content);
@@ -607,7 +607,7 @@ mod tests {
             warnings[0].line, 2,
             "Warning should be on the first line of the list (line 2)"
         );
-        assert!(warnings[0].message.contains("preceded by a blank line"));
+        assert!(warnings[0].message.contains("preceded by blank line"));
 
         // Test that warning has fix
         check_warnings_have_fixes(content);
@@ -634,9 +634,9 @@ mod tests {
             "Expected 2 warnings for list in middle without surrounding blank lines"
         );
         assert_eq!(warnings[0].line, 2, "First warning on line 2 (start)");
-        assert!(warnings[0].message.contains("preceded by a blank line"));
+        assert!(warnings[0].message.contains("preceded by blank line"));
         assert_eq!(warnings[1].line, 3, "Second warning on line 3 (end)");
-        assert!(warnings[1].message.contains("followed by a blank line"));
+        assert!(warnings[1].message.contains("followed by blank line"));
 
         // Test that warnings have fixes
         check_warnings_have_fixes(content);
@@ -682,9 +682,9 @@ mod tests {
         );
         if warnings.len() == 2 {
             assert_eq!(warnings[0].line, 2, "Warning 1 should be on line 2 (start)");
-            assert!(warnings[0].message.contains("preceded by a blank line"));
+            assert!(warnings[0].message.contains("preceded by blank line"));
             assert_eq!(warnings[1].line, 5, "Warning 2 should be on line 5 (end)");
-            assert!(warnings[1].message.contains("followed by a blank line"));
+            assert!(warnings[1].message.contains("followed by blank line"));
         }
 
         // Test that warnings have fixes
@@ -794,7 +794,7 @@ mod tests {
         );
         if !warnings.is_empty() {
             assert_eq!(warnings[0].line, 4); // Warning on last line of list
-            assert!(warnings[0].message.contains("followed by a blank line"));
+            assert!(warnings[0].message.contains("followed by blank line"));
         }
 
         // Test that warnings have fixes
