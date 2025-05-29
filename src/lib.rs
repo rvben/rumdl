@@ -70,7 +70,7 @@ impl ContentCharacteristics {
             {
                 chars.has_lists = true;
             }
-            if !chars.has_links && line.contains('[') {
+            if !chars.has_links && (line.contains('[') || line.contains("http://") || line.contains("https://") || line.contains("ftp://")) {
                 chars.has_links = true;
             }
             if !chars.has_images && line.contains("![") {

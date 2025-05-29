@@ -117,7 +117,11 @@ impl MD055TablePipeStyle {
             0
         };
         let end_idx = if parts.last().map_or(false, |p| p.trim().is_empty()) {
-            parts.len() - 1
+            if parts.len() > 0 {
+                parts.len() - 1
+            } else {
+                0
+            }
         } else {
             parts.len()
         };
@@ -500,5 +504,24 @@ mod tests {
         // Since content doesn't have leading/trailing pipes but defaults to "leading_and_trailing",
         // there should be warnings for all rows
         assert_eq!(warnings.len(), 3);
+    }
+
+    #[test]
+    fn test_underflow_protection() {
+        // Test case to ensure no underflow when parts is empty
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+
+        // Test with empty string (edge case)
+        let result = rule.fix_table_row("", "leading_and_trailing");
+        assert_eq!(result, "");
+
+        // Test with string that doesn't contain pipes
+        let result = rule.fix_table_row("no pipes here", "leading_and_trailing");
+        assert_eq!(result, "no pipes here");
+
+        // Test with minimal pipe content
+        let result = rule.fix_table_row("|", "leading_and_trailing");
+        // Should not panic and should handle gracefully
+        assert!(!result.is_empty());
     }
 }

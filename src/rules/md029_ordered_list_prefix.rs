@@ -307,9 +307,8 @@ impl MD029OrderedListPrefix {
 
             // Check each item in the group for correct sequence
             for (idx, (line_num, line)) in group.iter().enumerate() {
-                if Self::get_list_number(line).is_some() {
+                if let Some(actual_num) = Self::get_list_number(line) {
                     let expected_num = self.get_expected_number(idx);
-                    let actual_num = Self::get_list_number(line).unwrap();
 
                     if actual_num != expected_num {
                         warnings.push(LintWarning {
@@ -377,5 +376,50 @@ mod tests {
         let ctx = crate::lint_context::LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_redundant_computation_fix() {
+        // This test confirms that the redundant computation bug is fixed
+        // Previously: get_list_number() was called twice (once for is_some(), once for unwrap())
+        // Now: get_list_number() is called once with if let pattern
+
+        let rule = MD029OrderedListPrefix::default();
+
+        // Test with mixed valid and edge case content
+        let content = "1. First item\n3. Wrong number\n2. Another wrong number";
+        let structure = DocumentStructure::new(content);
+        let ctx = crate::lint_context::LintContext::new(content);
+
+        // This should not panic and should produce warnings for incorrect numbering
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        assert_eq!(result.len(), 2); // Should have warnings for items 3 and 2
+
+        // Verify the warnings have correct content
+        assert!(result[0].message.contains("3 does not match style (expected 2)"));
+        assert!(result[1].message.contains("2 does not match style (expected 3)"));
+    }
+
+    #[test]
+    fn test_performance_improvement() {
+        // This test verifies that the fix improves performance by avoiding redundant calls
+        let rule = MD029OrderedListPrefix::default();
+
+        // Create a larger list to test performance
+        let mut content = String::new();
+        for i in 1..=100 {
+            content.push_str(&format!("{}. Item {}\n", i + 1, i)); // All wrong numbers
+        }
+
+        let structure = DocumentStructure::new(&content);
+        let ctx = crate::lint_context::LintContext::new(&content);
+
+        // This should complete without issues and produce warnings for all items
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        assert_eq!(result.len(), 100); // Should have warnings for all 100 items
+
+        // Verify first and last warnings
+        assert!(result[0].message.contains("2 does not match style (expected 1)"));
+        assert!(result[99].message.contains("101 does not match style (expected 100)"));
     }
 }

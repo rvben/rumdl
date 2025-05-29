@@ -146,3 +146,88 @@ impl Rule for MD011NoReversedLinks {
         Box::new(MD011NoReversedLinks)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_capture_group_order_fix() {
+        // This test confirms that the capture group order bug is fixed
+        // The regex pattern \(([^)]+)\)\[([^\]]+)\] captures:
+        // cap[1] = URL (inside parentheses)
+        // cap[2] = text (inside brackets)
+        // So (URL)[text] should become [text](URL)
+
+        let rule = MD011NoReversedLinks;
+
+        // Test with reversed link syntax
+        let content = "Check out (https://example.com)[this link] for more info.";
+        let ctx = LintContext::new(content);
+
+        // This should detect the reversed syntax
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Reversed link syntax"));
+
+        // Verify the fix produces correct output
+        let fix = result[0].fix.as_ref().unwrap();
+        assert_eq!(fix.replacement, "[this link](https://example.com)");
+    }
+
+    #[test]
+    fn test_multiple_reversed_links() {
+        // Test multiple reversed links in the same content
+        let rule = MD011NoReversedLinks;
+
+        let content = "Visit (https://example.com)[Example] and (https://test.com)[Test Site].";
+        let ctx = LintContext::new(content);
+
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+
+        // Verify both fixes are correct
+        assert_eq!(result[0].fix.as_ref().unwrap().replacement, "[Example](https://example.com)");
+        assert_eq!(result[1].fix.as_ref().unwrap().replacement, "[Test Site](https://test.com)");
+    }
+
+    #[test]
+    fn test_normal_links_not_flagged() {
+        // Test that normal link syntax is not flagged
+        let rule = MD011NoReversedLinks;
+
+        let content = "This is a normal [link](https://example.com) and another [link](https://test.com).";
+        let ctx = LintContext::new(content);
+
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn debug_capture_groups() {
+        // Debug test to understand capture group behavior
+        let pattern = r"\(([^)]+)\)\[([^\]]+)\]";
+        let regex = Regex::new(pattern).unwrap();
+
+        let test_text = "(https://example.com)[Click here]";
+
+        if let Some(cap) = regex.captures(test_text) {
+            println!("Full match: {}", &cap[0]);
+            println!("cap[1] (first group): {}", &cap[1]);
+            println!("cap[2] (second group): {}", &cap[2]);
+
+            // Current fix format
+            let current_fix = format!("[{}]({})", &cap[2], &cap[1]);
+            println!("Current fix produces: {}", current_fix);
+
+            // Test what the actual rule produces
+            let rule = MD011NoReversedLinks;
+            let ctx = LintContext::new(test_text);
+            let result = rule.check(&ctx).unwrap();
+            if !result.is_empty() {
+                println!("Rule fix produces: {}", result[0].fix.as_ref().unwrap().replacement);
+            }
+        }
+    }
+}

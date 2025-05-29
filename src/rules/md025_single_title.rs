@@ -253,7 +253,13 @@ impl Rule for MD025SingleTitle {
                             "{} {}",
                             "#".repeat(self.level + 1),
                             if line_content.trim_start().starts_with('#') {
-                                &line_content[(col + self.level)..]
+                                // Add bounds checking to prevent panic
+                                let slice_start = col + self.level;
+                                if slice_start < line_content.len() {
+                                    &line_content[slice_start..]
+                                } else {
+                                    "" // If bounds exceeded, use empty string
+                                }
                             } else {
                                 line_content.trim() // For Setext, use the whole line
                             }
@@ -356,5 +362,56 @@ mod tests {
             result.is_empty(),
             "Should not flag a single title after front matter"
         );
+    }
+
+    #[test]
+    fn test_bounds_checking_bug() {
+        // Test case that could trigger bounds error in fix generation
+        // When col + self.level exceeds line_content.len()
+        let rule = MD025SingleTitle::default();
+
+        // Create content with very short second heading
+        let content = "# First\n#";
+        let ctx = crate::lint_context::LintContext::new(content);
+
+        // This should not panic
+        let result = rule.check(&ctx);
+        assert!(result.is_ok());
+
+        // Test the fix as well
+        let fix_result = rule.fix(&ctx);
+        assert!(fix_result.is_ok());
+    }
+
+    #[test]
+    fn test_bounds_checking_edge_case() {
+        // Test case that specifically targets the bounds checking fix
+        // Create a heading where col + self.level would exceed line length
+        let rule = MD025SingleTitle::default();
+
+        // Create content where the second heading is just "#" (length 1)
+        // col will be 0, self.level is 1, so col + self.level = 1
+        // This should not exceed bounds for "#" but tests the edge case
+        let content = "# First Title\n#";
+        let ctx = crate::lint_context::LintContext::new(content);
+
+        // This should not panic and should handle the edge case gracefully
+        let result = rule.check(&ctx);
+        assert!(result.is_ok());
+
+        if let Ok(warnings) = result {
+            if !warnings.is_empty() {
+                // Check that the fix doesn't cause a panic
+                let fix_result = rule.fix(&ctx);
+                assert!(fix_result.is_ok());
+
+                // The fix should produce valid content
+                if let Ok(fixed_content) = fix_result {
+                    assert!(!fixed_content.is_empty());
+                    // Should convert the second "#" to "##" (or "## " if there's content)
+                    assert!(fixed_content.contains("##"));
+                }
+            }
+        }
     }
 }

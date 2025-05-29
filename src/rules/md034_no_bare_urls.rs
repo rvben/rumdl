@@ -68,7 +68,11 @@ impl MD034NoBareUrls {
     #[inline]
     pub fn should_skip(&self, content: &str) -> bool {
         // Skip if content has no URLs and no email addresses
-        !early_returns::has_urls(content) && !content.contains('@')
+        let has_urls = early_returns::has_urls(content);
+        let has_emails = content.contains('@');
+        let should_skip = !has_urls && !has_emails;
+
+        should_skip
     }
 
     /// Remove trailing punctuation that is likely sentence punctuation, not part of the URL
@@ -539,7 +543,9 @@ impl Rule for MD034NoBareUrls {
     }
 
     fn uses_ast(&self) -> bool {
-        true
+        // AST-based approach doesn't work because CommonMark parser converts bare URLs to links
+        // Use document structure approach instead
+        false
     }
 
     fn uses_document_structure(&self) -> bool {

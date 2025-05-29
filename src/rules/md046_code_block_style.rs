@@ -192,7 +192,7 @@ impl MD046CodeBlockStyle {
                 // If it's a paragraph that doesn't look like it's part of a list,
                 // we might not be in a list anymore, but let's be conservative
                 // and keep looking a bit more
-                if j > 0 && j < i - 5 {
+                if j > 0 && i >= 5 && j < i - 5 {
                     // Only break if we've looked back a reasonable distance
                     break;
                 }
