@@ -1297,16 +1297,13 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs) {
         let has_issues = !all_warnings.is_empty();
         if has_issues {
             for warning in &all_warnings {
+                let rule_name = warning.rule_name.unwrap_or("unknown");
                 println!(
-                    "<stdin>:{}:{}: {}: {} [{}]",
-                    warning.line,
-                    warning.column,
-                    match warning.severity {
-                        rumdl::rule::Severity::Error => "error".red(),
-                        rumdl::rule::Severity::Warning => "warning".yellow(),
-                    },
-                    warning.message,
-                    warning.rule_name.unwrap_or("unknown")
+                    "<stdin>:{}:{}: {} {}",
+                    warning.line.to_string().cyan(),
+                    warning.column.to_string().cyan(),
+                    format!("[{:5}]", rule_name).yellow(), // Align rule names consistently
+                    warning.message
                 );
             }
         }
@@ -1611,7 +1608,7 @@ fn process_file(
                 file_path.blue().underline(),
                 warning.line.to_string().cyan(),
                 warning.column.to_string().cyan(),
-                format!("[{}]", rule_name).yellow(),
+                format!("[{:5}]", rule_name).yellow(), // Pad rule name to 5 characters for alignment
                 warning.message,
                 fix_indicator.green()
             );
