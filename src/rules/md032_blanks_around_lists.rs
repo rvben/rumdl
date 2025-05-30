@@ -126,8 +126,8 @@ impl MD032BlanksAroundLists {
                         if LIST_ITEM_START_REGEX.is_match(line_content) {
                             // Don't skip - process it as a potential list item
                         } else {
-                            current_line_idx_0 += 1;
-                            continue;
+                current_line_idx_0 += 1;
+                continue;
                         }
                     } else {
                         // Fenced code block - always skip
