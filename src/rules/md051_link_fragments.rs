@@ -98,43 +98,73 @@ impl MD051LinkFragments {
     /// Convert a heading to a fragment identifier following GitHub's algorithm:
     /// 1. Strip all formatting (code, emphasis, links, etc.)
     /// 2. Convert to lowercase
-    /// 3. Replace spaces and non-alphanumeric chars with hyphens
-    /// 4. Remove consecutive hyphens
+    /// 3. Replace spaces with hyphens, & with double hyphens, other special chars with hyphens
+    /// 4. Collapse multiple consecutive hyphens to single hyphens (except preserve & -> --)
+    /// 5. Remove leading and trailing hyphens
     fn heading_to_fragment(&self, heading: &str) -> String {
-        let mut stripped = heading.to_string();
+        // Step 1: Strip markdown formatting
+        let mut result = self.strip_markdown_formatting(heading);
+
+        // Step 2: Convert to lowercase
+        result = result.to_lowercase();
+
+        // Step 3 & 4: Process character by character with GitHub's rules
+        let mut fragment = String::new();
+
+        for c in result.chars() {
+            match c {
+                // Keep alphanumeric characters
+                'a'..='z' | '0'..='9' => {
+                    fragment.push(c);
+                }
+                // Ampersand becomes double hyphen (special case)
+                '&' => {
+                    // Only add hyphens if the last character isn't already a hyphen
+                    if !fragment.ends_with('-') {
+                        fragment.push_str("--");
+                    } else {
+                        // If we already have a hyphen, just add one more to make it double
+                        fragment.push('-');
+                    }
+                }
+                // Spaces and other characters become single hyphen (but avoid consecutive hyphens)
+                _ => {
+                    if !fragment.ends_with('-') {
+                        fragment.push('-');
+                    }
+                    // If fragment already ends with hyphen, skip adding another
+                }
+            }
+        }
+
+        // Step 5: Remove leading and trailing hyphens
+        fragment.trim_matches('-').to_string()
+    }
+
+    /// Strip markdown formatting from text, keeping only the content
+    fn strip_markdown_formatting(&self, text: &str) -> String {
+        let mut result = text.to_string();
 
         // Remove links but keep the link text: [text](url) -> text
-        stripped = INLINE_LINK_REGEX.replace_all(&stripped, "$1").to_string();
+        result = INLINE_LINK_REGEX.replace_all(&result, "$1").to_string();
 
         // Remove emphasis and bold formatting more comprehensively
-        stripped = BOLD_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = BOLD_UNDERSCORE_REGEX
-            .replace_all(&stripped, "$1")
+        result = BOLD_ASTERISK_REGEX.replace_all(&result, "$1").to_string();
+        result = BOLD_UNDERSCORE_REGEX
+            .replace_all(&result, "$1")
             .to_string();
-        stripped = ITALIC_ASTERISK_REGEX
-            .replace_all(&stripped, "$1")
+        result = ITALIC_ASTERISK_REGEX
+            .replace_all(&result, "$1")
             .to_string();
-        stripped = ITALIC_UNDERSCORE_REGEX
-            .replace_all(&stripped, "$1")
+        result = ITALIC_UNDERSCORE_REGEX
+            .replace_all(&result, "$1")
             .to_string();
-        stripped = STRIKETHROUGH_REGEX.replace_all(&stripped, "$1").to_string();
+        result = STRIKETHROUGH_REGEX.replace_all(&result, "$1").to_string();
 
         // Remove code spans by replacing with their content (simplified)
-        stripped = stripped.replace("`", "");
+        result = result.replace("`", "");
 
-        // Convert to lowercase and replace spaces/non-alphanumeric chars with hyphens
-        let fragment = stripped
-            .to_lowercase()
-            .chars()
-            .map(|c| match c {
-                ' ' => '-',
-                c if c.is_alphanumeric() => c,
-                _ => '-',
-            })
-            .collect::<String>();
-
-        // Replace multiple consecutive hyphens with a single one
-        MULTIPLE_HYPHENS.replace_all(&fragment, "-").to_string()
+        result
     }
 
     /// Generate multiple possible fragment variations for a heading to handle
@@ -144,25 +174,13 @@ impl MD051LinkFragments {
 
         // Primary fragment (GitHub's algorithm)
         let primary = self.heading_to_fragment(heading);
-        variations.push(primary.clone());
+        if !primary.is_empty() {
+            variations.push(primary.clone());
+        }
 
-        // Alternative: preserve some consecutive hyphens (for manually created TOCs)
-        let mut stripped = heading.to_string();
-        stripped = INLINE_LINK_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = BOLD_ASTERISK_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = BOLD_UNDERSCORE_REGEX
-            .replace_all(&stripped, "$1")
-            .to_string();
-        stripped = ITALIC_ASTERISK_REGEX
-            .replace_all(&stripped, "$1")
-            .to_string();
-        stripped = ITALIC_UNDERSCORE_REGEX
-            .replace_all(&stripped, "$1")
-            .to_string();
-        stripped = STRIKETHROUGH_REGEX.replace_all(&stripped, "$1").to_string();
-        stripped = stripped.replace("`", "");
-
-        // Alternative algorithm that preserves some patterns
+        // Alternative: preserve double hyphens (for manually created TOCs)
+        // Some tools or manual creation might use double hyphens for certain symbols
+        let stripped = self.strip_markdown_formatting(heading);
         let alt_fragment = stripped
             .to_lowercase()
             .chars()
@@ -173,15 +191,20 @@ impl MD051LinkFragments {
             })
             .collect::<String>();
 
-        // Only reduce to double hyphens (not single) for some tools
-        let alt_with_double = alt_fragment.replace("---", "--");
-        if alt_with_double != primary {
-            variations.push(alt_with_double);
+        // Create variation with double hyphens preserved for & symbols
+        let double_hyphen_variant = alt_fragment
+            .replace("---", "--")  // Collapse triple+ to double
+            .trim_matches('-')     // Remove leading/trailing hyphens
+            .to_string();
+
+        if !double_hyphen_variant.is_empty() && double_hyphen_variant != primary {
+            variations.push(double_hyphen_variant);
         }
 
-        // Keep the original with triple hyphens for some manual TOCs
-        if alt_fragment != primary {
-            variations.push(alt_fragment);
+        // Create variation with all consecutive hyphens preserved (for some manual TOCs)
+        let preserved_hyphens = alt_fragment.trim_matches('-').to_string();
+        if !preserved_hyphens.is_empty() && preserved_hyphens != primary && !variations.contains(&preserved_hyphens) {
+            variations.push(preserved_hyphens);
         }
 
         variations

@@ -432,3 +432,131 @@ fn test_readme_fragments_debug() {
     // TODO: Fix the algorithm to properly handle these cases
     println!("Test completed - this is a known issue with fragment generation algorithm");
 }
+
+#[test]
+fn test_md051_fragment_generation_regression() {
+    // Regression test for the MD051 fragment generation bug
+    // This test ensures that the GitHub-compatible fragment generation algorithm works correctly
+
+    let rule = MD051LinkFragments::new();
+
+    // Test cases that were previously failing - now tested through actual rule behavior
+    let test_cases = vec![
+        // Basic cases that should work
+        ("Simple Heading", "simple-heading"),
+        ("1. Numbered Heading", "1-numbered-heading"),
+        ("Heading with Spaces", "heading-with-spaces"),
+
+        // Ampersand cases (the main bug)
+        ("Test & Example", "test--example"),
+        ("A&B", "a--b"),
+        ("A & B", "a--b"),
+        ("Multiple & Ampersands & Here", "multiple--ampersands--here"),
+
+        // Special characters
+        ("Test. Period", "test-period"),
+        ("Test: Colon", "test-colon"),
+        ("Test! Exclamation", "test-exclamation"),
+        ("Test? Question", "test-question"),
+        ("Test (Parentheses)", "test-parentheses"),
+        ("Test [Brackets]", "test-brackets"),
+
+        // Complex cases
+        ("1. Heading with Numbers & Symbols!", "1-heading-with-numbers--symbols"),
+        ("Multiple!!! Exclamations & Symbols???", "multiple-exclamations--symbols"),
+        ("Heading with (Parentheses) & [Brackets]", "heading-with-parentheses--brackets"),
+        ("Special Characters: @#$%^&*()", "special-characters"),
+
+        // Edge cases
+        ("Only!!! Symbols!!!", "only-symbols"),
+        ("   Spaces   ", "spaces"), // Leading/trailing spaces
+        ("Already-hyphenated", "already-hyphenated"),
+        ("Multiple---hyphens", "multiple-hyphens"),
+    ];
+
+    for (heading, expected_fragment) in test_cases {
+        // Create a test document with the heading and a link to it
+        let content = format!("# {}\n\n[Link](#{}))", heading, expected_fragment);
+        let ctx = LintContext::new(&content);
+        let result = rule.check(&ctx).unwrap();
+
+        // If the fragment generation is correct, there should be no warnings
+        assert_eq!(
+            result.len(), 0,
+            "Fragment generation failed for heading '{}': expected fragment '{}' should be found, but got {} warnings: {:?}",
+            heading, expected_fragment, result.len(),
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn test_md051_real_world_scenarios() {
+    // Test real-world scenarios that should work with the fixed algorithm
+
+    let content = r#"
+# Main Title
+
+## 1. Getting Started & Setup
+[Link to setup](#1-getting-started--setup)
+
+## 2. Configuration & Options
+[Link to config](#2-configuration--options)
+
+## 3. Advanced Usage (Examples)
+[Link to advanced](#3-advanced-usage-examples)
+
+## 4. FAQ & Troubleshooting
+[Link to FAQ](#4-faq--troubleshooting)
+
+## 5. API Reference: Methods & Properties
+[Link to API](#5-api-reference-methods--properties)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // All links should be valid with the fixed algorithm
+    assert_eq!(
+        result.len(), 0,
+        "Expected no warnings, but got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_md051_ampersand_variations() {
+    // Specific test for ampersand handling variations
+
+    let content = r#"
+# Test & Example
+[Link 1](#test--example)
+
+# A&B
+[Link 2](#a--b)
+
+# Multiple & Symbols & Here
+[Link 3](#multiple--symbols--here)
+
+# Test&End
+[Link 4](#test--end)
+
+# &Start
+[Link 5](#start)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // All ampersand cases should be handled correctly
+    assert_eq!(
+        result.len(), 0,
+        "Expected no warnings for ampersand cases, but got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+// All MD051 tests are now complete and use integration testing approach
+// rather than relying on debug methods that expose internal implementation
