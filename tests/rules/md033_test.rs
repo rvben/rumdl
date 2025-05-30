@@ -330,3 +330,324 @@ fn test_edge_case_urls() {
     // <div> should be flagged (line 4)
     assert!(flagged_positions.contains(&(4, 11)));
 }
+
+// REGRESSION TESTS: Ensure MD033 properly follows CommonMark specification for indented code blocks
+
+#[test]
+fn test_md033_commonmark_indented_html_ignored() {
+    let content = r#"# Test Document
+
+Regular HTML: <div>should be flagged</div>
+
+Indented HTML (CommonMark code block):
+
+    <div>should NOT be flagged</div>
+    <p>also should NOT be flagged</p>
+
+More regular HTML: <span>should be flagged</span>"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD033NoInlineHtml::default();
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should only flag the regular HTML, not the indented HTML
+    assert_eq!(warnings.len(), 4); // <div>, </div>, <span>, </span>
+
+    // Verify the flagged lines are only the regular HTML
+    let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
+    assert!(flagged_lines.contains(&3)); // <div>should be flagged</div>
+    assert!(flagged_lines.contains(&10)); // <span>should be flagged</span>
+
+    // Verify indented HTML lines are NOT flagged
+    assert!(!flagged_lines.contains(&7)); // indented <div>
+    assert!(!flagged_lines.contains(&8)); // indented <p>
+}
+
+#[test]
+fn test_md033_exactly_four_spaces_is_code_block() {
+    let content = r#"# Test Document
+
+Three spaces (not code):   <div>flagged</div>
+
+Exactly four spaces (code block):
+
+    <div>not flagged</div>
+
+Five spaces (also code block):
+
+     <div>not flagged</div>
+
+Tab indented (code block):
+
+	<div>not flagged</div>
+
+Regular HTML: <p>flagged</p>"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD033NoInlineHtml::default();
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should flag: line 3 (three spaces), line 17 (regular)
+    // Should NOT flag: lines 7, 11, 15 (all properly indented)
+    let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
+
+    assert!(flagged_lines.contains(&3));  // Three spaces
+    assert!(flagged_lines.contains(&17)); // Regular HTML
+
+    assert!(!flagged_lines.contains(&7));  // Four spaces
+    assert!(!flagged_lines.contains(&11)); // Five spaces
+    assert!(!flagged_lines.contains(&15)); // Tab indented
+}
+
+#[test]
+fn test_md033_mixed_indented_content_in_code_blocks() {
+    let content = r#"# Test Document
+
+Regular HTML: <div>flagged</div>
+
+Mixed indented content (all in code block):
+
+    <div>HTML in code</div>
+    Regular text in code
+    More content in code
+    <p>More HTML in code</p>
+
+Back to regular: <span>flagged</span>"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD033NoInlineHtml::default();
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should only flag the regular HTML outside code blocks
+    let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
+
+    assert!(flagged_lines.contains(&3));  // Regular HTML
+    assert!(flagged_lines.contains(&12)); // Back to regular
+
+    // Should NOT flag any of the indented content
+    assert!(!flagged_lines.contains(&7));  // <div>HTML in code</div>
+    assert!(!flagged_lines.contains(&10)); // <p>More HTML in code</p>
+}
+
+#[test]
+fn test_md033_indented_code_with_blank_lines() {
+    let content = r#"# Test Document
+
+Regular: <div>flagged</div>
+
+Indented code block with blank lines:
+
+    <div>first block</div>
+
+    <p>second block after blank line</p>
+
+    <span>third block</span>
+
+Regular again: <em>flagged</em>"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD033NoInlineHtml::default();
+    let warnings = rule.check(&ctx).unwrap();
+
+    let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
+
+    // Should flag regular HTML
+    assert!(flagged_lines.contains(&3));  // Regular
+    assert!(flagged_lines.contains(&13)); // Regular again
+
+    // Should NOT flag indented HTML (even with blank lines between)
+    assert!(!flagged_lines.contains(&7));  // first block
+    assert!(!flagged_lines.contains(&9));  // second block
+    assert!(!flagged_lines.contains(&11)); // third block
+}
+
+#[test]
+fn test_md033_fenced_vs_indented_code_blocks() {
+    let content = r#"# Test Document
+
+Regular: <div>flagged</div>
+
+Fenced code block:
+```html
+<div>not flagged in fenced</div>
+<p>also not flagged</p>
+```
+
+Indented code block:
+
+    <div>not flagged in indented</div>
+    <p>also not flagged</p>
+
+Regular: <span>flagged</span>"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD033NoInlineHtml::default();
+    let warnings = rule.check(&ctx).unwrap();
+
+    let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
+
+    // Should flag regular HTML
+    assert!(flagged_lines.contains(&3));  // Regular
+    assert!(flagged_lines.contains(&16)); // Regular
+
+    // Should NOT flag HTML in either type of code block
+    assert!(!flagged_lines.contains(&7));  // fenced <div>
+    assert!(!flagged_lines.contains(&8));  // fenced <p>
+    assert!(!flagged_lines.contains(&13)); // indented <div>
+    assert!(!flagged_lines.contains(&14)); // indented <p>
+}
+
+#[test]
+fn test_md033_complex_html_in_indented_blocks() {
+    let content = r#"# Test Document
+
+Regular: <div class="test">flagged</div>
+
+Complex indented HTML:
+
+    <div class="container">
+        <p id="test">Nested HTML</p>
+        <span data-value="123">More content</span>
+        <!-- Comment in code -->
+        <img src="test.jpg" alt="image" />
+    </div>
+
+Self-closing in regular: <br />
+
+More indented:
+
+    <table>
+        <tr>
+            <td>Cell content</td>
+        </tr>
+    </table>
+
+Regular: <em>flagged</em>"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD033NoInlineHtml::default();
+    let warnings = rule.check(&ctx).unwrap();
+
+    let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
+
+    // Should flag only regular HTML, not indented HTML
+    assert_eq!(warnings.len(), 5); // 2 tags on line 3, 1 on line 14, 2 on line 24
+    assert!(flagged_lines.contains(&3));  // Regular div (opening and closing)
+    assert!(flagged_lines.contains(&14)); // Self-closing br
+    assert!(flagged_lines.contains(&24)); // Regular em (opening and closing)
+}
+
+#[test]
+fn test_md033_edge_cases_indentation() {
+    let content = r#"# Test Document
+
+Regular: <div>flagged</div>
+
+Mixed indentation levels:
+
+    <div>4 spaces - code block</div>
+        <p>8 spaces - still code block</p>
+   <span>3 spaces - NOT code block</span>
+    <em>4 spaces again - code block</em>
+
+Regular: <strong>flagged</strong>"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD033NoInlineHtml::default();
+    let warnings = rule.check(&ctx).unwrap();
+
+    let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
+
+    // Should flag regular HTML and 3-space indented
+    assert!(flagged_lines.contains(&3));  // Regular
+    assert!(flagged_lines.contains(&9));  // 3 spaces (not code block)
+    assert!(flagged_lines.contains(&12)); // Regular
+
+    // Should NOT flag 4+ space indented (code blocks)
+    assert!(!flagged_lines.contains(&7));  // 4 spaces
+    assert!(!flagged_lines.contains(&8));  // 8 spaces
+    assert!(!flagged_lines.contains(&10)); // 4 spaces again
+}
+
+#[test]
+fn test_md033_indented_html_in_lists() {
+    let content = r#"# Test Document
+
+Regular: <div>flagged</div>
+
+1. List item with indented code:
+
+       <div>should NOT be flagged</div>
+       <p>also should NOT be flagged</p>
+
+2. Another item: <span>should be flagged</span>
+
+   But this indented HTML:
+
+       <em>should NOT be flagged</em>
+
+Regular: <strong>flagged</strong>"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD033NoInlineHtml::default();
+    let warnings = rule.check(&ctx).unwrap();
+
+    let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
+
+    // Should flag regular HTML and HTML in list items (not indented enough)
+    assert!(flagged_lines.contains(&3));  // Regular
+    assert!(flagged_lines.contains(&10)); // List item HTML
+    assert!(flagged_lines.contains(&16)); // Regular
+
+    // Should NOT flag properly indented HTML (even in lists)
+    assert!(!flagged_lines.contains(&7));  // Indented in list
+    assert!(!flagged_lines.contains(&8));  // Indented in list
+    assert!(!flagged_lines.contains(&14)); // Indented in list
+}
+
+#[test]
+fn test_md033_regression_original_behavior_preserved() {
+    let content = r#"# Test Document
+
+Regular HTML tags should be flagged:
+<div>flagged</div>
+<p>flagged</p>
+<span>flagged</span>
+
+But indented code blocks should be ignored:
+
+    <div>not flagged</div>
+    <p>not flagged</p>
+    <span>not flagged</span>
+
+And fenced code blocks should be ignored:
+```html
+<div>not flagged</div>
+<p>not flagged</p>
+```
+
+Back to regular: <em>flagged</em>"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD033NoInlineHtml::default();
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should flag all regular HTML but none in code blocks
+    let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
+
+    // Regular HTML should be flagged
+    assert!(flagged_lines.contains(&4));  // <div>
+    assert!(flagged_lines.contains(&5));  // <p>
+    assert!(flagged_lines.contains(&6));  // <span>
+    assert!(flagged_lines.contains(&20)); // <em>
+
+    // Code block HTML should NOT be flagged
+    assert!(!flagged_lines.contains(&10)); // indented <div>
+    assert!(!flagged_lines.contains(&11)); // indented <p>
+    assert!(!flagged_lines.contains(&12)); // indented <span>
+    assert!(!flagged_lines.contains(&16)); // fenced <div>
+    assert!(!flagged_lines.contains(&17)); // fenced <p>
+
+    // Verify we have the expected number of warnings
+    assert_eq!(warnings.len(), 8); // 4 opening + 4 closing tags
+}

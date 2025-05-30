@@ -35,57 +35,15 @@ impl Rule for MD042NoEmptyLinks {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
 
-        lazy_static! {
-            static ref EMPTY_LINK_REGEX: Regex =
-                Regex::new(r"(?<!\!)\[([^\]]*)\]\(([^\)]*)\)").unwrap();
+        // Early return for empty content or content without links
+        if content.is_empty() || !content.contains('[') {
+            return Ok(Vec::new());
         }
 
-        for (line_num, line) in content.lines().enumerate() {
-            for cap_result in EMPTY_LINK_REGEX.captures_iter(line) {
-                let cap = match cap_result {
-                    Ok(cap) => cap,
-                    Err(_) => continue,
-                };
-
-                let full_match = cap.get(0).unwrap();
-                let text = cap.get(1).map_or("", |m| m.as_str());
-                let url = cap.get(2).map_or("", |m| m.as_str());
-
-                if text.trim().is_empty() || url.trim().is_empty() {
-                    let replacement = if text.trim().is_empty() && url.trim().is_empty() {
-                        "[Link text](https://example.com)".to_string()
-                    } else if text.trim().is_empty() {
-                        format!("[Link text]({})", url)
-                    } else {
-                        format!("[{}](https://example.com)", text)
-                    };
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: format!(
-                            "Empty link found: [{
-            }]({})",
-                            text, url
-                        ),
-                        line: line_num + 1,
-                        column: full_match.start() + 1,
-                        end_line: line_num + 1,
-                        end_column: full_match.end() + 1,
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index
-                                .line_col_to_byte_range(line_num + 1, full_match.start() + 1),
-                            replacement,
-                        }),
-                    });
-                }
-            }
-        }
-
-        Ok(warnings)
+        // Use document structure for proper code block and code span detection
+        let structure = DocumentStructure::new(content);
+        self.check_with_structure(ctx, &structure)
     }
 
     /// Optimized check using document structure
@@ -125,7 +83,7 @@ impl Rule for MD042NoEmptyLinks {
                 line: link.line,
                 column: link.start_col,
                 end_line: link.line,
-                end_column: link.end_col,
+                end_column: link.end_col + 1,
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: line_index.line_col_to_byte_range(link.line, link.start_col),

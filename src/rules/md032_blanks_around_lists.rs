@@ -103,8 +103,42 @@ impl MD032BlanksAroundLists {
             if structure.is_in_code_block(current_line_idx_1)
                 || structure.is_in_front_matter(current_line_idx_1)
             {
-                current_line_idx_0 += 1;
-                continue;
+                // Special case: Even if a line is in a code block (e.g., tab-indented),
+                // if it looks like a list item, the user probably intended it as such.
+                // We should warn about spacing issues rather than silently ignore it.
+                // But only apply this to INDENTED code blocks, not FENCED code blocks.
+                if structure.is_in_code_block(current_line_idx_1) {
+                    // Check if this is an indented code block (starts with tab or 4+ spaces)
+                    // vs a fenced code block (enclosed in ``` or ~~~)
+                    let line_trimmed = line_str.trim_start();
+                    let leading_whitespace = &line_str[..line_str.len() - line_trimmed.len()];
+                    let is_indented_code = leading_whitespace.contains('\t') ||
+                                          leading_whitespace.chars().filter(|&c| c == ' ').count() >= 4;
+
+                    if is_indented_code {
+                        // Check if this "indented code block" line actually looks like a list item
+                        let blockquote_prefix = BLOCKQUOTE_PREFIX_RE
+                            .find(line_str)
+                            .map_or(String::new(), |m| m.as_str().to_string());
+                        let line_content = line_str.trim_start_matches(&blockquote_prefix);
+
+                        // If it matches our list item pattern, treat it as a list item for linting purposes
+                        if LIST_ITEM_START_REGEX.is_match(line_content) {
+                            // Don't skip - process it as a potential list item
+                        } else {
+                            current_line_idx_0 += 1;
+                            continue;
+                        }
+                    } else {
+                        // Fenced code block - always skip
+                        current_line_idx_0 += 1;
+                        continue;
+                    }
+                } else {
+                    // Front matter - always skip
+                    current_line_idx_0 += 1;
+                    continue;
+                }
             }
 
             // Determine blockquote prefix and content *before* checking for list item

@@ -492,81 +492,59 @@ impl DocumentStructure {
                     let lang = captures.get(3).map(|m| m.as_str().to_string());
                     current_language = lang.filter(|l| !l.is_empty());
                 }
-                // Check for indented code block (simplified)
-                else if line.starts_with("    ") && !line.trim().is_empty() {
-                    // Don't treat indented HTML tags as code blocks
-                    let trimmed = line.trim_start();
-                    if trimmed.starts_with('<') && trimmed.len() > 1 {
-                        let second_char = trimmed.chars().nth(1).unwrap();
-                        if second_char.is_ascii_alphabetic()
-                            || (second_char == '/'
-                                && trimmed.len() > 2
-                                && trimmed.chars().nth(2).unwrap().is_ascii_alphabetic())
-                        {
-                            // This looks like an HTML tag, don't treat as code block
-                            // Skip this line and continue
-                        } else {
-                            // Not an HTML tag, process as potential code block
-                            let mut end_line = i;
-                            while end_line + 1 < lines.len()
-                                && (lines[end_line + 1].starts_with("    ")
-                                    || lines[end_line + 1].trim().is_empty())
-                            {
-                                // Check if the next indented line is also an HTML tag
-                                if lines[end_line + 1].starts_with("    ") {
-                                    let next_trimmed = lines[end_line + 1].trim_start();
-                                    if next_trimmed.starts_with('<') && next_trimmed.len() > 1 {
-                                        let next_second_char = next_trimmed.chars().nth(1).unwrap();
-                                        if next_second_char.is_ascii_alphabetic()
-                                            || (next_second_char == '/'
-                                                && next_trimmed.len() > 2
-                                                && next_trimmed
-                                                    .chars()
-                                                    .nth(2)
-                                                    .unwrap()
-                                                    .is_ascii_alphabetic())
-                                        {
-                                            // Next line is also HTML, break the code block here
-                                            break;
-                                        }
-                                    }
-                                }
-                                end_line += 1;
-                            }
+                // Check for indented code block (CommonMark compliant)
+                else if Self::is_indented_code_line(line) && !line.trim().is_empty() {
+                    // According to CommonMark, any content indented by 4+ spaces OR a tab is a code block
+                    // regardless of what the content is (including HTML)
+                    let mut end_line = i;
 
-                            // Only create code block if we found non-HTML content
-                            if end_line > i {
-                                code_blocks.push(CodeBlock {
-                                    start_line: i + 1,
-                                    end_line: end_line + 1,
-                                    language: None,
-                                    block_type: CodeBlockType::Indented,
-                                });
+                    // Find the end of this indented code block
+                    // Continue while we have indented lines OR blank lines that are followed by more indented lines
+                    while end_line + 1 < lines.len() {
+                        let next_line = lines[end_line + 1];
 
-                                // Skip to end of block
-                                i = end_line;
-                            }
-                        }
-                    } else {
-                        // Not an HTML tag, process as normal indented code block
-                        let mut end_line = i;
-                        while end_line + 1 < lines.len()
-                            && (lines[end_line + 1].starts_with("    ")
-                                || lines[end_line + 1].trim().is_empty())
-                        {
+                        if Self::is_indented_code_line(next_line) && !next_line.trim().is_empty() {
+                            // Found another indented line, continue the block
                             end_line += 1;
+                        } else if next_line.trim().is_empty() {
+                            // Found a blank line, check if there are more indented lines after it
+                            let mut lookahead = end_line + 2;
+                            let mut found_indented = false;
+
+                            while lookahead < lines.len() {
+                                let lookahead_line = lines[lookahead];
+                                if Self::is_indented_code_line(lookahead_line) && !lookahead_line.trim().is_empty() {
+                                    found_indented = true;
+                                    break;
+                                } else if !lookahead_line.trim().is_empty() {
+                                    // Found non-empty, non-indented line, stop looking
+                                    break;
+                                }
+                                lookahead += 1;
+                            }
+
+                            if found_indented {
+                                // Include this blank line as part of the code block
+                                end_line += 1;
+                            } else {
+                                // No more indented lines, end the block here
+                                break;
+                            }
+                        } else {
+                            // Found non-empty, non-indented line, end the block
+                            break;
                         }
-
-                        code_blocks.push(CodeBlock {
-                            start_line: i + 1,
-                            end_line: end_line + 1,
-                            language: None,
-                            block_type: CodeBlockType::Indented,
-                        });
-
-                        // Skip to end of block
-                        i = end_line;
                     }
+
+                    code_blocks.push(CodeBlock {
+                        start_line: i + 1,
+                        end_line: end_line + 1,
+                        language: None,
+                        block_type: CodeBlockType::Indented,
+                    });
+
+                    // Skip to end of block
+                    i = end_line;
                 }
             } else {
                 // Check for fenced code block end - must start with the same fence character
@@ -651,6 +629,30 @@ impl DocumentStructure {
     #[inline]
     pub fn has_trailing_spaces(line: &str) -> bool {
         Self::count_trailing_spaces(line) > 0
+    }
+
+    /// Check if a line is indented code according to CommonMark specification
+    ///
+    /// According to CommonMark, a line is considered indented code if it starts with:
+    /// - 4 or more spaces, OR
+    /// - A tab character
+    #[inline]
+    fn is_indented_code_line(line: &str) -> bool {
+        if line.starts_with('\t') {
+            return true;
+        }
+
+        // Count leading spaces
+        let mut space_count = 0;
+        for c in line.chars() {
+            if c == ' ' {
+                space_count += 1;
+            } else {
+                break;
+            }
+        }
+
+        space_count >= 4
     }
 
     /// Get a list of list start indices
