@@ -66,9 +66,15 @@ impl MD006StartBullets {
                         if Self::is_bullet_list_item(lines[check_idx]).is_none() {
                             // Found non-list content - check if it breaks the list structure
                             let content_indent = lines[check_idx].len() - lines[check_idx].trim_start().len();
-                            // Content is only acceptable if it's indented at least as much as current item
-                            // AND we have a true parent relationship (prev_indent < current_indent)
-                            if content_indent < current_indent || prev_indent >= current_indent {
+
+                            // Content is acceptable if:
+                            // 1. It's indented at least as much as the current item (continuation of parent)
+                            // 2. OR it's indented more than the previous bullet (continuation of previous item)
+                            // 3. AND we have a true parent relationship (prev_indent < current_indent)
+                            let is_continuation = content_indent >= prev_indent.max(2); // At least 2 spaces for continuation
+                            let is_valid_nesting = prev_indent < current_indent;
+
+                            if !is_continuation || !is_valid_nesting {
                                 has_breaking_content = true;
                                 break;
                             }
@@ -78,13 +84,19 @@ impl MD006StartBullets {
                     if !has_breaking_content {
                         return Some((i, prev_indent));
                     } else {
-                        // Content breaks the list structure
-                        return None;
+                        // Content breaks the list structure, but continue searching for an earlier valid parent
+                        continue;
                     }
                 }
                 // If prev_indent > current_indent, it's a child of a sibling, ignore it and keep searching.
             } else {
-                // Found non-list content - this breaks the search
+                // Found non-list content - check if it's a continuation line
+                let content_indent = lines[i].len() - lines[i].trim_start().len();
+                // If it's indented enough to be a continuation, don't break the search
+                if content_indent >= 2 {
+                    continue;
+                }
+                // Otherwise, this breaks the search
                 return None;
             }
         }
@@ -247,8 +259,7 @@ impl Rule for MD006StartBullets {
                 column: start_col,
                 end_line: line_num,
                 end_column: end_col,
-                message: "List item should start at the beginning of the line (remove indentation)"
-                .to_string(),
+                message: "List item indentation".to_string(),
                 fix: Some(Fix {
                 range: line_index.line_col_to_byte_range(line_num, 1),
                 replacement,

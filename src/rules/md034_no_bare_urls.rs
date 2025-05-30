@@ -96,183 +96,6 @@ impl MD034NoBareUrls {
         &url[..end]
     }
 
-    // Find all bare URLs in a line, using DocumentStructure for code span detection
-    fn find_bare_urls_with_structure(
-        &self,
-        line: &str,
-        line_idx: usize,
-        structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> Vec<LintWarning> {
-        let mut warnings = Vec::new();
-
-        // Early return: empty lines
-        if line.trim().is_empty() {
-            return warnings;
-        }
-
-        // Fast path - check if line potentially contains a URL
-        if !URL_QUICK_CHECK.is_match(line) {
-            return warnings;
-        }
-
-        // Skip lines that consist only of a badge link
-        if BADGE_LINK_LINE.is_match(line) {
-            return warnings;
-        }
-
-        // Early return: skip reference definitions
-        if REFERENCE_DEF_RE.is_match(line) {
-            return warnings;
-        }
-
-        // --- NEW: Collect all link/image destination ranges using regex ---
-        let mut excluded_ranges: Vec<(usize, usize)> = Vec::new();
-        // Markdown links: [text](url)
-        for cap in MARKDOWN_LINK_PATTERN.captures_iter(line) {
-            if let Some(dest) = cap.get(1) {
-                excluded_ranges.push((dest.start(), dest.end()));
-            }
-        }
-        // Markdown images: ![alt](url)
-        for cap in MARKDOWN_IMAGE_PATTERN.captures_iter(line) {
-            if let Some(dest) = cap.get(2) {
-                excluded_ranges.push((dest.start(), dest.end()));
-            }
-        }
-        // Angle-bracket links: <url>
-        for cap in ANGLE_LINK_PATTERN.captures_iter(line) {
-            if let Some(m) = cap.get(1) {
-                excluded_ranges.push((m.start(), m.end()));
-            }
-        }
-        // HTML attribute URLs: src="url", href="url", etc.
-        for cap in HTML_ATTRIBUTE_URL.captures_iter(line) {
-            if let Some(url_attr) = cap.get(1) {
-                excluded_ranges.push((url_attr.start(), url_attr.end()));
-            }
-        }
-        // Sort and merge overlapping ranges
-        excluded_ranges.sort_by_key(|r| r.0);
-        let mut merged: Vec<(usize, usize)> = Vec::new();
-        for (start, end) in excluded_ranges {
-            if let Some((_, last_end)) = merged.last_mut() {
-                if *last_end >= start {
-                    *last_end = (*last_end).max(end);
-                    continue;
-                }
-            }
-            merged.push((start, end));
-        }
-
-        for url_match in SIMPLE_URL_REGEX.find_iter(line) {
-            let url_start = url_match.start();
-            let mut url_end = url_match.end();
-
-            // Trim trailing punctuation that's likely sentence punctuation
-            let raw_url = &line[url_start..url_end];
-            let trimmed_url = self.trim_trailing_punctuation(raw_url);
-            url_end = url_start + trimmed_url.len();
-
-            // Skip if URL became empty after trimming
-            if url_end <= url_start {
-                continue;
-            }
-
-            // Manual boundary check: not part of a larger word
-            let before = if url_start == 0 {
-                None
-            } else {
-                line.get(url_start - 1..url_start)
-            };
-            let after = line.get(url_end..url_end + 1);
-            let is_valid_boundary = before.map_or(true, |c| {
-                !c.chars().next().unwrap().is_alphanumeric() && c != "_"
-            }) && after.map_or(true, |c| {
-                !c.chars().next().unwrap().is_alphanumeric() && c != "_"
-            });
-            if !is_valid_boundary {
-                continue;
-            }
-            // Skip if this URL is within a code span (using DocumentStructure)
-            if structure.is_in_code_span(line_idx + 1, url_start + 1) {
-                continue;
-            }
-            // --- NEW: Skip if URL is within any excluded range (link/image dest) ---
-            let in_any_range = merged
-                .iter()
-                .any(|(start, end)| url_start >= *start && url_end <= *end);
-            if in_any_range {
-                continue;
-            }
-            let (start_line, start_col, end_line, end_col) =
-                calculate_url_range(line_idx + 1, line, url_start, url_end - url_start);
-            warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                message: format!("Bare URL found (wrap in angle brackets: <URL> or use link syntax: [text](URL))"),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: url_start..url_end,
-                    replacement: format!("<{}>", &line[url_start..url_end]),
-                }),
-            });
-        }
-
-        // Check for email addresses - similar logic to URLs
-        for email_match in EMAIL_REGEX.find_iter(line) {
-            let email_start = email_match.start();
-            let email_end = email_match.end();
-            // Manual boundary check: not part of a larger word
-            let before = if email_start == 0 {
-                None
-            } else {
-                line.get(email_start - 1..email_start)
-            };
-            let after = line.get(email_end..email_end + 1);
-            let is_valid_boundary = before.map_or(true, |c| {
-                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-            }) && after.map_or(true, |c| {
-                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-            });
-            if !is_valid_boundary {
-                continue;
-            }
-            // Skip if this email is within a code span (using DocumentStructure)
-            if structure.is_in_code_span(line_idx + 1, email_start + 1) {
-                continue;
-            }
-            // Skip if email is within any excluded range (link/image dest)
-            let in_any_range = merged
-                .iter()
-                .any(|(start, end)| email_start >= *start && email_end <= *end);
-            if in_any_range {
-                continue;
-            }
-            let (start_line, start_col, end_line, end_col) =
-                calculate_url_range(line_idx + 1, line, email_start, email_end - email_start);
-            warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                message: format!(
-                    "Bare email address found: {}",
-                    &line[email_start..email_end]
-                ),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: email_start..email_end,
-                    replacement: format!("<{}>", &line[email_start..email_end]),
-                }),
-            });
-        }
-        warnings
-    }
-
     // Uses DocumentStructure for code block and code span detection in check_with_structure.
     pub fn check_with_structure(
         &self,
@@ -286,30 +109,196 @@ impl MD034NoBareUrls {
             return Ok(vec![]);
         }
 
+        // Process the entire content to handle multi-line markdown links
         let mut warnings = Vec::new();
-        for (i, line) in content.lines().enumerate() {
-            // Fast path: Skip empty lines
-            if line.trim().is_empty() {
+
+        // First, find all markdown link ranges across the entire content
+        let mut excluded_ranges: Vec<(usize, usize)> = Vec::new();
+
+        // Markdown links: [text](url) - handle multi-line
+        for cap in MARKDOWN_LINK_PATTERN.captures_iter(content) {
+            if let Some(dest) = cap.get(1) {
+                excluded_ranges.push((dest.start(), dest.end()));
+            }
+        }
+
+        // Markdown images: ![alt](url) - handle multi-line
+        for cap in MARKDOWN_IMAGE_PATTERN.captures_iter(content) {
+            if let Some(dest) = cap.get(2) {
+                excluded_ranges.push((dest.start(), dest.end()));
+            }
+        }
+
+        // Angle-bracket links: <url>
+        for cap in ANGLE_LINK_PATTERN.captures_iter(content) {
+            if let Some(m) = cap.get(1) {
+                excluded_ranges.push((m.start(), m.end()));
+            }
+        }
+
+        // HTML attribute URLs: src="url", href="url", etc.
+        for cap in HTML_ATTRIBUTE_URL.captures_iter(content) {
+            if let Some(url_attr) = cap.get(1) {
+                excluded_ranges.push((url_attr.start(), url_attr.end()));
+            }
+        }
+
+        // Sort and merge overlapping ranges
+        excluded_ranges.sort_by_key(|r| r.0);
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (start, end) in excluded_ranges {
+            if let Some((_, last_end)) = merged.last_mut() {
+                if *last_end >= start {
+                    *last_end = (*last_end).max(end);
+                    continue;
+                }
+            }
+            merged.push((start, end));
+        }
+
+        // Now find all URLs in the content and check if they're excluded
+        for url_match in SIMPLE_URL_REGEX.find_iter(content) {
+            let url_start = url_match.start();
+            let mut url_end = url_match.end();
+
+            // Trim trailing punctuation that's likely sentence punctuation
+            let raw_url = &content[url_start..url_end];
+            let trimmed_url = self.trim_trailing_punctuation(raw_url);
+            url_end = url_start + trimmed_url.len();
+
+            // Skip if URL became empty after trimming
+            if url_end <= url_start {
                 continue;
             }
 
-            // Fast path: Skip lines without potential URLs or emails
-            if !line.contains("http") && !line.contains("ftp") && !line.contains('@') {
+            // Manual boundary check: not part of a larger word
+            let before = if url_start == 0 {
+                None
+            } else {
+                content.get(url_start - 1..url_start)
+            };
+            let after = content.get(url_end..url_end + 1);
+            let is_valid_boundary = before.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_"
+            }) && after.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_"
+            });
+            if !is_valid_boundary {
                 continue;
             }
 
-            // Skip lines in code blocks
-            if structure.is_in_code_block(i + 1) {
+            // Convert byte offset to line/column
+            let (line_num, col_num) = ctx.offset_to_line_col(url_start);
+
+            // Skip if this URL is within a code span
+            if structure.is_in_code_span(line_num, col_num) {
                 continue;
             }
 
-            // Fast path: Skip reference link definitions
+            // Skip if this URL is within a code block
+            if structure.is_in_code_block(line_num) {
+                continue;
+            }
+
+            // Skip if URL is within any excluded range (link/image dest)
+            let in_any_range = merged
+                .iter()
+                .any(|(start, end)| url_start >= *start && url_end <= *end);
+            if in_any_range {
+                continue;
+            }
+
+            // Skip reference definitions
+            let line_start = content[..url_start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let line_end = content[url_start..].find('\n').map(|i| url_start + i).unwrap_or(content.len());
+            let line = &content[line_start..line_end];
             if REFERENCE_DEF_RE.is_match(line) {
                 continue;
             }
 
-            warnings.extend(self.find_bare_urls_with_structure(line, i, structure));
+            let url_text = &content[url_start..url_end];
+            let (start_line, start_col, end_line, end_col) =
+                calculate_url_range(line_num, line, col_num - 1, url_text.len());
+
+            warnings.push(LintWarning {
+                rule_name: Some(self.name()),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                message: format!("Bare URL found"),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: url_start..url_end,
+                    replacement: format!("<{}>", url_text),
+                }),
+            });
         }
+
+        // Check for email addresses - similar logic to URLs
+        for email_match in EMAIL_REGEX.find_iter(content) {
+            let email_start = email_match.start();
+            let email_end = email_match.end();
+
+            // Manual boundary check: not part of a larger word
+            let before = if email_start == 0 {
+                None
+            } else {
+                content.get(email_start - 1..email_start)
+            };
+            let after = content.get(email_end..email_end + 1);
+            let is_valid_boundary = before.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
+            }) && after.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
+            });
+            if !is_valid_boundary {
+                continue;
+            }
+
+            // Convert byte offset to line/column
+            let (line_num, col_num) = ctx.offset_to_line_col(email_start);
+
+            // Skip if this email is within a code span
+            if structure.is_in_code_span(line_num, col_num) {
+                continue;
+            }
+
+            // Skip if this email is within a code block
+            if structure.is_in_code_block(line_num) {
+                continue;
+            }
+
+            // Skip if email is within any excluded range (link/image dest)
+            let in_any_range = merged
+                .iter()
+                .any(|(start, end)| email_start >= *start && email_end <= *end);
+            if in_any_range {
+                continue;
+            }
+
+            let email_text = &content[email_start..email_end];
+            let line_start = content[..email_start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let line_end = content[email_start..].find('\n').map(|i| email_start + i).unwrap_or(content.len());
+            let line = &content[line_start..line_end];
+            let (start_line, start_col, end_line, end_col) =
+                calculate_url_range(line_num, line, col_num - 1, email_text.len());
+
+            warnings.push(LintWarning {
+                rule_name: Some(self.name()),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                message: format!("Bare email address found"),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: email_start..email_end,
+                    replacement: format!("<{}>", email_text),
+                }),
+            });
+        }
+
         Ok(warnings)
     }
 
@@ -368,7 +357,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Bare URL found (wrap in angle brackets: <URL> or use link syntax: [text](URL))"),
+                            message: format!("Bare URL found"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
@@ -466,7 +455,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Bare URL found (wrap in angle brackets: <URL> or use link syntax: [text](URL))"),
+                            message: format!("Bare URL found"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),

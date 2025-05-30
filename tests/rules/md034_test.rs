@@ -418,10 +418,10 @@ fn test_bare_email_addresses() {
 
     assert!(result[0]
         .message
-        .contains("Bare email address found: support@example.com"));
+        .contains("Bare email address found"));
     assert!(result[1]
         .message
-        .contains("Bare email address found: admin@test.org"));
+        .contains("Bare email address found"));
 
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
@@ -617,4 +617,71 @@ fn test_combined_emails_and_localhost() {
     let fixed = rule.fix(&ctx).unwrap();
     let expected = "Contact <admin@localhost.com> or visit <http://localhost:9090>\nAlso try <user@example.org> and <https://192.168.1.1:3000>";
     assert_eq!(fixed, expected);
+}
+
+// REGRESSION TESTS: Prevent false positives that were previously fixed
+
+#[test]
+fn test_multiline_markdown_links_not_flagged() {
+    let rule = MD034NoBareUrls;
+    // This is the exact pattern that was causing false positives before the fix
+    let content = "Details about each issue type and the issue lifecycle are discussed in the [MLflow Issue\nPolicy](https://github.com/mlflow/mlflow/blob/master/ISSUE_POLICY.md).\n\nAfter you have agreed upon an implementation strategy for your feature\nor patch with an MLflow committer, the next step is to introduce your\nchanges (see [developing\nchanges](https://github.com/mlflow/mlflow/blob/master/CONTRIBUTING.md#developing-and-testing-mlflow))\nas a pull request against the MLflow Repository.";
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should not flag any URLs since they are all properly formatted as markdown links
+    assert!(
+        result.is_empty(),
+        "Multi-line markdown links should not be flagged as bare URLs. Found {} warnings: {:#?}",
+        result.len(),
+        result
+    );
+
+    // Fix should not change anything since there are no bare URLs
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content,
+        "Fix should not change content with properly formatted multi-line markdown links"
+    );
+}
+
+#[test]
+fn test_mixed_multiline_links_and_bare_urls() {
+    let rule = MD034NoBareUrls;
+    // Test content with both multi-line markdown links (should not be flagged) and bare URLs (should be flagged)
+    let content = "This has a [multi-line\nlink](https://github.com/example/repo) which should not be flagged.\n\nBut this bare URL should be flagged: https://bare-url.com\n\nAnd this [another multi-line\nlink with long URL](https://github.com/very/long/repository/path/that/spans/multiple/lines) should also not be flagged.";
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the one bare URL
+    assert_eq!(
+        result.len(),
+        1,
+        "Should only flag the bare URL, not the multi-line markdown links. Found {} warnings: {:#?}",
+        result.len(),
+        result
+    );
+
+    // Verify the flagged URL is the correct one
+    assert!(
+        result[0].message.contains("Bare URL found"),
+        "Should flag bare URL with correct message"
+    );
+
+    // Check that the fix only wraps the bare URL
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.contains("<https://bare-url.com>"),
+        "Should wrap the bare URL in angle brackets"
+    );
+    assert!(
+        fixed.contains("[multi-line\nlink](https://github.com/example/repo)"),
+        "Should not modify the multi-line markdown link"
+    );
+    assert!(
+        fixed.contains("[another multi-line\nlink with long URL](https://github.com/very/long/repository/path/that/spans/multiple/lines)"),
+        "Should not modify the second multi-line markdown link"
+    );
 }
