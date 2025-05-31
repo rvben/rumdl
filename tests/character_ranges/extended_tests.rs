@@ -121,7 +121,7 @@ fn test_md030_list_marker_space() {
     let test = simple_test(
         "MD030",
         "-  Two spaces",
-        ExpectedWarning::new(1, 3, 1, 4, " "),
+        ExpectedWarning::new(1, 2, 1, 4, "  "),
     );
     test_character_ranges(test);
 }

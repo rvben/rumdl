@@ -114,33 +114,21 @@ impl Rule for MD030ListMarkerSpace {
                     // Calculate precise character range for the problematic spacing
                     let marker_end_pos = cap.get(2).map_or(0, |m| m.end());
                     let whitespace_start_pos = marker_end_pos;
-                    let _whitespace_len = whitespace.len();
+                    let whitespace_len = whitespace.len();
 
-                    // If we have expected spaces, highlight only the extra ones
-                    let extra_spaces_start = if whitespace.len() > expected_spaces {
-                        whitespace_start_pos + expected_spaces
-                    } else {
-                        whitespace_start_pos
-                    };
-                    let extra_spaces_len = if whitespace.len() > expected_spaces {
-                        whitespace.len() - expected_spaces
-                    } else {
-                        whitespace.len()
-                    };
-
+                    // Calculate the range that needs to be replaced (the entire whitespace after marker)
                     let (start_line, start_col, end_line, end_col) =
-                        calculate_match_range(line_num, line, extra_spaces_start, extra_spaces_len);
+                        calculate_match_range(line_num, line, whitespace_start_pos, whitespace_len);
 
-                    // Generate the fix text
-                    let fix =
-                        self.try_fix_list_marker_spacing(line)
-                            .map(|fixed_line| crate::rule::Fix {
-                                range: crate::utils::range_utils::LineIndex::new(
-                                    ctx.content.to_string(),
-                                )
-                                .line_col_to_byte_range(line_num, 1),
-                                replacement: fixed_line,
-                            });
+                    // Generate the correct replacement text (just the correct spacing)
+                    let correct_spaces = " ".repeat(expected_spaces);
+                    let fix = Some(crate::rule::Fix {
+                        range: crate::utils::range_utils::LineIndex::new(
+                            ctx.content.to_string(),
+                        )
+                        .line_col_to_byte_range(line_num, start_col),
+                        replacement: correct_spaces,
+                    });
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),

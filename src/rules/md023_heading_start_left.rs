@@ -81,13 +81,12 @@ impl Rule for MD023HeadingStartLeft {
                             end_column: end_col,
                             severity: Severity::Warning,
                             message: format!(
-                                "Setext heading should not be indented by {
-            } spaces",
+                                "Setext heading should not be indented by {} spaces",
                                 indentation
                             ),
                             fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(start_line + 1, 1),
-                                replacement: heading_text.to_string(),
+                                range: line_index.line_col_to_byte_range(start_line + 1, start_col),
+                                replacement: String::new(), // Remove the indentation
                             }),
                         });
 
@@ -117,8 +116,8 @@ impl Rule for MD023HeadingStartLeft {
                                 message: "Setext heading underline should not be indented"
                                     .to_string(),
                                 fix: Some(Fix {
-                                    range: line_index.line_col_to_byte_range(underline_line + 1, 1),
-                                    replacement: underline_text.to_string(),
+                                    range: line_index.line_col_to_byte_range(underline_line + 1, underline_start_col),
+                                    replacement: String::new(), // Remove the indentation
                                 }),
                             });
                         }
@@ -168,13 +167,12 @@ impl Rule for MD023HeadingStartLeft {
                         end_column: atx_end_col,
                         severity: Severity::Warning,
                         message: format!(
-                            "Heading should not be indented by {
-            } spaces",
+                            "Heading should not be indented by {} spaces",
                             indentation
                         ),
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(start_line + 1, 1),
-                            replacement: fixed_heading,
+                            range: line_index.line_col_to_byte_range(start_line + 1, atx_start_col),
+                            replacement: String::new(), // Remove the indentation
                         }),
                     });
                 }
@@ -350,13 +348,12 @@ impl Rule for MD023HeadingStartLeft {
                             end_column: setext_end_col,
                             severity: Severity::Warning,
                             message: format!(
-                                "Setext heading should not be indented by {
-            } spaces",
+                                "Setext heading should not be indented by {} spaces",
                                 indentation
                             ),
                             fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(line_num, 1),
-                                replacement: heading_text.to_string(),
+                                range: line_index.line_col_to_byte_range(line_num, setext_start_col),
+                                replacement: String::new(), // Remove the indentation
                             }),
                         });
 
@@ -387,8 +384,8 @@ impl Rule for MD023HeadingStartLeft {
                                     .to_string(),
                                 fix: Some(Fix {
                                     range: line_index
-                                        .line_col_to_byte_range(underline_line_idx + 1, 1),
-                                    replacement: underline_text.to_string(),
+                                        .line_col_to_byte_range(underline_line_idx + 1, underline_start_col_struct),
+                                    replacement: String::new(), // Remove the indentation
                                 }),
                             });
                         }
@@ -450,13 +447,12 @@ impl Rule for MD023HeadingStartLeft {
                         end_column: atx_end_col_struct,
                         severity: Severity::Warning,
                         message: format!(
-                            "Heading should not be indented by {
-            } spaces",
+                            "Heading should not be indented by {} spaces",
                             indentation
                         ),
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num, 1),
-                            replacement: fixed_heading,
+                            range: line_index.line_col_to_byte_range(line_num, atx_start_col_struct),
+                            replacement: String::new(), // Remove the indentation
                         }),
                     });
                 }

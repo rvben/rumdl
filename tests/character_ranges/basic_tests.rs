@@ -40,7 +40,7 @@ fn test_md019_multiple_spaces_atx() {
     let test = simple_test(
         "MD019",
         "##  Heading with multiple spaces",
-        ExpectedWarning::new(1, 4, 1, 5, " "),
+        ExpectedWarning::new(1, 3, 1, 5, "  "),
     );
     test_character_ranges(test);
 }

@@ -83,8 +83,8 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         message: "Multiple spaces after blockquote symbol".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, indentation.len() + 1),
-                            replacement: format!("> {}", actual_content.trim_start()),
+                            range: _line_index.line_col_to_byte_range(i + 1, start_col),
+                            replacement: " ".to_string(), // Just one space
                         }),
                     });
                     line_processed = true;

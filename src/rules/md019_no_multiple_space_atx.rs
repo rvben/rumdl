@@ -132,11 +132,14 @@ impl Rule for MD019NoMultipleSpaceAtx {
 
                 // Calculate precise range: highlight the extra spaces (all spaces after the first one)
                 let hash_end_col = hashes.end() + 1; // 1-indexed, position after hashes
-                let extra_spaces_start = hash_end_col + 1; // Skip the first (correct) space
-                let extra_spaces_len = spaces - 1; // Number of extra spaces
+                let spaces_start_col = hash_end_col; // Start of all spaces after hashes
+                let spaces_len = spaces; // Length of all spaces
 
                 let (start_line, start_col, end_line, end_col) =
-                    calculate_single_line_range(line_num, extra_spaces_start, extra_spaces_len);
+                    calculate_single_line_range(line_num, spaces_start_col, spaces_len);
+
+                // Generate the correct replacement text (just one space)
+                let correct_spacing = " ";
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
@@ -151,8 +154,8 @@ impl Rule for MD019NoMultipleSpaceAtx {
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num, 1),
-                        replacement: self.fix_atx_heading(line),
+                        range: line_index.line_col_to_byte_range(line_num, start_col),
+                        replacement: correct_spacing.to_string(),
                     }),
                 });
             }

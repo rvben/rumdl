@@ -237,20 +237,12 @@ impl Rule for MD006StartBullets {
                 valid_bullet_lines[line_idx] = is_valid;
 
                 if !is_valid {
-                    let fixed_line = line.trim_start();
-                    let needs_blank_line = line_idx > 0
-                        && !Self::is_blank_line(lines[line_idx - 1])
-                        && Self::is_bullet_list_item(lines[line_idx - 1]).is_none();
-                    let replacement = if needs_blank_line {
-                        format!("\n{}", fixed_line)
-                    } else {
-                        fixed_line.to_string()
-                    };
+                    // Calculate the precise range for the indentation that needs to be removed
+                    let start_col = 1; // Always start from beginning of line
+                    let end_col = indent + 1; // End at the position after the indentation
 
-                    // Calculate the range to highlight: from first indentation character to end of list marker
-                    let start_col = if indent > 0 { 2 } else { 1 }; // Start from first indentation space if indented
-                    let marker_pos = line.find(|c: char| c == '*' || c == '-' || c == '+').unwrap_or(0);
-                    let end_col = marker_pos + 3; // +1 for the marker itself, +1 for 1-based indexing, +1 for space after marker
+                    // Replacement is just removing the indentation by providing empty string
+                    let replacement = String::new(); // Remove the indentation
 
                     result.push(LintWarning {
                 rule_name: Some(self.name()),
@@ -261,7 +253,7 @@ impl Rule for MD006StartBullets {
                 end_column: end_col,
                 message: "List item indentation".to_string(),
                 fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(line_num, 1),
+                range: line_index.line_col_to_byte_range(line_num, start_col),
                 replacement,
             }),
                     });
