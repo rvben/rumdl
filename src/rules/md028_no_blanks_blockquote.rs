@@ -25,6 +25,12 @@ impl MD028NoBlanksBlockquote {
     }
 }
 
+impl Default for MD028NoBlanksBlockquote {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl Rule for MD028NoBlanksBlockquote {
     fn name(&self) -> &'static str {
         "MD028"

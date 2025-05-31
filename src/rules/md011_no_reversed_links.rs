@@ -169,6 +169,12 @@ impl MD011NoReversedLinks {
     }
 }
 
+impl Default for MD011NoReversedLinks {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl Rule for MD011NoReversedLinks {
     fn name(&self) -> &'static str {
         "MD011"

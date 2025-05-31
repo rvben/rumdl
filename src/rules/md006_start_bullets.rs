@@ -238,11 +238,20 @@ impl Rule for MD006StartBullets {
 
                 if !is_valid {
                     // Calculate the precise range for the indentation that needs to be removed
-                    let start_col = 1; // Always start from beginning of line
-                    let end_col = indent + 1; // End at the position after the indentation
+                    // For "  * Indented bullet", we want to highlight just the indentation and marker "  *" (columns 1-3)
+                    let start_col = 1; // Start from beginning of line
+                    let end_col = indent + 2; // Include the marker (indent + 1 for marker position + 1 for inclusive range)
 
-                    // Replacement is just removing the indentation by providing empty string
-                    let replacement = String::new(); // Remove the indentation
+                    // For the fix, we need to replace the highlighted part ("  *") with just the bullet marker ("* ")
+                    let line = lines[line_idx];
+                    let trimmed = line.trim_start();
+                    // Extract just the bullet marker and normalize to single space
+                    let bullet_part = if let Some(captures) = BULLET_PATTERN.captures(trimmed) {
+                        format!("{} ", captures.get(2).unwrap().as_str()) // Always use single space
+                    } else {
+                        "* ".to_string() // fallback
+                    };
+                    let replacement = bullet_part;
 
                     result.push(LintWarning {
                 rule_name: Some(self.name()),

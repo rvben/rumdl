@@ -96,6 +96,12 @@ impl MD005ListIndent {
     }
 }
 
+impl Default for MD005ListIndent {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl Rule for MD005ListIndent {
     fn name(&self) -> &'static str {
         "MD005"

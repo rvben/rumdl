@@ -25,6 +25,12 @@ impl MD031BlanksAroundFences {
     }
 }
 
+impl Default for MD031BlanksAroundFences {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl Rule for MD031BlanksAroundFences {
     fn name(&self) -> &'static str {
         "MD031"

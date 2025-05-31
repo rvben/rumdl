@@ -11,7 +11,7 @@ fn test_md006_start_bullets() {
     let test = simple_test(
         "MD006",
         "  - Indented bullet",
-        ExpectedWarning::new(1, 2, 1, 5, " - "),
+        ExpectedWarning::new(1, 1, 1, 4, "  -"),
     );
     test_character_ranges(test);
 }

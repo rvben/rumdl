@@ -69,31 +69,6 @@ impl MD021NoMultipleSpaceClosedAtx {
             (0, 0)
         }
     }
-
-    // Calculate the byte range for a specific line in the content
-    fn get_line_byte_range(&self, content: &str, line_num: usize) -> std::ops::Range<usize> {
-        let mut current_line = 1;
-        let mut start_byte = 0;
-
-        for (i, c) in content.char_indices() {
-            if current_line == line_num && c == '\n' {
-                return start_byte..i;
-            } else if c == '\n' {
-                current_line += 1;
-                if current_line == line_num {
-                    start_byte = i + 1;
-                }
-            }
-        }
-
-        // If we're looking for the last line and it doesn't end with a newline
-        if current_line == line_num {
-            return start_byte..content.len();
-        }
-
-        // Fallback if line not found (shouldn't happen)
-        0..0
-    }
 }
 
 impl Rule for MD021NoMultipleSpaceClosedAtx {

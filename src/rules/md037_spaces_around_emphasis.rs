@@ -231,6 +231,12 @@ fn has_spacing_issues(span: &EmphasisSpan) -> bool {
 #[derive(Clone)]
 pub struct MD037NoSpaceInEmphasis;
 
+impl Default for MD037NoSpaceInEmphasis {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl Rule for MD037NoSpaceInEmphasis {
     fn name(&self) -> &'static str {
         "MD037"
