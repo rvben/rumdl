@@ -10,16 +10,14 @@ use std::ops::Range;
 use std::sync::RwLock;
 
 lazy_static! {
-    // Match ATX headings (with or without closing hashes)
-    static ref ATX_HEADING_RE: Regex = Regex::new(r"^(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap();
+    // Optimized single regex for all ATX heading types (normal, closed, indented 1-3 spaces)
+    static ref ATX_HEADING_UNIFIED: Regex = Regex::new(r"^( {0,3})(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap();
 
-    // Match closed ATX headings specifically
-    static ref CLOSED_ATX_HEADING_RE: Regex = Regex::new(r"^(#{1,6})(\s+)(.+?)(\s+#{1,6})$").unwrap();
+    // Fast check patterns for early returns
+    static ref QUICK_HEADING_CHECK: Regex = Regex::new(r"^( {0,3}#|\s*[=\-]+\s*$)").unwrap();
+    static ref QUICK_PUNCTUATION_CHECK: Regex = Regex::new(r"[.,;:!?]").unwrap();
 
-    // Match indented headings with up to 3 spaces (these are valid headings in Markdown)
-    static ref INDENTED_HEADING_RE: Regex = Regex::new(r"^( {1,3})(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap();
-
-    // Match deeply indented headings (4+ spaces) - these are considered code blocks in Markdown
+    // Deeply indented headings (4+ spaces) - these are code blocks
     static ref DEEPLY_INDENTED_HEADING_RE: Regex = Regex::new(r"^(\s{4,})(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap();
 
     // Pattern for setext heading underlines (= or -)
@@ -28,8 +26,7 @@ lazy_static! {
     // Regex cache for punctuation patterns
     static ref PUNCTUATION_REGEX_CACHE: RwLock<HashMap<String, Regex>> = RwLock::new(HashMap::new());
 
-    // Optimized regex patterns for fix operations
-    // Only match ATX headings with 0-3 spaces indentation (4+ spaces are code blocks)
+    // Optimized regex patterns for fix operations with multiline flag
     static ref FAST_ATX_PUNCTUATION_RE: Regex = Regex::new(r"(?m)^( {0,3}#{1,6}\s+.+?)[.,;:!?]+(\s*(?:#{1,6})?)$").unwrap();
     static ref FAST_SETEXT_PUNCTUATION_RE: Regex = Regex::new(r"(?m)^(.+?)[.,;:!?]+(\s*)$").unwrap();
 }
@@ -55,6 +52,7 @@ impl MD026NoTrailingPunctuation {
         }
     }
 
+    #[inline]
     fn get_punctuation_regex(&self) -> Result<Regex, regex::Error> {
         // Check cache first
         {
@@ -102,29 +100,25 @@ impl MD026NoTrailingPunctuation {
         }
     }
 
-    // Extract the heading text from an ATX heading
+    // Optimized heading text extraction using unified regex
     #[inline]
     fn extract_atx_heading_text(&self, line: &str) -> Option<String> {
-        // Check for indented headings first (1-3 spaces)
-        if let Some(captures) = INDENTED_HEADING_RE.captures(line) {
+        if let Some(captures) = ATX_HEADING_UNIFIED.captures(line) {
             return Some(captures.get(4).unwrap().as_str().to_string());
-        } else if let Some(captures) = CLOSED_ATX_HEADING_RE.captures(line) {
-            return Some(captures.get(3).unwrap().as_str().to_string());
-        } else if let Some(captures) = ATX_HEADING_RE.captures(line) {
-            return Some(captures.get(3).unwrap().as_str().to_string());
         }
         None
     }
 
     // Remove trailing punctuation from text
+    #[inline]
     fn remove_trailing_punctuation(&self, text: &str, re: &Regex) -> String {
         re.replace_all(text.trim(), "").to_string()
     }
 
-    // Fix an ATX heading by removing trailing punctuation
+    // Optimized ATX heading fix using unified regex
+    #[inline]
     fn fix_atx_heading(&self, line: &str, re: &Regex) -> String {
-        // Check for indented headings first (1-3 spaces)
-        if let Some(captures) = INDENTED_HEADING_RE.captures(line) {
+        if let Some(captures) = ATX_HEADING_UNIFIED.captures(line) {
             let indentation = captures.get(1).unwrap().as_str();
             let hashes = captures.get(2).unwrap().as_str();
             let space = captures.get(3).unwrap().as_str();
@@ -147,38 +141,12 @@ impl MD026NoTrailingPunctuation {
             return format!("{}{}{}{}", indentation, hashes, space, fixed_content);
         }
 
-        if let Some(captures) = CLOSED_ATX_HEADING_RE.captures(line) {
-            // Handle closed ATX heading (# Heading #)
-            let hashes = captures.get(1).unwrap().as_str();
-            let space = captures.get(2).unwrap().as_str();
-            let content = captures.get(3).unwrap().as_str();
-            let closing = captures.get(4).unwrap().as_str();
-
-            let fixed_content = self.remove_trailing_punctuation(content, re);
-            return format!("{}{}{}{}", hashes, space, fixed_content, closing);
-        }
-
-        if let Some(captures) = ATX_HEADING_RE.captures(line) {
-            // Handle regular ATX heading (# Heading)
-            let hashes = captures.get(1).unwrap().as_str();
-            let space = captures.get(2).unwrap().as_str();
-            let content = captures.get(3).unwrap().as_str();
-
-            let fixed_content = self.remove_trailing_punctuation(content, re);
-
-            // Preserve any trailing hashes if present
-            if let Some(trailing) = captures.get(4) {
-                return format!("{}{}{}{}", hashes, space, fixed_content, trailing.as_str());
-            }
-
-            return format!("{}{}{}", hashes, space, fixed_content);
-        }
-
         // Fallback if no regex matches
         line.to_string()
     }
 
     // Fix a setext heading by removing trailing punctuation from the content line
+    #[inline]
     fn fix_setext_heading(&self, content_line: &str, re: &Regex) -> String {
         let trimmed = content_line.trim_end();
         let mut whitespace = "";
@@ -196,35 +164,38 @@ impl MD026NoTrailingPunctuation {
         )
     }
 
-    // Check if we're in front matter (between --- markers)
-    fn is_in_front_matter(&self, lines: &[&str], line_idx: usize) -> bool {
-        if line_idx == 0 || lines.is_empty() {
+    // Optimized front matter detection
+    #[inline]
+    fn is_in_front_matter(&self, lines: &[&str], line_index: usize) -> bool {
+        if lines.is_empty() {
             return false;
         }
 
-        let mut start_marker = false;
+        // Quick check: if first line is not front matter start, no front matter exists
+        if !lines[0].trim().starts_with("---") {
+            return false;
+        }
+
+        // Find front matter bounds
+        let mut in_front_matter = false;
+        let mut front_matter_end = 0;
 
         for (i, &line) in lines.iter().enumerate() {
-            if i >= line_idx {
-                break;
-            }
-
-            let trimmed = line.trim();
-            if trimmed == "---" {
-                if !start_marker {
-                    start_marker = true;
-                } else {
-                    // Found end marker, we're past front matter
-                    return false;
+            if line.trim() == "---" {
+                if i == 0 {
+                    in_front_matter = true;
+                } else if in_front_matter {
+                    front_matter_end = i;
+                    break;
                 }
             }
         }
 
-        // If we found a start marker but no end marker, we're still in front matter
-        start_marker
+        line_index < front_matter_end
     }
 
-    // Check if a line is a deeply indented heading (4+ spaces) which should be treated as code
+    // Fast check for deeply indented headings (4+ spaces = code block)
+    #[inline]
     fn is_deeply_indented_heading(&self, line: &str) -> bool {
         DEEPLY_INDENTED_HEADING_RE.is_match(line)
     }
@@ -235,6 +206,17 @@ impl MD026NoTrailingPunctuation {
         structure: &crate::utils::document_structure::DocumentStructure,
     ) -> LintResult {
         let content = ctx.content;
+
+        // Early return optimizations
+        if content.is_empty() || structure.heading_lines.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for any punctuation we care about
+        if !QUICK_PUNCTUATION_CHECK.is_match(content) {
+            return Ok(Vec::new());
+        }
+
         let lines: Vec<&str> = content.lines().collect();
         let mut warnings = Vec::new();
 
@@ -249,13 +231,15 @@ impl MD026NoTrailingPunctuation {
                 continue;
             }
 
+            let line_content = lines[heading_line - 1];
+
             // Skip if we're in front matter
             if self.is_in_front_matter(&lines, heading_line - 1) {
                 continue;
             }
 
             // Skip deeply indented headings (they're code blocks)
-            if self.is_deeply_indented_heading(lines[heading_line - 1]) {
+            if self.is_deeply_indented_heading(line_content) {
                 continue;
             }
 
@@ -264,12 +248,10 @@ impl MD026NoTrailingPunctuation {
 
             if region.0 == region.1 {
                 // ATX heading (single line)
-                if let Some(heading_text) = self.extract_atx_heading_text(lines[heading_line - 1]) {
+                if let Some(heading_text) = self.extract_atx_heading_text(line_content) {
                     if self.has_trailing_punctuation(&heading_text, &re) {
                         // Find the trailing punctuation in the ATX heading
                         if let Some(punctuation_match) = re.find(heading_text.trim()) {
-                            let line_content = lines[heading_line - 1];
-
                             // For ATX headings, find the punctuation position in the line
                             let heading_start_in_line =
                                 line_content.find(&heading_text).unwrap_or(0);
@@ -299,7 +281,7 @@ impl MD026NoTrailingPunctuation {
                                 severity: Severity::Warning,
                                 fix: Some(Fix {
                                     range: self.get_line_byte_range(content, heading_line),
-                                    replacement: self.fix_atx_heading(lines[heading_line - 1], &re),
+                                    replacement: self.fix_atx_heading(line_content, &re),
                                 }),
                             });
                         }
@@ -307,14 +289,12 @@ impl MD026NoTrailingPunctuation {
                 }
             } else {
                 // Setext heading: check the content line for trailing punctuation
-                if self.has_trailing_punctuation(lines[heading_line - 1], &re) {
+                if self.has_trailing_punctuation(line_content, &re) {
                     // Find the trailing punctuation in the setext heading
-                    if let Some(punctuation_match) = re.find(lines[heading_line - 1].trim()) {
-                        let line_content = lines[heading_line - 1];
-
+                    if let Some(punctuation_match) = re.find(line_content.trim()) {
                         // For setext headings, find the punctuation position in the line
                         let text_start_in_line = line_content
-                            .find(lines[heading_line - 1].trim())
+                            .find(line_content.trim())
                             .unwrap_or(0);
                         let punctuation_start_in_line =
                             text_start_in_line + punctuation_match.start();
@@ -327,8 +307,7 @@ impl MD026NoTrailingPunctuation {
                             punctuation_len,
                         );
 
-                        let last_char =
-                            lines[heading_line - 1].trim().chars().last().unwrap_or(' ');
+                        let last_char = line_content.trim().chars().last().unwrap_or(' ');
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             line: start_line,
@@ -336,15 +315,14 @@ impl MD026NoTrailingPunctuation {
                             end_line,
                             end_column: end_col,
                             message: format!(
-                                "Heading '{
-                }' ends with punctuation '{}'",
-                                lines[heading_line - 1].trim(),
+                                "Heading '{}' ends with punctuation '{}'",
+                                line_content.trim(),
                                 last_char
                             ),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: self.get_line_byte_range(content, heading_line),
-                                replacement: self.fix_setext_heading(lines[heading_line - 1], &re),
+                                replacement: self.fix_setext_heading(line_content, &re),
                             }),
                         });
                     }
@@ -377,26 +355,22 @@ impl Rule for MD026NoTrailingPunctuation {
             return Ok(Vec::new());
         }
 
-        // Quick check for ATX headings (#) or potential setext headings (lines followed by = or -)
-        let has_headings = content.contains('#') || {
-            let lines: Vec<&str> = content.lines().collect();
-            lines.windows(2).any(|pair| {
-                !pair[0].trim().is_empty()
-                    && (pair[1].trim().chars().all(|c| c == '=' || c == '-')
-                        && !pair[1].trim().is_empty())
-            })
-        };
+        // Quick check for any punctuation we care about
+        if !QUICK_PUNCTUATION_CHECK.is_match(content) {
+            return Ok(Vec::new());
+        }
+
+        // Check if we have potential headings (ATX # or setext underlines)
+        let has_headings = content.lines().any(|line|
+            line.trim_start().starts_with('#') ||
+            SETEXT_UNDERLINE_RE.is_match(line)
+        );
 
         if !has_headings {
             return Ok(Vec::new());
         }
 
-        // Quick check for any punctuation we care about
-        if !content.chars().any(|c| self.punctuation.contains(c)) {
-            return Ok(Vec::new());
-        }
-
-        // Use fallback pattern - try to use shared structure if available
+        // Use shared structure if available, otherwise create one
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
         self.check_with_structure(ctx, &structure)
     }
@@ -404,22 +378,27 @@ impl Rule for MD026NoTrailingPunctuation {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
 
-        // Fast path: if no headings or punctuation, return unchanged
-        if !content.contains('#')
-            && !content.lines().any(|line| {
-                let lines: Vec<&str> = content.lines().collect();
-                let idx = lines.iter().position(|&l| l == line).unwrap_or(0);
-                idx + 1 < lines.len() && SETEXT_UNDERLINE_RE.is_match(lines[idx + 1])
-            })
-        {
+        // Fast path optimizations
+        if content.is_empty() {
             return Ok(content.to_string());
         }
 
-        if !content.chars().any(|c| self.punctuation.contains(c)) {
+        // Quick check for punctuation
+        if !QUICK_PUNCTUATION_CHECK.is_match(content) {
             return Ok(content.to_string());
         }
 
-        // For default punctuation, use fast regex approach
+        // Check if we have potential headings (ATX # or setext underlines)
+        let has_headings = content.lines().any(|line|
+            line.trim_start().starts_with('#') ||
+            SETEXT_UNDERLINE_RE.is_match(line)
+        );
+
+        if !has_headings {
+            return Ok(content.to_string());
+        }
+
+        // For default punctuation, use optimized fast regex approach
         if self.punctuation == ".,;:!?" {
             let mut result = content.to_string();
 
@@ -459,50 +438,45 @@ impl Rule for MD026NoTrailingPunctuation {
         let mut fixed_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
         let re = self.get_punctuation_regex().unwrap();
 
-        for (idx, &_line_num) in structure.heading_lines.iter().enumerate() {
-            // Use heading_regions to get line indices
-            let region = structure.heading_regions[idx];
-            let start_line_idx = region.0.saturating_sub(1); // 1-based to 0-based
-
-            // Check bounds
-            if start_line_idx >= fixed_lines.len() {
+        for (idx, &heading_line) in structure.heading_lines.iter().enumerate() {
+            if heading_line == 0 || heading_line > lines.len() {
                 continue;
             }
 
-            // Fix based on heading type identified by region span
+            // Skip if we're in front matter
+            if self.is_in_front_matter(&lines, heading_line - 1) {
+                continue;
+            }
+
+            // Skip deeply indented headings (they're code blocks)
+            if self.is_deeply_indented_heading(lines[heading_line - 1]) {
+                continue;
+            }
+
+            let region = structure.heading_regions[idx];
+
             if region.0 == region.1 {
-                // ATX heading (single line)
-                let fixed = self.fix_atx_heading(&fixed_lines[start_line_idx], &re);
-                fixed_lines[start_line_idx] = fixed;
+                // ATX heading
+                if let Some(heading_text) = self.extract_atx_heading_text(lines[heading_line - 1]) {
+                    if self.has_trailing_punctuation(&heading_text, &re) {
+                        fixed_lines[heading_line - 1] = self.fix_atx_heading(lines[heading_line - 1], &re);
+                    }
+                }
             } else {
-                // Setext heading (content is on start_line_idx)
-                let fixed = self.fix_setext_heading(&fixed_lines[start_line_idx], &re);
-                fixed_lines[start_line_idx] = fixed;
+                // Setext heading
+                if self.has_trailing_punctuation(lines[heading_line - 1], &re) {
+                    fixed_lines[heading_line - 1] = self.fix_setext_heading(lines[heading_line - 1], &re);
+                }
             }
         }
 
-        // Join lines back with original newline separators
-        let mut result = String::new();
-        let mut original_lines = content.lines().peekable();
-        let fixed_lines_iter = fixed_lines.into_iter();
-
-        for fixed_line in fixed_lines_iter {
-            result.push_str(&fixed_line);
-            // Append original newline sequence if possible
-            if original_lines.next().is_some() && original_lines.peek().is_some() {
-                #[cfg(windows)]
-                result.push_str("\r\n");
-                #[cfg(not(windows))]
+        // Reconstruct content preserving line endings
+        let mut result = String::with_capacity(content.len());
+        for (i, line) in fixed_lines.iter().enumerate() {
+            result.push_str(line);
+            if i < fixed_lines.len() - 1 || content.ends_with('\n') {
                 result.push('\n');
             }
-        }
-
-        // Handle case where content originally ended with a newline
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            #[cfg(windows)]
-            result.push_str("\r\n");
-            #[cfg(not(windows))]
-            result.push('\n');
         }
 
         Ok(result)
@@ -541,6 +515,6 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD026NoTr
         let content = ctx.content;
         !content.is_empty()
             && !structure.heading_lines.is_empty()
-            && content.chars().any(|c| self.punctuation.contains(c))
+            && QUICK_PUNCTUATION_CHECK.is_match(content)
     }
 }
