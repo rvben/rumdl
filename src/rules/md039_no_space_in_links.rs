@@ -1,4 +1,15 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    // Pre-compiled regex patterns for performance - using DOTALL flag to match newlines
+    static ref LINK_PATTERN: Regex = Regex::new(r"(?s)!?\[([^\]]*)\]\(([^)]*)\)").unwrap();
+
+    // Fast check patterns - simple string-based checks are faster than complex regex
+    static ref WHITESPACE_CHECK: Regex = Regex::new(r"^\s+|\s+$").unwrap();
+    static ref ALL_WHITESPACE: Regex = Regex::new(r"^\s*$").unwrap();
+}
 
 /// Rule MD039: No space inside link text
 ///
@@ -17,21 +28,20 @@ impl MD039NoSpaceInLinks {
         Self
     }
 
-    /// Fast check to see if content has any potential links or images
+    /// Optimized fast check to see if content has any potential links or images
     #[inline]
     fn has_links_or_images(&self, content: &str) -> bool {
-        (content.contains('[') && content.contains("]("))
-            || (content.contains("![") && content.contains("]("))
+        LINK_PATTERN.is_match(content)
     }
 
-    /// Shared parser: yields (is_image, text, url, link_start, link_end, text_start, text_end)
+    /// Optimized link parsing using regex with early returns
     fn parse_links_and_images(
         content: &str,
     ) -> Vec<(bool, &str, &str, usize, usize, usize, usize)> {
         let mut results = Vec::new();
 
         // Early return if no potential links
-        if !content.contains('[') || !content.contains("](") {
+        if !LINK_PATTERN.is_match(content) {
             return results;
         }
 
@@ -39,131 +49,55 @@ impl MD039NoSpaceInLinks {
         let code_block_ranges =
             crate::utils::code_block_utils::CodeBlockUtils::detect_code_blocks(content);
 
-        // Convert to char indices for efficient processing
-        let chars: Vec<(usize, char)> = content.char_indices().collect();
-        let mut idx = 0;
-
-        while idx < chars.len() {
-            let (byte_i, c) = chars[idx];
+        // Use optimized regex parsing instead of character-by-character iteration
+        for m in LINK_PATTERN.find_iter(content) {
+            let match_start = m.start();
+            let match_end = m.end();
 
             // Skip if in code block (optimized check)
             if code_block_ranges
                 .iter()
-                .any(|&(start, end)| byte_i >= start && byte_i < end)
+                .any(|&(start, end)| match_start >= start && match_start < end)
             {
-                idx += 1;
                 continue;
             }
 
-            let is_image = c == '!' && idx + 1 < chars.len() && chars[idx + 1].1 == '[';
-            let start_bracket = if is_image {
-                if idx + 1 < chars.len() && chars[idx + 1].1 == '[' {
-                    idx + 1
-                } else {
-                    usize::MAX
+            let full_match = m.as_str();
+            let is_image = full_match.starts_with('!');
+
+            // Extract using the regex capture groups for better performance
+            if let Some(captures) = LINK_PATTERN.captures(full_match) {
+                if let (Some(text_match), Some(url_match)) = (captures.get(1), captures.get(2)) {
+                    let text = text_match.as_str();
+                    let url = url_match.as_str();
+
+                    // Calculate absolute positions
+                    let text_start = match_start + text_match.start() + if is_image { 2 } else { 1 };
+                    let text_end = match_start + text_match.end() + if is_image { 2 } else { 1 };
+
+                    results.push((
+                        is_image,
+                        text,
+                        url,
+                        match_start,
+                        match_end,
+                        text_start,
+                        text_end,
+                    ));
                 }
-            } else if c == '[' {
-                idx
-            } else {
-                usize::MAX
-            };
-
-            if start_bracket == usize::MAX {
-                idx += 1;
-                continue;
             }
-
-            // Find matching closing bracket (not escaped), allowing multi-line
-            let mut j = start_bracket + 1;
-            while j < chars.len() {
-                if chars[j].1 == ']' {
-                    let mut backslashes = 0;
-                    let mut k = j;
-                    while k > start_bracket && chars[k - 1].1 == '\\' {
-                        backslashes += 1;
-                        k -= 1;
-                    }
-                    if backslashes % 2 == 0 {
-                        break;
-                    }
-                }
-                j += 1;
-            }
-
-            if j >= chars.len() {
-                idx = j + 1;
-                continue;
-            }
-
-            // Check for ( after ] (allow whitespace)
-            let mut k = j + 1;
-            while k < chars.len() && chars[k].1.is_whitespace() {
-                k += 1;
-            }
-            if k >= chars.len() || chars[k].1 != '(' {
-                idx = j + 1;
-                continue;
-            }
-
-            // Find matching ) for url
-            let mut l = k + 1;
-            let mut paren_count = 1;
-            while l < chars.len() {
-                if chars[l].1 == '(' {
-                    paren_count += 1;
-                } else if chars[l].1 == ')' {
-                    paren_count -= 1;
-                    if paren_count == 0 {
-                        break;
-                    }
-                }
-                l += 1;
-            }
-
-            if paren_count != 0 || l >= chars.len() {
-                idx = l + 1;
-                continue;
-            }
-
-            let text_start = chars[start_bracket].0 + chars[start_bracket].1.len_utf8();
-            let text_end = chars[j].0;
-            let url_start = chars[k].0 + chars[k].1.len_utf8();
-            let url_end = chars[l].0;
-
-            if text_end < text_start
-                || url_end < url_start
-                || text_end > content.len()
-                || url_end > content.len()
-            {
-                idx = l + 1;
-                continue;
-            }
-
-            let text = &content[text_start..text_end];
-            let url = &content[url_start..url_end];
-            let link_start = if is_image {
-                chars[idx].0
-            } else {
-                chars[start_bracket].0
-            };
-            let link_end = chars[l].0 + chars[l].1.len_utf8();
-
-            results.push((
-                is_image, text, url, link_start, link_end, text_start, text_end,
-            ));
-            idx = l + 1;
         }
         results
     }
 
+    #[inline]
     fn trim_link_text_preserve_escapes(text: &str) -> &str {
-        // Find first non-whitespace
+        // Optimized trimming that preserves escapes
         let start = text
             .char_indices()
             .find(|&(_, c)| !c.is_whitespace())
             .map(|(i, _)| i)
             .unwrap_or(text.len());
-        // Find last non-whitespace
         let end = text
             .char_indices()
             .rev()
@@ -175,6 +109,38 @@ impl MD039NoSpaceInLinks {
         } else {
             &text[start..end]
         }
+    }
+
+    /// Optimized whitespace checking for link text
+    #[inline]
+    fn needs_trimming(&self, text: &str) -> bool {
+        // Simple and fast check: compare with trimmed version
+        text != text.trim_matches(|c: char| c.is_whitespace())
+    }
+
+    /// Optimized unescaping for performance-critical path
+    #[inline]
+    fn unescape_fast(&self, text: &str) -> String {
+        if !text.contains('\\') {
+            return text.to_string();
+        }
+
+        let mut result = String::with_capacity(text.len());
+        let mut chars = text.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                if let Some(&next) = chars.peek() {
+                    result.push(next);
+                    chars.next();
+                } else {
+                    result.push(c);
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
     }
 }
 
@@ -208,7 +174,7 @@ impl Rule for MD039NoSpaceInLinks {
         let content = ctx.content;
         let mut warnings = Vec::new();
 
-        // Parse links and images once
+        // Parse links and images once with optimized algorithm
         let links_and_images = Self::parse_links_and_images(content);
 
         // Early return if no links found
@@ -216,23 +182,16 @@ impl Rule for MD039NoSpaceInLinks {
             return Ok(Vec::new());
         }
 
-        for (is_image, text, url, link_start, _link_end, _text_start, _text_end) in links_and_images
-        {
-            // Unescape for whitespace check
-            let mut unesc = String::with_capacity(text.len());
-            let mut tchars = text.chars().peekable();
-            while let Some(c) = tchars.next() {
-                if c == '\\' {
-                    if let Some(&next) = tchars.peek() {
-                        unesc.push(next);
-                        tchars.next();
-                    }
-                } else {
-                    unesc.push(c);
-                }
+        for (is_image, text, url, link_start, _link_end, _text_start, _text_end) in links_and_images {
+            // Fast check if trimming is needed
+            if !self.needs_trimming(text) {
+                continue;
             }
 
-            let needs_warning = if unesc.chars().all(|c| c.is_whitespace()) {
+            // Optimized unescaping for whitespace check
+            let unescaped = self.unescape_fast(text);
+
+            let needs_warning = if ALL_WHITESPACE.is_match(&unescaped) {
                 true
             } else {
                 let trimmed = text.trim_matches(|c: char| c.is_whitespace());
@@ -245,7 +204,8 @@ impl Rule for MD039NoSpaceInLinks {
                 } else {
                     format!("[{}]({})", text, url)
                 };
-                let fixed = if unesc.chars().all(|c| c.is_whitespace()) {
+
+                let fixed = if ALL_WHITESPACE.is_match(&unescaped) {
                     if is_image {
                         format!("![]({})", url)
                     } else {
@@ -259,6 +219,7 @@ impl Rule for MD039NoSpaceInLinks {
                         format!("[{}]({})", trimmed, url)
                     }
                 };
+
                 let (line, column) = ctx.offset_to_line_col(link_start);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
@@ -282,25 +243,26 @@ impl Rule for MD039NoSpaceInLinks {
         if self.should_skip(ctx) {
             return Ok(ctx.content.to_string());
         }
+
         let content = ctx.content;
+        let links_and_images = Self::parse_links_and_images(content);
+
+        if links_and_images.is_empty() {
+            return Ok(content.to_string());
+        }
+
         let mut fixes = Vec::new();
-        for (is_image, text, url, link_start, link_end, _text_start, _text_end) in
-            Self::parse_links_and_images(content)
-        {
-            // Unescape for whitespace check
-            let mut unesc = String::with_capacity(text.len());
-            let mut tchars = text.chars().peekable();
-            while let Some(c) = tchars.next() {
-                if c == '\\' {
-                    if let Some(&next) = tchars.peek() {
-                        unesc.push(next);
-                        tchars.next();
-                    }
-                } else {
-                    unesc.push(c);
-                }
+
+        for (is_image, text, url, link_start, link_end, _text_start, _text_end) in links_and_images {
+            // Fast check if trimming is needed
+            if !self.needs_trimming(text) {
+                continue;
             }
-            let replacement = if unesc.chars().all(|c| c.is_whitespace()) {
+
+            // Optimized unescaping for whitespace check
+            let unescaped = self.unescape_fast(text);
+
+            let replacement = if ALL_WHITESPACE.is_match(&unescaped) {
                 if is_image {
                     format!("![]({})", url)
                 } else {
@@ -316,18 +278,23 @@ impl Rule for MD039NoSpaceInLinks {
             };
             fixes.push((link_start, link_end, replacement));
         }
+
         if fixes.is_empty() {
             return Ok(content.to_string());
         }
-        let mut fixed = String::with_capacity(content.len());
-        let mut last = 0;
+
+        // Apply fixes efficiently
+        let mut result = String::with_capacity(content.len());
+        let mut last_pos = 0;
+
         for (start, end, replacement) in fixes {
-            fixed.push_str(&content[last..start]);
-            fixed.push_str(&replacement);
-            last = end;
+            result.push_str(&content[last_pos..start]);
+            result.push_str(&replacement);
+            last_pos = end;
         }
-        fixed.push_str(&content[last..]);
-        Ok(fixed)
+        result.push_str(&content[last_pos..]);
+
+        Ok(result)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -479,5 +446,58 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
         // markdownlint does not trim or remove escapes, so output should be unchanged
         assert_eq!(fixed, "[link\\]](url) and [link\\[]](url)");
+    }
+
+    #[test]
+    fn test_performance_md039() {
+        use std::time::Instant;
+
+        let rule = MD039NoSpaceInLinks::new();
+
+        // Generate test content with many links
+        let mut content = String::with_capacity(100_000);
+
+        // Add links with spaces (should be detected and fixed)
+        for i in 0..500 {
+            content.push_str(&format!("Line {} with [ spaced link {} ](url{}) and text.\n", i, i, i));
+        }
+
+        // Add valid links (should be fast to skip)
+        for i in 0..500 {
+            content.push_str(&format!("Line {} with [valid link {}](url{}) and text.\n", i + 500, i, i));
+        }
+
+        println!("MD039 Performance Test - Content: {} bytes, {} lines", content.len(), content.lines().count());
+
+        let ctx = crate::lint_context::LintContext::new(&content);
+
+        // Warm up
+        let _ = rule.check(&ctx).unwrap();
+
+        // Measure check performance
+        let mut total_duration = std::time::Duration::ZERO;
+        let runs = 5;
+        let mut warnings_count = 0;
+
+        for _ in 0..runs {
+            let start = Instant::now();
+            let warnings = rule.check(&ctx).unwrap();
+            total_duration += start.elapsed();
+            warnings_count = warnings.len();
+        }
+
+        let avg_check_duration = total_duration / runs;
+
+        println!("MD039 Optimized Performance:");
+        println!("- Average check time: {:?} ({:.2} ms)", avg_check_duration, avg_check_duration.as_secs_f64() * 1000.0);
+        println!("- Found {} warnings", warnings_count);
+        println!("- Lines per second: {:.0}", content.lines().count() as f64 / avg_check_duration.as_secs_f64());
+        println!("- Microseconds per line: {:.2}", avg_check_duration.as_micros() as f64 / content.lines().count() as f64);
+
+        // Performance assertion - should complete reasonably fast
+        assert!(avg_check_duration.as_millis() < 200, "MD039 check should complete in under 200ms, took {}ms", avg_check_duration.as_millis());
+
+        // Verify we're finding the expected number of warnings (500 links with spaces)
+        assert_eq!(warnings_count, 500, "Should find 500 warnings for links with spaces");
     }
 }

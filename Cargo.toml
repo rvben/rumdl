@@ -21,6 +21,26 @@ crate-type = ["cdylib", "rlib"]
 name = "rumdl"
 path = "src/main.rs"
 
+[[bench]]
+name = "rule_performance"
+harness = false
+
+[[bench]]
+name = "fix_performance"
+harness = false
+
+[[bench]]
+name = "range_performance"
+harness = false
+
+[[bench]]
+name = "simple_fix_bench"
+harness = false
+
+[[bench]]
+name = "range_utils_benchmark"
+harness = false
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 colored = "3.0.0"

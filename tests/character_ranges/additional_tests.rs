@@ -33,7 +33,7 @@ fn test_md005_list_indentation() {
     let test = simple_test(
         "MD005",
         "- Item 1\n  - Nested item\n   - Wrong indent",
-        ExpectedWarning::new(3, 2, 3, 6, "  - "),
+        ExpectedWarning::new(3, 1, 3, 4, "   "),
     );
     test_character_ranges(test);
 }
@@ -95,7 +95,7 @@ fn test_md005_deep_nesting() {
     let test = simple_test(
         "MD005",
         "- Level 1\n  - Level 2\n    - Level 3\n     - Wrong level 4",
-        ExpectedWarning::new(4, 2, 4, 8, "    - "),
+        ExpectedWarning::new(4, 1, 4, 6, "     "),
     );
     test_character_ranges(test);
 }

@@ -76,7 +76,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         "MD004" => Some(("* Item 1\n- Item 2", Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)))),
         "MD005" => Some(("* Item 1\n   * Item with 3 spaces (should be 2)", Box::new(MD005ListIndent::default()))),
         "MD006" => Some(("  * Indented list item that should trigger MD006", Box::new(MD006StartBullets))),
-        "MD007" => Some(("* Item\n   * Wrong indentation", Box::new(MD007ULIndent::default()))),
+        "MD007" => Some(("- Item 1\n   - Wrong indent", Box::new(MD007ULIndent::default()))),
         "MD009" => Some(("Line with trailing spaces   ", Box::new(MD009TrailingSpaces::default()))),
         "MD010" => Some(("Line with\ttab", Box::new(MD010NoHardTabs::default()))),
         "MD011" => Some(("(http://example.com)[Example]", Box::new(MD011NoReversedLinks::default()))),
@@ -111,7 +111,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         "MD043" => Some(("# Wrong heading", Box::new(MD043RequiredHeadings::new(vec!["Introduction".to_string()])))),
         "MD044" => Some(("javascript instead of JavaScript", Box::new(MD044ProperNames::new(vec!["JavaScript".to_string()], false)))),
         "MD045" => Some(("![](image.png)", Box::new(MD045NoAltText::default()))),
-        "MD046" => Some(("    indented code", Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Indented)))),
+        "MD046" => Some(("    indented code", Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Fenced)))),
         "MD047" => Some(("File without trailing newline", Box::new(MD047SingleTrailingNewline::default()))),
         "MD048" => Some(("~~~\ncode\n~~~", Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Tilde)))),
         "MD049" => Some(("Text _emphasis_ text", Box::new(MD049EmphasisStyle::default()))),
@@ -236,8 +236,9 @@ mod tests {
             // Expected: "* Indented list item that should trigger MD006"
             // But we'll be lenient about exact spacing as long as there's no duplication
             assert!(fixed.contains("Indented list item that should trigger MD006"), "Should contain the original content");
+        } else {
+            panic!("Expected MD006 to provide a fix");
         }
-        // If no fix is available, that's also acceptable for this test
     }
 
     #[test]
@@ -253,8 +254,9 @@ mod tests {
             assert!(!fixed.contains("   * *"), "Should not contain duplicated content");
             // The fix should correct the indentation to 2 spaces
             assert!(fixed.contains("  * Item with 3 spaces"), "Should fix indentation to 2 spaces");
+        } else {
+            panic!("Expected MD005 to provide a fix");
         }
-        // If no fix is available, that's also acceptable for this test
     }
 
     #[test]
@@ -268,8 +270,11 @@ mod tests {
         if let Ok(fixed) = result {
             assert!(!fixed.contains("> >"), "Should not contain duplicated blockquote markers");
             assert!(!fixed.contains(">>"), "Should not contain merged blockquote markers");
+            // The fix should correct to single space
+            assert!(fixed.contains("> Multiple spaces"), "Should fix to single space after marker");
+        } else {
+            panic!("Expected MD027 to provide a fix");
         }
-        // If no fix is available, that's also acceptable for this test
     }
 
     #[test]
@@ -290,6 +295,40 @@ mod tests {
                     }
                 }
             }
+        }
+        // If no fix is available, that's also acceptable for this test
+    }
+
+    #[test]
+    fn test_md007_vscode_fix_no_duplication() {
+        let rule = MD007ULIndent::default();
+        let content = "- Item 1\n   - Wrong indent";
+
+        let result = simulate_vscode_fix(content, &rule);
+
+        // If MD007 has a fix, it should not duplicate content
+        if let Ok(fixed) = result {
+            assert!(!fixed.contains("- -"), "Should not contain duplicated list markers");
+            assert!(!fixed.contains("   - -"), "Should not contain duplicated content");
+            // The fix should correct the indentation
+            assert!(fixed.contains("  - Wrong indent"), "Should fix indentation to 2 spaces");
+        } else {
+            panic!("Expected MD007 to provide a fix");
+        }
+    }
+
+    #[test]
+    fn test_md046_vscode_fix_no_duplication() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "    indented code"; // Indented code that should trigger MD046
+
+        let result = simulate_vscode_fix(content, &rule);
+
+        // If MD046 has a fix, it should not duplicate content
+        if let Ok(fixed) = result {
+            assert!(!fixed.contains("    indented"), "Should not contain original indented code");
+            assert!(fixed.contains("```"), "Should contain fenced code block marker");
+            assert!(fixed.contains("indented code"), "Should contain the code content");
         }
         // If no fix is available, that's also acceptable for this test
     }

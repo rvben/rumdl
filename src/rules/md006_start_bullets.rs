@@ -238,9 +238,9 @@ impl Rule for MD006StartBullets {
 
                 if !is_valid {
                     // Calculate the precise range for the indentation that needs to be removed
-                    // For "  * Indented bullet", we want to highlight just the indentation and marker "  *" (columns 1-3)
+                    // For "  * Indented bullet", we want to highlight the indentation, marker, and space after marker "  * " (columns 1-4)
                     let start_col = 1; // Start from beginning of line
-                    let end_col = indent + 2; // Include the marker (indent + 1 for marker position + 1 for inclusive range)
+                    let end_col = indent + 3; // Include marker and space after it (indent + 1 for marker + 1 for space + 1 for inclusive range)
 
                     // For the fix, we need to replace the highlighted part ("  *") with just the bullet marker ("* ")
                     let line = lines[line_idx];
@@ -262,8 +262,12 @@ impl Rule for MD006StartBullets {
                 end_column: end_col,
                 message: "List item indentation".to_string(),
                 fix: Some(Fix {
-                range: line_index.line_col_to_byte_range(line_num, start_col),
-                replacement,
+                    range: {
+                        let start_byte = line_index.line_col_to_byte_range(line_num, start_col).start;
+                        let end_byte = line_index.line_col_to_byte_range(line_num, end_col).start;
+                        start_byte..end_byte
+                    },
+                    replacement,
             }),
                     });
                 }

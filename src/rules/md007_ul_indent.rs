@@ -94,35 +94,26 @@ impl Rule for MD007ULIndent {
                         if let Some(line) = lines.get(item.line_number - 1) {
                             // Extract the marker and content
                             let re = regex::Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
-                            if let Some(caps) = re.captures(line) {
-                                let content_part = caps.get(4).map_or("", |m| m.as_str());
-                                let space_after_marker = caps.get(3).map_or(" ", |m| m.as_str());
-                                let marker_char = caps.get(2).map_or("*", |m| m.as_str());
+                            if re.captures(line).is_some() {
                                 let correct_indent = " ".repeat(expected_indent);
-                                let fixed_line = format!(
-                                    "{}{}{}{}{}",
-                                    item.blockquote_prefix,
-                                    correct_indent,
-                                    marker_char,
-                                    space_after_marker,
-                                    content_part
-                                );
 
+                                // Fix range should match warning range - only the problematic indentation
                                 let line_index =
                                     crate::utils::range_utils::LineIndex::new(content.to_string());
-                                let line_start =
-                                    line_index.line_col_to_byte_range(item.line_number, 1).start;
-                                let line_end = if item.line_number < lines.len() {
-                                    line_index
-                                        .line_col_to_byte_range(item.line_number + 1, 1)
-                                        .start
-                                        - 1
-                                } else {
-                                    content.len()
-                                };
+
+                                // Warning will cover the indentation area that needs to be fixed
+                                let start_col = item.blockquote_prefix.len() + 1; // Start of indentation
+                                let end_col = item.blockquote_prefix.len() + item.indent_str.len() + 1; // End of actual indentation string
+
+                                let start_byte = line_index.line_col_to_byte_range(item.line_number, start_col).start;
+                                let end_byte = line_index.line_col_to_byte_range(item.line_number, end_col).start;
+
+                                // Replacement should be just the correct indentation
+                                let replacement = correct_indent;
+
                                 Some(crate::rule::Fix {
-                                    range: line_start..line_end,
-                                    replacement: fixed_line,
+                                    range: start_byte..end_byte,
+                                    replacement,
                                 })
                             } else {
                                 None
@@ -139,9 +130,9 @@ impl Rule for MD007ULIndent {
                             expected_indent, item.nesting_level, item.indentation
                         ),
                         line: item.line_number,
-                        column: item.blockquote_prefix.len() + item.indentation + 1, // correct column for marker
+                        column: item.blockquote_prefix.len() + 1, // Start of indentation
                         end_line: item.line_number,
-                        end_column: item.blockquote_prefix.len() + item.indentation + 2,
+                        end_column: item.blockquote_prefix.len() + item.indent_str.len() + 1, // End of actual indentation string
                         severity: Severity::Warning,
                         fix,
                     });
@@ -191,35 +182,26 @@ impl Rule for MD007ULIndent {
                         if let Some(line) = lines.get(item.line_number - 1) {
                             // Extract the marker and content
                             let re = regex::Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
-                            if let Some(caps) = re.captures(line) {
-                                let content_part = caps.get(4).map_or("", |m| m.as_str());
-                                let space_after_marker = caps.get(3).map_or(" ", |m| m.as_str());
-                                let marker_char = caps.get(2).map_or("*", |m| m.as_str());
+                            if re.captures(line).is_some() {
                                 let correct_indent = " ".repeat(expected_indent);
-                                let fixed_line = format!(
-                                    "{}{}{}{}{}",
-                                    item.blockquote_prefix,
-                                    correct_indent,
-                                    marker_char,
-                                    space_after_marker,
-                                    content_part
-                                );
 
+                                // Fix range should match warning range - only the problematic indentation
                                 let line_index =
                                     crate::utils::range_utils::LineIndex::new(content.to_string());
-                                let line_start =
-                                    line_index.line_col_to_byte_range(item.line_number, 1).start;
-                                let line_end = if item.line_number < lines.len() {
-                                    line_index
-                                        .line_col_to_byte_range(item.line_number + 1, 1)
-                                        .start
-                                        - 1
-                                } else {
-                                    content.len()
-                                };
+
+                                // Warning will cover the indentation area that needs to be fixed
+                                let start_col = item.blockquote_prefix.len() + 1; // Start of indentation
+                                let end_col = item.blockquote_prefix.len() + item.indent_str.len() + 1; // End of actual indentation string
+
+                                let start_byte = line_index.line_col_to_byte_range(item.line_number, start_col).start;
+                                let end_byte = line_index.line_col_to_byte_range(item.line_number, end_col).start;
+
+                                // Replacement should be just the correct indentation
+                                let replacement = correct_indent;
+
                                 Some(crate::rule::Fix {
-                                    range: line_start..line_end,
-                                    replacement: fixed_line,
+                                    range: start_byte..end_byte,
+                                    replacement,
                                 })
                             } else {
                                 None
@@ -236,9 +218,9 @@ impl Rule for MD007ULIndent {
                             expected_indent, item.nesting_level, item.indentation
                         ),
                         line: item.line_number,
-                        column: item.blockquote_prefix.len() + item.indentation + 1, // correct column for marker
+                        column: item.blockquote_prefix.len() + 1, // Start of indentation
                         end_line: item.line_number,
-                        end_column: item.blockquote_prefix.len() + item.indentation + 2,
+                        end_column: item.blockquote_prefix.len() + item.indent_str.len() + 1, // End of actual indentation string
                         severity: Severity::Warning,
                         fix,
                     });

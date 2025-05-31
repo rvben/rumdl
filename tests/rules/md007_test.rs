@@ -27,9 +27,9 @@ fn test_invalid_list_indent() {
     }
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].column, 4);
+    assert_eq!(result[0].column, 1);
     assert_eq!(result[1].line, 3);
-    assert_eq!(result[1].column, 7);
+    assert_eq!(result[1].column, 1);
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn test_mixed_indentation() {
     }
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
-    assert_eq!(result[0].column, 4);
+    assert_eq!(result[0].column, 1);
 }
 
 #[test]

@@ -82,8 +82,12 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         message: "Multiple spaces after blockquote symbol".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, start_col),
-                            replacement: " ".to_string(), // Just one space
+                            range: {
+                                let start_byte = _line_index.line_col_to_byte_range(i + 1, start_col).start;
+                                let end_byte = _line_index.line_col_to_byte_range(i + 1, end_col).start;
+                                start_byte..end_byte
+                            },
+                            replacement: "".to_string(), // Remove the extra spaces
                         }),
                     });
                     line_processed = true;
