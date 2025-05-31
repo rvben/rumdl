@@ -46,24 +46,16 @@ impl Rule for MD023HeadingStartLeft {
             let line = lines[start_line];
             let indentation = line.len() - line.trim_start().len();
 
+            // Determine if it's an ATX or Setext heading
+            let is_setext = heading.end_line > heading.start_line;
+
             // If the heading is indented, add a warning
             if indentation > 0 {
-                // Determine if it's an ATX or Setext heading
-                let is_setext = heading.end_line > heading.start_line;
-                let level = if let Some(level_str) = &heading.metadata {
-                    level_str.parse::<u32>().unwrap_or(1)
-                } else {
-                    1 // Default to level 1 if not specified
-                };
-
                 if is_setext {
                     // For Setext headings, we need to fix both the heading text and underline
-                    let heading_text = lines[start_line].trim();
                     let underline_line = start_line + 1;
 
                     if underline_line < lines.len() {
-                        let underline_text = lines[underline_line].trim();
-
                         // Calculate precise character range for the indentation
                         let (start_line_calc, start_col, end_line, end_col) =
                             calculate_single_line_range(
@@ -124,32 +116,6 @@ impl Rule for MD023HeadingStartLeft {
                     }
                 } else {
                     // For ATX headings, just fix the single line
-                    let is_closed_atx = line.trim().ends_with('#');
-                    let heading_content = if heading.text.trim().is_empty() {
-                        String::new() // Empty heading
-                    } else {
-                        format!(" {}", heading.text.trim())
-                    };
-
-                    // Create a fixed version without indentation
-                    let fixed_heading = if is_closed_atx {
-                        if heading_content.trim().is_empty() {
-                            format!(
-                                "{} {}",
-                                "#".repeat(level as usize),
-                                "#".repeat(level as usize)
-                            )
-                        } else {
-                            format!(
-                                "{}{} {}",
-                                "#".repeat(level as usize),
-                                heading_content,
-                                "#".repeat(level as usize)
-                            )
-                        }
-                    } else {
-                        format!("{}{}", "#".repeat(level as usize), heading_content)
-                    };
 
                     // Calculate precise character range for the indentation
                     let (atx_start_line, atx_start_col, atx_end_line, atx_end_col) =
@@ -308,29 +274,18 @@ impl Rule for MD023HeadingStartLeft {
             let line = lines[line_idx];
             let indentation = line.len() - line.trim_start().len();
 
+            // Determine if it's an ATX or Setext heading
+            let is_setext = line_idx + 1 < lines.len()
+                && (lines[line_idx + 1].trim().starts_with('=')
+                    || lines[line_idx + 1].trim().starts_with('-'));
+
             // If the heading is indented, add a warning
             if indentation > 0 {
-                // Determine if it's an ATX or Setext heading
-                let is_setext = line_idx + 1 < lines.len()
-                    && (lines[line_idx + 1].trim().starts_with('=')
-                        || lines[line_idx + 1].trim().starts_with('-'));
-
-                // Find the heading level from the structure
-                let level_idx = structure
-                    .heading_lines
-                    .iter()
-                    .position(|&l| l == line_num)
-                    .unwrap_or(0);
-                let level = structure.heading_levels.get(level_idx).unwrap_or(&1);
-
                 if is_setext {
                     // For Setext headings, we need to fix both the heading text and underline
-                    let heading_text = line.trim();
                     let underline_line_idx = line_idx + 1;
 
                     if underline_line_idx < lines.len() {
-                        let underline_text = lines[underline_line_idx].trim();
-
                         // Calculate precise character range for the indentation
                         let (setext_start_line, setext_start_col, setext_end_line, setext_end_col) =
                             calculate_single_line_range(
@@ -392,40 +347,6 @@ impl Rule for MD023HeadingStartLeft {
                     }
                 } else {
                     // For ATX headings, just fix the single line
-                    let is_closed_atx = line.trim().ends_with('#');
-                    let heading_text = line.trim();
-
-                    // Extract the heading content by removing the hashes
-                    let mut content_start = 0;
-                    while content_start < heading_text.len()
-                        && heading_text.chars().nth(content_start) == Some('#')
-                    {
-                        content_start += 1;
-                    }
-
-                    let heading_content = if content_start < heading_text.len() {
-                        heading_text[content_start..].trim().to_string()
-                    } else {
-                        String::new() // Empty heading
-                    };
-
-                    // Create a fixed version without indentation
-                    let fixed_heading = if is_closed_atx {
-                        if heading_content.trim().is_empty() {
-                            format!("{} {}", "#".repeat(*level), "#".repeat(*level))
-                        } else {
-                            format!(
-                                "{} {} {}",
-                                "#".repeat(*level),
-                                heading_content.trim(),
-                                "#".repeat(*level)
-                            )
-                        }
-                    } else if heading_content.trim().is_empty() {
-                        "#".repeat(*level).to_string()
-                    } else {
-                        format!("{} {}", "#".repeat(*level), heading_content.trim())
-                    };
 
                     // Calculate precise character range for the indentation
                     let (

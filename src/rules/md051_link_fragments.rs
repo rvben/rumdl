@@ -3,6 +3,18 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::*;
 use std::collections::HashSet;
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    // Pre-compiled optimized patterns for quick checks
+    static ref QUICK_LINK_CHECK: Regex = Regex::new(r"\[.*?\]\([^)]*#").unwrap();
+    static ref QUICK_EXTERNAL_CHECK: Regex = Regex::new(r"^https?://|^ftp://|^www\.").unwrap();
+    static ref QUICK_MARKDOWN_CHECK: Regex = Regex::new(r"[*_`\[\]]").unwrap();
+
+    // Optimized single-pass markdown stripping (faster than multiple regex calls)
+    static ref MARKDOWN_STRIP: Regex = Regex::new(r"\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*]+)\*|_([^_]+)_|`([^`]+)`|\[([^\]]+)\]\([^)]+\)").unwrap();
+}
 
 /// Rule MD051: Link fragments should match document headings
 ///
@@ -24,7 +36,7 @@ impl MD051LinkFragments {
         Self
     }
 
-    /// Extract headings from pre-computed DocumentStructure data
+    /// Extract headings from pre-computed DocumentStructure data (optimized)
     fn extract_headings_from_structure(
         &self,
         content: &str,
@@ -69,8 +81,9 @@ impl MD051LinkFragments {
             if let Some(cap) = ATX_HEADING_WITH_CAPTURE.captures(line) {
                 if let Some(heading_text) = cap.get(2) {
                     let heading = heading_text.as_str().trim();
-                    let variations = self.generate_fragment_variations(heading);
-                    for fragment in variations {
+                    // Use optimized fragment generation
+                    let fragment = self.heading_to_fragment_fast(heading);
+                    if !fragment.is_empty() {
                         headings.insert(fragment);
                     }
                 }
@@ -83,8 +96,9 @@ impl MD051LinkFragments {
                 if let Ok(Some(cap)) = SETEXT_HEADING_WITH_CAPTURE.captures(&combined) {
                     if let Some(heading_text) = cap.get(1) {
                         let heading = heading_text.as_str().trim();
-                        let variations = self.generate_fragment_variations(heading);
-                        for fragment in variations {
+                        // Use optimized fragment generation
+                        let fragment = self.heading_to_fragment_fast(heading);
+                        if !fragment.is_empty() {
                             headings.insert(fragment);
                         }
                     }
@@ -95,123 +109,136 @@ impl MD051LinkFragments {
         headings
     }
 
-    /// Convert a heading to a fragment identifier following GitHub's algorithm:
-    /// 1. Strip all formatting (code, emphasis, links, etc.)
-    /// 2. Convert to lowercase
-    /// 3. Replace spaces with hyphens, & with double hyphens, other special chars with hyphens
-    /// 4. Collapse multiple consecutive hyphens to single hyphens (except preserve & -> --)
-    /// 5. Remove leading and trailing hyphens
-    fn heading_to_fragment(&self, heading: &str) -> String {
-        // Step 1: Strip markdown formatting
-        let mut result = self.strip_markdown_formatting(heading);
+    /// Optimized fragment generation with minimal allocations
+    #[inline]
+    fn heading_to_fragment_fast(&self, heading: &str) -> String {
+        // Early return for empty headings
+        if heading.is_empty() {
+            return String::new();
+        }
 
-        // Step 2: Convert to lowercase
-        result = result.to_lowercase();
+        // Quick check: if no markdown formatting, use fast path
+        let needs_markdown_stripping = QUICK_MARKDOWN_CHECK.is_match(heading);
 
-        // Step 3 & 4: Process character by character with GitHub's rules
-        let mut fragment = String::new();
+        let text = if needs_markdown_stripping {
+            self.strip_markdown_formatting_fast(heading)
+        } else {
+            heading.to_string()
+        };
 
-        for c in result.chars() {
+        // Optimized character processing using byte iteration for ASCII
+        let mut fragment = String::with_capacity(text.len());
+        let mut prev_was_hyphen = false;
+
+        for c in text.to_lowercase().chars() {
             match c {
                 // Keep alphanumeric characters
                 'a'..='z' | '0'..='9' => {
                     fragment.push(c);
+                    prev_was_hyphen = false;
                 }
                 // Ampersand becomes double hyphen (special case)
                 '&' => {
-                    // Only add hyphens if the last character isn't already a hyphen
-                    if !fragment.ends_with('-') {
+                    if !prev_was_hyphen {
                         fragment.push_str("--");
                     } else {
-                        // If we already have a hyphen, just add one more to make it double
-                        fragment.push('-');
+                        fragment.push('-'); // Make it double
                     }
+                    prev_was_hyphen = true;
                 }
                 // Spaces and other characters become single hyphen (but avoid consecutive hyphens)
                 _ => {
-                    if !fragment.ends_with('-') {
+                    if !prev_was_hyphen {
                         fragment.push('-');
+                        prev_was_hyphen = true;
                     }
-                    // If fragment already ends with hyphen, skip adding another
                 }
             }
         }
 
-        // Step 5: Remove leading and trailing hyphens
+        // Remove leading and trailing hyphens
         fragment.trim_matches('-').to_string()
     }
 
-    /// Strip markdown formatting from text, keeping only the content
-    fn strip_markdown_formatting(&self, text: &str) -> String {
-        let mut result = text.to_string();
+    /// Optimized markdown stripping using single-pass regex
+    #[inline]
+    fn strip_markdown_formatting_fast(&self, text: &str) -> String {
+        // Use single regex to capture all markdown formatting at once
+        let result = MARKDOWN_STRIP.replace_all(text, |caps: &regex::Captures| {
+            // Return the captured content (group 1-7 for different formatting types)
+            for i in 1..=7 {
+                if let Some(content) = caps.get(i) {
+                    return content.as_str().to_string();
+                }
+            }
+            caps.get(0).unwrap().as_str().to_string()
+        });
 
-        // Remove links but keep the link text: [text](url) -> text
-        result = INLINE_LINK_REGEX.replace_all(&result, "$1").to_string();
-
-        // Remove emphasis and bold formatting more comprehensively
-        result = BOLD_ASTERISK_REGEX.replace_all(&result, "$1").to_string();
-        result = BOLD_UNDERSCORE_REGEX
-            .replace_all(&result, "$1")
-            .to_string();
-        result = ITALIC_ASTERISK_REGEX
-            .replace_all(&result, "$1")
-            .to_string();
-        result = ITALIC_UNDERSCORE_REGEX
-            .replace_all(&result, "$1")
-            .to_string();
-        result = STRIKETHROUGH_REGEX.replace_all(&result, "$1").to_string();
-
-        // Remove code spans by replacing with their content (simplified)
-        result = result.replace("`", "");
-
-        result
+        // Remove any remaining backticks
+        result.replace('`', "")
     }
 
-    /// Generate multiple possible fragment variations for a heading to handle
-    /// different tools and manual creation scenarios
-    fn generate_fragment_variations(&self, heading: &str) -> Vec<String> {
-        let mut variations = Vec::new();
-
-        // Primary fragment (GitHub's algorithm)
-        let primary = self.heading_to_fragment(heading);
-        if !primary.is_empty() {
-            variations.push(primary.clone());
+    /// Fast external URL detection with optimized patterns
+    #[inline]
+    fn is_external_url_fast(&self, url: &str) -> bool {
+        // Quick byte-level check for common prefixes
+        let bytes = url.as_bytes();
+        if bytes.len() < 4 {
+            return false;
         }
 
-        // Alternative: preserve double hyphens (for manually created TOCs)
-        // Some tools or manual creation might use double hyphens for certain symbols
-        let stripped = self.strip_markdown_formatting(heading);
-        let alt_fragment = stripped
-            .to_lowercase()
-            .chars()
-            .map(|c| match c {
-                ' ' => '-',
-                c if c.is_alphanumeric() => c,
-                _ => '-',
-            })
-            .collect::<String>();
-
-        // Create variation with double hyphens preserved for & symbols
-        let double_hyphen_variant = alt_fragment
-            .replace("---", "--")  // Collapse triple+ to double
-            .trim_matches('-')     // Remove leading/trailing hyphens
-            .to_string();
-
-        if !double_hyphen_variant.is_empty() && double_hyphen_variant != primary {
-            variations.push(double_hyphen_variant);
+        // Check for http:// (7 chars minimum)
+        if bytes.len() >= 7 && &bytes[..7] == b"http://" {
+            return true;
         }
 
-        // Create variation with all consecutive hyphens preserved (for some manual TOCs)
-        let preserved_hyphens = alt_fragment.trim_matches('-').to_string();
-        if !preserved_hyphens.is_empty() && preserved_hyphens != primary && !variations.contains(&preserved_hyphens) {
-            variations.push(preserved_hyphens);
+        // Check for https:// (8 chars minimum)
+        if bytes.len() >= 8 && &bytes[..8] == b"https://" {
+            return true;
         }
 
-        variations
+        // Check for ftp:// (6 chars minimum)
+        if bytes.len() >= 6 && &bytes[..6] == b"ftp://" {
+            return true;
+        }
+
+        // Check for www. (4 chars minimum)
+        if bytes.len() >= 4 && &bytes[..4] == b"www." {
+            return true;
+        }
+
+        false
     }
 
-    fn is_external_url(&self, url: &str) -> bool {
-        EXTERNAL_URL_REGEX.is_match(url).unwrap_or(false)
+    /// Optimized link extraction with fast pattern matching
+    fn find_fragment_links_fast(&self, line: &str) -> Vec<(usize, usize, String)> {
+        let mut links = Vec::new();
+
+        // Quick check: if no potential links, return early
+        if !QUICK_LINK_CHECK.is_match(line) {
+            return links;
+        }
+
+        // Use optimized regex to find links with fragments
+        let iter = LINK_REGEX.captures_iter(line);
+        for cap_result in iter {
+            if let Ok(cap) = cap_result {
+                let full_match = cap.get(0).unwrap();
+                let url = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+                let fragment = cap.get(3).map(|m| m.as_str()).unwrap_or("");
+
+                // Only check internal links (use fast external check)
+                if !self.is_external_url_fast(url) {
+                    links.push((
+                        full_match.start(),
+                        full_match.end(),
+                        fragment.to_lowercase(),
+                    ));
+                }
+            }
+        }
+
+        links
     }
 }
 
@@ -252,6 +279,7 @@ impl Rule for MD051LinkFragments {
 
         let mut warnings = Vec::new();
         let headings = self.extract_headings_from_structure(content, structure);
+
         let mut in_toc_section = false;
 
         for (line_num, line) in content.lines().enumerate() {
@@ -276,29 +304,22 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
-            // Use regex to find all links with fragments
-            let link_iter = LINK_REGEX.captures_iter(line);
-            for cap in link_iter.flatten() {
-                let full_match = cap.get(0).unwrap();
-                let url = cap.get(2).map(|m| m.as_str()).unwrap_or("");
-                let fragment = cap.get(3).map(|m| m.as_str()).unwrap_or("");
+            // Use optimized link extraction
+            let fragment_links = self.find_fragment_links_fast(line);
 
-                // Only check internal links (not external URLs)
-                if self.is_external_url(url) {
-                    continue;
-                }
-
+            for (start_pos, end_pos, fragment) in fragment_links {
                 // Skip if the link is inside a code span
-                if structure.is_in_code_span(line_num + 1, full_match.start() + 1) {
+                if structure.is_in_code_span(line_num + 1, start_pos + 1) {
                     continue;
                 }
 
                 // Check if the fragment exists in headings
-                if !headings.contains(&fragment.to_lowercase()) {
+                // If no headings exist, all fragment links should warn
+                if headings.is_empty() || !headings.contains(&fragment) {
                     // Calculate precise character range for the entire link
-                    let match_len = full_match.end() - full_match.start();
+                    let match_len = end_pos - start_pos;
                     let (start_line, start_col, end_line, end_col) =
-                        calculate_match_range(line_num + 1, line, full_match.start(), match_len);
+                        calculate_match_range(line_num + 1, line, start_pos, match_len);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),

@@ -73,7 +73,6 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         extra_spaces_len,
                     );
 
-                    let actual_content = BlockquoteUtils::get_blockquote_content(line);
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         line: start_line,
