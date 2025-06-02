@@ -119,6 +119,57 @@ impl RumdlLanguageServer {
             }
         }
     }
+
+        /// Load or reload rumdl configuration from files
+    async fn load_configuration(&self, notify_client: bool) {
+        let config_guard = self.config.read().await;
+        let explicit_config_path = config_guard.config_path.clone();
+        drop(config_guard);
+
+        // Use the same discovery logic as CLI but with LSP-specific error handling
+        match Self::load_config_for_lsp(explicit_config_path.as_deref()) {
+            Ok(sourced_config) => {
+                let loaded_files = sourced_config.loaded_files.clone();
+                *self.rumdl_config.write().await = sourced_config.into();
+
+                if !loaded_files.is_empty() {
+                    let message = format!("Loaded rumdl config from: {}", loaded_files.join(", "));
+                    log::info!("{}", message);
+                    if notify_client {
+                        self.client
+                            .log_message(MessageType::INFO, &message)
+                            .await;
+                    }
+                } else {
+                    log::info!("Using default rumdl configuration (no config files found)");
+                }
+            }
+            Err(e) => {
+                let message = format!("Failed to load rumdl config: {}", e);
+                log::warn!("{}", message);
+                if notify_client {
+                    self.client
+                        .log_message(MessageType::WARNING, &message)
+                        .await;
+                }
+                // Use default configuration
+                *self.rumdl_config.write().await = crate::config::Config::default();
+            }
+        }
+    }
+
+    /// Reload rumdl configuration from files (with client notification)
+    async fn reload_configuration(&self) {
+        self.load_configuration(true).await;
+    }
+
+    /// Load configuration for LSP - similar to CLI loading but returns Result
+    fn load_config_for_lsp(
+        config_path: Option<&str>,
+    ) -> Result<crate::config::SourcedConfig, crate::config::ConfigError> {
+        // Use the same configuration loading as the CLI
+        crate::config::SourcedConfig::load_with_discovery(config_path, None, false)
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -133,20 +184,8 @@ impl LanguageServer for RumdlLanguageServer {
             }
         }
 
-        // Load rumdl configuration if specified
-        let config_guard = self.config.read().await;
-        if let Some(config_path) = &config_guard.config_path {
-            match crate::config::SourcedConfig::load(Some(config_path), None) {
-                Ok(sourced_config) => {
-                    *self.rumdl_config.write().await = sourced_config.into();
-                    log::info!("Loaded rumdl config from: {}", config_path);
-                }
-                Err(e) => {
-                    log::warn!("Failed to load config from {}: {}", config_path, e);
-                }
-            }
-        }
-        drop(config_guard);
+        // Load rumdl configuration with auto-discovery
+        self.load_configuration(false).await;
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
@@ -185,6 +224,13 @@ impl LanguageServer for RumdlLanguageServer {
             .log_message(MessageType::INFO, "rumdl Language Server started")
             .await;
     }
+
+    async fn did_change_workspace_folders(&self, _params: DidChangeWorkspaceFoldersParams) {
+        // Reload configuration when workspace folders change
+        self.reload_configuration().await;
+    }
+
+
 
     async fn shutdown(&self) -> JsonRpcResult<()> {
         log::info!("Shutting down rumdl Language Server");

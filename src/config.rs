@@ -697,7 +697,7 @@ impl SourcedConfig {
         }
     }
 
-    /// Load and merge configurations from files and CLI overrides.
+        /// Load and merge configurations from files and CLI overrides.
     pub fn load(
         config_path: Option<&str>,
         cli_overrides: Option<&SourcedGlobalConfig>,

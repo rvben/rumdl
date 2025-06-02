@@ -47,6 +47,21 @@ fn read_file_efficiently(path: &Path) -> Result<String, Box<dyn Error>> {
     }
 }
 
+/// Utility function to load configuration with standard CLI error handling.
+/// This eliminates duplication between different CLI commands that load configuration.
+fn load_config_with_cli_error_handling(
+    config_path: Option<&str>,
+    no_config: bool,
+) -> rumdl_config::SourcedConfig {
+    match rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("{}: {}", "Config error".red().bold(), e);
+            std::process::exit(1);
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -1100,17 +1115,7 @@ build-backend = \"setuptools.build_meta\"
                 }
                 // Handle 'config file' subcommand for showing config file path
                 else if let Some(ConfigSubcommand::File) = subcmd {
-                    let sourced = match rumdl_config::SourcedConfig::load_with_discovery(
-                        cli.config.as_deref(),
-                        None,
-                        cli.no_config,
-                    ) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            eprintln!("{}: {}", "Config error".red().bold(), e);
-                            std::process::exit(1);
-                        }
-                    };
+                    let sourced = load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config);
 
                     if sourced.loaded_files.is_empty() {
                         if cli.no_config {
@@ -1143,17 +1148,7 @@ build-backend = \"setuptools.build_meta\"
                     let sourced_reg = if *defaults {
                         rumdl_config::SourcedConfig::default()
                     } else {
-                        match rumdl_config::SourcedConfig::load_with_discovery(
-                            cli.config.as_deref(),
-                            None,
-                            cli.no_config,
-                        ) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                eprintln!("{}: {}", "Config error".red().bold(), e);
-                                std::process::exit(1);
-                            }
-                        }
+                        load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config)
                     };
                     let validation_warnings =
                         rumdl_config::validate_config_sourced(&sourced_reg, &registry_reg);
@@ -1171,17 +1166,7 @@ build-backend = \"setuptools.build_meta\"
                         rumdl_config::SourcedConfig::default()
                     } else {
                         // Reload config if not defaults (necessary because we exited early in 'get' case)
-                        match rumdl_config::SourcedConfig::load_with_discovery(
-                            cli.config.as_deref(),
-                            None,
-                            cli.no_config,
-                        ) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                eprintln!("{}: {}", "Config error".red().bold(), e);
-                                std::process::exit(1);
-                            }
-                        }
+                        load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config)
                     };
 
                     // If --output toml is set, print as valid TOML
@@ -1363,16 +1348,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs) {
 
 fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool) {
     // 1. Load sourced config (for provenance and validation)
-    let sourced =
-        match rumdl_config::SourcedConfig::load_with_discovery(global_config_path, None, no_config)
-        {
-            Ok(sourced) => sourced,
-            Err(e) => {
-                // Syntax error or type mismatch: fail and exit
-                eprintln!("{}: {}", "Config error".red().bold(), e);
-                std::process::exit(1);
-            }
-        };
+    let sourced = load_config_with_cli_error_handling(global_config_path, no_config);
 
     // 2. Validate config (unknown keys/rules/options)
     let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
