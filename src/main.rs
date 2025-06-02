@@ -164,6 +164,8 @@ enum Commands {
 enum ConfigSubcommand {
     /// Query a specific config key (e.g. global.exclude or MD013.line_length)
     Get { key: String },
+    /// Show the absolute path of the configuration file that was loaded
+    File,
 }
 
 #[derive(Args, Debug)]
@@ -951,7 +953,7 @@ build-backend = \"setuptools.build_meta\"
                 defaults,
                 output,
             }) => {
-                // Handle 'config get' subcommand for querying a specific key
+                // Handle config subcommands
                 if let Some(ConfigSubcommand::Get { key }) = subcmd {
                     if let Some((section_part, field_part)) = key.split_once('.') {
                         // 1. Load the full SourcedConfig once
@@ -1094,6 +1096,42 @@ build-backend = \"setuptools.build_meta\"
                     } else {
                         eprintln!("Key must be in the form global.key or MDxxx.key");
                         std::process::exit(1);
+                    }
+                }
+                // Handle 'config file' subcommand for showing config file path
+                else if let Some(ConfigSubcommand::File) = subcmd {
+                    let sourced = match rumdl_config::SourcedConfig::load_with_discovery(
+                        cli.config.as_deref(),
+                        None,
+                        cli.no_config,
+                    ) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("{}: {}", "Config error".red().bold(), e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    if sourced.loaded_files.is_empty() {
+                        if cli.no_config {
+                            println!("No configuration file loaded (--no-config specified)");
+                        } else {
+                            println!("No configuration file found (using defaults)");
+                        }
+                    } else {
+                        // Convert relative paths to absolute paths
+                        for file_path in &sourced.loaded_files {
+                            match std::fs::canonicalize(file_path) {
+                                Ok(absolute_path) => {
+                                    println!("{}", absolute_path.display());
+                                }
+                                Err(_) => {
+                                    // If canonicalize fails, it might be a file that doesn't exist anymore
+                                    // or a relative path that can't be resolved. Just print as-is.
+                                    println!("{}", file_path);
+                                }
+                            }
+                        }
                     }
                 }
                 // --- Fallthrough logic for `rumdl config` (no subcommand) ---
