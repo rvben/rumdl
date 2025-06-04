@@ -8,17 +8,34 @@ use crate::rule::{Fix, LintWarning};
 /// Apply a list of warning fixes to content, simulating how the LSP client would apply them
 /// This is used for testing consistency between CLI and LSP fix methods
 pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<String, String> {
-    let mut fixes: Vec<&Fix> = warnings
+    let mut fixes: Vec<(usize, &Fix)> = warnings
         .iter()
-        .filter_map(|w| w.fix.as_ref())
+        .enumerate()
+        .filter_map(|(i, w)| w.fix.as_ref().map(|fix| (i, fix)))
         .collect();
 
     // Sort fixes by range in reverse order (end to start) to avoid offset issues
-    fixes.sort_by_key(|fix| std::cmp::Reverse(fix.range.start));
+    // Use original index as secondary sort key to ensure stable sorting
+    fixes.sort_by(|(idx_a, fix_a), (idx_b, fix_b)| {
+        // Primary: sort by range start in reverse order (largest first)
+        let range_cmp = fix_b.range.start.cmp(&fix_a.range.start);
+        if range_cmp != std::cmp::Ordering::Equal {
+            return range_cmp;
+        }
+        
+        // Secondary: sort by range end in reverse order 
+        let end_cmp = fix_b.range.end.cmp(&fix_a.range.end);
+        if end_cmp != std::cmp::Ordering::Equal {
+            return end_cmp;
+        }
+        
+        // Tertiary: maintain original order for identical ranges (stable sort)
+        idx_a.cmp(idx_b)
+    });
 
     let mut result = content.to_string();
     
-    for fix in fixes {
+    for (_, fix) in fixes {
         // Validate range bounds
         if fix.range.end > result.len() {
             return Err(format!(

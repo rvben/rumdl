@@ -167,7 +167,7 @@ impl Rule for MD009TrailingSpaces {
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: _line_index.line_col_to_byte_range_with_length(line_num + 1, trimmed.len() + 1, trailing_spaces),
-                    replacement: if !self.strict && line_num < lines.len() - 1 && trailing_spaces >= 1 {
+                    replacement: if !self.strict && !is_truly_last_line && trailing_spaces >= 1 {
                         " ".repeat(self.br_spaces)
                     } else {
                         String::new()

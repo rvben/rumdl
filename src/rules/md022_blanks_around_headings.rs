@@ -712,42 +712,78 @@ impl Rule for MD022BlanksAroundHeadings {
                     }
                 }
 
-                // Check if we need blank lines below
+                // Check if we need blank lines below (but skip if next line is list or code fence)
                 let effective_heading_line = heading_line;
                 if effective_heading_line < lines.len() - 1 {
-                    let mut blank_lines_below = 0;
-                    for line in lines.iter().skip(effective_heading_line + 1) {
-                        if !line.trim().is_empty() {
-                            break;
-                        }
-                        blank_lines_below += 1;
+                    // Check what the next non-blank line is
+                    let mut next_non_blank_idx = effective_heading_line + 1;
+                    while next_non_blank_idx < lines.len()
+                        && lines[next_non_blank_idx].trim().is_empty()
+                    {
+                        next_non_blank_idx += 1;
                     }
 
-                    if blank_lines_below < self.lines_below {
-                        let needed_blanks = self.lines_below - blank_lines_below;
-                        let insertion_point = effective_heading_line + 2; // Insert after the heading line (1-indexed)
-                        
-                        // Calculate precise character range for inserting blank lines after heading
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_heading_range(heading_display_line, line);
+                    // Skip warning if next line is a code fence or list item (same logic as earlier)
+                    let next_line_is_code_fence = next_non_blank_idx < lines.len() && {
+                        let next_trimmed = lines[next_non_blank_idx].trim();
+                        (next_trimmed.starts_with("```") || next_trimmed.starts_with("~~~"))
+                            && (next_trimmed == "```"
+                                || next_trimmed == "~~~"
+                                || next_trimmed.len() >= 3
+                                    && next_trimmed[3..]
+                                        .chars()
+                                        .next()
+                                        .map_or(true, |c| c.is_whitespace() || c.is_alphabetic()))
+                    };
 
-                        result.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            message: format!(
-                                "Expected {} blank {} below heading",
-                                self.lines_below,
-                                if self.lines_below == 1 { "line" } else { "lines" }
-                            ),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(insertion_point, 1, 0),
-                                replacement: "\n".repeat(needed_blanks),
-                            }),
-                        });
+                    let next_line_is_list = next_non_blank_idx < lines.len() && {
+                        let next_trimmed = lines[next_non_blank_idx].trim();
+                        next_trimmed.starts_with("- ")
+                            || next_trimmed.starts_with("* ")
+                            || next_trimmed.starts_with("+ ")
+                            || next_trimmed
+                                .chars()
+                                .next()
+                                .map_or(false, |c| c.is_ascii_digit())
+                                && next_trimmed.contains(". ")
+                    };
+
+                    // Only generate warning if next line is NOT a code fence or list item
+                    if !next_line_is_code_fence && !next_line_is_list {
+                        let mut blank_lines_below = 0;
+                        for line in lines.iter().skip(effective_heading_line + 1) {
+                            if !line.trim().is_empty() {
+                                break;
+                            }
+                            blank_lines_below += 1;
+                        }
+
+                        if blank_lines_below < self.lines_below {
+                            let needed_blanks = self.lines_below - blank_lines_below;
+                            let insertion_point = effective_heading_line + 2; // Insert after the heading line (1-indexed)
+                            
+                            // Calculate precise character range for inserting blank lines after heading
+                            let (start_line, start_col, end_line, end_col) =
+                                calculate_heading_range(heading_display_line, line);
+
+                            result.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                message: format!(
+                                    "Expected {} blank {} below heading",
+                                    self.lines_below,
+                                    if self.lines_below == 1 { "line" } else { "lines" }
+                                ),
+                                line: start_line,
+                                column: start_col,
+                                end_line,
+                                end_column: end_col,
+                                severity: Severity::Warning,
+                                fix: Some(Fix {
+                                    range: line_index.line_col_to_byte_range_with_length(insertion_point, 1, 0),
+                                    replacement: "\n".repeat(needed_blanks),
+                                }),
+                            });
+                        }
                     }
                 }
 
