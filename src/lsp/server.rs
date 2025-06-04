@@ -105,7 +105,7 @@ impl RumdlLanguageServer {
                     // Check if warning is within the requested range
                     let warning_line = (warning.line.saturating_sub(1)) as u32;
                     if warning_line >= range.start.line && warning_line <= range.end.line {
-                        if let Some(action) = warning_to_code_action(&warning, uri) {
+                        if let Some(action) = warning_to_code_action(&warning, uri, text) {
                             actions.push(action);
                         }
                     }

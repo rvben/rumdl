@@ -108,20 +108,21 @@ fn test_warning_to_diagnostic_error_severity() {
 fn test_warning_to_code_action_with_fix() {
     let warning = LintWarning {
         message: "Line too long".to_string(),
-        line: 3,
-        column: 5,
-        end_line: 3,
-        end_column: 15,
+        line: 1,
+        column: 1,
+        end_line: 1,
+        end_column: 47,
         severity: Severity::Warning,
         fix: Some(Fix {
-            range: 80..90,
+            range: 0..47,
             replacement: "shorter text".to_string(),
         }),
         rule_name: Some("MD013"),
     };
 
     let uri = Url::parse("file:///test.md").expect("Invalid URI");
-    let code_action = warning_to_code_action(&warning, &uri);
+    let document_text = "This line is too long and needs to be shortened";
+    let code_action = warning_to_code_action(&warning, &uri, document_text);
 
     assert!(code_action.is_some());
     let action = code_action.unwrap();
@@ -158,7 +159,8 @@ fn test_warning_to_code_action_without_fix() {
     };
 
     let uri = Url::parse("file:///test.md").expect("Invalid URI");
-    let code_action = warning_to_code_action(&warning, &uri);
+    let document_text = "Test document content";
+    let code_action = warning_to_code_action(&warning, &uri, document_text);
 
     assert!(code_action.is_none());
 }

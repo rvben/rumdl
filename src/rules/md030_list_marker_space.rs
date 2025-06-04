@@ -122,11 +122,14 @@ impl Rule for MD030ListMarkerSpace {
 
                     // Generate the correct replacement text (just the correct spacing)
                     let correct_spaces = " ".repeat(expected_spaces);
+                    
+                    // Calculate byte positions for the fix range
+                    let line_start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+                    let whitespace_start_byte = line_start_byte + whitespace_start_pos;
+                    let whitespace_end_byte = whitespace_start_byte + whitespace.len();
+                    
                     let fix = Some(crate::rule::Fix {
-                        range: crate::utils::range_utils::LineIndex::new(
-                            ctx.content.to_string(),
-                        )
-                        .line_col_to_byte_range(line_num, start_col),
+                        range: whitespace_start_byte..whitespace_end_byte,
                         replacement: correct_spaces,
                     });
 
