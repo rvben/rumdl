@@ -3,7 +3,7 @@
 /// See [docs/md021.md](../../docs/md021.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::{calculate_single_line_range, LineIndex};
+use crate::utils::range_utils::{calculate_line_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -167,44 +167,21 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                     )
                 };
 
-                // Calculate precise character range for the extra spaces
-                let start_col;
-                let length;
-                let replacement;
-
-                if start_spaces > 1 && end_spaces > 1 {
-                    // Fix the extra spaces at the start (after opening hashes)
-                    let opening_hashes = captures.get(2).unwrap();
-                    start_col = opening_hashes.end() + 2; // After hash + first space
-                    length = start_spaces - 1; // Extra spaces only
-                    replacement = String::new(); // Remove extra spaces
-                } else if start_spaces > 1 {
-                    // Fix the extra spaces after opening hashes
-                    let opening_hashes = captures.get(2).unwrap();
-                    start_col = opening_hashes.end() + 2; // After hash + first space
-                    length = start_spaces - 1; // Extra spaces only
-                    replacement = String::new(); // Remove extra spaces
-                } else {
-                    // Fix the extra spaces before closing hashes
-                    let content = captures.get(4).unwrap();
-                    start_col = content.end() + 2; // After content + first space
-                    length = end_spaces - 1; // Extra spaces only
-                    replacement = String::new(); // Remove extra spaces
-                };
-
-                let (start_line, start_col_calc, end_line, end_col) =
-                    calculate_single_line_range(line_num, start_col, length);
+                // Replace the entire line with the fixed version
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_line_range(line_num, line);
+                let replacement = self.fix_closed_atx_heading(line);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     message,
                     line: start_line,
-                    column: start_col_calc,
+                    column: start_col,
                     end_line,
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(start_line, start_col_calc),
+                        range: line_index.line_col_to_byte_range_with_length(start_line, 1, line.len()),
                         replacement,
                     }),
                 });

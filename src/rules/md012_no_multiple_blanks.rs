@@ -223,7 +223,12 @@ impl Rule for MD012NoMultipleBlanks {
                             end_line,
                             end_column: end_col,
                             fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range(excess_line, 1),
+                                range: {
+                                    // Remove entire line including newline
+                                    let line_start = _line_index.get_line_start_byte(excess_line).unwrap_or(0);
+                                    let line_end = _line_index.get_line_start_byte(excess_line + 1).unwrap_or(line_start + 1);
+                                    line_start..line_end
+                                },
                                 replacement: String::new(), // Remove the excess line
                             }),
                         });
@@ -256,7 +261,12 @@ impl Rule for MD012NoMultipleBlanks {
                     end_line,
                     end_column: end_col,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(excess_line, 1),
+                        range: {
+                            // Remove entire line including newline
+                            let line_start = _line_index.get_line_start_byte(excess_line).unwrap_or(0);
+                            let line_end = _line_index.get_line_start_byte(excess_line + 1).unwrap_or(line_start + 1);
+                            line_start..line_end
+                        },
                         replacement: String::new(),
                     }),
                 });

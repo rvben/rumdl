@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
@@ -59,7 +59,7 @@ impl Rule for MD047SingleTrailingNewline {
                 }
             } else {
                 // For missing newline, highlight the end of the last line
-                calculate_line_range(last_line_num, last_line_content)
+                (last_line_num, last_line_content.len() + 1, last_line_num, last_line_content.len() + 1)
             };
 
             warnings.push(LintWarning {
@@ -71,12 +71,20 @@ impl Rule for MD047SingleTrailingNewline {
                 end_column: end_col,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: line_index.line_col_to_byte_range(start_line, start_col),
+                    range: if has_trailing_newline {
+                        // For multiple newlines, replace from the position to the end of file
+                        let start_range = line_index.line_col_to_byte_range_with_length(start_line, start_col, 0);
+                        start_range.start..content.len()
+                    } else {
+                        // For missing newline, insert at the end of the file
+                        let end_pos = content.len();
+                        end_pos..end_pos
+                    },
                     replacement: if has_trailing_newline {
                         // If there are multiple newlines, fix by ensuring just one
                         let trimmed = content.trim_end();
                         if !trimmed.is_empty() {
-                            trimmed.to_string() + "\n"
+                            "\n".to_string()
                         } else {
                             // Handle the case where content is just whitespace and newlines
                             String::new()

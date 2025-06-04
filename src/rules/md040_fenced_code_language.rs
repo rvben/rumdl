@@ -64,8 +64,16 @@ impl Rule for MD040FencedCodeLanguage {
                             .to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: if line.starts_with("```") {
+                            range: {
+                                // Replace just the fence marker with fence+language
+                                let trimmed_start = line.len() - line.trim_start().len();
+                                let fence_len = fence.len();
+                                let line_start_byte = ctx.line_offsets.get(i).copied().unwrap_or(0);
+                                let fence_start_byte = line_start_byte + trimmed_start;
+                                let fence_end_byte = fence_start_byte + fence_len;
+                                fence_start_byte..fence_end_byte
+                            },
+                            replacement: if fence == "```" {
                                 "```text".to_string()
                             } else {
                                 "~~~text".to_string()
@@ -92,7 +100,7 @@ impl Rule for MD040FencedCodeLanguage {
             return Ok(vec![]);
         }
 
-        let line_index = LineIndex::new(content.to_string());
+        let _line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
         // Use the code blocks from document structure
@@ -119,8 +127,16 @@ impl Rule for MD040FencedCodeLanguage {
                                 .to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(block.start_line, 1),
-                                replacement: if fence_line.starts_with("```") {
+                                range: {
+                                    // Replace just the fence marker with fence+language
+                                    let trimmed_start = fence_line.len() - fence_line.trim_start().len();
+                                    let fence_len = if fence_line.trim_start().starts_with("```") { 3 } else { 3 };
+                                    let line_start_byte = ctx.line_offsets.get(block.start_line - 1).copied().unwrap_or(0);
+                                    let fence_start_byte = line_start_byte + trimmed_start;
+                                    let fence_end_byte = fence_start_byte + fence_len;
+                                    fence_start_byte..fence_end_byte
+                                },
+                                replacement: if fence_line.trim_start().starts_with("```") {
                                     "```text".to_string()
                                 } else {
                                     "~~~text".to_string()

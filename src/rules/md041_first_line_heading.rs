@@ -102,11 +102,10 @@ impl Rule for MD041FirstLineHeading {
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: LineIndex::new(content.to_string())
-                        .line_col_to_byte_range(first_line, 1),
+                        .line_col_to_byte_range_with_length(first_line, 1, 0),
                     replacement: format!(
-                        "{} Title\n{}",
-                        "#".repeat(self.level),
-                        lines[first_line - 1]
+                        "{} Title\n\n",
+                        "#".repeat(self.level)
                     ),
                 }),
             });

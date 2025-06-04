@@ -51,7 +51,7 @@ fn test_md021_multiple_spaces_closed_atx() {
     let test = simple_test(
         "MD021",
         "# Heading  #",
-        ExpectedWarning::new(1, 11, 1, 12, " "), // Highlights the extra space
+        ExpectedWarning::new(1, 1, 1, 13, "# Heading  #"), // Now highlights entire line
     );
     test_character_ranges(test);
 }

@@ -30,7 +30,7 @@ fn test_mixed_fences_prefer_backticks() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "# Mixed blocks\n\n```\nbacktick block\n```\n\n```\ntilde block\n```\n"
+        "# Mixed blocks\n\n```\nbacktick block\n```\n\n```\ntilde block\n```"
     );
 }
 
@@ -44,7 +44,7 @@ fn test_mixed_fences_prefer_tildes() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "# Mixed blocks\n\n~~~\nbacktick block\n~~~\n\n~~~\ntilde block\n~~~\n"
+        "# Mixed blocks\n\n~~~\nbacktick block\n~~~\n\n~~~\ntilde block\n~~~"
     );
 }
 
@@ -58,7 +58,7 @@ fn test_consistent_style_first_backtick() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "# Mixed blocks\n\n```\nbacktick block\n```\n\n```\ntilde block\n```\n"
+        "# Mixed blocks\n\n```\nbacktick block\n```\n\n```\ntilde block\n```"
     );
 }
 
@@ -72,7 +72,7 @@ fn test_consistent_style_first_tilde() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "# Mixed blocks\n\n~~~\ntilde block\n~~~\n\n~~~\nbacktick block\n~~~\n"
+        "# Mixed blocks\n\n~~~\ntilde block\n~~~\n\n~~~\nbacktick block\n~~~"
     );
 }
 

@@ -7,6 +7,7 @@ pub mod code_block_utils;
 pub mod document_structure;
 pub mod early_returns;
 pub mod element_cache;
+pub mod fix_utils;
 pub mod markdown_elements;
 pub mod range_utils;
 pub mod regex_cache;

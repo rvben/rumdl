@@ -32,13 +32,14 @@ impl MD009TrailingSpaces {
 
     fn is_in_code_block(lines: &[&str], current_line: usize) -> bool {
         let mut fence_count = 0;
-        for (i, line) in lines.iter().take(current_line + 1).enumerate() {
+        for (i, line) in lines.iter().enumerate() {
+            if i == current_line {
+                // Check if we're inside a code block at this point
+                return fence_count % 2 == 1;
+            }
             let trimmed = line.trim_start();
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 fence_count += 1;
-            }
-            if i == current_line && fence_count % 2 == 1 {
-                return true;
             }
         }
         false
@@ -103,7 +104,7 @@ impl Rule for MD009TrailingSpaces {
                         message: "Empty line has trailing spaces".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(line_num + 1, 1),
+                            range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
                             replacement: String::new(),
                         }),
                     });
@@ -117,7 +118,10 @@ impl Rule for MD009TrailingSpaces {
             }
 
             // Check if it's a valid line break
-            if !self.strict && trailing_spaces == self.br_spaces {
+            // Special handling: if the content ends with a newline, the last line from .lines() 
+            // is not really the "last line" in terms of trailing spaces rules
+            let is_truly_last_line = line_num == lines.len() - 1 && !content.ends_with('\n');
+            if !self.strict && !is_truly_last_line && trailing_spaces == self.br_spaces {
                 continue;
             }
 
@@ -137,8 +141,8 @@ impl Rule for MD009TrailingSpaces {
                     message: "Empty blockquote line needs a space after >".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(line_num + 1, trimmed.len() + 1),
-                        replacement: format!("{} ", trimmed),
+                        range: _line_index.line_col_to_byte_range_with_length(line_num + 1, trimmed.len() + 1, line.len() - trimmed.len()),
+                        replacement: " ".to_string(),
                     }),
                 });
                 continue;
@@ -162,11 +166,11 @@ impl Rule for MD009TrailingSpaces {
                 },
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: _line_index.line_col_to_byte_range(line_num + 1, trimmed.len() + 1),
-                    replacement: if !self.strict && line_num < lines.len() - 1 {
-                        format!("{}{}", trimmed, " ".repeat(self.br_spaces))
+                    range: _line_index.line_col_to_byte_range_with_length(line_num + 1, trimmed.len() + 1, trailing_spaces),
+                    replacement: if !self.strict && line_num < lines.len() - 1 && trailing_spaces >= 1 {
+                        " ".repeat(self.br_spaces)
                     } else {
-                        trimmed.to_string()
+                        String::new()
                     },
                 }),
             });
@@ -221,7 +225,8 @@ impl Rule for MD009TrailingSpaces {
 
             // Handle lines with trailing spaces
             let trailing_spaces = Self::count_trailing_spaces(line);
-            if i < lines.len() - 1 && trailing_spaces >= 1 {
+            let is_truly_last_line = i == lines.len() - 1 && !content.ends_with('\n');
+            if !self.strict && !is_truly_last_line && trailing_spaces >= 1 {
                 // This is a line break (intentional trailing spaces)
                 result.push_str(trimmed);
                 result.push_str(&" ".repeat(self.br_spaces));

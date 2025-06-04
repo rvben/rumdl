@@ -77,7 +77,7 @@ impl Rule for MD023HeadingStartLeft {
                                 indentation
                             ),
                             fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(start_line + 1, start_col),
+                                range: line_index.line_col_to_byte_range_with_length(start_line + 1, start_col, indentation),
                                 replacement: String::new(), // Remove the indentation
                             }),
                         });
@@ -108,7 +108,7 @@ impl Rule for MD023HeadingStartLeft {
                                 message: "Setext heading underline should not be indented"
                                     .to_string(),
                                 fix: Some(Fix {
-                                    range: line_index.line_col_to_byte_range(underline_line + 1, underline_start_col),
+                                    range: line_index.line_col_to_byte_range_with_length(underline_line + 1, underline_start_col, underline_indentation),
                                     replacement: String::new(), // Remove the indentation
                                 }),
                             });
@@ -137,7 +137,7 @@ impl Rule for MD023HeadingStartLeft {
                             indentation
                         ),
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(start_line + 1, atx_start_col),
+                            range: line_index.line_col_to_byte_range_with_length(start_line + 1, atx_start_col, indentation),
                             replacement: String::new(), // Remove the indentation
                         }),
                     });
@@ -307,7 +307,7 @@ impl Rule for MD023HeadingStartLeft {
                                 indentation
                             ),
                             fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(line_num, setext_start_col),
+                                range: line_index.line_col_to_byte_range_with_length(line_num, setext_start_col, indentation),
                                 replacement: String::new(), // Remove the indentation
                             }),
                         });
@@ -372,7 +372,7 @@ impl Rule for MD023HeadingStartLeft {
                             indentation
                         ),
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num, atx_start_col_struct),
+                            range: line_index.line_col_to_byte_range_with_length(line_num, atx_start_col_struct, indentation),
                             replacement: String::new(), // Remove the indentation
                         }),
                     });

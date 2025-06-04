@@ -18,7 +18,7 @@ fn test_missing_blank_above() {
     let content = "Paragraph.\n# Heading 1\nContent.";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 2); // Missing blank above and below
 }
 
 #[test]

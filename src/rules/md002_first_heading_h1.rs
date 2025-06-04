@@ -233,8 +233,10 @@ impl Rule for MD002FirstHeadingH1 {
                         crate::rules::heading_utils::HeadingUtils::convert_heading_style(
                             &text, self.level, style,
                         );
+                    // Use line content range to replace the entire heading line
+                    let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
                     Fix {
-                        range: first_heading_line..first_heading_line,
+                        range: line_index.line_content_range(first_heading_line),
                         replacement,
                     }
                 },

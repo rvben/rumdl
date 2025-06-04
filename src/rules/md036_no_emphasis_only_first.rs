@@ -229,7 +229,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                     message: format!("Emphasis used instead of a heading: '{}'", text),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(i + 1, 1),
+                        range: line_index.line_content_range(i + 1),
                         replacement: self.get_heading_for_emphasis(level, &text),
                     }),
                 });

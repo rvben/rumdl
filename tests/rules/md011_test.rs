@@ -14,7 +14,7 @@ fn test_md011_valid() {
 #[test]
 fn test_md011_invalid() {
     let rule = MD011NoReversedLinks {};
-    let content = "(text)[link]\n(more text)[another/link]\n";
+    let content = "(link)[text]\n(another/link)[more text]\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
@@ -25,7 +25,7 @@ fn test_md011_invalid() {
 #[test]
 fn test_md011_mixed() {
     let rule = MD011NoReversedLinks {};
-    let content = "[text](link)\n(reversed)[link]\n[text](link)\n";
+    let content = "[text](link)\n(link)[reversed]\n[text](link)\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -35,7 +35,7 @@ fn test_md011_mixed() {
 #[test]
 fn test_md011_fix() {
     let rule = MD011NoReversedLinks {};
-    let content = "(text)[link]\n(more text)[another/link]\n";
+    let content = "(link)[text]\n(another/link)[more text]\n";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "[text](link)\n[more text](another/link)\n");

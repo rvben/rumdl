@@ -45,6 +45,56 @@ impl LineIndex {
         start..start
     }
 
+    /// Calculate a proper byte range for replacing text with a specific length
+    /// This is the correct function to use for LSP fixes
+    pub fn line_col_to_byte_range_with_length(&self, line: usize, column: usize, length: usize) -> Range<usize> {
+        let line = line.saturating_sub(1);
+        let line_start = *self.line_starts.get(line).unwrap_or(&self.content.len());
+
+        let current_line = self.content.lines().nth(line).unwrap_or("");
+        let col = column.clamp(1, current_line.len() + 1);
+
+        let start = line_start + col - 1;
+        let end = (start + length).min(line_start + current_line.len());
+        start..end
+    }
+
+    /// Calculate byte range for entire line replacement (including newline)
+    /// This is ideal for rules that need to replace complete lines
+    pub fn whole_line_range(&self, line: usize) -> Range<usize> {
+        let line_idx = line.saturating_sub(1);
+        let start = *self.line_starts.get(line_idx).unwrap_or(&self.content.len());
+        let end = self.line_starts.get(line_idx + 1).copied()
+            .unwrap_or(self.content.len());
+        start..end
+    }
+
+    /// Calculate byte range for text within a line (excluding newline)
+    /// Useful for replacing specific parts of a line
+    pub fn line_text_range(&self, line: usize, start_col: usize, end_col: usize) -> Range<usize> {
+        let line_idx = line.saturating_sub(1);
+        let line_start = *self.line_starts.get(line_idx).unwrap_or(&self.content.len());
+        
+        // Get the actual line content to ensure we don't exceed bounds
+        let current_line = self.content.lines().nth(line_idx).unwrap_or("");
+        let line_len = current_line.len();
+        
+        let start = line_start + start_col.saturating_sub(1).min(line_len);
+        let end = line_start + end_col.saturating_sub(1).min(line_len);
+        start..end.max(start)
+    }
+
+    /// Calculate byte range from start of line to end of line content (excluding newline)
+    /// Useful for replacing line content while preserving line structure
+    pub fn line_content_range(&self, line: usize) -> Range<usize> {
+        let line_idx = line.saturating_sub(1);
+        let line_start = *self.line_starts.get(line_idx).unwrap_or(&self.content.len());
+        
+        let current_line = self.content.lines().nth(line_idx).unwrap_or("");
+        let line_end = line_start + current_line.len();
+        line_start..line_end
+    }
+
     /// Get the global start byte offset for a given 1-based line number.
     pub fn get_line_start_byte(&self, line_num: usize) -> Option<usize> {
         if line_num == 0 {
@@ -357,5 +407,59 @@ mod tests {
         assert_eq!(start_col, 21); // limit + 1
         assert_eq!(end_line, 1);
         assert_eq!(end_col, 36); // Total length + 1 (35 chars + 1 = 36)
+    }
+
+    #[test] 
+    fn test_whole_line_range() {
+        let content = "Line 1\nLine 2\nLine 3".to_string();
+        let line_index = LineIndex::new(content);
+        
+        // Test first line (includes newline)
+        let range = line_index.whole_line_range(1);
+        assert_eq!(range, 0..7); // "Line 1\n"
+        
+        // Test middle line
+        let range = line_index.whole_line_range(2);
+        assert_eq!(range, 7..14); // "Line 2\n"
+        
+        // Test last line (no newline)
+        let range = line_index.whole_line_range(3);
+        assert_eq!(range, 14..20); // "Line 3"
+    }
+
+    #[test]
+    fn test_line_content_range() {
+        let content = "Line 1\nLine 2\nLine 3".to_string();
+        let line_index = LineIndex::new(content);
+        
+        // Test first line content (excludes newline)
+        let range = line_index.line_content_range(1);
+        assert_eq!(range, 0..6); // "Line 1"
+        
+        // Test middle line content
+        let range = line_index.line_content_range(2);
+        assert_eq!(range, 7..13); // "Line 2"
+        
+        // Test last line content
+        let range = line_index.line_content_range(3);
+        assert_eq!(range, 14..20); // "Line 3"
+    }
+
+    #[test]
+    fn test_line_text_range() {
+        let content = "Hello world\nAnother line".to_string();
+        let line_index = LineIndex::new(content);
+        
+        // Test partial text in first line
+        let range = line_index.line_text_range(1, 1, 5); // "Hell"
+        assert_eq!(range, 0..4);
+        
+        // Test partial text in second line  
+        let range = line_index.line_text_range(2, 1, 7); // "Anothe"
+        assert_eq!(range, 12..18);
+        
+        // Test bounds checking
+        let range = line_index.line_text_range(1, 1, 100); // Should clamp to line end
+        assert_eq!(range, 0..11); // "Hello world"
     }
 }

@@ -363,8 +363,8 @@ impl MD032BlanksAroundLists {
                         rule_name: Some(self.name()),
                         message: "List should be preceded by blank line".to_string(),
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(start_line, 1),
-                            replacement: format!("{}\n{}", prefix, lines[start_line - 1]),
+                            range: line_index.line_col_to_byte_range_with_length(start_line, 1, 0),
+                            replacement: format!("{}\n", prefix),
                         }),
                     });
                 }
@@ -397,8 +397,8 @@ impl MD032BlanksAroundLists {
                         rule_name: Some(self.name()),
                         message: "List should be followed by blank line".to_string(),
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(end_line + 1, 1),
-                            replacement: format!("{}\n{}", prefix, lines[end_line]),
+                            range: line_index.line_col_to_byte_range_with_length(end_line + 1, 1, 0),
+                            replacement: format!("{}\n", prefix),
                         }),
                     });
                 }

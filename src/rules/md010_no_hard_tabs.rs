@@ -213,8 +213,8 @@ impl Rule for MD010NoHardTabs {
                     message,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(line_num + 1, start_pos + 1),
-                        replacement: line.replace('\t', &" ".repeat(self.spaces_per_tab)),
+                        range: _line_index.line_col_to_byte_range_with_length(line_num + 1, start_pos + 1, tab_count),
+                        replacement: " ".repeat(tab_count * self.spaces_per_tab),
                     }),
                 });
             }

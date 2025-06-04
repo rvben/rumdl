@@ -72,7 +72,7 @@ impl Rule for MD048CodeFenceStyle {
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(line_num + 1, fence_start + 1),
+                        range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
                         replacement: line.replace("```", "~~~"),
                     }),
                 });
@@ -95,7 +95,7 @@ impl Rule for MD048CodeFenceStyle {
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(line_num + 1, fence_start + 1),
+                        range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
                         replacement: line.replace("~~~", "```"),
                     }),
                 });
@@ -127,6 +127,11 @@ impl Rule for MD048CodeFenceStyle {
                 result.push_str(line);
             }
             result.push('\n');
+        }
+        
+        // Remove the last newline if the original content didn't end with one
+        if !content.ends_with('\n') && result.ends_with('\n') {
+            result.pop();
         }
 
         Ok(result)

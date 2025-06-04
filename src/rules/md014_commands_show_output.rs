@@ -200,9 +200,17 @@ impl Rule for MD014CommandsShowOutput {
                                     message,
                                     severity: Severity::Warning,
                                     fix: Some(Fix {
-                                        range: _line_index
-                                            .line_col_to_byte_range(block_start_line + 1, 1),
-                                        replacement: self.fix_command_block(&current_block),
+                                        range: {
+                                            // Replace the content line(s) between the fences
+                                            let content_start_line = block_start_line + 1; // Line after opening fence (0-indexed)
+                                            let content_end_line = line_num - 1; // Line before closing fence (0-indexed)
+                                            
+                                            // Calculate byte range for the content lines including their newlines
+                                            let start_byte = _line_index.get_line_start_byte(content_start_line + 1).unwrap_or(0); // +1 for 1-indexed
+                                            let end_byte = _line_index.get_line_start_byte(content_end_line + 2).unwrap_or(start_byte); // +2 to include newline after last content line
+                                            start_byte..end_byte
+                                        },
+                                        replacement: format!("{}\n", self.fix_command_block(&current_block)),
                                     }),
                                 });
                             }
@@ -261,6 +269,11 @@ impl Rule for MD014CommandsShowOutput {
                 result.push_str(line);
                 result.push('\n');
             }
+        }
+
+        // Remove trailing newline if original didn't have one
+        if !content.ends_with('\n') && result.ends_with('\n') {
+            result.pop();
         }
 
         Ok(result)

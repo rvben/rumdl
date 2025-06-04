@@ -1,0 +1,181 @@
+//! Utilities for applying fixes consistently between CLI and LSP
+//!
+//! This module provides shared logic for applying markdown fixes to ensure
+//! that both CLI batch fixes and LSP individual fixes produce identical results.
+
+use crate::rule::{Fix, LintWarning};
+
+/// Apply a list of warning fixes to content, simulating how the LSP client would apply them
+/// This is used for testing consistency between CLI and LSP fix methods
+pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<String, String> {
+    let mut fixes: Vec<&Fix> = warnings
+        .iter()
+        .filter_map(|w| w.fix.as_ref())
+        .collect();
+
+    // Sort fixes by range in reverse order (end to start) to avoid offset issues
+    fixes.sort_by_key(|fix| std::cmp::Reverse(fix.range.start));
+
+    let mut result = content.to_string();
+    
+    for fix in fixes {
+        // Validate range bounds
+        if fix.range.end > result.len() {
+            return Err(format!(
+                "Fix range end {} exceeds content length {}",
+                fix.range.end,
+                result.len()
+            ));
+        }
+        
+        if fix.range.start > fix.range.end {
+            return Err(format!(
+                "Invalid fix range: start {} > end {}",
+                fix.range.start,
+                fix.range.end
+            ));
+        }
+
+        // Apply the fix by replacing the range with the replacement text
+        result.replace_range(fix.range.clone(), &fix.replacement);
+    }
+
+    Ok(result)
+}
+
+/// Convert a single warning fix to a text edit-style representation
+/// This helps validate that individual warning fixes are correctly structured
+pub fn warning_fix_to_edit(content: &str, warning: &LintWarning) -> Result<(usize, usize, String), String> {
+    if let Some(fix) = &warning.fix {
+        // Validate the fix range against content
+        if fix.range.end > content.len() {
+            return Err(format!(
+                "Fix range end {} exceeds content length {}",
+                fix.range.end,
+                content.len()
+            ));
+        }
+
+        Ok((fix.range.start, fix.range.end, fix.replacement.clone()))
+    } else {
+        Err("Warning has no fix".to_string())
+    }
+}
+
+/// Helper function to validate that a fix range makes sense in the context
+pub fn validate_fix_range(content: &str, fix: &Fix) -> Result<(), String> {
+    if fix.range.start > content.len() {
+        return Err(format!(
+            "Fix range start {} exceeds content length {}",
+            fix.range.start,
+            content.len()
+        ));
+    }
+
+    if fix.range.end > content.len() {
+        return Err(format!(
+            "Fix range end {} exceeds content length {}",
+            fix.range.end,
+            content.len()
+        ));
+    }
+
+    if fix.range.start > fix.range.end {
+        return Err(format!(
+            "Invalid fix range: start {} > end {}",
+            fix.range.start,
+            fix.range.end
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rule::{Fix, LintWarning, Severity};
+
+    #[test]
+    fn test_apply_single_fix() {
+        let content = "1.  Multiple spaces";
+        let warning = LintWarning {
+            message: "Too many spaces".to_string(),
+            line: 1,
+            column: 3,
+            end_line: 1,
+            end_column: 5,
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: 2..4, // "  " (two spaces)
+                replacement: " ".to_string(), // single space
+            }),
+            rule_name: Some("MD030"),
+        };
+
+        let result = apply_warning_fixes(content, &[warning]).unwrap();
+        assert_eq!(result, "1. Multiple spaces");
+    }
+
+    #[test]
+    fn test_apply_multiple_fixes() {
+        let content = "1.  First\n*   Second";
+        let warnings = vec![
+            LintWarning {
+                message: "Too many spaces".to_string(),
+                line: 1,
+                column: 3,
+                end_line: 1,
+                end_column: 5,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: 2..4, // First line "  "
+                    replacement: " ".to_string(),
+                }),
+                rule_name: Some("MD030"),
+            },
+            LintWarning {
+                message: "Too many spaces".to_string(),
+                line: 2,
+                column: 2,
+                end_line: 2,
+                end_column: 5,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: 11..14, // Second line "   " (after newline + "*")
+                    replacement: " ".to_string(),
+                }),
+                rule_name: Some("MD030"),
+            },
+        ];
+
+        let result = apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(result, "1. First\n* Second");
+    }
+
+    #[test]
+    fn test_validate_fix_range() {
+        let content = "Hello world";
+        
+        // Valid range
+        let valid_fix = Fix {
+            range: 0..5,
+            replacement: "Hi".to_string(),
+        };
+        assert!(validate_fix_range(content, &valid_fix).is_ok());
+
+        // Invalid range (end > content length)
+        let invalid_fix = Fix {
+            range: 0..20,
+            replacement: "Hi".to_string(),
+        };
+        assert!(validate_fix_range(content, &invalid_fix).is_err());
+
+        // Invalid range (start > end)
+        let invalid_fix2 = Fix {
+            range: 5..3,
+            replacement: "Hi".to_string(),
+        };
+        assert!(validate_fix_range(content, &invalid_fix2).is_err());
+    }
+}

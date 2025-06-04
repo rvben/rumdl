@@ -4,7 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::{is_heading, is_setext_heading_marker};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::calculate_heading_range;
+use crate::utils::range_utils::{calculate_heading_range, LineIndex};
 use fancy_regex::Regex;
 use lazy_static::lazy_static;
 use toml;
@@ -670,28 +670,85 @@ impl Rule for MD022BlanksAroundHeadings {
                     }
                 }
 
-                // Combine all issues for this heading into one warning
-                if !issues.is_empty() {
-                    // Use the combined message like check_with_structure does
-                    let message = issues.join(" ");
+                // Generate individual warnings with proper LSP fixes instead of combined warnings
+                let line_index = LineIndex::new(content.to_string());
+                
+                // Check if we need blank lines above
+                if heading_line > 0 {
+                    let mut blank_lines_above = 0;
+                    for j in (0..heading_line).rev() {
+                        if lines[j].trim().is_empty() {
+                            blank_lines_above += 1;
+                        } else {
+                            break;
+                        }
+                    }
 
-                    // Calculate precise character range for the heading
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_heading_range(heading_display_line, line);
+                    if blank_lines_above < self.lines_above {
+                        let needed_blanks = self.lines_above - blank_lines_above;
+                        let insertion_point = heading_line + 1; // Insert before the heading line (1-indexed: +1 for 1-indexed)
+                        
+                        // Calculate precise character range for inserting blank lines before heading
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_heading_range(heading_display_line, line);
 
-                    result.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message,
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: 0..0, // Placeholder range - the actual fix is handled by the fix() method
-                            replacement: String::new(), // Placeholder - the actual fix is handled by the fix() method
-                        }),
-                    });
+                        result.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message: format!(
+                                "Expected {} blank {} above heading",
+                                self.lines_above,
+                                if self.lines_above == 1 { "line" } else { "lines" }
+                            ),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range_with_length(insertion_point, 1, 0),
+                                replacement: "\n".repeat(needed_blanks),
+                            }),
+                        });
+                    }
+                }
+
+                // Check if we need blank lines below
+                let effective_heading_line = heading_line;
+                if effective_heading_line < lines.len() - 1 {
+                    let mut blank_lines_below = 0;
+                    for line in lines.iter().skip(effective_heading_line + 1) {
+                        if !line.trim().is_empty() {
+                            break;
+                        }
+                        blank_lines_below += 1;
+                    }
+
+                    if blank_lines_below < self.lines_below {
+                        let needed_blanks = self.lines_below - blank_lines_below;
+                        let insertion_point = effective_heading_line + 2; // Insert after the heading line (1-indexed)
+                        
+                        // Calculate precise character range for inserting blank lines after heading
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_heading_range(heading_display_line, line);
+
+                        result.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message: format!(
+                                "Expected {} blank {} below heading",
+                                self.lines_below,
+                                if self.lines_below == 1 { "line" } else { "lines" }
+                            ),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range_with_length(insertion_point, 1, 0),
+                                replacement: "\n".repeat(needed_blanks),
+                            }),
+                        });
+                    }
                 }
 
                 // Update previous heading index
@@ -1020,7 +1077,7 @@ mod tests {
         let content = "# Heading 1\nSome content.\n## Heading 2\nMore content.\n";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2); // Missing blanks: below first heading, above and below second heading
+        assert_eq!(result.len(), 3); // Missing blanks: below first heading, above second heading, below second heading
 
         // Test the fix
         let fixed = rule.fix(&ctx).unwrap();

@@ -41,10 +41,13 @@ fn test_md005_list_indentation() {
 // MD022 - Blanks around headings
 #[test]
 fn test_md022_blanks_around_headings() {
-    let test = simple_test(
+    let test = multi_warning_test(
         "MD022",
         "Some text\n# Heading\nMore text",
-        ExpectedWarning::new(2, 1, 2, 10, "# Heading"),
+        vec![
+            ExpectedWarning::new(2, 1, 2, 10, "# Heading"),  // Missing blank above
+            ExpectedWarning::new(2, 1, 2, 10, "# Heading"),  // Missing blank below
+        ],
     );
     test_character_ranges(test);
 }

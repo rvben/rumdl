@@ -165,7 +165,7 @@ impl Rule for MD001HeadingIncrement {
                     message: format!("Expected heading level {}", prev_level + 1),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num, indentation + 1),
+                        range: line_index.line_content_range(line_num),
                         replacement: format!("{}{}", " ".repeat(indentation), replacement),
                     }),
                 });

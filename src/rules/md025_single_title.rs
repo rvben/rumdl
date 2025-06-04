@@ -324,7 +324,7 @@ impl Rule for MD025SingleTitle {
                 );
 
                 // For ATX headings, find the '#' position; for Setext, use column 1
-                let col = if line_content.trim_start().starts_with('#') {
+                let _col = if line_content.trim_start().starts_with('#') {
                     line_content.find('#').unwrap_or(0)
                 } else {
                     0 // Setext headings start at column 1
@@ -342,22 +342,21 @@ impl Rule for MD025SingleTitle {
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line + 1, col + 1),
-                        replacement: format!(
-                            "{} {}",
-                            "#".repeat(self.level + 1),
-                            if line_content.trim_start().starts_with('#') {
-                                // Add bounds checking to prevent panic
-                                let slice_start = col + self.level;
-                                if slice_start < line_content.len() {
-                                    &line_content[slice_start..]
-                                } else {
-                                    "" // If bounds exceeded, use empty string
-                                }
+                        range: line_index.line_content_range(line + 1),
+                        replacement: {
+                            let leading_spaces = line_content.len() - line_content.trim_start().len();
+                            let indentation = " ".repeat(leading_spaces);
+                            let heading_text = if line_content.trim_start().starts_with('#') {
+                                // ATX heading: extract text after existing #'s
+                                line_content.trim_start()
+                                    .trim_start_matches('#')
+                                    .trim()
                             } else {
-                                line_content.trim() // For Setext, use the whole line
-                            }
-                        ),
+                                // Setext heading: use the whole line text
+                                line_content.trim()
+                            };
+                            format!("{}{} {}", indentation, "#".repeat(self.level + 1), heading_text)
+                        },
                     }),
                 });
             }

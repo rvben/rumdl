@@ -41,9 +41,10 @@ impl MD011NoReversedLinks {
         for line in content.lines() {
             for cap in REVERSED_LINK_REGEX.captures_iter(line) {
                 if cap.get(3).is_some() {
-                    // Found reversed link syntax (text)[url]
-                    let text = cap[3].trim_matches('(').trim_matches(')');
-                    let url = &cap[4];
+                    // Found reversed link syntax (URL)[text]
+                    // cap[3] contains (URL) with parentheses, cap[4] contains text
+                    let url = cap[3].trim_matches('(').trim_matches(')');
+                    let text = &cap[4];
                     let start = line_start + cap.get(0).unwrap().start();
                     results.push((
                         current_line,
@@ -206,7 +207,13 @@ impl Rule for MD011NoReversedLinks {
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: (0..0), // TODO: Replace with correct byte range if available
+                        range: {
+                            // Calculate proper byte range using line offsets and match position
+                            let line_start_byte = ctx.line_offsets.get(line_num).copied().unwrap_or(0);
+                            let match_start_byte = line_start_byte + match_obj.start();
+                            let match_end_byte = match_start_byte + match_obj.len();
+                            match_start_byte..match_end_byte
+                        },
                         replacement: format!("[{}]({})", &cap[2], &cap[1]),
                     }),
                 });
@@ -228,7 +235,13 @@ impl Rule for MD011NoReversedLinks {
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: (0..0), // TODO: Replace with correct byte range if available
+                        range: {
+                            // Calculate proper byte range using line offsets and match position
+                            let line_start_byte = ctx.line_offsets.get(line_num).copied().unwrap_or(0);
+                            let match_start_byte = line_start_byte + start;
+                            let match_end_byte = match_start_byte + len;
+                            match_start_byte..match_end_byte
+                        },
                         replacement: format!("[{}]({})", text, url),
                     }),
                 });
@@ -256,7 +269,7 @@ impl Rule for MD011NoReversedLinks {
 
             if !self.is_in_code_block(content, pos) {
                 let adjusted_pos = pos + offset;
-                let original_len = format!("({})[{}]", url, text).len();
+                let original_len = format!("({})[{}]", text, url).len();
                 let replacement = format!("[{}]({})", text, url);
                 result.replace_range(adjusted_pos..adjusted_pos + original_len, &replacement);
                 // Update offset based on the difference in lengths

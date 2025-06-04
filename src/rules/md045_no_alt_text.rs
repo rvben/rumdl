@@ -48,7 +48,7 @@ impl Rule for MD045NoAltText {
                 let alt_text = cap.get(1).map_or("", |m| m.as_str());
                 if alt_text.trim().is_empty() {
                     let full_match = cap.get(0).unwrap();
-                    let _url_part = cap.get(2).unwrap();
+                    let url_part = cap.get(2).unwrap();
 
                     // Calculate precise character range for the entire image syntax
                     let (start_line, start_col, end_line, end_col) = calculate_match_range(
@@ -68,11 +68,10 @@ impl Rule for MD045NoAltText {
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: _line_index
-                                .line_col_to_byte_range(line_num + 1, full_match.start() + 1),
+                                .line_col_to_byte_range_with_length(line_num + 1, full_match.start() + 1, full_match.len()),
                             replacement: format!(
-                                "![Image description]{
-            }",
-                                &line[full_match.start() + 2..full_match.end()]
+                                "![Image description]{}",
+                                url_part.as_str()
                             ),
                         }),
                     });

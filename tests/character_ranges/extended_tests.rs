@@ -229,7 +229,7 @@ fn test_md047_file_end_newline() {
     let test = simple_test(
         "MD047",
         "Text without newline",
-        ExpectedWarning::new(1, 1, 1, 21, "Text without newline"),
+        ExpectedWarning::new(1, 21, 1, 21, ""), // Now highlights end of line
     );
     test_character_ranges(test);
 }

@@ -3,6 +3,7 @@
 /// See [docs/md029.md](../../docs/md029.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -221,7 +222,7 @@ impl Rule for MD029OrderedListPrefix {
 
                 // Non-empty, non-list line breaks the list
                 if in_list && !list_items.is_empty() {
-                    self.check_list_section(&list_items, &mut warnings);
+                    self.check_list_section(&list_items, &mut warnings, content);
                     list_items.clear();
                     in_list = false;
                 }
@@ -230,7 +231,7 @@ impl Rule for MD029OrderedListPrefix {
 
         // Check last section if it exists
         if !list_items.is_empty() {
-            self.check_list_section(&list_items, &mut warnings);
+            self.check_list_section(&list_items, &mut warnings, content);
         }
 
         Ok(warnings)
@@ -287,7 +288,7 @@ impl DocumentStructureExtensions for MD029OrderedListPrefix {
 }
 
 impl MD029OrderedListPrefix {
-    fn check_list_section(&self, items: &[(usize, String)], warnings: &mut Vec<LintWarning>) {
+    fn check_list_section(&self, items: &[(usize, String)], warnings: &mut Vec<LintWarning>, content: &str) {
         // Group items by indentation level and process each level independently
         let mut level_groups: std::collections::HashMap<usize, Vec<(usize, String)>> =
             std::collections::HashMap::new();
@@ -311,6 +312,13 @@ impl MD029OrderedListPrefix {
                     let expected_num = self.get_expected_number(idx);
 
                     if actual_num != expected_num {
+                        // Create a LineIndex for the actual content
+                        let line_index = LineIndex::new(content.to_string());
+                        
+                        // Find the number position in the line for precise replacement
+                        let number_start = line.find(char::is_numeric).unwrap_or(0);
+                        let number_len = actual_num.to_string().len();
+                        
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             message: format!(
@@ -318,15 +326,13 @@ impl MD029OrderedListPrefix {
                                 actual_num, expected_num
                             ),
                             line: line_num + 1,
-                            column: line.find(char::is_numeric).unwrap_or(0) + 1,
+                            column: number_start + 1,
                             end_line: line_num + 1,
-                            end_column: line.find(char::is_numeric).unwrap_or(0)
-                                + actual_num.to_string().len()
-                                + 1,
+                            end_column: number_start + number_len + 1,
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: 0..0, // TODO: Replace with correct byte range if available
-                                replacement: self.fix_line(line, expected_num),
+                                range: line_index.line_col_to_byte_range_with_length(line_num + 1, number_start + 1, number_len),
+                                replacement: expected_num.to_string(),
                             }),
                         });
                     }

@@ -154,7 +154,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num, start_col),
+                        range: line_index.line_col_to_byte_range_with_length(line_num, start_col, spaces_len),
                         replacement: correct_spacing.to_string(),
                     }),
                 });

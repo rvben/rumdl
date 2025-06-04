@@ -1,6 +1,6 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
-use crate::utils::range_utils::calculate_line_range;
+use crate::utils::range_utils::{calculate_line_range, LineIndex};
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -309,6 +309,9 @@ impl Rule for MD053LinkImageReferenceDefinitions {
 
         let mut warnings = Vec::new();
 
+        // Create LineIndex for proper range calculations
+        let line_index = LineIndex::new(content.to_string());
+
         // Create warnings for unused references
         for (definition, start, _end) in unused_refs {
             let line_num = start + 1; // 1-indexed line numbers
@@ -326,12 +329,19 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                 end_line,
                 end_column: end_col,
                 message: format!(
-                    "Unused link/image reference definition: [{
-            }]",
+                    "Unused link/image reference definition: [{}]",
                     definition
                 ),
                 severity: Severity::Warning,
-                fix: None, // We'll handle fixes in the fix() method
+                fix: Some(Fix {
+                    // Remove the entire line including the newline
+                    range: {
+                        let line_start = line_index.get_line_start_byte(line_num).unwrap_or(0);
+                        let line_end = line_index.get_line_start_byte(line_num + 1).unwrap_or(line_start + line_content.len());
+                        line_start..line_end
+                    },
+                    replacement: String::new(), // Remove the line
+                }),
             });
         }
 

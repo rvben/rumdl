@@ -67,8 +67,8 @@ impl Rule for MD031BlanksAroundFences {
                         message: "No blank line before fenced code block".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: format!("\n{}", lines[i]),
+                            range: _line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
+                            replacement: "\n".to_string(),
                         }),
                     });
                 }
@@ -98,8 +98,8 @@ impl Rule for MD031BlanksAroundFences {
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: _line_index
-                                    .line_col_to_byte_range(i + 1, lines[i].len() + 1),
-                                replacement: format!("{}\n", lines[i]),
+                                    .line_col_to_byte_range_with_length(i + 1, lines[i].len() + 1, 0),
+                                replacement: "\n".to_string(),
                             }),
                         });
                     }
@@ -218,8 +218,8 @@ impl Rule for MD031BlanksAroundFences {
                     message: "No blank line before fenced code block".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line_num, 1),
-                        replacement: format!("\n{}", lines[line_num - 1]),
+                        range: line_index.line_col_to_byte_range_with_length(line_num, 1, 0),
+                        replacement: "\n".to_string(),
                     }),
                 });
             }
@@ -244,8 +244,8 @@ impl Rule for MD031BlanksAroundFences {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index
-                            .line_col_to_byte_range(line_num, lines[line_num - 1].len() + 1),
-                        replacement: format!("{}\n", lines[line_num - 1]),
+                            .line_col_to_byte_range_with_length(line_num, lines[line_num - 1].len() + 1, 0),
+                        replacement: "\n".to_string(),
                     }),
                 });
             }

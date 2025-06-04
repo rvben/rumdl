@@ -86,7 +86,11 @@ impl Rule for MD042NoEmptyLinks {
                 end_column: link.end_col + 1,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: line_index.line_col_to_byte_range(link.line, link.start_col),
+                    range: line_index.line_col_to_byte_range_with_length(
+                        link.line, 
+                        link.start_col, 
+                        (link.end_col + 1).saturating_sub(link.start_col)
+                    ),
                     replacement,
                 }),
             });
