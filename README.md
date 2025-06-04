@@ -233,6 +233,18 @@ Create a default configuration file in the current directory
 **Options:**
 - `--pyproject`: Generate configuration for `pyproject.toml` instead of `.rumdl.toml`
 
+#### `import <FILE> [OPTIONS]`
+
+Import and convert markdownlint configuration files to rumdl format
+
+**Arguments:**
+- `<FILE>`: Path to markdownlint config file (JSON/YAML)
+
+**Options:**
+- `-o, --output <path>`: Output file path (default: `.rumdl.toml`)
+- `--format <format>`: Output format: `toml` or `json` (default: `toml`)
+- `--dry-run`: Show converted config without writing to file
+
 #### `rule [<rule>]`
 
 Show information about a rule or list all rules
@@ -288,6 +300,15 @@ rumdl init
 # Create or update a pyproject.toml file with rumdl configuration
 rumdl init --pyproject
 
+# Import a markdownlint config file
+rumdl import .markdownlint.json
+
+# Convert markdownlint config to JSON format
+rumdl import --format json .markdownlint.yaml --output rumdl-config.json
+
+# Preview conversion without writing file
+rumdl import --dry-run .markdownlint.json
+
 # Show information about a specific rule
 rumdl rule MD013
 
@@ -326,6 +347,30 @@ rumdl can be configured in several ways:
 1. Using a `.rumdl.toml` file in your project directory
 2. Using the `[tool.rumdl]` section in your project's `pyproject.toml` file (for Python projects)
 3. Using command-line arguments
+4. **Automatic markdownlint compatibility**: rumdl automatically discovers and loads existing markdownlint config files (`.markdownlint.json`, `.markdownlint.yaml`, etc.)
+
+### Markdownlint Migration
+
+rumdl provides seamless compatibility with existing markdownlint configurations:
+
+**Automatic Discovery**: rumdl automatically detects and loads markdownlint config files:
+- `.markdownlint.json` / `.markdownlint.jsonc`
+- `.markdownlint.yaml` / `.markdownlint.yml`
+- `markdownlint.json` / `markdownlint.yaml`
+
+**Explicit Import**: Convert markdownlint configs to rumdl format:
+```bash
+# Convert to .rumdl.toml
+rumdl import .markdownlint.json
+
+# Convert to JSON format
+rumdl import --format json .markdownlint.yaml --output config.json
+
+# Preview conversion
+rumdl import --dry-run .markdownlint.json
+```
+
+For comprehensive documentation on global settings (file selection, rule enablement, etc.), see our [Global Settings Reference](docs/global-settings.md).
 
 ### Configuration File Example
 

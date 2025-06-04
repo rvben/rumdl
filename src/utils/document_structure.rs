@@ -51,6 +51,8 @@ pub struct DocumentStructure {
     pub in_blockquote: Vec<bool>,
     /// Bitmap indicating which lines are inside HTML blocks
     pub in_html_block: Vec<bool>,
+    /// Line numbers of horizontal rules (1-indexed)
+    pub horizontal_rule_lines: Vec<usize>,
 }
 
 /// Front matter block
@@ -215,6 +217,7 @@ impl DocumentStructure {
             blockquotes: Vec::new(),
             in_blockquote: Vec::new(),
             in_html_block: Vec::new(),
+            horizontal_rule_lines: Vec::new(),
         };
 
         // Analyze the document and populate the structure
@@ -304,6 +307,13 @@ impl DocumentStructure {
         // OPTIMIZATION 3: Detect lists only if needed
         if has_list_markers {
             self.detect_list_items(content);
+        }
+
+        // Detect horizontal rules only if needed
+        let has_potential_hrs = content.contains("---") || content.contains("***") || content.contains("___") ||
+                                content.contains("- -") || content.contains("* *") || content.contains("_ _");
+        if has_potential_hrs {
+            self.detect_horizontal_rules(content);
         }
 
         // Check for URLs only if needed
@@ -1089,6 +1099,47 @@ impl DocumentStructure {
         }
     }
 
+    /// Detect horizontal rules in the document
+    fn detect_horizontal_rules(&mut self, content: &str) {
+        lazy_static! {
+            // Horizontal rule patterns - simplified to match Markdown spec
+            static ref HR_HYPHEN: Regex = Regex::new(r"^[ \t]*-[ \t]*-[ \t]*-[ \t-]*$").unwrap();
+            static ref HR_ASTERISK: Regex = Regex::new(r"^[ \t]*\*[ \t]*\*[ \t]*\*[ \t\*]*$").unwrap();
+            static ref HR_UNDERSCORE: Regex = Regex::new(r"^[ \t]*_[ \t]*_[ \t]*_[ \t_]*$").unwrap();
+        }
+
+        // Clear existing data
+        self.horizontal_rule_lines.clear();
+
+        let lines: Vec<&str> = content.lines().collect();
+
+        for (i, line) in lines.iter().enumerate() {
+            // Skip lines in code blocks or front matter
+            if self.is_in_code_block(i + 1) || self.is_in_front_matter(i + 1) {
+                continue;
+            }
+
+            // Check for horizontal rule patterns
+            if HR_HYPHEN.is_match(line) || HR_ASTERISK.is_match(line) || HR_UNDERSCORE.is_match(line) {
+                // Additional validation: ensure it's not part of a setext heading
+                // (setext headings have content on the previous line)
+                let is_setext_marker = if i > 0 {
+                    let prev_line = lines[i - 1].trim();
+                    !prev_line.is_empty() && 
+                    !self.is_in_code_block(i) && 
+                    !self.is_in_front_matter(i) &&
+                    line.trim().chars().all(|c| c == '-' || c == ' ')
+                } else {
+                    false
+                };
+
+                if !is_setext_marker {
+                    self.horizontal_rule_lines.push(i + 1); // 1-indexed
+                }
+            }
+        }
+    }
+
     /// Detect HTML blocks (block-level HTML regions) according to CommonMark spec
     fn detect_html_blocks(&mut self, content: &str) {
         let lines: Vec<&str> = content.lines().collect();
@@ -1476,5 +1527,34 @@ mod tests {
         let structure = DocumentStructure::new(content);
         assert_eq!(structure.heading_lines, vec![1, 2]);
         assert_eq!(structure.heading_levels, vec![1, 1]);
+    }
+
+    #[test]
+    fn test_horizontal_rule_detection() {
+        // Test basic horizontal rules
+        let content = "Text\n\n---\n\nMore text\n\n***\n\nFinal\n\n___\n\nEnd";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.horizontal_rule_lines, vec![3, 7, 11]);
+
+        // Test horizontal rules with spaces
+        let content = "Text\n\n- - -\n\n* * *\n\n_ _ _\n\nEnd";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.horizontal_rule_lines, vec![3, 5, 7]);
+
+        // Test setext headings are not detected as horizontal rules
+        let content = "# ATX\n\nSetext\n------\n\n---\n\nAnother\n======\n";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.horizontal_rule_lines, vec![6]); // Only the actual HR
+        assert_eq!(structure.heading_lines, vec![1, 3, 8]); // Three headings
+
+        // Test horizontal rules in code blocks are ignored
+        let content = "Text\n\n```\n---\n***\n```\n\n---\n\nEnd";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.horizontal_rule_lines, vec![8]); // Only the one outside code block
+
+        // Test horizontal rules in front matter are ignored
+        let content = "---\ntitle: Test\n---\n\n---\n\nContent";
+        let structure = DocumentStructure::new(content);
+        assert_eq!(structure.horizontal_rule_lines, vec![5]); // Only the one after front matter
     }
 }

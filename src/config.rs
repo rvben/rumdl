@@ -85,10 +85,18 @@ pub struct GlobalConfig {
     /// Respect .gitignore files when scanning directories
     #[serde(default = "default_respect_gitignore")]
     pub respect_gitignore: bool,
+
+    /// Global line length setting (used by MD013 and other rules if not overridden)
+    #[serde(default = "default_line_length")]
+    pub line_length: u64,
 }
 
 fn default_respect_gitignore() -> bool {
     true
+}
+
+fn default_line_length() -> u64 {
+    80
 }
 
 // Add the Default impl
@@ -100,6 +108,7 @@ impl Default for GlobalConfig {
             exclude: Vec::new(),
             include: Vec::new(),
             respect_gitignore: true,
+            line_length: 80,
         }
     }
 }
@@ -584,6 +593,7 @@ pub struct SourcedGlobalConfig {
     pub exclude: SourcedValue<Vec<String>>,
     pub include: SourcedValue<Vec<String>>,
     pub respect_gitignore: SourcedValue<bool>,
+    pub line_length: SourcedValue<u64>,
 }
 
 impl Default for SourcedGlobalConfig {
@@ -594,6 +604,7 @@ impl Default for SourcedGlobalConfig {
             exclude: SourcedValue::new(Vec::new(), ConfigSource::Default),
             include: SourcedValue::new(Vec::new(), ConfigSource::Default),
             respect_gitignore: SourcedValue::new(true, ConfigSource::Default),
+            line_length: SourcedValue::new(80, ConfigSource::Default),
         }
     }
 }
@@ -905,6 +916,7 @@ impl From<SourcedConfig> for Config {
             exclude: sourced.global.exclude.value,
             include: sourced.global.include.value,
             respect_gitignore: sourced.global.respect_gitignore.value,
+            line_length: sourced.global.line_length.value,
         };
         Config { global, rules }
     }

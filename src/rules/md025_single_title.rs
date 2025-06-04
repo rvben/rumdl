@@ -95,9 +95,29 @@ impl MD025SingleTitle {
     }
 
     /// Check if headings are separated by horizontal rules
-    fn has_separator_before_heading(&self, _structure: &DocumentStructure, _heading_line: usize) -> bool {
-        // TODO: Implement when DocumentStructure supports horizontal rules
-        // For now, just return false to disable this feature
+    fn has_separator_before_heading(&self, structure: &DocumentStructure, heading_line: usize) -> bool {
+        if !self.allow_with_separators {
+            return false;
+        }
+
+        // Look for horizontal rules in the lines before this heading
+        // Check up to 5 lines before the heading for a horizontal rule
+        let search_start = heading_line.saturating_sub(5);
+        
+        for &hr_line in &structure.horizontal_rule_lines {
+            if hr_line >= search_start && hr_line < heading_line {
+                // Found a horizontal rule before this heading
+                // Check that there's no other heading between the HR and this heading
+                let has_intermediate_heading = structure.heading_lines.iter().any(|&h_line| {
+                    h_line > hr_line && h_line < heading_line
+                });
+                
+                if !has_intermediate_heading {
+                    return true;
+                }
+            }
+        }
+        
         false
     }
 }
@@ -566,5 +586,36 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_horizontal_rule_separators() {
+        let rule = MD025SingleTitle::default(); // Has allow_with_separators = true
+
+        // Test that headings separated by horizontal rules are allowed
+        let content = "# First Title\n\nContent here.\n\n---\n\n# Second Title\n\nMore content.\n\n***\n\n# Third Title\n\nFinal content.";
+        let structure = DocumentStructure::new(content);
+        let result = rule
+            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
+            .unwrap();
+        assert!(result.is_empty(), "Should not flag headings separated by horizontal rules");
+
+        // Test that headings without separators are still flagged
+        let content = "# First Title\n\nContent here.\n\n---\n\n# Second Title\n\nMore content.\n\n# Third Title\n\nNo separator before this one.";
+        let structure = DocumentStructure::new(content);
+        let result = rule
+            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
+            .unwrap();
+        assert_eq!(result.len(), 1, "Should flag the heading without separator");
+        assert_eq!(result[0].line, 11); // Third title on line 11
+
+        // Test with allow_with_separators = false
+        let strict_rule = MD025SingleTitle::strict();
+        let content = "# First Title\n\nContent here.\n\n---\n\n# Second Title\n\nMore content.";
+        let structure = DocumentStructure::new(content);
+        let result = strict_rule
+            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
+            .unwrap();
+        assert_eq!(result.len(), 1, "Strict mode should flag all multiple H1s regardless of separators");
     }
 }

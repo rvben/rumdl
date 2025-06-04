@@ -345,7 +345,7 @@ impl Rule for MD013LineLength {
         // get_rule_config_value now automatically tries both underscore and kebab-case variants
         let line_length =
             crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length")
-                .unwrap_or(80);
+                .unwrap_or(config.global.line_length as usize);
 
         let code_blocks =
             crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")

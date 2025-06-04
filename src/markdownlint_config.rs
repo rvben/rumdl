@@ -197,6 +197,19 @@ impl MarkdownlintConfig {
         let mut fragment = crate::config::SourcedConfigFragment::default();
         let file = file_path.map(|s| s.to_string());
         for (key, value) in &self.0 {
+            // Special handling for line-length as a global setting
+            if key.eq_ignore_ascii_case("line-length") || key.eq_ignore_ascii_case("line_length") {
+                if let Some(line_length) = value.as_u64() {
+                    fragment.global.line_length.push_override(
+                        line_length,
+                        crate::config::ConfigSource::Markdownlint,
+                        file.clone(),
+                        None,
+                    );
+                }
+                continue;
+            }
+            
             let mapped = markdownlint_to_rumdl_rule_key(key);
             if let Some(rumdl_key) = mapped {
                 let norm_rule_key = rumdl_key.to_ascii_uppercase();
