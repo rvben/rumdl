@@ -171,8 +171,9 @@ impl Rule for MD040FencedCodeLanguage {
 
             if let Some(ref current_fence) = fence_char {
                 if trimmed.starts_with(current_fence) {
-                    // This is a closing fence - use no indentation
-                    result.push_str(&format!("{}\n", current_fence));
+                    // This is a closing fence - preserve original indentation
+                    result.push_str(line);
+                    result.push('\n');
                     in_code_block = false;
                     fence_char = None;
                     continue;
@@ -193,8 +194,9 @@ impl Rule for MD040FencedCodeLanguage {
                     // Add 'text' as default language for opening fence if no language specified
                     let after_fence = trimmed[fence.len()..].trim();
                     if after_fence.is_empty() {
-                        // Use no indentation for the opening fence with language
-                        result.push_str(&format!("{}text\n", fence));
+                        // Preserve original indentation when adding language
+                        let original_indent = &line[..line.len() - line.trim_start().len()];
+                        result.push_str(&format!("{}{}text\n", original_indent, fence));
                     } else {
                         // Keep original indentation for fences that already have a language
                         result.push_str(line);

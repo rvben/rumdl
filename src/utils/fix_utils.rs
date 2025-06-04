@@ -8,11 +8,42 @@ use crate::rule::{Fix, LintWarning};
 /// Apply a list of warning fixes to content, simulating how the LSP client would apply them
 /// This is used for testing consistency between CLI and LSP fix methods
 pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<String, String> {
+    let original_line_ending = crate::utils::detect_line_ending(content);
     let mut fixes: Vec<(usize, &Fix)> = warnings
         .iter()
         .enumerate()
         .filter_map(|(i, w)| w.fix.as_ref().map(|fix| (i, fix)))
         .collect();
+
+    // Deduplicate fixes that operate on the same range with the same replacement
+    // This prevents double-application when multiple warnings target the same issue
+    fixes.sort_by(|(_, fix_a), (_, fix_b)| {
+        let range_cmp = fix_a.range.start.cmp(&fix_b.range.start);
+        if range_cmp != std::cmp::Ordering::Equal {
+            return range_cmp;
+        }
+        fix_a.range.end.cmp(&fix_b.range.end)
+    });
+    
+    let mut deduplicated = Vec::new();
+    let mut i = 0;
+    while i < fixes.len() {
+        let (idx, current_fix) = fixes[i];
+        deduplicated.push((idx, current_fix));
+        
+        // Skip any subsequent fixes that have the same range and replacement
+        while i + 1 < fixes.len() {
+            let (_, next_fix) = fixes[i + 1];
+            if current_fix.range == next_fix.range && current_fix.replacement == next_fix.replacement {
+                i += 1; // Skip the duplicate
+            } else {
+                break;
+            }
+        }
+        i += 1;
+    }
+    
+    let mut fixes = deduplicated;
 
     // Sort fixes by range in reverse order (end to start) to avoid offset issues
     // Use original index as secondary sort key to ensure stable sorting
@@ -54,10 +85,25 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
         }
 
         // Apply the fix by replacing the range with the replacement text
-        result.replace_range(fix.range.clone(), &fix.replacement);
+        // Normalize fix replacement to match document line endings
+        let normalized_replacement = if original_line_ending == "\r\n" && !fix.replacement.contains("\r\n") {
+            fix.replacement.replace('\n', "\r\n")
+        } else {
+            fix.replacement.clone()
+        };
+        
+        result.replace_range(fix.range.clone(), &normalized_replacement);
     }
 
-    Ok(result)
+    // For consistency with CLI behavior, normalize all line endings in the result
+    // to match the detected predominant style
+    let normalized_result = if original_line_ending == "\r\n" {
+        result.replace('\n', "\r\n")
+    } else {
+        result.replace("\r\n", "\n")
+    };
+    
+    Ok(normalized_result)
 }
 
 /// Convert a single warning fix to a text edit-style representation
