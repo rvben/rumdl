@@ -160,10 +160,9 @@ impl Rule for MD040FencedCodeLanguage {
         let _line_index = LineIndex::new(content.to_string());
 
         let mut result = String::new();
-
         let mut in_code_block = false;
-
         let mut fence_char = None;
+        let mut fence_needs_language = false;
 
         let lines: Vec<&str> = content.lines().collect();
         for line in lines.iter() {
@@ -171,11 +170,18 @@ impl Rule for MD040FencedCodeLanguage {
 
             if let Some(ref current_fence) = fence_char {
                 if trimmed.starts_with(current_fence) {
-                    // This is a closing fence - preserve original indentation
-                    result.push_str(line);
+                    // This is a closing fence
+                    if fence_needs_language {
+                        // Remove indentation from closing fence to match opening fence
+                        result.push_str(trimmed);
+                    } else {
+                        // Preserve original indentation for fences that already had language
+                        result.push_str(line);
+                    }
                     result.push('\n');
                     in_code_block = false;
                     fence_char = None;
+                    fence_needs_language = false;
                     continue;
                 }
 
@@ -194,13 +200,14 @@ impl Rule for MD040FencedCodeLanguage {
                     // Add 'text' as default language for opening fence if no language specified
                     let after_fence = trimmed[fence.len()..].trim();
                     if after_fence.is_empty() {
-                        // Preserve original indentation when adding language
-                        let original_indent = &line[..line.len() - line.trim_start().len()];
-                        result.push_str(&format!("{}{}text\n", original_indent, fence));
+                        // Remove indentation when adding language
+                        result.push_str(&format!("{}text\n", fence));
+                        fence_needs_language = true;
                     } else {
                         // Keep original indentation for fences that already have a language
                         result.push_str(line);
                         result.push('\n');
+                        fence_needs_language = false;
                     }
                 } else {
                     result.push_str(line);
