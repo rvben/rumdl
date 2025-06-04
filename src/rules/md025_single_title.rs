@@ -17,6 +17,10 @@ lazy_static! {
 pub struct MD025SingleTitle {
     level: usize,
     front_matter_title: String,
+    /// Allow multiple H1s if they appear to be document sections (appendices, references, etc.)
+    allow_document_sections: bool,
+    /// Allow multiple H1s if separated by horizontal rules
+    allow_with_separators: bool,
 }
 
 impl Default for MD025SingleTitle {
@@ -24,6 +28,8 @@ impl Default for MD025SingleTitle {
         Self {
             level: 1,
             front_matter_title: "title".to_string(),
+            allow_document_sections: true, // More lenient by default
+            allow_with_separators: true,
         }
     }
 }
@@ -33,7 +39,66 @@ impl MD025SingleTitle {
         Self {
             level,
             front_matter_title: front_matter_title.to_string(),
+            allow_document_sections: true,
+            allow_with_separators: true,
         }
+    }
+
+    pub fn strict() -> Self {
+        Self {
+            level: 1,
+            front_matter_title: "title".to_string(),
+            allow_document_sections: false,
+            allow_with_separators: false,
+        }
+    }
+
+    /// Check if a heading text suggests it's a legitimate document section
+    fn is_document_section_heading(&self, heading_text: &str) -> bool {
+        if !self.allow_document_sections {
+            return false;
+        }
+
+        let lower_text = heading_text.to_lowercase();
+        
+        // Common section names that are legitimate as separate H1s
+        let section_indicators = [
+            "appendix", "appendices",
+            "reference", "references", "bibliography",
+            "index", "indices",
+            "glossary", "glossaries",
+            "conclusion", "conclusions",
+            "summary", "executive summary",
+            "acknowledgment", "acknowledgments", "acknowledgement", "acknowledgements",
+            "about", "contact", "license", "legal",
+            "changelog", "change log", "history",
+            "faq", "frequently asked questions",
+            "troubleshooting", "support",
+            "installation", "setup", "getting started",
+            "api reference", "api documentation",
+            "examples", "tutorials", "guides",
+        ];
+
+        // Check if the heading starts with these patterns
+        section_indicators.iter().any(|&indicator| {
+            lower_text.starts_with(indicator) ||
+            lower_text.starts_with(&format!("{}:", indicator)) ||
+            lower_text.contains(&format!(" {}", indicator)) ||
+            // Handle appendix numbering like "Appendix A", "Appendix 1"
+            (indicator == "appendix" && (
+                lower_text.matches("appendix").count() == 1 && 
+                (lower_text.contains(" a") || lower_text.contains(" b") || 
+                 lower_text.contains(" 1") || lower_text.contains(" 2") ||
+                 lower_text.contains(" i") || lower_text.contains(" ii"))
+            ))
+        })
+    }
+
+    /// Check if headings are separated by horizontal rules
+    fn has_separator_before_heading(&self, _structure: &DocumentStructure, _heading_line: usize) -> bool {
+        // TODO: Implement when DocumentStructure supports horizontal rules
+        // For now, just return false to disable this feature
+        false
     }
 }
 
@@ -186,8 +251,9 @@ impl Rule for MD025SingleTitle {
         }
 
         // If we have multiple target level headings, flag all subsequent ones (not the first)
+        // unless they are legitimate document sections
         if target_level_headings.len() > 1 {
-            // Skip the first heading, flag the rest
+            // Skip the first heading, check the rest for legitimacy
             for &line in &target_level_headings[1..] {
                 // Skip if out of bounds
                 if line >= lines.len() {
@@ -205,6 +271,14 @@ impl Rule for MD025SingleTitle {
                     // Setext heading: use the entire line content
                     line_content.trim()
                 };
+
+                // Check if this heading should be allowed
+                let should_allow = self.is_document_section_heading(heading_text) ||
+                    self.has_separator_before_heading(structure, line + 1);
+
+                if should_allow {
+                    continue; // Skip flagging this heading
+                }
 
                 // Calculate precise character range for the heading text content
                 let text_start_in_line = if let Some(pos) = line_content.find(heading_text) {
@@ -300,6 +374,14 @@ impl Rule for MD025SingleTitle {
             "front_matter_title".to_string(),
             toml::Value::String(self.front_matter_title.clone()),
         );
+        map.insert(
+            "allow_document_sections".to_string(),
+            toml::Value::Boolean(self.allow_document_sections),
+        );
+        map.insert(
+            "allow_with_separators".to_string(),
+            toml::Value::Boolean(self.allow_with_separators),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -312,7 +394,19 @@ impl Rule for MD025SingleTitle {
         let front_matter_title =
             crate::config::get_rule_config_value::<String>(config, "MD025", "front_matter_title")
                 .unwrap_or_else(|| "title".to_string());
-        Box::new(MD025SingleTitle::new(level as usize, &front_matter_title))
+        let allow_document_sections =
+            crate::config::get_rule_config_value::<bool>(config, "MD025", "allow_document_sections")
+                .unwrap_or(true); // Default to true for better UX
+        let allow_with_separators =
+            crate::config::get_rule_config_value::<bool>(config, "MD025", "allow_with_separators")
+                .unwrap_or(true);
+
+        Box::new(MD025SingleTitle {
+            level: level as usize,
+            front_matter_title,
+            allow_document_sections,
+            allow_with_separators,
+        })
     }
 }
 
@@ -343,8 +437,8 @@ mod tests {
             .unwrap();
         assert!(result.is_empty());
 
-        // Test with multiple level-1 headings
-        let content = "# Title 1\n\n## Section 1\n\n# Title 2\n\n## Section 2";
+        // Test with multiple level-1 headings (non-section names) - should flag
+        let content = "# Title 1\n\n## Section 1\n\n# Another Title\n\n## Section 2";
         let structure = DocumentStructure::new(content);
         let result = rule
             .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
@@ -362,6 +456,65 @@ mod tests {
             result.is_empty(),
             "Should not flag a single title after front matter"
         );
+    }
+
+    #[test]
+    fn test_allow_document_sections() {
+        let rule = MD025SingleTitle::default(); // Has allow_document_sections = true
+
+        // Test valid document sections that should NOT be flagged
+        let valid_cases = vec![
+            "# Main Title\n\n## Content\n\n# Appendix A\n\nAppendix content",
+            "# Introduction\n\nContent here\n\n# References\n\nRef content",
+            "# Guide\n\nMain content\n\n# Bibliography\n\nBib content",
+            "# Manual\n\nContent\n\n# Index\n\nIndex content",
+            "# Document\n\nContent\n\n# Conclusion\n\nFinal thoughts",
+            "# Tutorial\n\nContent\n\n# FAQ\n\nQuestions and answers",
+            "# Project\n\nContent\n\n# Acknowledgments\n\nThanks",
+        ];
+
+        for case in valid_cases {
+            let structure = DocumentStructure::new(case);
+            let result = rule
+                .check_with_structure(&crate::lint_context::LintContext::new(case), &structure)
+                .unwrap();
+            assert!(
+                result.is_empty(),
+                "Should not flag document sections in: {}",
+                case
+            );
+        }
+
+        // Test invalid cases that should still be flagged
+        let invalid_cases = vec![
+            "# Main Title\n\n## Content\n\n# Random Other Title\n\nContent",
+            "# First\n\nContent\n\n# Second Title\n\nMore content",
+        ];
+
+        for case in invalid_cases {
+            let structure = DocumentStructure::new(case);
+            let result = rule
+                .check_with_structure(&crate::lint_context::LintContext::new(case), &structure)
+                .unwrap();
+            assert!(
+                !result.is_empty(),
+                "Should flag non-section headings in: {}",
+                case
+            );
+        }
+    }
+
+    #[test]
+    fn test_strict_mode() {
+        let rule = MD025SingleTitle::strict(); // Has allow_document_sections = false
+
+        // Even document sections should be flagged in strict mode
+        let content = "# Main Title\n\n## Content\n\n# Appendix A\n\nAppendix content";
+        let structure = DocumentStructure::new(content);
+        let result = rule
+            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
+            .unwrap();
+        assert_eq!(result.len(), 1, "Strict mode should flag all multiple H1s");
     }
 
     #[test]

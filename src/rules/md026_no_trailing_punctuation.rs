@@ -13,9 +13,9 @@ lazy_static! {
     // Optimized single regex for all ATX heading types (normal, closed, indented 1-3 spaces)
     static ref ATX_HEADING_UNIFIED: Regex = Regex::new(r"^( {0,3})(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap();
 
-    // Fast check patterns for early returns
+    // Fast check patterns for early returns - more restrictive
     static ref QUICK_HEADING_CHECK: Regex = Regex::new(r"^( {0,3}#|\s*[=\-]+\s*$)").unwrap();
-    static ref QUICK_PUNCTUATION_CHECK: Regex = Regex::new(r"[.,;:!?]").unwrap();
+    static ref QUICK_PUNCTUATION_CHECK: Regex = Regex::new(r"[.,;]").unwrap();
 
     // Deeply indented headings (4+ spaces) - these are code blocks
     static ref DEEPLY_INDENTED_HEADING_RE: Regex = Regex::new(r"^(\s{4,})(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap();
@@ -26,9 +26,9 @@ lazy_static! {
     // Regex cache for punctuation patterns
     static ref PUNCTUATION_REGEX_CACHE: RwLock<HashMap<String, Regex>> = RwLock::new(HashMap::new());
 
-    // Optimized regex patterns for fix operations with multiline flag
-    static ref FAST_ATX_PUNCTUATION_RE: Regex = Regex::new(r"(?m)^( {0,3}#{1,6}\s+.+?)[.,;:!?]+(\s*(?:#{1,6})?)$").unwrap();
-    static ref FAST_SETEXT_PUNCTUATION_RE: Regex = Regex::new(r"(?m)^(.+?)[.,;:!?]+(\s*)$").unwrap();
+    // Optimized regex patterns for fix operations with multiline flag - more restrictive
+    static ref FAST_ATX_PUNCTUATION_RE: Regex = Regex::new(r"(?m)^( {0,3}#{1,6}\s+.+?)[.,;]+(\s*(?:#{1,6})?)$").unwrap();
+    static ref FAST_SETEXT_PUNCTUATION_RE: Regex = Regex::new(r"(?m)^(.+?)[.,;]+(\s*)$").unwrap();
 }
 
 /// Rule MD026: Trailing punctuation in heading
@@ -40,7 +40,7 @@ pub struct MD026NoTrailingPunctuation {
 impl Default for MD026NoTrailingPunctuation {
     fn default() -> Self {
         Self {
-            punctuation: ".,;:!?".to_string(),
+            punctuation: ".,;".to_string(),  // More restrictive by default - exclude : ! ?
         }
     }
 }
@@ -48,7 +48,7 @@ impl Default for MD026NoTrailingPunctuation {
 impl MD026NoTrailingPunctuation {
     pub fn new(punctuation: Option<String>) -> Self {
         Self {
-            punctuation: punctuation.unwrap_or_else(|| ".,;:!?".to_string()),
+            punctuation: punctuation.unwrap_or_else(|| ".,;".to_string()),  // More restrictive by default
         }
     }
 
@@ -76,7 +76,18 @@ impl MD026NoTrailingPunctuation {
 
     #[inline]
     fn has_trailing_punctuation(&self, text: &str, re: &Regex) -> bool {
-        re.is_match(text.trim())
+        let trimmed = text.trim();
+        
+        // Only apply lenient rules for the default punctuation setting
+        // When users specify custom punctuation, they want strict behavior
+        if self.punctuation == ".,;" {
+            // Check for common legitimate punctuation patterns before applying the rule
+            if self.is_legitimate_punctuation(trimmed) {
+                return false;
+            }
+        }
+        
+        re.is_match(trimmed)
     }
 
     #[inline]
@@ -107,6 +118,56 @@ impl MD026NoTrailingPunctuation {
             return Some(captures.get(4).unwrap().as_str().to_string());
         }
         None
+    }
+
+    /// Check if punctuation in a heading is legitimate and should be allowed
+    #[inline]
+    fn is_legitimate_punctuation(&self, text: &str) -> bool {
+        let text = text.trim();
+        
+        // Allow question marks in question headings
+        if text.ends_with('?') {
+            // Check if it's likely a genuine question
+            let question_words = ["what", "why", "how", "when", "where", "who", "which", "can", "should", "would", "could", "is", "are", "do", "does", "did"];
+            let lower_text = text.to_lowercase();
+            if question_words.iter().any(|&word| lower_text.starts_with(word)) {
+                return true;
+            }
+        }
+        
+        // Allow colons in common categorical/labeling patterns
+        if text.ends_with(':') {
+            // Common patterns that legitimately use colons
+            let colon_patterns = [
+                "faq", "api", "note", "warning", "error", "info", "tip", "chapter", "step", 
+                "version", "part", "section", "method", "function", "class", "module",
+                "reference", "guide", "tutorial", "example", "demo", "usage", "syntax"
+            ];
+            
+            let lower_text = text.to_lowercase();
+            
+            // Check if it starts with any of these patterns
+            if colon_patterns.iter().any(|&pattern| lower_text.starts_with(pattern)) {
+                return true;
+            }
+            
+            // Check for numbered items like "Step 1:", "Chapter 2:", "Version 1.0:"
+            if regex::Regex::new(r"^(step|chapter|part|section|version)\s*\d").unwrap().is_match(&lower_text) {
+                return true;
+            }
+        }
+        
+        // Allow exclamation marks in specific contexts (less common, but sometimes legitimate)
+        if text.ends_with('!') {
+            // Only allow for very specific patterns like "Important!", "New!", "Warning!"
+            let exclamation_patterns = ["important", "new", "warning", "alert", "notice", "attention"];
+            let lower_text = text.to_lowercase();
+            if exclamation_patterns.iter().any(|&pattern| lower_text.starts_with(pattern)) {
+                return true;
+            }
+        }
+        
+        false
     }
 
     // Remove trailing punctuation from text
@@ -213,8 +274,17 @@ impl MD026NoTrailingPunctuation {
         }
 
         // Quick check for any punctuation we care about
-        if !QUICK_PUNCTUATION_CHECK.is_match(content) {
-            return Ok(Vec::new());
+        // For custom punctuation, we need to check differently
+        if self.punctuation == ".,;" {
+            if !QUICK_PUNCTUATION_CHECK.is_match(content) {
+                return Ok(Vec::new());
+            }
+        } else {
+            // For custom punctuation, check if any of those characters exist
+            let has_custom_punctuation = self.punctuation.chars().any(|c| content.contains(c));
+            if !has_custom_punctuation {
+                return Ok(Vec::new());
+            }
         }
 
         let lines: Vec<&str> = content.lines().collect();
@@ -356,8 +426,17 @@ impl Rule for MD026NoTrailingPunctuation {
         }
 
         // Quick check for any punctuation we care about
-        if !QUICK_PUNCTUATION_CHECK.is_match(content) {
-            return Ok(Vec::new());
+        // For custom punctuation, we need to check differently
+        if self.punctuation == ".,;" {
+            if !QUICK_PUNCTUATION_CHECK.is_match(content) {
+                return Ok(Vec::new());
+            }
+        } else {
+            // For custom punctuation, check if any of those characters exist
+            let has_custom_punctuation = self.punctuation.chars().any(|c| content.contains(c));
+            if !has_custom_punctuation {
+                return Ok(Vec::new());
+            }
         }
 
         // Check if we have potential headings (ATX # or setext underlines)
@@ -384,8 +463,17 @@ impl Rule for MD026NoTrailingPunctuation {
         }
 
         // Quick check for punctuation
-        if !QUICK_PUNCTUATION_CHECK.is_match(content) {
-            return Ok(content.to_string());
+        // For custom punctuation, we need to check differently
+        if self.punctuation == ".,;" {
+            if !QUICK_PUNCTUATION_CHECK.is_match(content) {
+                return Ok(content.to_string());
+            }
+        } else {
+            // For custom punctuation, check if any of those characters exist
+            let has_custom_punctuation = self.punctuation.chars().any(|c| content.contains(c));
+            if !has_custom_punctuation {
+                return Ok(content.to_string());
+            }
         }
 
         // Check if we have potential headings (ATX # or setext underlines)
@@ -399,7 +487,7 @@ impl Rule for MD026NoTrailingPunctuation {
         }
 
         // For default punctuation, use optimized fast regex approach
-        if self.punctuation == ".,;:!?" {
+        if self.punctuation == ".,;" {
             let mut result = content.to_string();
 
             // Fix ATX headings with fast regex
@@ -501,7 +589,7 @@ impl Rule for MD026NoTrailingPunctuation {
     {
         let punctuation =
             crate::config::get_rule_config_value::<String>(config, "MD026", "punctuation")
-                .unwrap_or_else(|| ".,;:!?".to_string());
+                .unwrap_or_else(|| ".,;".to_string());  // More restrictive default
         Box::new(MD026NoTrailingPunctuation::new(Some(punctuation)))
     }
 }
@@ -513,8 +601,16 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD026NoTr
         structure: &crate::utils::document_structure::DocumentStructure,
     ) -> bool {
         let content = ctx.content;
-        !content.is_empty()
-            && !structure.heading_lines.is_empty()
-            && QUICK_PUNCTUATION_CHECK.is_match(content)
+        if content.is_empty() || structure.heading_lines.is_empty() {
+            return false;
+        }
+        
+        // Check for punctuation we care about
+        if self.punctuation == ".,;" {
+            QUICK_PUNCTUATION_CHECK.is_match(content)
+        } else {
+            // For custom punctuation, check if any of those characters exist
+            self.punctuation.chars().any(|c| content.contains(c))
+        }
     }
 }

@@ -650,7 +650,7 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
         Box::new(MD029OrderedListPrefix::default()),
         Box::new(MD030ListMarkerSpace::default()),
         Box::new(MD031BlanksAroundFences {}),
-        Box::new(MD032BlanksAroundLists {}),
+        Box::new(MD032BlanksAroundLists::default()),
         Box::new(MD033NoInlineHtml::default()),
         Box::new(MD034NoBareUrls {}),
         Box::new(MD035HRStyle::default()),
@@ -912,7 +912,7 @@ build-backend = \"setuptools.build_meta\"
                     Box::new(MD029OrderedListPrefix::default()),
                     Box::new(MD030ListMarkerSpace::default()),
                     Box::new(MD031BlanksAroundFences {}),
-                    Box::new(MD032BlanksAroundLists {}),
+                    Box::new(MD032BlanksAroundLists::default()),
                     Box::new(MD033NoInlineHtml::default()),
                     Box::new(MD034NoBareUrls {}),
                     Box::new(MD035HRStyle::default()),
@@ -1146,7 +1146,29 @@ build-backend = \"setuptools.build_meta\"
                     let all_rules_reg = rumdl::rules::all_rules(&rumdl_config::Config::default()); // Rename to avoid conflict
                     let registry_reg = rumdl_config::RuleRegistry::from_rules(&all_rules_reg);
                     let sourced_reg = if *defaults {
-                        rumdl_config::SourcedConfig::default()
+                        // For defaults, create a SourcedConfig that includes all rule defaults
+                        let mut default_sourced = rumdl_config::SourcedConfig::default();
+                        
+                        // Add default configurations from all rules
+                        for rule in &all_rules_reg {
+                            if let Some((rule_name, config_value)) = rule.default_config_section() {
+                                if let toml::Value::Table(table) = config_value {
+                                    let mut rule_config = rumdl_config::SourcedRuleConfig::default();
+                                    for (key, value) in table {
+                                        rule_config.values.insert(
+                                            key.clone(),
+                                            rumdl_config::SourcedValue::new(
+                                                value.clone(),
+                                                rumdl_config::ConfigSource::Default,
+                                            ),
+                                        );
+                                    }
+                                    default_sourced.rules.insert(rule_name.to_uppercase(), rule_config);
+                                }
+                            }
+                        }
+                        
+                        default_sourced
                     } else {
                         load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config)
                     };
@@ -1162,25 +1184,40 @@ build-backend = \"setuptools.build_meta\"
                     // --- END CONFIG VALIDATION ---
 
                     // Decide which config to print based on --defaults
-                    let final_sourced_to_print = if *defaults {
-                        rumdl_config::SourcedConfig::default()
-                    } else {
-                        // Reload config if not defaults (necessary because we exited early in 'get' case)
-                        load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config)
-                    };
+                    let final_sourced_to_print = sourced_reg;
 
                     // If --output toml is set, print as valid TOML
                     if output.as_deref() == Some("toml") {
-                        let config_to_print = if *defaults {
-                            rumdl_config::Config::default()
+                        if *defaults {
+                            // For defaults with TOML output, generate a complete default config
+                            let mut default_config = rumdl_config::Config::default();
+                            
+                            // Add all rule default configurations
+                            for rule in &all_rules_reg {
+                                if let Some((rule_name, config_value)) = rule.default_config_section() {
+                                    if let toml::Value::Table(table) = config_value {
+                                        let mut rule_config = rumdl_config::RuleConfig::default();
+                                        rule_config.values = table.into_iter().collect();
+                                        default_config.rules.insert(rule_name.to_uppercase(), rule_config);
+                                    }
+                                }
+                            }
+                            
+                            match toml::to_string_pretty(&default_config) {
+                                Ok(s) => println!("{}", s),
+                                Err(e) => {
+                                    eprintln!("Failed to serialize config to TOML: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
                         } else {
-                            final_sourced_to_print.into()
-                        };
-                        match toml::to_string_pretty(&config_to_print) {
-                            Ok(s) => println!("{}", s),
-                            Err(e) => {
-                                eprintln!("Failed to serialize config to TOML: {}", e);
-                                std::process::exit(1);
+                            let config_to_print: rumdl_config::Config = final_sourced_to_print.into();
+                            match toml::to_string_pretty(&config_to_print) {
+                                Ok(s) => println!("{}", s),
+                                Err(e) => {
+                                    eprintln!("Failed to serialize config to TOML: {}", e);
+                                    std::process::exit(1);
+                                }
                             }
                         }
                     } else {

@@ -82,10 +82,81 @@ lazy_static! {
 /// - Fast path checks before applying more expensive regex operations
 /// - Efficient list item detection
 /// - Pre-computation of code block lines to avoid redundant processing
-#[derive(Debug, Default, Clone)]
-pub struct MD032BlanksAroundLists;
+#[derive(Debug, Clone)]
+pub struct MD032BlanksAroundLists {
+    /// Allow lists to follow headings without blank lines
+    pub allow_after_headings: bool,
+    /// Allow lists to follow content ending with colons without blank lines
+    pub allow_after_colons: bool,
+}
+
+impl Default for MD032BlanksAroundLists {
+    fn default() -> Self {
+        Self {
+            allow_after_headings: true,    // More lenient by default
+            allow_after_colons: true,
+        }
+    }
+}
 
 impl MD032BlanksAroundLists {
+    pub fn strict() -> Self {
+        Self {
+            allow_after_headings: false,
+            allow_after_colons: false,
+        }
+    }
+
+    /// Check if a blank line should be required before a list based on the previous line context
+    fn should_require_blank_line_before(&self, prev_line: &str, structure: &DocumentStructure, prev_line_num: usize) -> bool {
+        let trimmed_prev = prev_line.trim();
+        
+        // Always require blank lines after code blocks, front matter, etc.
+        if structure.is_in_code_block(prev_line_num) || structure.is_in_front_matter(prev_line_num) {
+            return true;
+        }
+
+        // Allow lists after headings if configured
+        if self.allow_after_headings && self.is_heading_line(trimmed_prev) {
+            return false;
+        }
+
+        // Allow lists after content ending with colons if configured
+        if self.allow_after_colons && trimmed_prev.ends_with(':') {
+            return false;
+        }
+
+        // Default: require blank line
+        true
+    }
+
+    /// Check if a line is a heading
+    fn is_heading_line(&self, line: &str) -> bool {
+        // ATX headings - starts with 1-6 # characters followed by space or end of line
+        if line.starts_with('#') {
+            let mut chars = line.chars();
+            chars.next(); // Skip first #
+            
+            // Count additional # characters
+            let mut hash_count = 1;
+            while let Some(ch) = chars.next() {
+                if ch == '#' && hash_count < 6 {
+                    hash_count += 1;
+                } else {
+                    // After the # characters, we should have whitespace or end of line
+                    return ch.is_whitespace() || ch == '\0';
+                }
+            }
+            
+            // If we got here, the line is all # characters (valid heading)
+            return true;
+        }
+        
+        // Could add Setext heading detection here if needed
+        false
+    }
+
+
     // Updated to return blockquote prefix along with block ranges
     fn find_md032_list_blocks(
         &self,
@@ -276,7 +347,9 @@ impl MD032BlanksAroundLists {
                 let prefixes_match = prev_prefix.trim() == prefix.trim();
 
                 // Only require blank lines for content in the same context (same blockquote level)
-                if !is_prev_excluded && !prev_is_blank && prefixes_match {
+                // and when the context actually requires it
+                let should_require = self.should_require_blank_line_before(prev_line_str, structure, prev_line_actual_idx_1);
+                if !is_prev_excluded && !prev_is_blank && prefixes_match && should_require {
                     // Calculate precise character range for the entire list line that needs a blank line before it
                     let (start_line, start_col, end_line, end_col) =
                         calculate_line_range(start_line, lines[start_line - 1]);
@@ -426,9 +499,11 @@ impl Rule for MD032BlanksAroundLists {
                     .find(lines[prev_line_actual_idx_0])
                     .map_or(String::new(), |m| m.as_str().to_string());
 
+                let should_require = self.should_require_blank_line_before(lines[prev_line_actual_idx_0], &structure, prev_line_actual_idx_1);
                 if !is_prev_excluded
                     && !is_blank_in_context(lines[prev_line_actual_idx_0])
                     && prev_prefix == *prefix
+                    && should_require
                 {
                     insertions.insert(start_line, prefix.clone());
                 }
@@ -486,11 +561,35 @@ impl Rule for MD032BlanksAroundLists {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert(
+            "allow_after_headings".to_string(),
+            toml::Value::Boolean(self.allow_after_headings),
+        );
+        map.insert(
+            "allow_after_colons".to_string(),
+            toml::Value::Boolean(self.allow_after_colons),
+        );
+        Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(Self)
+        let allow_after_headings =
+            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_headings")
+                .unwrap_or(true); // Default to true for better UX
+
+        let allow_after_colons =
+            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_colons")
+                .unwrap_or(true);
+
+        Box::new(MD032BlanksAroundLists {
+            allow_after_headings,
+            allow_after_colons,
+        })
     }
 
     fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
@@ -575,13 +674,13 @@ mod tests {
     use crate::rule::Rule;
 
     fn lint(content: &str) -> Vec<LintWarning> {
-        let rule = MD032BlanksAroundLists;
+        let rule = MD032BlanksAroundLists::default();
         let ctx = LintContext::new(content);
         rule.check(&ctx).expect("Lint check failed")
     }
 
     fn fix(content: &str) -> String {
-        let rule = MD032BlanksAroundLists;
+        let rule = MD032BlanksAroundLists::default();
         let ctx = LintContext::new(content);
         rule.fix(&ctx).expect("Lint fix failed")
     }

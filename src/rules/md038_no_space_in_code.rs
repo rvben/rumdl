@@ -27,6 +27,12 @@ use crate::utils::document_structure::{CodeSpan, DocumentStructure, DocumentStru
 #[derive(Debug, Clone)]
 pub struct MD038NoSpaceInCode {
     pub enabled: bool,
+    /// Allow leading/trailing spaces in code spans when they improve readability
+    pub allow_intentional_spaces: bool,
+    /// Allow spaces around single characters (e.g., ` y ` for visibility)
+    pub allow_single_char_spaces: bool,
+    /// Allow spaces in command examples (heuristic: contains common shell indicators)
+    pub allow_command_spaces: bool,
 }
 
 impl Default for MD038NoSpaceInCode {
@@ -37,7 +43,21 @@ impl Default for MD038NoSpaceInCode {
 
 impl MD038NoSpaceInCode {
     pub fn new() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            allow_intentional_spaces: true, // More lenient by default
+            allow_single_char_spaces: true,
+            allow_command_spaces: true,
+        }
+    }
+    
+    pub fn strict() -> Self {
+        Self {
+            enabled: true,
+            allow_intentional_spaces: false,
+            allow_single_char_spaces: false,
+            allow_command_spaces: false,
+        }
     }
 
     /// Extract the actual content between backticks in a code span
@@ -53,14 +73,84 @@ impl MD038NoSpaceInCode {
         if code_content.starts_with(' ') || code_content.ends_with(' ') {
             // Only fix if there's actual content after trimming
             let trimmed = code_content.trim();
-            if !trimmed.is_empty() {
-                let original = format!("`{}`", code_content);
-                let fixed = format!("`{}`", trimmed);
-                return Some((original, fixed));
+            if trimmed.is_empty() {
+                return None; // Don't flag empty code spans
             }
+
+            // Apply heuristics to determine if spaces might be intentional
+            if self.should_allow_spaces(code_content, trimmed) {
+                return None;
+            }
+
+            let original = format!("`{}`", code_content);
+            let fixed = format!("`{}`", trimmed);
+            return Some((original, fixed));
         }
 
         None
+    }
+
+    /// Determine if spaces in a code span should be allowed based on content heuristics
+    fn should_allow_spaces(&self, code_content: &str, trimmed: &str) -> bool {
+        // If intentional spaces are globally allowed, apply heuristics
+        if self.allow_intentional_spaces {
+            // Allow single character with spaces for visibility (e.g., ` y `, ` * `)
+            if self.allow_single_char_spaces && trimmed.len() == 1 {
+                return true;
+            }
+
+            // Allow command examples with spaces
+            if self.allow_command_spaces && self.looks_like_command(trimmed) {
+                return true;
+            }
+
+            // Allow spaces around variable references or file patterns
+            if self.looks_like_variable_or_pattern(trimmed) {
+                return true;
+            }
+
+            // Allow if spaces improve readability for complex content
+            if self.spaces_improve_readability(code_content, trimmed) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Check if content looks like a shell command that benefits from spaces
+    fn looks_like_command(&self, content: &str) -> bool {
+        // Common command patterns
+        let command_indicators = [
+            "git ", "npm ", "cargo ", "docker ", "kubectl ", "pip ", "yarn ",
+            "sudo ", "chmod ", "chown ", "ls ", "cd ", "mkdir ", "rm ",
+            "cp ", "mv ", "cat ", "grep ", "find ", "awk ", "sed ",
+        ];
+        
+        let lower_content = content.to_lowercase();
+        command_indicators.iter().any(|&indicator| lower_content.starts_with(indicator))
+            || content.contains(" -") // Commands with flags
+            || content.contains(" --") // Commands with long flags
+    }
+
+    /// Check if content looks like a variable reference or file pattern
+    fn looks_like_variable_or_pattern(&self, content: &str) -> bool {
+        // Variable patterns: $VAR, ${VAR}, %VAR%, etc.
+        content.starts_with('$') 
+            || content.starts_with('%') && content.ends_with('%')
+            || (content.contains("*") && content.len() > 3) // File patterns like *.txt (must be substantial)
+            || (content.contains("?") && content.len() > 3 && content.contains(".")) // File patterns like file?.txt
+    }
+
+    /// Check if spaces improve readability for complex content
+    fn spaces_improve_readability(&self, _code_content: &str, trimmed: &str) -> bool {
+        // Complex content that benefits from spacing - be more conservative
+        trimmed.len() >= 20 // Only longer content might benefit from spacing
+            || trimmed.contains("://") // URLs
+            || trimmed.contains("->") // Arrows or operators
+            || trimmed.contains("=>") // Lambda arrows
+            || trimmed.contains("&&") || trimmed.contains("||") // Boolean operators
+            || (trimmed.chars().filter(|c| c.is_ascii_punctuation()).count() as f64 / trimmed.len() as f64) > 0.4 // Higher punctuation density threshold
     }
 
     /// Check if the document has any code spans
@@ -238,11 +328,51 @@ impl Rule for MD038NoSpaceInCode {
         Some(self)
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert(
+            "allow_intentional_spaces".to_string(),
+            toml::Value::Boolean(self.allow_intentional_spaces),
+        );
+        map.insert(
+            "allow_single_char_spaces".to_string(),
+            toml::Value::Boolean(self.allow_single_char_spaces),
+        );
+        map.insert(
+            "allow_command_spaces".to_string(),
+            toml::Value::Boolean(self.allow_command_spaces),
+        );
+        Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD038NoSpaceInCode::default())
+        let allow_intentional_spaces = crate::config::get_rule_config_value::<bool>(
+            config,
+            "MD038",
+            "allow_intentional_spaces",
+        ).unwrap_or(true); // Default to true for better UX
+
+        let allow_single_char_spaces = crate::config::get_rule_config_value::<bool>(
+            config,
+            "MD038",
+            "allow_single_char_spaces",
+        ).unwrap_or(true);
+
+        let allow_command_spaces = crate::config::get_rule_config_value::<bool>(
+            config,
+            "MD038",
+            "allow_command_spaces",
+        ).unwrap_or(true);
+
+        Box::new(MD038NoSpaceInCode {
+            enabled: true,
+            allow_intentional_spaces,
+            allow_single_char_spaces,
+            allow_command_spaces,
+        })
     }
 }
 
@@ -273,6 +403,12 @@ mod tests {
             "Multiple `code spans` in `one line` are fine",
             "Code span with `symbols: !@#$%^&*()`",
             "Empty code span `` is technically valid",
+            // New cases that should be allowed with lenient settings
+            "Type ` y ` to confirm.", // Single character with spaces
+            "Use ` git commit -m \"message\" ` to commit.", // Command with spaces
+            "The variable ` $HOME ` contains home path.", // Variable reference
+            "The pattern ` *.txt ` matches text files.", // File pattern
+            "URL example ` https://example.com/very/long/path?query=value&more=params ` here.", // Complex long URL
         ];
         for case in valid_cases {
             let ctx = crate::lint_context::LintContext::new(case);
@@ -288,11 +424,12 @@ mod tests {
     #[test]
     fn test_md038_invalid() {
         let rule = MD038NoSpaceInCode::new();
+        // Cases that should still be flagged even with lenient settings
         let invalid_cases = vec![
-            "This is ` code` with leading space.",
-            "This is `code ` with trailing space.",
-            "This is ` code ` with both leading and trailing space.",
-            "Multiple ` code ` spans with `spaces ` in one line.",
+            "This is ` random word ` with unnecessary spaces.", // Not a command/variable/single char
+            "Text with ` plain text ` should be flagged.", // Just plain text with spaces
+            "Code with ` just code ` here.", // Simple code with spaces
+            "Multiple ` word ` spans with ` text ` in one line.", // Multiple simple cases
         ];
         for case in invalid_cases {
             let ctx = crate::lint_context::LintContext::new(case);
@@ -300,6 +437,30 @@ mod tests {
             assert!(
                 !result.is_empty(),
                 "Invalid case should have warnings: {}",
+                case
+            );
+        }
+    }
+
+    #[test]
+    fn test_md038_strict_mode() {
+        let rule = MD038NoSpaceInCode::strict();
+        // In strict mode, ALL spaces should be flagged
+        let invalid_cases = vec![
+            "Type ` y ` to confirm.", // Single character with spaces
+            "Use ` git commit -m \"message\" ` to commit.", // Command with spaces
+            "The variable ` $HOME ` contains home path.", // Variable reference
+            "The pattern ` *.txt ` matches text files.", // File pattern
+            "This is ` code` with leading space.",
+            "This is `code ` with trailing space.",
+            "This is ` code ` with both leading and trailing space.",
+        ];
+        for case in invalid_cases {
+            let ctx = crate::lint_context::LintContext::new(case);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                !result.is_empty(),
+                "Strict mode should flag all spaces: {}",
                 case
             );
         }

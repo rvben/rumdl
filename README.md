@@ -146,8 +146,8 @@ rumdl check --include "docs/*.md,README.md" .
 # Combine include and exclude patterns
 rumdl check --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
 
-# Ignore gitignore rules
-rumdl check --no-respect-gitignore .
+# Don't respect gitignore files (note: --respect-gitignore defaults to true)
+rumdl check --respect-gitignore=false .
 ```
 
 ## Pre-commit Integration
@@ -205,38 +205,73 @@ rumdl <command> [options] [file or directory...]
 
 ### Commands
 
-- `check`: Lint Markdown files and print warnings/errors (main subcommand)
-  - Options:
-    - `-c, --config <file>`: Use custom configuration file
-    - `--fix`: Automatically fix issues where possible
-    - `-l, --list-rules`: List all available rules
-    - `-d, --disable <rules>`: Disable specific rules (comma-separated)
-    - `-e, --enable <rules>`: Enable only specific rules (comma-separated)
-    - `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
-    - `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
-    - `--no-respect-gitignore`: Don't respect .gitignore files
-    - `-v, --verbose`: Show detailed output
-    - `--profile`: Show profiling information
-    - `-q, --quiet`: Suppress all output except errors
+#### `check [PATHS...]`
 
-- `init`: Create a default `.rumdl.toml` configuration file in the current directory
-  - `--pyproject`: Generate configuration for `pyproject.toml` instead of `.rumdl.toml`
+Lint Markdown files and print warnings/errors (main subcommand)
 
-- `rule [<rule>]`: Show information about a rule or list all rules
-  - If a rule name or ID is provided, shows details for that rule
-  - If no argument is given, lists all available rules
+**Arguments:**
+- `[PATHS...]`: Files or directories to lint. If provided, these paths take precedence over include patterns
 
-- `config [--defaults]`: Show the full effective configuration (default), or only the defaults.
-  - `--defaults`: Show only the default configuration as TOML.
-  - Subcommands:
-    - `get <key>`: Query a specific config key (e.g. `global.exclude` or `MD013.line_length`)
+**Options:**
+- `-f, --fix`: Automatically fix issues where possible
+- `-l, --list-rules`: List all available rules
+- `-d, --disable <rules>`: Disable specific rules (comma-separated)
+- `-e, --enable <rules>`: Enable only specific rules (comma-separated)
+- `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
+- `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
+- `--respect-gitignore`: Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)
+- `-v, --verbose`: Show detailed output
+- `--profile`: Show profiling information
+- `-q, --quiet`: Quiet mode
+- `-o, --output <format>`: Output format: `text` (default) or `json`
+- `--stdin`: Read from stdin instead of files
 
-- `server`: Start the Language Server Protocol server for editor integration
-  - `--port <PORT>`: TCP port to listen on (for debugging)
-  - `--stdio`: Use stdio for communication (default)
-  - `-v, --verbose`: Enable verbose logging
+#### `init [OPTIONS]`
 
-- `version`: Show version information
+Create a default configuration file in the current directory
+
+**Options:**
+- `--pyproject`: Generate configuration for `pyproject.toml` instead of `.rumdl.toml`
+
+#### `rule [<rule>]`
+
+Show information about a rule or list all rules
+
+**Arguments:**
+- `[rule]`: Rule name or ID (optional). If provided, shows details for that rule. If omitted, lists all available rules
+
+#### `config [OPTIONS] [COMMAND]`
+
+Show configuration or query a specific key
+
+**Options:**
+- `--defaults`: Show only the default configuration values
+- `--output <format>`: Output format (e.g. `toml`, `json`)
+
+**Subcommands:**
+- `get <key>`: Query a specific config key (e.g. `global.exclude` or `MD013.line_length`)
+- `file`: Show the absolute path of the configuration file that was loaded
+
+#### `server [OPTIONS]`
+
+Start the Language Server Protocol server for editor integration
+
+**Options:**
+- `--port <PORT>`: TCP port to listen on (for debugging)
+- `--stdio`: Use stdio for communication (default)
+- `-v, --verbose`: Enable verbose logging
+
+#### `version`
+
+Show version information
+
+### Global Options
+
+These options are available for all commands:
+
+- `--color <mode>`: Control colored output: `auto` (default), `always`, `never`
+- `--config <file>`: Path to configuration file
+- `--no-config`: Ignore all configuration files and use built-in defaults
 
 ### Usage Examples
 
@@ -261,6 +296,24 @@ rumdl rule
 
 # Query a specific config key
 rumdl config get global.exclude
+
+# Show the path of the loaded configuration file
+rumdl config file
+
+# Show configuration as JSON instead of the default format
+rumdl config --output json
+
+# Lint content from stdin
+echo "# My Heading" | rumdl check --stdin
+
+# Get JSON output for integration with other tools
+rumdl check --output json README.md
+
+# Disable colors in output
+rumdl check --color never README.md
+
+# Use built-in defaults, ignoring all config files
+rumdl check --no-config README.md
 
 # Show version information
 rumdl version
@@ -425,10 +478,12 @@ Run with `--fix` to automatically fix issues
 
 ### Output Format
 
+#### Text Output (Default)
+
 rumdl uses a consistent output format for all issues:
 
 ```text
-{file}:{line}:{column}: [{rule*id}] {message} [{fix*indicator}]
+{file}:{line}:{column}: [{rule_id}] {message} [{fix_indicator}]
 ```
 
 The output is colorized by default:
@@ -439,6 +494,42 @@ The output is colorized by default:
 - Error messages appear in white
 - Fixable issues are marked with `[*]` in green
 - Fixed issues are marked with `[fixed]` in green
+
+#### JSON Output
+
+For integration with other tools and automation, use `--output json`:
+
+```bash
+rumdl check --output json README.md
+```
+
+This produces structured JSON output:
+
+```json
+{
+  "summary": {
+    "total_files": 1,
+    "files_with_issues": 1,
+    "total_issues": 2,
+    "fixable_issues": 1
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "issues": [
+        {
+          "line": 12,
+          "column": 1,
+          "rule": "MD022",
+          "message": "Headings should be surrounded by blank lines",
+          "fixable": true,
+          "severity": "error"
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## Development
 
