@@ -163,25 +163,65 @@ impl Rule for MD040FencedCodeLanguage {
         let mut in_code_block = false;
         let mut fence_char = None;
         let mut fence_needs_language = false;
+        let mut original_indent = String::new();
 
         let lines: Vec<&str> = content.lines().collect();
-        for line in lines.iter() {
+
+        // Helper function to check if we're in a nested context
+        let is_in_nested_context = |line_idx: usize| -> bool {
+            // Look for blockquote or list context above this line
+            for i in (0..line_idx).rev() {
+                let line = lines.get(i).unwrap_or(&"");
+                let trimmed = line.trim();
+
+                // If we hit a blank line, check if context continues
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                // Check for blockquote markers
+                if line.trim_start().starts_with('>') {
+                    return true;
+                }
+
+                // Check for list markers with sufficient indentation
+                if line.len() - line.trim_start().len() >= 2 {
+                    let after_indent = line.trim_start();
+                    if after_indent.starts_with("- ") || after_indent.starts_with("* ") ||
+                       after_indent.starts_with("+ ") ||
+                       (after_indent.len() > 2 && after_indent.chars().nth(0).unwrap_or(' ').is_ascii_digit() &&
+                        after_indent.chars().nth(1).unwrap_or(' ') == '.' &&
+                        after_indent.chars().nth(2).unwrap_or(' ') == ' ') {
+                        return true;
+                    }
+                }
+
+                // If we find content that's not indented, we're not in nested context
+                if line.starts_with(|c: char| !c.is_whitespace()) {
+                    break;
+                }
+            }
+            false
+        };
+
+        for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
             if let Some(ref current_fence) = fence_char {
                 if trimmed.starts_with(current_fence) {
                     // This is a closing fence
                     if fence_needs_language {
-                        // Remove indentation from closing fence to match opening fence
-                        result.push_str(trimmed);
+                        // Use the same indentation as the opening fence
+                        result.push_str(&format!("{}{}\n", original_indent, trimmed));
                     } else {
-                        // Preserve original indentation for fences that already had language
+                        // Preserve original line as-is
                         result.push_str(line);
+                        result.push('\n');
                     }
-                    result.push('\n');
                     in_code_block = false;
                     fence_char = None;
                     fence_needs_language = false;
+                    original_indent.clear();
                     continue;
                 }
 
@@ -197,14 +237,27 @@ impl Rule for MD040FencedCodeLanguage {
                     };
                     fence_char = Some(fence.to_string());
 
+                    // Capture the original indentation
+                    let line_indent = line[..line.len() - line.trim_start().len()].to_string();
+
                     // Add 'text' as default language for opening fence if no language specified
                     let after_fence = trimmed[fence.len()..].trim();
                     if after_fence.is_empty() {
-                        // Remove indentation when adding language
-                        result.push_str(&format!("{}text\n", fence));
+                        // Decide whether to preserve indentation based on context
+                        let should_preserve_indent = is_in_nested_context(i);
+
+                        if should_preserve_indent {
+                            // Preserve indentation for nested contexts
+                            original_indent = line_indent;
+                            result.push_str(&format!("{}{}text\n", original_indent, fence));
+                        } else {
+                            // Remove indentation for standalone code blocks
+                            original_indent = String::new();
+                            result.push_str(&format!("{}text\n", fence));
+                        }
                         fence_needs_language = true;
                     } else {
-                        // Keep original indentation for fences that already have a language
+                        // Keep original line as-is since it already has a language
                         result.push_str(line);
                         result.push('\n');
                         fence_needs_language = false;
