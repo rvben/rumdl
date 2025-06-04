@@ -240,30 +240,40 @@ impl Rule for MD055TablePipeStyle {
             for line_idx in all_lines {
                 let line = lines[line_idx];
                 if let Some(current_style) = TableUtils::determine_pipe_style(line) {
-                    if current_style != target_style {
+                    // Only flag lines with actual style mismatches
+                    let needs_fixing = current_style != target_style;
+
+                    if needs_fixing {
                         let (start_line, start_col, end_line, end_col) =
                             calculate_line_range(line_idx + 1, line);
 
+                        let message = format!(
+                            "Table pipe style should be {}",
+                            match target_style {
+                                "leading_and_trailing" => "leading and trailing",
+                                "no_leading_or_trailing" => "no leading or trailing",
+                                "leading_only" => "leading only",
+                                "trailing_only" => "trailing only",
+                                _ => target_style,
+                            }
+                        );
+
+                        let fixed_line = self.fix_table_row(line, target_style);
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             severity: Severity::Warning,
-                            message: format!(
-                                "Table pipe style should be {}",
-                                match target_style {
-                                    "leading_and_trailing" => "leading and trailing",
-                                    "no_leading_or_trailing" => "no leading or trailing",
-                                    "leading_only" => "leading only",
-                                    "trailing_only" => "trailing only",
-                                    _ => target_style,
-                                }
-                            ),
+                            message,
                             line: start_line,
                             column: start_col,
                             end_line,
                             end_column: end_col,
                             fix: Some(crate::rule::Fix {
-                                range: line_index.line_col_to_byte_range(line_idx + 1, 1),
-                                replacement: self.fix_table_row(line, target_style),
+                                range: line_index.whole_line_range(line_idx + 1),
+                                replacement: if line_idx < lines.len() - 1 {
+                                    format!("{}\n", fixed_line)
+                                } else {
+                                    fixed_line
+                                },
                             }),
                         });
                     }
