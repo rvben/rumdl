@@ -29,11 +29,26 @@ impl Rule for MD040FencedCodeLanguage {
         let mut in_code_block = false;
         let mut current_fence_marker: Option<String> = None;
 
+        // Pre-compute disabled state to avoid O(n²) complexity
+        let mut is_disabled = false;
+
         for (i, line) in content.lines().enumerate() {
             let trimmed = line.trim();
 
-            // Check if this rule is disabled at this line
-            if crate::rule::is_rule_disabled_at_line(content, self.name(), i) {
+            // Update disabled state incrementally
+            if let Some(rules) = crate::rule::parse_disable_comment(trimmed) {
+                if rules.is_empty() || rules.contains(&self.name()) {
+                    is_disabled = true;
+                }
+            }
+            if let Some(rules) = crate::rule::parse_enable_comment(trimmed) {
+                if rules.is_empty() || rules.contains(&self.name()) {
+                    is_disabled = false;
+                }
+            }
+
+            // Skip processing if rule is disabled
+            if is_disabled {
                 continue;
             }
 
@@ -170,12 +185,26 @@ impl Rule for MD040FencedCodeLanguage {
             false
         };
 
+        // Pre-compute disabled state to avoid O(n²) complexity
+        let mut is_disabled = false;
+
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
-            // Check if this rule is disabled at this line
-            if crate::rule::is_rule_disabled_at_line(content, self.name(), i) {
-                // Rule is disabled, preserve the line as-is
+            // Update disabled state incrementally
+            if let Some(rules) = crate::rule::parse_disable_comment(trimmed) {
+                if rules.is_empty() || rules.contains(&self.name()) {
+                    is_disabled = true;
+                }
+            }
+            if let Some(rules) = crate::rule::parse_enable_comment(trimmed) {
+                if rules.is_empty() || rules.contains(&self.name()) {
+                    is_disabled = false;
+                }
+            }
+
+            // Skip processing if rule is disabled, preserve the line as-is
+            if is_disabled {
                 result.push_str(line);
                 result.push('\n');
                 continue;

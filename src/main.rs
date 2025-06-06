@@ -1879,23 +1879,23 @@ fn process_file(
                 });
 
                 if has_non_disabled_warnings {
-                    let ctx = LintContext::new(&content);
-                    match rule.fix(&ctx) {
-                        Ok(fixed_content) => {
-                            if fixed_content != content {
-                                content = fixed_content;
-                                // Apply fixes for this rule - we consider all warnings for the rule fixed
+                let ctx = LintContext::new(&content);
+                match rule.fix(&ctx) {
+                    Ok(fixed_content) => {
+                        if fixed_content != content {
+                            content = fixed_content;
+                            // Apply fixes for this rule - we consider all warnings for the rule fixed
                                 warnings_fixed += rule_warnings.len();
-                            }
                         }
-                        Err(err) => {
-                            if !quiet {
-                                eprintln!(
-                                    "{} Failed to apply fix for rule {}: {}",
-                                    "Warning:".yellow().bold(),
-                                    rule.name(),
-                                    err
-                                );
+                    }
+                    Err(err) => {
+                        if !quiet {
+                            eprintln!(
+                                "{} Failed to apply fix for rule {}: {}",
+                                "Warning:".yellow().bold(),
+                                rule.name(),
+                                err
+                            );
                             }
                         }
                     }

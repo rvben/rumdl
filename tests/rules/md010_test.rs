@@ -21,12 +21,12 @@ fn test_leading_hard_tabs() {
     assert_eq!(result[0].line, 1);
     assert_eq!(
         result[0].message,
-        "Found leading hard tab, use 4 spaces instead"
+        "Found leading tab, use 4 spaces instead"
     );
     assert_eq!(result[1].line, 2);
     assert_eq!(
         result[1].message,
-        "Found 2 leading hard tabs, use 8 spaces instead"
+        "Found 2 leading tabs, use 8 spaces instead"
     );
 }
 
@@ -40,7 +40,7 @@ fn test_alignment_tabs() {
     assert_eq!(result[0].line, 1);
     assert_eq!(
         result[0].message,
-        "Found hard tab for alignment, use spaces instead"
+        "Found tab for alignment, use spaces instead"
     );
 }
 
@@ -52,7 +52,7 @@ fn test_empty_line_tabs() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // One warning per line (grouped consecutive tabs)
     assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].message, "Empty line contains 2 hard tabs");
+    assert_eq!(result[0].message, "Empty line contains 2 tabs");
 }
 
 #[test]

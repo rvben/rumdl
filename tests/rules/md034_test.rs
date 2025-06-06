@@ -418,10 +418,10 @@ fn test_bare_email_addresses() {
 
     assert!(result[0]
         .message
-        .contains("Bare email address found"));
+        .contains("Email address without angle brackets or link formatting"));
     assert!(result[1]
         .message
-        .contains("Bare email address found"));
+        .contains("Email address without angle brackets or link formatting"));
 
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
@@ -476,7 +476,7 @@ fn test_email_addresses_various_formats() {
             assert!(
                 result
                     .iter()
-                    .any(|w| w.message.contains("Bare email address found")),
+                    .any(|w| w.message.contains("Email address without angle brackets or link formatting")),
                 "Email detection failed for: {}",
                 content
             );
@@ -531,7 +531,7 @@ fn test_localhost_urls() {
         "Localhost URLs should be flagged as bare URLs"
     );
     assert!(
-        result.iter().any(|w| w.message.contains("Bare URL found")),
+        result.iter().any(|w| w.message.contains("URL without angle brackets or link formatting")),
         "Localhost URL detection failed"
     );
 
@@ -573,7 +573,7 @@ fn test_localhost_variations() {
             assert!(
                 result
                     .iter()
-                    .any(|w| w.message.contains("Bare URL found") || w.message.contains("ftp")),
+                    .any(|w| w.message.contains("URL without angle brackets or link formatting")),
                 "Localhost/protocol detection failed for: {}",
                 content
             );
@@ -666,7 +666,7 @@ fn test_mixed_multiline_links_and_bare_urls() {
 
     // Verify the flagged URL is the correct one
     assert!(
-        result[0].message.contains("Bare URL found"),
+        result[0].message.contains("URL without angle brackets or link formatting"),
         "Should flag bare URL with correct message"
     );
 

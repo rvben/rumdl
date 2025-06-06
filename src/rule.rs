@@ -217,7 +217,7 @@ pub fn is_rule_disabled_at_line(content: &str, rule_name: &str, line_num: usize)
 }
 
 /// Parse a disable comment and return the list of rules (empty vec means all rules)
-fn parse_disable_comment(line: &str) -> Option<Vec<&str>> {
+pub fn parse_disable_comment(line: &str) -> Option<Vec<&str>> {
     // Check for rumdl-disable first (preferred syntax)
     if let Some(start) = line.find("<!-- rumdl-disable") {
         let after_prefix = &line[start + "<!-- rumdl-disable".len()..];
@@ -260,7 +260,7 @@ fn parse_disable_comment(line: &str) -> Option<Vec<&str>> {
 }
 
 /// Parse an enable comment and return the list of rules (empty vec means all rules)
-fn parse_enable_comment(line: &str) -> Option<Vec<&str>> {
+pub fn parse_enable_comment(line: &str) -> Option<Vec<&str>> {
     // Check for rumdl-enable first (preferred syntax)
     if let Some(start) = line.find("<!-- rumdl-enable") {
         let after_prefix = &line[start + "<!-- rumdl-enable".len()..];
