@@ -1,5 +1,5 @@
 //!
-//! Rule MD033: No inline HTML
+//! Rule MD033: No HTML tags
 //!
 //! See [docs/md033.md](../../docs/md033.md) for full documentation, configuration, and examples.
 
@@ -238,7 +238,7 @@ impl MD033NoInlineHtml {
                                     column: start_col,
                                     end_line,
                                     end_column: end_col,
-                                    message: format!("Inline HTML found (use Markdown syntax instead)"),
+                                    message: format!("HTML tag found (use Markdown syntax instead)"),
                                     severity: Severity::Warning,
                                     fix: None,
                                 });

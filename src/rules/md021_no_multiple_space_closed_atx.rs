@@ -77,7 +77,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn description(&self) -> &'static str {
-        "Multiple spaces inside hashes on closed ATX style heading"
+        "Multiple spaces inside hashes on closed heading"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -148,22 +148,22 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
 
                 let message = if start_spaces > 1 && end_spaces > 1 {
                     format!(
-                        "Multiple spaces ({} at start, {} at end) inside hashes on closed ATX style heading with {} hashes",
+                        "Multiple spaces ({} at start, {} at end) inside hashes on closed heading (with {} at start and end)",
                         start_spaces,
                         end_spaces,
-                        opening_hashes.as_str().len()
+                        "#".repeat(opening_hashes.as_str().len())
                     )
                 } else if start_spaces > 1 {
                     format!(
-                        "Multiple spaces ({}) after opening hashes on closed ATX style heading with {} hashes",
+                        "Multiple spaces ({}) after {} at start of closed heading",
                         start_spaces,
-                        opening_hashes.as_str().len()
+                        "#".repeat(opening_hashes.as_str().len())
                     )
                 } else {
                     format!(
-                        "Multiple spaces ({}) before closing hashes on closed ATX style heading with {} hashes",
+                        "Multiple spaces ({}) before {} at end of closed heading",
                         end_spaces,
-                        opening_hashes.as_str().len()
+                        "#".repeat(opening_hashes.as_str().len())
                     )
                 };
 

@@ -17,7 +17,7 @@ impl Rule for MD040FencedCodeLanguage {
     }
 
     fn description(&self) -> &'static str {
-        "Fenced code blocks should have a language specified"
+        "Code blocks should have a language specified"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -60,7 +60,7 @@ impl Rule for MD040FencedCodeLanguage {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: "Fenced code block missing language"
+                        message: "Code block (```) missing language"
                             .to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
@@ -123,7 +123,7 @@ impl Rule for MD040FencedCodeLanguage {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: "Fenced code block missing language"
+                            message: "Code block (```) missing language"
                                 .to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {

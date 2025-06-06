@@ -22,7 +22,7 @@ fn test_invalid_closed_atx_headings() {
     assert_eq!(result[0].column, 11);
     assert_eq!(
         result[0].message,
-        "Missing space before closing hashes on closed ATX style heading with 1 hashes"
+        "Missing space before # at end of closed heading"
     );
 }
 
@@ -86,7 +86,7 @@ fn test_heading_with_multiple_hashes() {
     assert_eq!(result.len(), 1);
     assert_eq!(
         result[0].message,
-        "Missing space before closing hashes on closed ATX style heading with 6 hashes"
+        "Missing space before ###### at end of closed heading"
     );
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "###### Heading 6 ######");

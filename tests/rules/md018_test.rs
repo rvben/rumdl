@@ -82,7 +82,7 @@ fn test_heading_with_multiple_hashes() {
     assert_eq!(result.len(), 1);
     assert_eq!(
         result[0].message,
-        "No space after ###### in ATX style heading"
+        "No space after ###### in heading"
     );
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "###### Heading 6");

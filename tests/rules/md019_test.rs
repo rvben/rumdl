@@ -22,7 +22,7 @@ fn test_invalid_atx_headings() {
     assert_eq!(result[0].column, 2);
     assert_eq!(
         result[0].message,
-        "Multiple spaces (2) after # in ATX style heading"
+        "Multiple spaces (2) after # in heading"
     );
 }
 
@@ -86,7 +86,7 @@ fn test_heading_with_multiple_hashes() {
     assert_eq!(result.len(), 1);
     assert_eq!(
         result[0].message,
-        "Multiple spaces (2) after ###### in ATX style heading"
+        "Multiple spaces (2) after ###### in heading"
     );
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "###### Heading 6");
@@ -121,7 +121,7 @@ fn test_many_spaces() {
     assert_eq!(result.len(), 2);
     assert_eq!(
         result[0].message,
-        "Multiple spaces (5) after # in ATX style heading"
+        "Multiple spaces (5) after # in heading"
     );
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "# Heading with many spaces\n## Another heading");

@@ -191,7 +191,7 @@ impl Rule for MD004UnorderedListStyle {
                                     end_line: line,
                                     end_column: col + 1,
                                     message: format!(
-                                        "marker '{}' does not match expected style '{}'",
+                                        "List marker '{}' does not match expected style '{}'",
                                         marker, first
                                     ),
                                     severity: Severity::Warning,
@@ -223,7 +223,7 @@ impl Rule for MD004UnorderedListStyle {
                                 end_line: line,
                                 end_column: col + 1,
                                 message: format!(
-                                    "marker '{}' does not match expected style '{}'",
+                                    "List marker '{}' does not match expected style '{}'",
                                     marker, target_marker
                                 ),
                                 severity: Severity::Warning,

@@ -107,7 +107,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
     }
 
     fn description(&self) -> &'static str {
-        "No space inside hashes on closed ATX style heading"
+        "No space inside hashes on closed heading"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -180,8 +180,8 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     // Missing space at both start and end: #Heading#
                     let opening_hashes = captures.get(2).unwrap();
                     message = format!(
-                        "Missing space inside hashes on closed ATX style heading with {} hashes",
-                        opening_hashes.as_str().len()
+                        "Missing space inside hashes on closed heading (with {} at start and end)",
+                        "#".repeat(opening_hashes.as_str().len())
                     );
                     // Highlight the position right after the opening hashes
                     start_col = opening_hashes.end() + 1;
@@ -190,8 +190,8 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     // Missing space at start: #Heading #
                     let opening_hashes = captures.get(2).unwrap();
                     message = format!(
-                        "Missing space after opening hashes on closed ATX style heading with {} hashes",
-                        opening_hashes.as_str().len()
+                        "Missing space after {} at start of closed heading",
+                        "#".repeat(opening_hashes.as_str().len())
                     );
                     // Highlight the position right after the opening hashes
                     start_col = opening_hashes.end() + 1;
@@ -201,8 +201,8 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     let content = captures.get(3).unwrap();
                     let closing_hashes = captures.get(5).unwrap();
                     message = format!(
-                        "Missing space before closing hashes on closed ATX style heading with {} hashes",
-                        closing_hashes.as_str().len()
+                        "Missing space before {} at end of closed heading",
+                        "#".repeat(closing_hashes.as_str().len())
                     );
                     // Highlight the position right before the closing hashes
                     start_col = content.end() + 1;

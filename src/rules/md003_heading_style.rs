@@ -356,8 +356,21 @@ impl Rule for MD003HeadingStyle {
                     end_line,
                     end_column: end_col,
                     message: format!(
-                        "Heading style should be {:?}, found {:?}",
-                        expected_style, style
+                        "Heading style should be {}, found {}",
+                        match expected_style {
+                            HeadingStyle::Atx => "# Heading",
+                            HeadingStyle::AtxClosed => "# Heading #",
+                            HeadingStyle::Setext1 => "Heading\n=======",
+                            HeadingStyle::Setext2 => "Heading\n-------",
+                            HeadingStyle::Consistent => "consistent with the first heading",
+                        },
+                        match style {
+                            HeadingStyle::Atx => "# Heading",
+                            HeadingStyle::AtxClosed => "# Heading #",
+                            HeadingStyle::Setext1 => "Heading (underlined with =)",
+                            HeadingStyle::Setext2 => "Heading (underlined with -)",
+                            HeadingStyle::Consistent => "consistent style",
+                        }
                     ),
                     severity: Severity::Warning,
                     fix,

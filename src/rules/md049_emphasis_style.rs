@@ -135,8 +135,7 @@ impl Rule for MD049EmphasisStyle {
                             end_line,
                             end_column: end_col,
                             message: format!(
-                                "Emphasis should use {
-            } instead of {}",
+                                "Emphasis should use {} instead of {}",
                                 target_marker, marker
                             ),
                             fix,

@@ -97,8 +97,8 @@ impl Rule for MD050StrongStyle {
                 if !self.is_escaped(line, m.start()) {
                     let text = &line[m.start() + 2..m.end() - 2];
                     let message = match target_style {
-                        StrongStyle::Asterisk => "Strong emphasis should use asterisks",
-                        StrongStyle::Underscore => "Strong emphasis should use underscores",
+                        StrongStyle::Asterisk => "Strong emphasis should use ** instead of __",
+                        StrongStyle::Underscore => "Strong emphasis should use __ instead of **",
                         StrongStyle::Consistent => unreachable!(),
                     };
 

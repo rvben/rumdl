@@ -6,22 +6,22 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    // Pattern to match blockquote lines with multiple spaces after >
+    // Pattern to match quote lines with multiple spaces after >
     static ref BLOCKQUOTE_MULTIPLE_SPACES: Regex = Regex::new(r"^(\s*)>(\s{2,})(.*)$").unwrap();
 
     // New patterns for detecting malformed blockquote attempts where user intent is clear
     static ref MALFORMED_BLOCKQUOTE_PATTERNS: Vec<(Regex, &'static str)> = vec![
         // Double > without space: >>text (looks like nested but missing spaces)
-        (Regex::new(r"^(\s*)>>([^\s>].*|$)").unwrap(), "missing spaces in nested blockquote"),
+        (Regex::new(r"^(\s*)>>([^\s>].*|$)").unwrap(), "missing spaces in nested quote"),
 
         // Triple > without space: >>>text
-        (Regex::new(r"^(\s*)>>>([^\s>].*|$)").unwrap(), "missing spaces in deeply nested blockquote"),
+        (Regex::new(r"^(\s*)>>>([^\s>].*|$)").unwrap(), "missing spaces in deeply nested quote"),
 
         // Space then > then text: > >text (extra > by mistake)
-        (Regex::new(r"^(\s*)>\s+>([^\s>].*|$)").unwrap(), "extra blockquote marker"),
+        (Regex::new(r"^(\s*)>\s+>([^\s>].*|$)").unwrap(), "extra quote marker"),
 
         // Multiple spaces then >: (spaces)>text (indented blockquote without space)
-        (Regex::new(r"^(\s{4,})>([^\s].*|$)").unwrap(), "indented blockquote missing space"),
+        (Regex::new(r"^(\s{4,})>([^\s].*|$)").unwrap(), "indented quote missing space"),
     ];
 }
 
@@ -38,7 +38,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
     }
 
     fn description(&self) -> &'static str {
-        "Multiple spaces after blockquote symbol"
+        "Multiple spaces after quote marker (>)"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -79,7 +79,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: "Multiple spaces after blockquote symbol".to_string(),
+                        message: "Multiple spaces after quote marker (>)".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: {
@@ -111,7 +111,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: format!("Malformed blockquote: {}", description),
+                        message: format!("Malformed quote: {}", description),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: _line_index.line_col_to_byte_range(i + 1, 1),

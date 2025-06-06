@@ -65,7 +65,7 @@ impl Rule for MD048CodeFenceStyle {
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
-                    message: "Code fence style: use tildes instead of backticks".to_string(),
+                    message: "Code fence style: use ~~~ instead of ```".to_string(),
                     line: start_line,
                     column: start_col,
                     end_line,
@@ -88,7 +88,7 @@ impl Rule for MD048CodeFenceStyle {
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
-                    message: "Code fence style: use backticks instead of tildes".to_string(),
+                    message: "Code fence style: use ``` instead of ~~~".to_string(),
                     line: start_line,
                     column: start_col,
                     end_line,

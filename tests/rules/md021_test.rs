@@ -82,7 +82,7 @@ fn test_heading_with_multiple_hashes() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].message, "Multiple spaces (2 at start, 2 at end) inside hashes on closed ATX style heading with 6 hashes");
+    assert_eq!(result[0].message, "Multiple spaces (2 at start, 2 at end) inside hashes on closed heading (with ###### at start and end)");
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "###### Heading 6 ######");
 }
@@ -128,7 +128,7 @@ fn test_multiple_spaces_at_start() {
     assert_eq!(result.len(), 3);
     assert_eq!(
         result[0].message,
-        "Multiple spaces (3) after opening hashes on closed ATX style heading with 1 hashes"
+        "Multiple spaces (3) after # at start of closed heading"
     );
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###");
@@ -143,7 +143,7 @@ fn test_multiple_spaces_at_end() {
     assert_eq!(result.len(), 3);
     assert_eq!(
         result[0].message,
-        "Multiple spaces (3) before closing hashes on closed ATX style heading with 1 hashes"
+        "Multiple spaces (3) before # at end of closed heading"
     );
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###");

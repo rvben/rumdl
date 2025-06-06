@@ -1,4 +1,4 @@
-/// Rule MD010: No hard tabs
+/// Rule MD010: No tabs
 ///
 /// See [docs/md010.md](../../docs/md010.md) for full documentation, configuration, and examples.
 use crate::utils::range_utils::{calculate_match_range, LineIndex};
@@ -135,7 +135,7 @@ impl Rule for MD010NoHardTabs {
     }
 
     fn description(&self) -> &'static str {
-        "No hard tabs"
+        "No tabs"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -178,28 +178,28 @@ impl Rule for MD010NoHardTabs {
 
                 let message = if line.trim().is_empty() {
                     if tab_count == 1 {
-                        "Empty line contains hard tab".to_string()
+                        "Empty line contains tab".to_string()
                     } else {
-                        format!("Empty line contains {} hard tabs", tab_count)
+                        format!("Empty line contains {} tabs", tab_count)
                     }
                 } else if is_leading {
                     if tab_count == 1 {
                         format!(
-                            "Found leading hard tab, use {} spaces instead",
+                            "Found leading tab, use {} spaces instead",
                             self.spaces_per_tab
                         )
                     } else {
                         format!(
-                            "Found {} leading hard tabs, use {} spaces instead",
+                            "Found {} leading tabs, use {} spaces instead",
                             tab_count,
                             tab_count * self.spaces_per_tab
                         )
                     }
                 } else if tab_count == 1 {
-                    "Found hard tab for alignment, use spaces instead".to_string()
+                    "Found tab for alignment, use spaces instead".to_string()
                 } else {
                     format!(
-                        "Found {} hard tabs for alignment, use spaces instead",
+                        "Found {} tabs for alignment, use spaces instead",
                         tab_count
                     )
                 };

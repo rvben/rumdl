@@ -329,7 +329,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                 end_line,
                 end_column: end_col,
                 message: format!(
-                    "Unused link/image reference definition: [{}]",
+                    "Unused link/image reference: [{}]",
                     definition
                 ),
                 severity: Severity::Warning,

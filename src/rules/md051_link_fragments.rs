@@ -16,11 +16,11 @@ lazy_static! {
     static ref MARKDOWN_STRIP: Regex = Regex::new(r"\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*]+)\*|_([^_]+)_|`([^`]+)`|\[([^\]]+)\]\([^)]+\)").unwrap();
 }
 
-/// Rule MD051: Link fragments should match document headings
+/// Rule MD051: Link anchors should match document headings
 ///
 /// See [docs/md051.md](../../docs/md051.md) for full documentation, configuration, and examples.
 ///
-/// This rule is triggered when a link fragment (the part after #) doesn't exist in the document.
+/// This rule is triggered when a link anchor (the part after #) doesn't exist in the document.
 /// This only applies to internal document links, not to external URLs.
 #[derive(Clone)]
 pub struct MD051LinkFragments;
@@ -248,7 +248,7 @@ impl Rule for MD051LinkFragments {
     }
 
     fn description(&self) -> &'static str {
-        "Link fragments should exist"
+        "Link anchors (# references) should exist"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -328,7 +328,7 @@ impl Rule for MD051LinkFragments {
                         end_line,
                         end_column: end_col,
                         message: format!(
-                            "Link fragment '#{}' does not exist in document headings.",
+                            "Link anchor '#{}' does not exist in document headings",
                             fragment
                         ),
                         severity: Severity::Warning,

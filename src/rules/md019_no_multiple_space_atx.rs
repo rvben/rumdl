@@ -55,7 +55,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
     }
 
     fn description(&self) -> &'static str {
-        "Multiple spaces after hash on ATX style heading"
+        "Multiple spaces after hash in heading"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -144,7 +144,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     message: format!(
-                        "Multiple spaces ({}) after {} in ATX style heading",
+                        "Multiple spaces ({}) after {} in heading",
                         spaces,
                         "#".repeat(hashes.as_str().len())
                     ),

@@ -1,4 +1,4 @@
-/// Rule MD034: No bare URLs
+/// Rule MD034: No unformatted URLs
 ///
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
 use crate::rule::{
@@ -226,7 +226,7 @@ impl MD034NoBareUrls {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!("Bare URL found"),
+                message: format!("URL without angle brackets or link formatting"),
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: url_start..url_end,
@@ -290,7 +290,7 @@ impl MD034NoBareUrls {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!("Bare email address found"),
+                message: format!("Email address without angle brackets or link formatting"),
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: email_start..email_end,
@@ -357,7 +357,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Bare URL found"),
+                            message: format!("URL without angle brackets or link formatting"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
@@ -397,7 +397,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Bare email address found (wrap in angle brackets: <email>)"),
+                            message: format!("Email address without angle brackets or link formatting (wrap like: <email>)"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + email_text.len()),
@@ -455,7 +455,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Bare URL found"),
+                            message: format!("URL without angle brackets or link formatting"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
@@ -492,7 +492,7 @@ impl Rule for MD034NoBareUrls {
     }
 
     fn description(&self) -> &'static str {
-        "Bare URL used"
+        "URL without angle brackets or link formatting"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

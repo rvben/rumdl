@@ -130,7 +130,7 @@ impl Rule for MD018NoMissingSpaceAtx {
     }
 
     fn description(&self) -> &'static str {
-        "No space after hash on ATX style heading"
+        "No space after hash in heading"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -228,7 +228,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     message: format!(
-                        "No space after {} in ATX style heading",
+                        "No space after {} in heading",
                         "#".repeat(hashes.as_str().len())
                     ),
                     line: start_line,
@@ -280,7 +280,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message: format!(
-                            "No space after {} in ATX style heading",
+                            "No space after {} in heading",
                             "#".repeat(hashes.as_str().len())
                         ),
                         line: start_line,
