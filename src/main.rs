@@ -1162,7 +1162,7 @@ build-backend = \"setuptools.build_meta\"
                     let sourced_reg = if *defaults {
                         // For defaults, create a SourcedConfig that includes all rule defaults
                         let mut default_sourced = rumdl_config::SourcedConfig::default();
-                        
+
                         // Add default configurations from all rules
                         for rule in &all_rules_reg {
                             if let Some((rule_name, config_value)) = rule.default_config_section() {
@@ -1181,7 +1181,7 @@ build-backend = \"setuptools.build_meta\"
                                 }
                             }
                         }
-                        
+
                         default_sourced
                     } else {
                         load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config)
@@ -1205,7 +1205,7 @@ build-backend = \"setuptools.build_meta\"
                         if *defaults {
                             // For defaults with TOML output, generate a complete default config
                             let mut default_config = rumdl_config::Config::default();
-                            
+
                             // Add all rule default configurations
                             for rule in &all_rules_reg {
                                 if let Some((rule_name, config_value)) = rule.default_config_section() {
@@ -1216,7 +1216,7 @@ build-backend = \"setuptools.build_meta\"
                                     }
                                 }
                             }
-                            
+
                             match toml::to_string_pretty(&default_config) {
                                 Ok(s) => println!("{}", s),
                                 Err(e) => {
@@ -1280,7 +1280,7 @@ build-backend = \"setuptools.build_meta\"
             }
             Some(Commands::Import { file, output, format, dry_run }) => {
                 use rumdl::markdownlint_config;
-                
+
                 // Load the markdownlint config file
                 let ml_config = match markdownlint_config::load_markdownlint_config(file) {
                     Ok(config) => config,
@@ -1292,13 +1292,13 @@ build-backend = \"setuptools.build_meta\"
 
                 // Convert to rumdl config format
                 let fragment = ml_config.map_to_sourced_rumdl_config_fragment(Some(file));
-                
+
                 // Generate the output
                 let output_content = match format.as_str() {
                     "toml" => {
                         // Convert to TOML format
                         let mut output = String::new();
-                        
+
                         // Add global settings if any
                         if !fragment.global.enable.value.is_empty() || !fragment.global.disable.value.is_empty() ||
                            !fragment.global.exclude.value.is_empty() || !fragment.global.include.value.is_empty() ||
@@ -1321,7 +1321,7 @@ build-backend = \"setuptools.build_meta\"
                             }
                             output.push('\n');
                         }
-                        
+
                         // Add rule-specific settings
                         for (rule_name, rule_config) in &fragment.rules {
                             if !rule_config.values.is_empty() {
@@ -1331,7 +1331,7 @@ build-backend = \"setuptools.build_meta\"
                                     if key == "value" && rule_config.values.len() > 1 {
                                         continue;
                                     }
-                                    
+
                                     match &sourced_value.value {
                                         toml::Value::String(s) => output.push_str(&format!("{} = \"{}\"\n", key, s)),
                                         toml::Value::Integer(i) => output.push_str(&format!("{} = {}\n", key, i)),
@@ -1372,7 +1372,7 @@ build-backend = \"setuptools.build_meta\"
                     "json" => {
                         // Convert to JSON format (similar to pyproject.toml structure)
                         let mut json_config = serde_json::Map::new();
-                        
+
                         // Add global settings
                         if !fragment.global.enable.value.is_empty() || !fragment.global.disable.value.is_empty() ||
                            !fragment.global.exclude.value.is_empty() || !fragment.global.include.value.is_empty() ||
@@ -1405,7 +1405,7 @@ build-backend = \"setuptools.build_meta\"
                             }
                             json_config.insert("global".to_string(), serde_json::Value::Object(global));
                         }
-                        
+
                         // Add rule-specific settings
                         for (rule_name, rule_config) in &fragment.rules {
                             if !rule_config.values.is_empty() {
@@ -1418,7 +1418,7 @@ build-backend = \"setuptools.build_meta\"
                                 json_config.insert(rule_name.clone(), serde_json::Value::Object(rule_obj));
                             }
                         }
-                        
+
                         serde_json::to_string_pretty(&json_config).unwrap_or_else(|e| {
                             eprintln!("{}: Failed to serialize to JSON: {}", "Error".red().bold(), e);
                             std::process::exit(1);
@@ -1438,12 +1438,12 @@ build-backend = \"setuptools.build_meta\"
                     let output_path = output.as_deref().unwrap_or(
                         if format == "json" { "rumdl-config.json" } else { ".rumdl.toml" }
                     );
-                    
+
                     if Path::new(output_path).exists() {
                         eprintln!("{}: Output file '{}' already exists", "Error".red().bold(), output_path);
                         std::process::exit(1);
                     }
-                    
+
                     match fs::write(output_path, output_content) {
                         Ok(_) => {
                             println!("Converted markdownlint config from '{}' to '{}'", file, output_path);
@@ -1863,30 +1863,40 @@ fn process_file(
     if _fix {
         // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
         for rule in rules {
-            if all_warnings
+            let rule_warnings: Vec<_> = all_warnings
                 .iter()
-                .any(|w| w.rule_name == Some(rule.name()))
-            {
-                let ctx = LintContext::new(&content);
-                match rule.fix(&ctx) {
-                    Ok(fixed_content) => {
-                        if fixed_content != content {
-                            content = fixed_content;
-                            // Apply fixes for this rule - we consider all warnings for the rule fixed
-                            warnings_fixed += all_warnings
-                                .iter()
-                                .filter(|w| w.rule_name == Some(rule.name()))
-                                .count();
+                .filter(|w| w.rule_name == Some(rule.name()))
+                .collect();
+
+            if !rule_warnings.is_empty() {
+                // Check if any warnings for this rule are in non-disabled regions
+                let has_non_disabled_warnings = rule_warnings.iter().any(|w| {
+                    !rumdl::rule::is_rule_disabled_at_line(
+                        &content,
+                        rule.name(),
+                        w.line.saturating_sub(1), // Convert to 0-based line index
+                    )
+                });
+
+                if has_non_disabled_warnings {
+                    let ctx = LintContext::new(&content);
+                    match rule.fix(&ctx) {
+                        Ok(fixed_content) => {
+                            if fixed_content != content {
+                                content = fixed_content;
+                                // Apply fixes for this rule - we consider all warnings for the rule fixed
+                                warnings_fixed += rule_warnings.len();
+                            }
                         }
-                    }
-                    Err(err) => {
-                        if !quiet {
-                            eprintln!(
-                                "{} Failed to apply fix for rule {}: {}",
-                                "Warning:".yellow().bold(),
-                                rule.name(),
-                                err
-                            );
+                        Err(err) => {
+                            if !quiet {
+                                eprintln!(
+                                    "{} Failed to apply fix for rule {}: {}",
+                                    "Warning:".yellow().bold(),
+                                    rule.name(),
+                                    err
+                                );
+                            }
                         }
                     }
                 }

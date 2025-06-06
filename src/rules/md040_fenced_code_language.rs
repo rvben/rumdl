@@ -1,6 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{
-    CodeBlockType, DocumentStructure, DocumentStructureExtensions,
+    DocumentStructure, DocumentStructureExtensions,
 };
 use crate::utils::range_utils::{calculate_line_range, LineIndex};
 
@@ -27,95 +27,55 @@ impl Rule for MD040FencedCodeLanguage {
         let mut warnings = Vec::new();
 
         let mut in_code_block = false;
-
-        let mut fence_char = None;
+        let mut current_fence_marker: Option<String> = None;
 
         for (i, line) in content.lines().enumerate() {
             let trimmed = line.trim();
 
-            if let Some(ref current_fence) = fence_char {
-                if trimmed.starts_with(current_fence) {
-                    in_code_block = false;
-                    fence_char = None;
-                }
-            } else if !in_code_block && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
-                // Opening fence
-                let fence = if trimmed.starts_with("```") {
-                    "```"
-                } else {
-                    "~~~"
-                };
-                fence_char = Some(fence.to_string());
-
-                // Check if language is specified
-                let after_fence = trimmed[fence.len()..].trim();
-                if after_fence.is_empty() {
-                    // Calculate precise character range for the entire fence line that needs a language
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_line_range(i + 1, line);
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: "Code block (```) missing language"
-                            .to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: {
-                                // Replace just the fence marker with fence+language
-                                let trimmed_start = line.len() - line.trim_start().len();
-                                let fence_len = fence.len();
-                                let line_start_byte = ctx.line_offsets.get(i).copied().unwrap_or(0);
-                                let fence_start_byte = line_start_byte + trimmed_start;
-                                let fence_end_byte = fence_start_byte + fence_len;
-                                fence_start_byte..fence_end_byte
-                            },
-                            replacement: if fence == "```" {
-                                "```text".to_string()
-                            } else {
-                                "~~~text".to_string()
-                            },
-                        }),
-                    });
-                }
-                in_code_block = true;
+            // Check if this rule is disabled at this line
+            if crate::rule::is_rule_disabled_at_line(content, self.name(), i) {
+                continue;
             }
-        }
 
-        Ok(warnings)
-    }
+            if in_code_block {
+                // We're inside a code block, only look for the matching closing fence
+                if let Some(ref fence_marker) = current_fence_marker {
+                    if trimmed.starts_with(fence_marker) && trimmed[fence_marker.len()..].trim().is_empty() {
+                        // This is the closing fence
+                        in_code_block = false;
+                        current_fence_marker = None;
+                    }
+                    // Otherwise, this is just content inside the code block - ignore it
+                }
+            } else {
+                // Check for fence markers (``` or ~~~ with any length >= 3)
+                let fence_marker = if trimmed.starts_with("```") {
+                    // Find the full sequence of backticks
+                    let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
+                    if backtick_count >= 3 {
+                        Some("`".repeat(backtick_count))
+                    } else {
+                        None
+                    }
+                } else if trimmed.starts_with("~~~") {
+                    // Find the full sequence of tildes
+                    let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
+                    if tilde_count >= 3 {
+                        Some("~".repeat(tilde_count))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
-        // Early return if no code blocks
-        if !_doc_structure.has_code_blocks {
-            return Ok(vec![]);
-        }
-
-        let _line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
-
-        // Use the code blocks from document structure
-        for block in &_doc_structure.code_blocks {
-            // Only check fenced code blocks
-            match block.block_type {
-                CodeBlockType::Fenced => {
+                if let Some(fence_marker) = fence_marker {
                     // Check if language is specified
-                    if block.language.as_ref().map_or(true, |lang| lang.is_empty()) {
-                        // Get the opening fence line
-                        let fence_line = content.lines().nth(block.start_line - 1).unwrap_or("");
-
+                    let after_fence = trimmed[fence_marker.len()..].trim();
+                    if after_fence.is_empty() {
                         // Calculate precise character range for the entire fence line that needs a language
                         let (start_line, start_col, end_line, end_col) =
-                            calculate_line_range(block.start_line, fence_line);
+                            calculate_line_range(i + 1, line);
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
@@ -129,30 +89,36 @@ impl Rule for MD040FencedCodeLanguage {
                             fix: Some(Fix {
                                 range: {
                                     // Replace just the fence marker with fence+language
-                                    let trimmed_start = fence_line.len() - fence_line.trim_start().len();
-                                    let fence_len = if fence_line.trim_start().starts_with("```") { 3 } else { 3 };
-                                    let line_start_byte = ctx.line_offsets.get(block.start_line - 1).copied().unwrap_or(0);
+                                    let trimmed_start = line.len() - line.trim_start().len();
+                                    let fence_len = fence_marker.len();
+                                    let line_start_byte = ctx.line_offsets.get(i).copied().unwrap_or(0);
                                     let fence_start_byte = line_start_byte + trimmed_start;
                                     let fence_end_byte = fence_start_byte + fence_len;
                                     fence_start_byte..fence_end_byte
                                 },
-                                replacement: if fence_line.trim_start().starts_with("```") {
-                                    "```text".to_string()
-                                } else {
-                                    "~~~text".to_string()
-                                },
+                                replacement: format!("{}text", fence_marker),
                             }),
                         });
                     }
-                }
-                CodeBlockType::Indented => {
-                    // Indented code blocks don't have languages, so skip them
-                    continue;
+
+                    in_code_block = true;
+                    current_fence_marker = Some(fence_marker);
                 }
             }
         }
 
         Ok(warnings)
+    }
+
+    /// Optimized check using document structure
+    fn check_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> LintResult {
+        // For now, just delegate to the regular check method to ensure consistent behavior
+        // The document structure optimization can be re-added later once the logic is stable
+        self.check(ctx)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -161,7 +127,7 @@ impl Rule for MD040FencedCodeLanguage {
 
         let mut result = String::new();
         let mut in_code_block = false;
-        let mut fence_char = None;
+        let mut current_fence_marker: Option<String> = None;
         let mut fence_needs_language = false;
         let mut original_indent = String::new();
 
@@ -207,41 +173,66 @@ impl Rule for MD040FencedCodeLanguage {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
-            if let Some(ref current_fence) = fence_char {
-                if trimmed.starts_with(current_fence) {
-                    // This is a closing fence
-                    if fence_needs_language {
-                        // Use the same indentation as the opening fence
-                        result.push_str(&format!("{}{}\n", original_indent, trimmed));
-                    } else {
-                        // Preserve original line as-is
-                        result.push_str(line);
-                        result.push('\n');
+            // Check if this rule is disabled at this line
+            if crate::rule::is_rule_disabled_at_line(content, self.name(), i) {
+                // Rule is disabled, preserve the line as-is
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+
+            if in_code_block {
+                // We're inside a code block, only look for the matching closing fence
+                if let Some(ref fence_marker) = current_fence_marker {
+                    if trimmed.starts_with(fence_marker) && trimmed[fence_marker.len()..].trim().is_empty() {
+                        // This is the closing fence
+                        if fence_needs_language {
+                            // Use the same indentation as the opening fence
+                            result.push_str(&format!("{}{}\n", original_indent, trimmed));
+                        } else {
+                            // Preserve original line as-is
+                            result.push_str(line);
+                            result.push('\n');
+                        }
+                        in_code_block = false;
+                        current_fence_marker = None;
+                        fence_needs_language = false;
+                        original_indent.clear();
+                        continue;
                     }
-                    in_code_block = false;
-                    fence_char = None;
-                    fence_needs_language = false;
-                    original_indent.clear();
-                    continue;
                 }
 
                 // This is content inside a code block - keep original indentation
                 result.push_str(line);
                 result.push('\n');
-            } else if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                if !in_code_block {
-                    let fence = if trimmed.starts_with("```") {
-                        "```"
+            } else {
+                // Check for fence markers (``` or ~~~ with any length >= 3)
+                let fence_marker = if trimmed.starts_with("```") {
+                    // Find the full sequence of backticks
+                    let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
+                    if backtick_count >= 3 {
+                        Some("`".repeat(backtick_count))
                     } else {
-                        "~~~"
-                    };
-                    fence_char = Some(fence.to_string());
+                        None
+                    }
+                } else if trimmed.starts_with("~~~") {
+                    // Find the full sequence of tildes
+                    let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
+                    if tilde_count >= 3 {
+                        Some("~".repeat(tilde_count))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
+                if let Some(fence_marker) = fence_marker {
                     // Capture the original indentation
                     let line_indent = line[..line.len() - line.trim_start().len()].to_string();
 
                     // Add 'text' as default language for opening fence if no language specified
-                    let after_fence = trimmed[fence.len()..].trim();
+                    let after_fence = trimmed[fence_marker.len()..].trim();
                     if after_fence.is_empty() {
                         // Decide whether to preserve indentation based on context
                         let should_preserve_indent = is_in_nested_context(i);
@@ -249,11 +240,11 @@ impl Rule for MD040FencedCodeLanguage {
                         if should_preserve_indent {
                             // Preserve indentation for nested contexts
                             original_indent = line_indent;
-                            result.push_str(&format!("{}{}text\n", original_indent, fence));
+                            result.push_str(&format!("{}{}text\n", original_indent, fence_marker));
                         } else {
                             // Remove indentation for standalone code blocks
                             original_indent = String::new();
-                            result.push_str(&format!("{}text\n", fence));
+                            result.push_str(&format!("{}text\n", fence_marker));
                         }
                         fence_needs_language = true;
                     } else {
@@ -262,14 +253,13 @@ impl Rule for MD040FencedCodeLanguage {
                         result.push('\n');
                         fence_needs_language = false;
                     }
+
+                    in_code_block = true;
+                    current_fence_marker = Some(fence_marker);
                 } else {
                     result.push_str(line);
                     result.push('\n');
                 }
-                in_code_block = true;
-            } else {
-                result.push_str(line);
-                result.push('\n');
             }
         }
 
