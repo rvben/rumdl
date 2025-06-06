@@ -87,6 +87,7 @@ enable = ["MD001", "MD003", "MD013", "MD022"]
 - Useful for gradually adopting rumdl or focusing on specific rule categories
 
 **Example CLI usage**:
+
 ```bash
 rumdl check --enable MD001,MD003,MD013 .
 ```
@@ -113,6 +114,7 @@ disable = ["MD013", "MD033", "MD041"]
 - Can be combined with rule-specific configuration to fine-tune behavior
 
 **Example CLI usage**:
+
 ```bash
 rumdl check --disable MD013,MD033 .
 ```
@@ -150,6 +152,7 @@ exclude = [
 - Useful for excluding generated files, dependencies, and temporary files
 
 **Example CLI usage**:
+
 ```bash
 rumdl check --exclude "node_modules,build,*.tmp.md" .
 ```
@@ -180,6 +183,7 @@ include = [
 - Useful for limiting linting to specific documentation areas
 
 **Example CLI usage**:
+
 ```bash
 rumdl check --include "docs/**/*.md,README.md" .
 ```
@@ -210,6 +214,7 @@ respect_gitignore = false  # Ignore .gitignore files
 - Respects `.gitignore` files at any level in the directory tree
 
 **Example CLI usage**:
+
 ```bash
 # Don't respect .gitignore files
 rumdl check --respect-gitignore=false .
@@ -240,6 +245,7 @@ line_length = 120  # Set global line length to 120 characters
 - When importing from markdownlint configs, top-level `line-length` is mapped to this setting
 
 **Example with rule override**:
+
 ```toml
 [global]
 line_length = 100  # Global default
@@ -259,6 +265,7 @@ Settings are applied in the following order (later sources override earlier ones
 ### Example: Precedence in Action
 
 Given this configuration file:
+
 ```toml
 [global]
 disable = ["MD013", "MD033"]
@@ -266,6 +273,7 @@ exclude = ["node_modules", "build"]
 ```
 
 And this command:
+
 ```bash
 rumdl check --disable MD001,MD013 --exclude "temp/**" docs/
 ```
@@ -280,24 +288,30 @@ The final configuration will be:
 rumdl processes files using the following logic:
 
 1. **Start with candidate files**:
-   - If paths are provided via CLI: use those files/directories
-   - Otherwise: recursively scan current directory for `.md` and `.markdown` files
+
+- If paths are provided via CLI: use those files/directories
+- Otherwise: recursively scan current directory for `.md` and `.markdown` files
 
 2. **Apply .gitignore filtering** (if `respect_gitignore = true`):
-   - Skip files/directories listed in `.gitignore` files
+
+- Skip files/directories listed in `.gitignore` files
 
 3. **Apply include patterns** (if specified):
-   - Keep only files matching at least one include pattern
+
+- Keep only files matching at least one include pattern
 
 4. **Apply exclude patterns**:
-   - Remove files matching any exclude pattern
+
+- Remove files matching any exclude pattern
 
 5. **Apply rule filtering**:
-   - Process remaining files with enabled rules only
+
+- Process remaining files with enabled rules only
 
 ### Example: File Selection
 
 Given this configuration:
+
 ```toml
 [global]
 include = ["docs/**/*.md", "README.md"]
