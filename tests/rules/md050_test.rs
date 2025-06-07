@@ -98,3 +98,49 @@ fn test_ignore_emphasis() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
+
+#[test]
+fn test_strong_in_code_spans() {
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+    let content = r#"# Test
+
+This is **bold** text.
+
+In inline code: `__text__` and `**text**` should be ignored.
+
+Also in code blocks:
+
+```markdown
+Use **asterisks** or __underscores__ for bold.
+```
+
+Another **bold** word here.
+"#;
+    
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // Should not detect strong text inside code spans or blocks
+    assert_eq!(result.len(), 0, "Should not detect strong text in code spans or blocks");
+    
+    // Test with underscore preference
+    let rule_underscore = MD050StrongStyle::new(StrongStyle::Underscore);
+    let result_underscore = rule_underscore.check(&ctx).unwrap();
+    
+    // Should only detect the two **bold** outside code
+    assert_eq!(result_underscore.len(), 2, "Should only detect bold text outside code");
+    assert_eq!(result_underscore[0].line, 3); // First **bold**
+    assert_eq!(result_underscore[1].line, 13); // Another **bold**
+    
+    // Test the fix
+    let fixed = rule_underscore.fix(&ctx).unwrap();
+    
+    // Should fix only the bold text outside code
+    assert!(fixed.contains("This is __bold__ text."));
+    assert!(fixed.contains("Another __bold__ word"));
+    
+    // Should NOT fix text inside code
+    assert!(fixed.contains("`__text__`"));
+    assert!(fixed.contains("`**text**`"));
+    assert!(fixed.contains("Use **asterisks** or __underscores__ for bold."));
+}

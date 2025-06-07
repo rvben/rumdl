@@ -1,4 +1,5 @@
 use crate::utils::range_utils::{calculate_match_range, LineIndex};
+use crate::utils::code_block_utils::CodeBlockUtils;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
@@ -26,11 +27,25 @@ impl MD050StrongStyle {
     }
 
     fn detect_style(&self, content: &str) -> Option<StrongStyle> {
-        // Find the first occurrence of either style
+        // Detect all code blocks and code spans
+        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
+        
+        // Find the first occurrence of either style that's not in a code block
+        let mut first_asterisk = None;
+        for m in ASTERISK_PATTERN.find_iter(content) {
+            if !CodeBlockUtils::is_in_code_block_or_span(&code_blocks, m.start()) {
+                first_asterisk = Some(m);
+                break;
+            }
+        }
 
-        let first_asterisk = ASTERISK_PATTERN.find(content);
-
-        let first_underscore = UNDERSCORE_PATTERN.find(content);
+        let mut first_underscore = None;
+        for m in UNDERSCORE_PATTERN.find_iter(content) {
+            if !CodeBlockUtils::is_in_code_block_or_span(&code_blocks, m.start()) {
+                first_underscore = Some(m);
+                break;
+            }
+        }
 
         match (first_asterisk, first_underscore) {
             (Some(a), Some(u)) => {
@@ -80,6 +95,9 @@ impl Rule for MD050StrongStyle {
         let _line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
+        
+        // Detect all code blocks and code spans
+        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
         let target_style = match self.style {
             StrongStyle::Consistent => self.detect_style(content).unwrap_or(StrongStyle::Asterisk),
@@ -91,9 +109,20 @@ impl Rule for MD050StrongStyle {
             StrongStyle::Underscore => &*ASTERISK_PATTERN,
             StrongStyle::Consistent => unreachable!(),
         };
+        
+        // Track byte position for each line
+        let mut byte_pos = 0;
 
         for (line_num, line) in content.lines().enumerate() {
             for m in strong_regex.find_iter(line) {
+                // Calculate the byte position of this match in the document
+                let match_byte_pos = byte_pos + m.start();
+                
+                // Skip if this strong text is inside a code block or code span
+                if CodeBlockUtils::is_in_code_block_or_span(&code_blocks, match_byte_pos) {
+                    continue;
+                }
+                
                 if !self.is_escaped(line, m.start()) {
                     let text = &line[m.start() + 2..m.end() - 2];
                     let message = match target_style {
@@ -129,6 +158,9 @@ impl Rule for MD050StrongStyle {
                     });
                 }
             }
+            
+            // Update byte position for next line
+            byte_pos += line.len() + 1; // +1 for newline
         }
 
         Ok(warnings)
@@ -136,7 +168,9 @@ impl Rule for MD050StrongStyle {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        
+        // Detect all code blocks and code spans
+        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
         let target_style = match self.style {
             StrongStyle::Consistent => self.detect_style(content).unwrap_or(StrongStyle::Asterisk),
@@ -153,6 +187,7 @@ impl Rule for MD050StrongStyle {
 
         let matches: Vec<(usize, usize)> = strong_regex
             .find_iter(content)
+            .filter(|m| !CodeBlockUtils::is_in_code_block_or_span(&code_blocks, m.start()))
             .filter(|m| !self.is_escaped(content, m.start()))
             .map(|m| (m.start(), m.end()))
             .collect();

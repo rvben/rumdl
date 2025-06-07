@@ -231,6 +231,134 @@ impl MD046CodeBlockStyle {
         false
     }
 
+    fn check_unclosed_code_blocks(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _line_index: &LineIndex,
+    ) -> Result<Vec<LintWarning>, LintError> {
+        let mut warnings = Vec::new();
+        let lines: Vec<&str> = ctx.content.lines().collect();
+        let mut fence_stack: Vec<(String, usize, usize, bool, bool)> = Vec::new(); // (fence_marker, fence_length, opening_line, flagged_for_nested, is_markdown_example)
+        
+        // Track if we're inside a markdown code block (for documentation examples)
+        let mut in_markdown_block = false;
+        let mut markdown_block_depth = 0;
+
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+
+            // Check for fence markers (``` or ~~~)
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
+
+                // Count the fence length
+                let fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
+                
+                // Check if this is a markdown code block start
+                let after_fence = &trimmed[fence_length..];
+                let lang_info = after_fence.trim().to_lowercase();
+                if lang_info.starts_with("markdown") || lang_info.starts_with("md") {
+                    in_markdown_block = true;
+                    markdown_block_depth = fence_stack.len();
+                }
+
+                // Check if this is a closing fence for the current open fence
+                if let Some((open_marker, open_length, _open_line, _flagged, _is_md)) = fence_stack.last() {
+                    // Must match fence character and have at least as many characters
+                    if fence_char == open_marker.chars().next().unwrap() && fence_length >= *open_length {
+                        // Check if this line has only whitespace after the fence marker
+                        let after_fence = &trimmed[fence_length..];
+                        if after_fence.trim().is_empty() {
+                            // This is a valid closing fence
+                            let _popped = fence_stack.pop();
+                            
+                            // Check if we're exiting a markdown block
+                            if in_markdown_block && fence_stack.len() == markdown_block_depth {
+                                in_markdown_block = false;
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                                // This is an opening fence (has content after marker or no matching open fence)
+                let after_fence = &trimmed[fence_length..];
+                if !after_fence.trim().is_empty() || fence_stack.is_empty() {
+                    // Only flag as problematic if we're opening a new fence while another is still open
+                    // AND they use the same fence character (indicating potential confusion)
+                    // BUT skip this check if we're inside a markdown example block
+                                        let has_nested_issue = if !in_markdown_block {
+                        if let Some((open_marker, open_length, open_line, _, _)) = fence_stack.last_mut() {
+                            if fence_char == open_marker.chars().next().unwrap() && fence_length >= *open_length {
+                                // This is problematic - same fence character used with equal or greater length while another is open
+                                let (opening_start_line, opening_start_col, opening_end_line, opening_end_col) =
+                                    calculate_line_range(*open_line, &lines[*open_line - 1]);
+
+                                // Calculate the byte position to insert closing fence before this line
+                                let line_start_byte = ctx.content.lines().take(i).map(|l| l.len() + 1).sum::<usize>();
+
+                                warnings.push(LintWarning {
+                                    rule_name: Some(self.name()),
+                                    line: opening_start_line,
+                                    column: opening_start_col,
+                                    end_line: opening_end_line,
+                                    end_column: opening_end_col,
+                                    message: format!("Code block '{}' should be closed before starting new one at line {}",
+                                                   open_marker, i + 1),
+                                    severity: Severity::Warning,
+                                    fix: Some(Fix {
+                                        range: (line_start_byte..line_start_byte),
+                                        replacement: format!("{}\n\n", open_marker),
+                                    }),
+                                });
+
+                                // Mark the current fence as flagged for nested issue
+                                fence_stack.last_mut().unwrap().3 = true;
+                                true // We flagged a nested issue for this fence
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    // Add this fence to the stack
+                    let fence_marker = fence_char.to_string().repeat(fence_length);
+                    fence_stack.push((fence_marker, fence_length, i + 1, has_nested_issue, in_markdown_block));
+                }
+            }
+        }
+
+        // Check for unclosed fences at end of file
+        // Only flag unclosed if we haven't already flagged for nested issues
+        // AND if they're not inside markdown example blocks
+        for (fence_marker, _, opening_line, flagged_for_nested, is_in_markdown_example) in fence_stack {
+            if !flagged_for_nested && !is_in_markdown_example {
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_line_range(opening_line, lines[opening_line - 1]);
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: format!("Code block opened with '{}' but never closed", fence_marker),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: (ctx.content.len()..ctx.content.len()),
+                        replacement: format!("\n{}", fence_marker),
+                    }),
+                });
+            }
+        }
+
+        Ok(warnings)
+    }
+
     fn detect_style(&self, content: &str) -> Option<CodeBlockStyle> {
         // Empty content has no style
         if content.is_empty() {
@@ -287,7 +415,7 @@ impl Rule for MD046CodeBlockStyle {
         Some(self)
     }
 
-    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         // Early return for empty content
         if ctx.content.is_empty() {
             return Ok(Vec::new());
@@ -301,7 +429,16 @@ impl Rule for MD046CodeBlockStyle {
             return Ok(Vec::new());
         }
 
-        // Try optimized path first, fallback to regular method
+        // First, always check for unclosed code blocks
+        let line_index = LineIndex::new(ctx.content.to_string());
+        let unclosed_warnings = self.check_unclosed_code_blocks(ctx, &line_index)?;
+
+        // If we found unclosed blocks, return those warnings first
+        if !unclosed_warnings.is_empty() {
+            return Ok(unclosed_warnings);
+        }
+
+        // Try optimized path for style consistency checks
         let structure = DocumentStructure::new(ctx.content);
         if self.has_relevant_elements(ctx, &structure) {
             return self.check_with_structure(ctx, &structure);
@@ -314,6 +451,27 @@ impl Rule for MD046CodeBlockStyle {
         let content = ctx.content;
         if content.is_empty() {
             return Ok(String::new());
+        }
+
+        // First check if we have nested fence issues that need special handling
+        let line_index = LineIndex::new(ctx.content.to_string());
+        let unclosed_warnings = self.check_unclosed_code_blocks(ctx, &line_index)?;
+
+        // If we have nested fence warnings, apply those fixes first
+        if !unclosed_warnings.is_empty() {
+            // Check if any warnings are about nested fences (not just unclosed blocks)
+            for warning in &unclosed_warnings {
+                if warning.message.contains("should be closed before starting new one at line") {
+                    // Apply the nested fence fix
+                    if let Some(fix) = &warning.fix {
+                        let mut result = String::new();
+                        result.push_str(&content[..fix.range.start]);
+                        result.push_str(&fix.replacement);
+                        result.push_str(&content[fix.range.start..]);
+                        return Ok(result);
+                    }
+                }
+            }
         }
 
         let lines: Vec<&str> = content.lines().collect();
@@ -423,6 +581,12 @@ impl Rule for MD046CodeBlockStyle {
             result.push_str("```\n");
         }
 
+        // Close any unclosed fenced blocks
+        if in_fenced_block && fenced_fence_type.is_some() {
+            result.push_str(fenced_fence_type.unwrap());
+            result.push('\n');
+        }
+
         // Remove trailing newline if original didn't have one
         if !content.ends_with('\n') && result.ends_with('\n') {
             result.pop();
@@ -436,7 +600,7 @@ impl Rule for MD046CodeBlockStyle {
         RuleCategory::CodeBlock
     }
 
-    /// Check if this rule should be skipped
+        /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or unlikely to contain code blocks
         ctx.content.is_empty()
@@ -455,6 +619,15 @@ impl Rule for MD046CodeBlockStyle {
             return Ok(Vec::new());
         }
 
+        // First, always check for unclosed code blocks and nested fences
+        let line_index = LineIndex::new(ctx.content.to_string());
+        let unclosed_warnings = self.check_unclosed_code_blocks(ctx, &line_index)?;
+
+        // If we found unclosed blocks or nested fences, return those warnings first
+        if !unclosed_warnings.is_empty() {
+            return Ok(unclosed_warnings);
+        }
+
         if !self.has_relevant_elements(ctx, structure) {
             return Ok(Vec::new());
         }
@@ -468,6 +641,8 @@ impl Rule for MD046CodeBlockStyle {
         if structure.code_blocks.is_empty() {
             return Ok(Vec::new());
         }
+
+
 
         // Analyze code blocks in the content to determine what types are present
         // If all blocks are fenced and target style is fenced, or all blocks are indented and target style is indented, return empty

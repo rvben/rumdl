@@ -93,3 +93,52 @@ fn test_no_code_blocks() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
+
+#[test]
+fn test_nested_code_blocks() {
+    let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+    let content = r#"# Documentation
+
+Here's how to use code blocks in markdown:
+
+````markdown
+You can use backticks:
+
+```javascript
+console.log("Hello");
+```
+
+Or tildes:
+
+~~~python
+print("Hello")
+~~~
+````
+
+The outer block uses backticks.
+"#;
+    
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // Should only check the outer fence markers, not the ones inside
+    assert_eq!(result.len(), 0, "Should not flag fences inside code blocks");
+    
+    // Test with tilde preference
+    let rule_tilde = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+    let result_tilde = rule_tilde.check(&ctx).unwrap();
+    
+    // Should flag the outer backtick fences (opening and closing)
+    assert_eq!(result_tilde.len(), 2, "Should flag outer backtick fences");
+    
+    // Test the fix
+    let fixed = rule_tilde.fix(&ctx).unwrap();
+    
+    // Should fix only the outer fences
+    assert!(fixed.contains("~~~~markdown"));
+    assert!(fixed.contains("~~~~\n\nThe outer"));
+    
+    // Should NOT fix the inner fences
+    assert!(fixed.contains("```javascript"));
+    assert!(fixed.contains("~~~python"));
+}

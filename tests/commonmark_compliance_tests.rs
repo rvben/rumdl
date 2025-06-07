@@ -101,10 +101,13 @@ fn verify_commonmark_elements(content: &str, filename: &str) {
             assert!(content.contains("- Nested"), "Missing nested list items");
         }
         "code-blocks.md" => {
-            // Verify code blocks are preserved
-            assert!(content.contains("```"), "Missing code block markers");
+            // Verify code blocks are preserved (either backticks or tildes are valid)
             assert!(
-                content.contains("```rust"),
+                content.contains("```") || content.contains("~~~"),
+                "Missing code block markers"
+            );
+            assert!(
+                content.contains("```rust") || content.contains("~~~rust"),
                 "Missing code block with language"
             );
             assert!(content.contains("println!"), "Missing code block content");
@@ -239,8 +242,11 @@ fn verify_document_structure(content: &str) {
     );
     assert!(content.contains("1. Ordered"), "Missing ordered list items");
 
-    // Verify code blocks
-    assert!(content.contains("```rust"), "Missing code block");
+    // Verify code blocks (either backticks or tildes are valid)
+    assert!(
+        content.contains("```rust") || content.contains("~~~rust"),
+        "Missing code block"
+    );
     assert!(content.contains("println!"), "Missing code block content");
 
     // Verify front matter is preserved or properly handled

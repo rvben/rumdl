@@ -359,6 +359,7 @@ rumdl provides seamless compatibility with existing markdownlint configurations:
 - `markdownlint.json` / `markdownlint.yaml`
 
 **Explicit Import**: Convert markdownlint configs to rumdl format:
+
 ```bash
 # Convert to .rumdl.toml
 rumdl import .markdownlint.json

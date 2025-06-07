@@ -16,10 +16,6 @@ lazy_static! {
 pub struct MD031BlanksAroundFences;
 
 impl MD031BlanksAroundFences {
-    fn is_code_fence_line(line: &str) -> bool {
-        line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~")
-    }
-
     fn is_empty_line(line: &str) -> bool {
         line.trim().is_empty()
     }
@@ -42,69 +38,98 @@ impl Rule for MD031BlanksAroundFences {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
-
         let lines: Vec<&str> = content.lines().collect();
 
+        let mut in_code_block = false;
+        let mut current_fence_marker: Option<String> = None;
         let mut i = 0;
 
         while i < lines.len() {
-            if Self::is_code_fence_line(lines[i]) {
-                // Check for blank line before fence
-                if i > 0 && !Self::is_empty_line(lines[i - 1]) {
-                    // Calculate precise character range for the entire fence line that needs a blank line before it
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_line_range(i + 1, lines[i]);
+            let line = lines[i];
+            let trimmed = line.trim_start();
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: "No blank line before fenced code block".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
-                            replacement: "\n".to_string(),
-                        }),
-                    });
+            // Determine fence marker if this is a fence line
+            let fence_marker = if trimmed.starts_with("```") {
+                let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
+                if backtick_count >= 3 {
+                    Some("`".repeat(backtick_count))
+                } else {
+                    None
                 }
-
-                // Find closing fence
-                let _opening_fence = i;
-                i += 1;
-                while i < lines.len() && !Self::is_code_fence_line(lines[i]) {
-                    i += 1;
+            } else if trimmed.starts_with("~~~") {
+                let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
+                if tilde_count >= 3 {
+                    Some("~".repeat(tilde_count))
+                } else {
+                    None
                 }
+            } else {
+                None
+            };
 
-                // If we found a closing fence
-                if i < lines.len() {
-                    // Check for blank line after fence
-                    if i + 1 < lines.len() && !Self::is_empty_line(lines[i + 1]) {
-                        // Calculate precise character range for the entire fence line that needs a blank line after it
-                        let (start_line_fence, start_col_fence, end_line_fence, end_col_fence) =
+            if let Some(fence_marker) = fence_marker {
+                if in_code_block {
+                    // We're inside a code block, check if this closes it
+                    if let Some(ref current_marker) = current_fence_marker {
+                        if trimmed.starts_with(current_marker) &&
+                           trimmed[current_marker.len()..].trim().is_empty() {
+                            // This closes the current code block
+                            in_code_block = false;
+                            current_fence_marker = None;
+
+                            // Check for blank line after closing fence
+                            if i + 1 < lines.len() && !Self::is_empty_line(lines[i + 1]) {
+                                let (start_line, start_col, end_line, end_col) =
+                                    calculate_line_range(i + 1, lines[i]);
+
+                                warnings.push(LintWarning {
+                                    rule_name: Some(self.name()),
+                                    line: start_line,
+                                    column: start_col,
+                                    end_line,
+                                    end_column: end_col,
+                                    message: "No blank line after fenced code block".to_string(),
+                                    severity: Severity::Warning,
+                                    fix: Some(Fix {
+                                        range: line_index
+                                            .line_col_to_byte_range_with_length(i + 1, lines[i].len() + 1, 0),
+                                        replacement: "\n".to_string(),
+                                    }),
+                                });
+                            }
+                        }
+                        // else: This is content inside a code block (different fence marker), ignore
+                    }
+                } else {
+                    // We're outside a code block, this opens one
+                    in_code_block = true;
+                    current_fence_marker = Some(fence_marker);
+
+                    // Check for blank line before opening fence
+                    if i > 0 && !Self::is_empty_line(lines[i - 1]) {
+                        let (start_line, start_col, end_line, end_col) =
                             calculate_line_range(i + 1, lines[i]);
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
-                            line: start_line_fence,
-                            column: start_col_fence,
-                            end_line: end_line_fence,
-                            end_column: end_col_fence,
-                            message: "No blank line after fenced code block".to_string(),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: "No blank line before fenced code block".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: _line_index
-                                    .line_col_to_byte_range_with_length(i + 1, lines[i].len() + 1, 0),
+                                range: line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
                                 replacement: "\n".to_string(),
                             }),
                         });
                     }
                 }
             }
+            // If we're inside a code block, ignore all content lines
             i += 1;
         }
 
@@ -121,41 +146,76 @@ impl Rule for MD031BlanksAroundFences {
         let lines: Vec<&str> = content.lines().collect();
 
         let mut result = Vec::new();
+        let mut in_code_block = false;
+        let mut current_fence_marker: Option<String> = None;
 
         let mut i = 0;
 
         while i < lines.len() {
-            if Self::is_code_fence_line(lines[i]) {
-                // Add blank line before fence if needed
-                if i > 0 && !Self::is_empty_line(lines[i - 1]) {
-                    result.push(String::new());
+            let line = lines[i];
+            let trimmed = line.trim_start();
+
+            // Determine fence marker if this is a fence line
+            let fence_marker = if trimmed.starts_with("```") {
+                let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
+                if backtick_count >= 3 {
+                    Some("`".repeat(backtick_count))
+                } else {
+                    None
                 }
-
-                // Add opening fence
-                result.push(lines[i].to_string());
-
-                // Find and add content within code block
-                let mut j = i + 1;
-                while j < lines.len() && !Self::is_code_fence_line(lines[j]) {
-                    result.push(lines[j].to_string());
-                    j += 1;
+            } else if trimmed.starts_with("~~~") {
+                let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
+                if tilde_count >= 3 {
+                    Some("~".repeat(tilde_count))
+                } else {
+                    None
                 }
+            } else {
+                None
+            };
 
-                // Add closing fence if found
-                if j < lines.len() {
-                    result.push(lines[j].to_string());
+            if let Some(fence_marker) = fence_marker {
+                if in_code_block {
+                    // We're inside a code block, check if this closes it
+                    if let Some(ref current_marker) = current_fence_marker {
+                        if trimmed.starts_with(current_marker) &&
+                           trimmed[current_marker.len()..].trim().is_empty() {
+                            // This closes the current code block
+                            result.push(line.to_string());
+                            in_code_block = false;
+                            current_fence_marker = None;
 
-                    // Add blank line after fence if needed
-                    if j + 1 < lines.len() && !Self::is_empty_line(lines[j + 1]) {
+                            // Add blank line after closing fence if needed
+                            if i + 1 < lines.len() && !Self::is_empty_line(lines[i + 1]) {
+                                result.push(String::new());
+                            }
+                        } else {
+                            // This is content inside a code block (different fence marker)
+                            result.push(line.to_string());
+                        }
+                    } else {
+                        // This shouldn't happen, but preserve as content
+                        result.push(line.to_string());
+                    }
+                } else {
+                    // We're outside a code block, this opens one
+                    in_code_block = true;
+                    current_fence_marker = Some(fence_marker);
+
+                    // Add blank line before fence if needed
+                    if i > 0 && !Self::is_empty_line(lines[i - 1]) {
                         result.push(String::new());
                     }
 
-                    i = j;
-                } else {
-                    i = j;
+                    // Add opening fence
+                    result.push(line.to_string());
                 }
+            } else if in_code_block {
+                // We're inside a code block, preserve content as-is
+                result.push(line.to_string());
             } else {
-                result.push(lines[i].to_string());
+                // We're outside code blocks, normal processing
+                result.push(line.to_string());
             }
             i += 1;
         }

@@ -28,6 +28,7 @@ impl Rule for MD040FencedCodeLanguage {
 
         let mut in_code_block = false;
         let mut current_fence_marker: Option<String> = None;
+        let mut opening_fence_indent: usize = 0;
 
         // Pre-compute disabled state to avoid O(n²) complexity
         let mut is_disabled = false;
@@ -52,39 +53,44 @@ impl Rule for MD040FencedCodeLanguage {
                 continue;
             }
 
-            if in_code_block {
-                // We're inside a code block, only look for the matching closing fence
-                if let Some(ref fence_marker) = current_fence_marker {
-                    if trimmed.starts_with(fence_marker) && trimmed[fence_marker.len()..].trim().is_empty() {
-                        // This is the closing fence
-                        in_code_block = false;
-                        current_fence_marker = None;
-                    }
-                    // Otherwise, this is just content inside the code block - ignore it
-                }
-            } else {
-                // Check for fence markers (``` or ~~~ with any length >= 3)
-                let fence_marker = if trimmed.starts_with("```") {
-                    // Find the full sequence of backticks
-                    let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
-                    if backtick_count >= 3 {
-                        Some("`".repeat(backtick_count))
-                    } else {
-                        None
-                    }
-                } else if trimmed.starts_with("~~~") {
-                    // Find the full sequence of tildes
-                    let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
-                    if tilde_count >= 3 {
-                        Some("~".repeat(tilde_count))
-                    } else {
-                        None
-                    }
+            // Determine fence marker if this is a fence line
+            let fence_marker = if trimmed.starts_with("```") {
+                let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
+                if backtick_count >= 3 {
+                    Some("`".repeat(backtick_count))
                 } else {
                     None
-                };
+                }
+            } else if trimmed.starts_with("~~~") {
+                let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
+                if tilde_count >= 3 {
+                    Some("~".repeat(tilde_count))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
-                if let Some(fence_marker) = fence_marker {
+                        if let Some(fence_marker) = fence_marker {
+                if in_code_block {
+                    // We're inside a code block, check if this closes it
+                    if let Some(ref current_marker) = current_fence_marker {
+                        let current_indent = line.len() - line.trim_start().len();
+                        // Only close if the fence marker exactly matches the opening marker AND has no content after
+                        // AND the indentation is not greater than the opening fence
+                        if fence_marker == *current_marker &&
+                           trimmed[current_marker.len()..].trim().is_empty() &&
+                           current_indent <= opening_fence_indent {
+                            // This closes the current code block
+                            in_code_block = false;
+                            current_fence_marker = None;
+                            opening_fence_indent = 0;
+                        }
+                        // else: This is content inside a code block, ignore completely
+                    }
+                } else {
+                    // We're outside a code block, this opens one
                     // Check if language is specified
                     let after_fence = trimmed[fence_marker.len()..].trim();
                     if after_fence.is_empty() {
@@ -118,8 +124,10 @@ impl Rule for MD040FencedCodeLanguage {
 
                     in_code_block = true;
                     current_fence_marker = Some(fence_marker);
+                    opening_fence_indent = line.len() - line.trim_start().len();
                 }
             }
+            // If we're inside a code block and this line is not a fence, ignore it
         }
 
         Ok(warnings)
@@ -145,6 +153,7 @@ impl Rule for MD040FencedCodeLanguage {
         let mut current_fence_marker: Option<String> = None;
         let mut fence_needs_language = false;
         let mut original_indent = String::new();
+        let mut opening_fence_indent: usize = 0;
 
         let lines: Vec<&str> = content.lines().collect();
 
@@ -210,53 +219,59 @@ impl Rule for MD040FencedCodeLanguage {
                 continue;
             }
 
-            if in_code_block {
-                // We're inside a code block, only look for the matching closing fence
-                if let Some(ref fence_marker) = current_fence_marker {
-                    if trimmed.starts_with(fence_marker) && trimmed[fence_marker.len()..].trim().is_empty() {
-                        // This is the closing fence
-                        if fence_needs_language {
-                            // Use the same indentation as the opening fence
-                            result.push_str(&format!("{}{}\n", original_indent, trimmed));
+            // Determine fence marker if this is a fence line
+            let fence_marker = if trimmed.starts_with("```") {
+                let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
+                if backtick_count >= 3 {
+                    Some("`".repeat(backtick_count))
+                } else {
+                    None
+                }
+            } else if trimmed.starts_with("~~~") {
+                let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
+                if tilde_count >= 3 {
+                    Some("~".repeat(tilde_count))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some(fence_marker) = fence_marker {
+                if in_code_block {
+                    // We're inside a code block, check if this closes it
+                    if let Some(ref current_marker) = current_fence_marker {
+                        let current_indent = line.len() - line.trim_start().len();
+                        if fence_marker == *current_marker &&
+                           trimmed[current_marker.len()..].trim().is_empty() &&
+                           current_indent <= opening_fence_indent {
+                            // This closes the current code block
+                            if fence_needs_language {
+                                // Use the same indentation as the opening fence
+                                result.push_str(&format!("{}{}\n", original_indent, trimmed));
+                            } else {
+                                // Preserve original line as-is
+                                result.push_str(line);
+                                result.push('\n');
+                            }
+                            in_code_block = false;
+                            current_fence_marker = None;
+                            fence_needs_language = false;
+                            original_indent.clear();
+                            opening_fence_indent = 0;
                         } else {
-                            // Preserve original line as-is
+                            // This is content inside a code block (different fence marker) - preserve exactly as-is
                             result.push_str(line);
                             result.push('\n');
                         }
-                        in_code_block = false;
-                        current_fence_marker = None;
-                        fence_needs_language = false;
-                        original_indent.clear();
-                        continue;
-                    }
-                }
-
-                // This is content inside a code block - keep original indentation
-                result.push_str(line);
-                result.push('\n');
-            } else {
-                // Check for fence markers (``` or ~~~ with any length >= 3)
-                let fence_marker = if trimmed.starts_with("```") {
-                    // Find the full sequence of backticks
-                    let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
-                    if backtick_count >= 3 {
-                        Some("`".repeat(backtick_count))
                     } else {
-                        None
-                    }
-                } else if trimmed.starts_with("~~~") {
-                    // Find the full sequence of tildes
-                    let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
-                    if tilde_count >= 3 {
-                        Some("~".repeat(tilde_count))
-                    } else {
-                        None
+                        // This shouldn't happen, but preserve as content
+                        result.push_str(line);
+                        result.push('\n');
                     }
                 } else {
-                    None
-                };
-
-                if let Some(fence_marker) = fence_marker {
+                    // We're outside a code block, this opens one
                     // Capture the original indentation
                     let line_indent = line[..line.len() - line.trim_start().len()].to_string();
 
@@ -285,10 +300,16 @@ impl Rule for MD040FencedCodeLanguage {
 
                     in_code_block = true;
                     current_fence_marker = Some(fence_marker);
-                } else {
-                    result.push_str(line);
-                    result.push('\n');
+                    opening_fence_indent = line.len() - line.trim_start().len();
                 }
+            } else if in_code_block {
+                // We're inside a code block and this is not a fence line - preserve exactly as-is
+                result.push_str(line);
+                result.push('\n');
+            } else {
+                // We're outside code blocks and this is not a fence line - preserve as-is
+                result.push_str(line);
+                result.push('\n');
             }
         }
 
