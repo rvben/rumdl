@@ -144,13 +144,11 @@ impl Rule for MD010NoHardTabs {
 
             // Skip if in code block and code_blocks is false
             if !self.code_blocks {
-                // Calculate byte position for this line
-                let mut byte_pos = 0;
-                for line in &lines[..line_num] {
-                    byte_pos += line.len() + 1; // +1 for newline
-                }
-                if ctx.is_in_code_block_or_span(byte_pos) {
-                    continue;
+                // Use pre-computed line info
+                if let Some(line_info) = ctx.line_info(line_num + 1) {
+                    if line_info.in_code_block {
+                        continue;
+                    }
                 }
             }
 

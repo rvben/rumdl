@@ -72,12 +72,10 @@ impl Rule for MD030ListMarkerSpace {
             let line_num = i + 1;
             
             // Skip if in code block
-            let mut byte_pos = 0;
-            for prev_line in &lines[..i] {
-                byte_pos += prev_line.len() + 1; // +1 for newline
-            }
-            if ctx.is_in_code_block_or_span(byte_pos) {
-                continue;
+            if let Some(line_info) = ctx.line_info(line_num) {
+                if line_info.in_code_block {
+                    continue;
+                }
             }
             // Skip indented code blocks (4+ spaces or tab)
             if line.starts_with("    ") || line.starts_with("\t") {
@@ -219,13 +217,11 @@ impl Rule for MD030ListMarkerSpace {
             let line_num = line_idx + 1;
 
             // Skip if in code block
-            let mut byte_pos = 0;
-            for prev_line in &lines[..line_idx] {
-                byte_pos += prev_line.len() + 1; // +1 for newline
-            }
-            if ctx.is_in_code_block_or_span(byte_pos) {
-                result_lines.push(line.to_string());
-                continue;
+            if let Some(line_info) = ctx.line_info(line_num) {
+                if line_info.in_code_block {
+                    result_lines.push(line.to_string());
+                    continue;
+                }
             }
 
             // Skip if in front matter

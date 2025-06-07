@@ -3,11 +3,27 @@ use markdown::{mdast::Node, to_mdast, ParseOptions};
 use std::panic;
 use crate::utils::code_block_utils::CodeBlockUtils;
 
+/// Pre-computed information about a line
+#[derive(Debug, Clone)]
+pub struct LineInfo {
+    /// The actual line content (without newline)
+    pub content: String,
+    /// Byte offset where this line starts in the document
+    pub byte_offset: usize,
+    /// Number of leading spaces/tabs
+    pub indent: usize,
+    /// Whether the line is blank (empty or only whitespace)
+    pub is_blank: bool,
+    /// Whether this line is inside a code block
+    pub in_code_block: bool,
+}
+
 pub struct LintContext<'a> {
     pub content: &'a str,
     pub ast: Node, // The root of the AST
     pub line_offsets: Vec<usize>,
     pub code_blocks: Vec<(usize, usize)>, // Cached code block and code span ranges
+    pub lines: Vec<LineInfo>, // Pre-computed line information
 }
 
 impl<'a> LintContext<'a> {
@@ -30,11 +46,15 @@ impl<'a> LintContext<'a> {
             // Detect code blocks once and cache them
             let code_blocks = CodeBlockUtils::detect_code_blocks(content);
             
+            // Pre-compute line information
+            let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
+            
             return Self {
                 content,
                 ast,
                 line_offsets,
                 code_blocks,
+                lines,
             };
         }
 
@@ -74,11 +94,15 @@ impl<'a> LintContext<'a> {
         // Detect code blocks once and cache them
         let code_blocks = CodeBlockUtils::detect_code_blocks(content);
         
+        // Pre-compute line information
+        let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
+        
         Self {
             content,
             ast,
             line_offsets,
             code_blocks,
+            lines,
         }
     }
 
@@ -100,6 +124,43 @@ impl<'a> LintContext<'a> {
     /// Check if a position is within a code block or code span
     pub fn is_in_code_block_or_span(&self, pos: usize) -> bool {
         CodeBlockUtils::is_in_code_block_or_span(&self.code_blocks, pos)
+    }
+    
+    /// Get line information by line number (1-indexed)
+    pub fn line_info(&self, line_num: usize) -> Option<&LineInfo> {
+        if line_num > 0 {
+            self.lines.get(line_num - 1)
+        } else {
+            None
+        }
+    }
+    
+    /// Get byte offset for a line number (1-indexed)
+    pub fn line_to_byte_offset(&self, line_num: usize) -> Option<usize> {
+        self.line_info(line_num).map(|info| info.byte_offset)
+    }
+    
+    /// Pre-compute line information
+    fn compute_line_info(content: &str, line_offsets: &[usize], code_blocks: &[(usize, usize)]) -> Vec<LineInfo> {
+        let mut lines = Vec::new();
+        let content_lines: Vec<&str> = content.lines().collect();
+        
+        for (i, line) in content_lines.iter().enumerate() {
+            let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
+            let indent = line.len() - line.trim_start().len();
+            let is_blank = line.trim().is_empty();
+            let in_code_block = CodeBlockUtils::is_in_code_block_or_span(code_blocks, byte_offset);
+            
+            lines.push(LineInfo {
+                content: line.to_string(),
+                byte_offset,
+                indent,
+                is_blank,
+                in_code_block,
+            });
+        }
+        
+        lines
     }
 }
 
@@ -150,6 +211,7 @@ mod tests {
         }
         assert_eq!(ctx.line_offsets, vec![0]);
         assert_eq!(ctx.offset_to_line_col(0), (1, 1));
+        assert_eq!(ctx.lines.len(), 0);
     }
 
     #[test]
@@ -183,6 +245,41 @@ mod tests {
         assert_eq!(ctx.offset_to_line_col(9), (3, 1)); // start of 'Second line'
         assert_eq!(ctx.offset_to_line_col(15), (3, 7)); // middle of 'Second line'
         assert_eq!(ctx.offset_to_line_col(21), (4, 1)); // start of 'Third line'
+    }
+
+    #[test]
+    fn test_line_info() {
+        let content = "# Title\n    indented\n\ncode:\n```rust\nfn main() {}\n```";
+        let ctx = LintContext::new(content);
+        
+        // Test line info
+        assert_eq!(ctx.lines.len(), 7);
+        
+        // Line 1: "# Title"
+        let line1 = &ctx.lines[0];
+        assert_eq!(line1.content, "# Title");
+        assert_eq!(line1.byte_offset, 0);
+        assert_eq!(line1.indent, 0);
+        assert!(!line1.is_blank);
+        assert!(!line1.in_code_block);
+        
+        // Line 2: "    indented"
+        let line2 = &ctx.lines[1];
+        assert_eq!(line2.content, "    indented");
+        assert_eq!(line2.byte_offset, 8);
+        assert_eq!(line2.indent, 4);
+        assert!(!line2.is_blank);
+        
+        // Line 3: "" (blank)
+        let line3 = &ctx.lines[2];
+        assert_eq!(line3.content, "");
+        assert!(line3.is_blank);
+        
+        // Test helper methods
+        assert_eq!(ctx.line_to_byte_offset(1), Some(0));
+        assert_eq!(ctx.line_to_byte_offset(2), Some(8));
+        assert_eq!(ctx.line_info(1).map(|l| l.indent), Some(0));
+        assert_eq!(ctx.line_info(2).map(|l| l.indent), Some(4));
     }
 
     #[test]

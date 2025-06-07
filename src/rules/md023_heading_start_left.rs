@@ -44,7 +44,9 @@ impl Rule for MD023HeadingStartLeft {
             }
 
             let line = lines[start_line];
-            let indentation = line.len() - line.trim_start().len();
+            let indentation = ctx.line_info(start_line + 1)
+                .map(|info| info.indent)
+                .unwrap_or_else(|| line.len() - line.trim_start().len());
 
             // Determine if it's an ATX or Setext heading
             let is_setext = heading.end_line > heading.start_line;
