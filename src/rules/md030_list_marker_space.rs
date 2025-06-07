@@ -73,8 +73,8 @@ impl Rule for MD030ListMarkerSpace {
             
             // Skip if in code block
             let mut byte_pos = 0;
-            for j in 0..i {
-                byte_pos += lines[j].len() + 1; // +1 for newline
+            for prev_line in &lines[..i] {
+                byte_pos += prev_line.len() + 1; // +1 for newline
             }
             if ctx.is_in_code_block_or_span(byte_pos) {
                 continue;
@@ -220,8 +220,8 @@ impl Rule for MD030ListMarkerSpace {
 
             // Skip if in code block
             let mut byte_pos = 0;
-            for j in 0..line_idx {
-                byte_pos += lines[j].len() + 1; // +1 for newline
+            for prev_line in &lines[..line_idx] {
+                byte_pos += prev_line.len() + 1; // +1 for newline
             }
             if ctx.is_in_code_block_or_span(byte_pos) {
                 result_lines.push(line.to_string());

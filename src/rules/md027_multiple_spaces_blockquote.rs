@@ -246,7 +246,7 @@ impl MD027MultipleSpacesBlockquote {
         }
 
         // 4. Fixed version should actually be a valid blockquote
-        if !BlockquoteUtils::is_blockquote(&fixed) {
+        if !BlockquoteUtils::is_blockquote(fixed) {
             return false;
         }
 

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tempfile::tempdir;
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
@@ -37,7 +37,7 @@ fn test_line_ending_compatibility() {
             // Verify that line numbers are calculated correctly
             for warning in &warnings {
                 assert!(warning.line > 0, "Line number should be positive for {}", name);
-                assert!(warning.column >= 0, "Column should be non-negative for {}", name);
+                // Column is usize, so it's always non-negative
             }
         }
 
@@ -102,8 +102,8 @@ Some content here.
         let rule = MD025SingleTitle::default();
         let warnings = rule.check(&ctx).unwrap();
 
-        // Should process without errors
-        assert!(warnings.len() >= 0, "Should process file: {}", filename);
+        // Should process without errors (len() is always non-negative)
+        let _ = warnings; // Acknowledge that we checked the file
 
         println!("  Processed file: {}", filename);
     }
@@ -120,7 +120,7 @@ Some content here.
             let rule = MD025SingleTitle::default();
             let warnings = rule.check(&ctx).unwrap();
 
-            assert!(warnings.len() >= 0, "Should process nested file: {}/{}", dir, filename);
+            let _ = warnings; // Should process nested file without errors
 
             println!("  Processed nested file: {}/{}", dir, filename);
         }
@@ -163,7 +163,7 @@ fn test_unicode_content_handling() {
             // Verify that Unicode doesn't break rule processing
             for warning in &warnings {
                 assert!(warning.line > 0, "Line number should be valid for {} with rule {}", name, rule.name());
-                assert!(warning.column >= 0, "Column should be valid for {} with rule {}", name, rule.name());
+                // Column is usize, so it's always non-negative
                 assert!(!warning.message.is_empty(), "Warning message should not be empty for {}", name);
             }
         }
@@ -276,7 +276,7 @@ fn test_file_encoding_detection() {
         let warnings = rule.check(&ctx).unwrap();
 
         // Should process without issues
-        assert!(warnings.len() >= 0, "Should process {} file", description);
+        let _ = warnings; // Acknowledge processing of {} file
 
         // Verify that BOM doesn't interfere with rule processing
         if description.contains("BOM") {

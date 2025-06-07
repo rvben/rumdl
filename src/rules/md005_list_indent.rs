@@ -341,11 +341,7 @@ impl Rule for MD005ListIndent {
         let mut warnings_with_fixes: Vec<_> = warnings
             .into_iter()
             .filter_map(|w| {
-                if let Some(fix) = w.fix.clone() {
-                    Some((w, fix))
-                } else {
-                    None
-                }
+                w.fix.clone().map(|fix| (w, fix))
             })
             .collect();
         warnings_with_fixes.sort_by_key(|(_, fix)| std::cmp::Reverse(fix.range.start));

@@ -102,8 +102,8 @@ impl Rule for MD009TrailingSpaces {
             if !self.strict {
                 // Calculate byte position for this line
                 let mut byte_pos = 0;
-                for i in 0..line_num {
-                    byte_pos += lines[i].len() + 1; // +1 for newline
+                for line in &lines[..line_num] {
+                    byte_pos += line.len() + 1; // +1 for newline
                 }
                 if ctx.is_in_code_block_or_span(byte_pos) {
                     continue;
@@ -204,8 +204,8 @@ impl Rule for MD009TrailingSpaces {
             // Handle code blocks if not in strict mode
             // Calculate byte position for this line
             let mut byte_pos = 0;
-            for j in 0..i {
-                byte_pos += lines[j].len() + 1; // +1 for newline
+            for prev_line in &lines[..i] {
+                byte_pos += prev_line.len() + 1; // +1 for newline
             }
             if ctx.is_in_code_block_or_span(byte_pos) {
                 result.push_str(line);

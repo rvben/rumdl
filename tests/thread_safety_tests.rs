@@ -125,9 +125,10 @@ Text with *emphasis * and **strong **.
     // Verify all rules executed successfully
     assert!(results.len() == 7, "Expected 7 rule results");
 
-    // Verify specific rules found expected warnings
-    for (rule_name, warning_count) in results.iter() {
-        assert!(*warning_count >= 0, "Rule {} should not fail", rule_name);
+    // Verify all rules executed (warning_count is usize, always non-negative)
+    for (rule_name, _warning_count) in results.iter() {
+        // Each rule executed successfully
+        println!("Rule {} executed in parallel", rule_name);
     }
 }
 

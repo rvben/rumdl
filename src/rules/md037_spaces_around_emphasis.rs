@@ -427,31 +427,31 @@ impl MD037NoSpaceInEmphasis {
         warnings: &mut Vec<LintWarning>,
     ) {
         // Quick documentation pattern checks using pre-compiled regex
-        if QUICK_DOC_CHECK.is_match(line) || QUICK_BOLD_CHECK.is_match(line) {
-            if DOC_METADATA_PATTERN.is_match(line) || BOLD_TEXT_PATTERN.is_match(line) {
-                return;
-            }
+        if (QUICK_DOC_CHECK.is_match(line) || QUICK_BOLD_CHECK.is_match(line))
+            && (DOC_METADATA_PATTERN.is_match(line) || BOLD_TEXT_PATTERN.is_match(line))
+        {
+            return;
         }
 
         // Optimized list detection with fast path
-        if line.starts_with(' ') || line.starts_with('*') || line.starts_with('+') || line.starts_with('-') {
-            if LIST_MARKER.is_match(line) {
-                if let Some(caps) = LIST_MARKER.captures(line) {
-                    if let Some(full_match) = caps.get(0) {
-                        let list_marker_end = full_match.end();
-                        if list_marker_end < line.len() {
-                            let remaining_content = &line[list_marker_end..];
+        if (line.starts_with(' ') || line.starts_with('*') || line.starts_with('+') || line.starts_with('-'))
+            && LIST_MARKER.is_match(line)
+        {
+            if let Some(caps) = LIST_MARKER.captures(line) {
+                if let Some(full_match) = caps.get(0) {
+                    let list_marker_end = full_match.end();
+                    if list_marker_end < line.len() {
+                        let remaining_content = &line[list_marker_end..];
 
-                            if self.is_likely_list_item_fast(remaining_content) {
-                                self.check_line_content_for_emphasis_fast(remaining_content, line_num, list_marker_end, warnings);
-                            } else {
-                                self.check_line_content_for_emphasis_fast(line, line_num, 0, warnings);
-                            }
+                        if self.is_likely_list_item_fast(remaining_content) {
+                            self.check_line_content_for_emphasis_fast(remaining_content, line_num, list_marker_end, warnings);
+                        } else {
+                            self.check_line_content_for_emphasis_fast(line, line_num, 0, warnings);
                         }
                     }
                 }
-                return;
             }
+            return;
         }
 
         // Check the entire line

@@ -234,9 +234,11 @@ mod tests {
         };
         assert!(validate_fix_range(content, &invalid_fix).is_err());
 
-        // Invalid range (start > end)
+        // Invalid range (start > end) - create reversed range
+        let start = 5;
+        let end = 3;
         let invalid_fix2 = Fix {
-            range: 5..3,
+            range: start..end,
             replacement: "Hi".to_string(),
         };
         assert!(validate_fix_range(content, &invalid_fix2).is_err());

@@ -59,13 +59,13 @@ impl MD006StartBullets {
                     // Found a potential parent or sibling
                     // Check if there's any non-list content between this potential parent and current item
                     let mut has_breaking_content = false;
-                    for check_idx in (i + 1)..line_idx {
-                        if Self::is_blank_line(lines[check_idx]) {
+                    for check_line in &lines[(i + 1)..line_idx] {
+                        if Self::is_blank_line(check_line) {
                             continue;
                         }
-                        if Self::is_bullet_list_item(lines[check_idx]).is_none() {
+                        if Self::is_bullet_list_item(check_line).is_none() {
                             // Found non-list content - check if it breaks the list structure
-                            let content_indent = lines[check_idx].len() - lines[check_idx].trim_start().len();
+                            let content_indent = check_line.len() - check_line.trim_start().len();
 
                             // Content is acceptable if:
                             // 1. It's indented at least as much as the current item (continuation of parent)
