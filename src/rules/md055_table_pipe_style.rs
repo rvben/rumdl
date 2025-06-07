@@ -201,7 +201,7 @@ impl Rule for MD055TablePipeStyle {
         };
 
         // Use shared table detection for better performance
-        let table_blocks = TableUtils::find_table_blocks(content);
+        let table_blocks = TableUtils::find_table_blocks(content, ctx);
 
         // Process each table block
         for table_block in table_blocks {
@@ -302,7 +302,7 @@ impl Rule for MD055TablePipeStyle {
         };
 
         // Use shared table detection for better performance
-        let table_blocks = TableUtils::find_table_blocks(content);
+        let table_blocks = TableUtils::find_table_blocks(content, ctx);
 
         // Create a copy of lines that we can modify
         let mut result_lines = lines

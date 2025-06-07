@@ -97,7 +97,7 @@ impl Rule for MD056TableColumnCount {
         let lines: Vec<&str> = content.lines().collect();
 
         // Use shared table detection for better performance
-        let table_blocks = TableUtils::find_table_blocks(content);
+        let table_blocks = TableUtils::find_table_blocks(content, ctx);
 
         for table_block in table_blocks {
             // Determine expected column count from header row

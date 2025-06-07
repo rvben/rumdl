@@ -38,18 +38,6 @@ impl MD010NoHardTabs {
         }
     }
 
-    fn is_in_code_block(lines: &[&str], current_line: usize) -> bool {
-        let mut fence_count = 0;
-        for (i, line) in lines.iter().take(current_line + 1).enumerate() {
-            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
-                fence_count += 1;
-            }
-            if i == current_line && fence_count % 2 == 1 {
-                return true;
-            }
-        }
-        false
-    }
 
     // Identify lines that are part of HTML comments
     fn find_html_comment_lines(lines: &[&str]) -> Vec<bool> {
@@ -155,8 +143,15 @@ impl Rule for MD010NoHardTabs {
             }
 
             // Skip if in code block and code_blocks is false
-            if !self.code_blocks && Self::is_in_code_block(&lines, line_num) {
-                continue;
+            if !self.code_blocks {
+                // Calculate byte position for this line
+                let mut byte_pos = 0;
+                for i in 0..line_num {
+                    byte_pos += lines[i].len() + 1; // +1 for newline
+                }
+                if ctx.is_in_code_block_or_span(byte_pos) {
+                    continue;
+                }
             }
 
             let tab_positions = Self::find_tab_positions(line);
@@ -233,20 +228,30 @@ impl Rule for MD010NoHardTabs {
         // Pre-compute which lines are part of HTML comments
         let html_comment_lines = Self::find_html_comment_lines(&lines);
 
+        // Pre-compute line positions for code block detection
+        let mut line_positions = Vec::with_capacity(lines.len());
+        let mut pos = 0;
+        for line in &lines {
+            line_positions.push(pos);
+            pos += line.len() + 1; // +1 for newline
+        }
+
         for (i, line) in lines.iter().enumerate() {
             if html_comment_lines[i] {
                 // Preserve HTML comments as they are
                 result.push_str(line);
-            } else if !self.code_blocks && Self::is_in_code_block(&lines, i) {
+            } else if !self.code_blocks && ctx.is_in_code_block_or_span(line_positions[i]) {
+                // Preserve code blocks when code_blocks is false
                 result.push_str(line);
             } else {
+                // Replace tabs with spaces
                 result.push_str(&line.replace('\t', &" ".repeat(self.spaces_per_tab)));
             }
-            result.push('\n');
-        }
-
-        if !content.ends_with('\n') {
-            result.pop();
+            
+            // Add newline if not the last line without a newline
+            if i < lines.len() - 1 || content.ends_with('\n') {
+                result.push('\n');
+            }
         }
 
         Ok(result)

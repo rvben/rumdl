@@ -61,6 +61,20 @@ fn test_indented_code_block() {
     let content = "# JavaScript Guide\n\n    const x = 'javascript';\n    console.log(x);";
     let ctx = rumdl::lint_context::LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
+    if !result.is_empty() {
+        eprintln!("Test failed - found violations:");
+        for warning in &result {
+            eprintln!("  Line {}: {}", warning.line, warning.message);
+        }
+        eprintln!("Code blocks detected: {:?}", ctx.code_blocks);
+        eprintln!("Content: {:?}", content);
+        let mut byte_pos = 0;
+        for (i, line) in content.lines().enumerate() {
+            eprintln!("Line {}: byte_pos={}, in_code_block={}, content={:?}", 
+                     i + 1, byte_pos, ctx.is_in_code_block_or_span(byte_pos), line);
+            byte_pos += line.len() + 1;
+        }
+    }
     assert!(result.is_empty());
 }
 
@@ -155,4 +169,83 @@ fn test_fix_code_block_included() {
         fixed,
         "```rust\nlet lang = \"Rust\";\n```\n\nThis is Rust code."
     );
+}
+
+#[test]
+fn test_code_fence_language_identifiers_preserved() {
+    // Test that language identifiers in code fences are not modified
+    let names = vec!["Rust".to_string(), "Python".to_string(), "JavaScript".to_string()];
+    let rule = MD044ProperNames::new(names, false); // Include code blocks
+    
+    let content = r#"```rust
+// This is rust code
+let rust = "rust";
+```
+
+```python
+# This is python code
+python = "python"
+```
+
+```javascript
+// This is javascript code
+const javascript = "javascript";
+```"#;
+    
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+    
+    // Language identifiers should remain lowercase
+    assert!(fixed.contains("```rust"), "rust identifier should stay lowercase");
+    assert!(fixed.contains("```python"), "python identifier should stay lowercase");
+    assert!(fixed.contains("```javascript"), "javascript identifier should stay lowercase");
+    
+    // When code_blocks = false (include code blocks), content inside should be capitalized
+    assert!(fixed.contains("let Rust = \"Rust\""), "Variable names should be capitalized");
+    assert!(fixed.contains("# This is Python code"), "Comments should be capitalized"); 
+    assert!(fixed.contains("Python = \"Python\""), "Variable names should be capitalized");
+    assert!(fixed.contains("const JavaScript = \"JavaScript\""), "Variable names should be capitalized");
+}
+
+#[test]
+fn test_tilde_fence_language_identifiers() {
+    // Test with tilde fences
+    let names = vec!["Ruby".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    
+    let content = "~~~ruby\nputs 'ruby'\n~~~";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+    
+    assert!(fixed.contains("~~~ruby"), "Tilde fence identifier should stay lowercase");
+    assert!(fixed.contains("puts 'Ruby'"), "Content should be capitalized");
+}
+
+#[test]
+fn test_fence_with_attributes() {
+    // Test fences with additional attributes
+    let names = vec!["JSON".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    
+    let content = "```json {highlight: [2]}\n{\n  \"json\": \"value\"\n}\n```";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+    
+    assert!(fixed.contains("```json {highlight: [2]}"), "Fence with attributes preserved");
+    assert!(fixed.contains("\"JSON\""), "Content should be capitalized");
+}
+
+#[test]
+fn test_mixed_fence_types() {
+    // Test document with both fence types
+    let names = vec!["Go".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    
+    let content = "```go\nfmt.Println(\"go\")\n```\n\n~~~go\nfmt.Println(\"go\")\n~~~";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+    
+    assert!(fixed.contains("```go"), "Backtick fence preserved");
+    assert!(fixed.contains("~~~go"), "Tilde fence preserved");
+    assert_eq!(fixed.matches("\"Go\"").count(), 2, "Both contents capitalized");
 }

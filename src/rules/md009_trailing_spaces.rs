@@ -30,20 +30,6 @@ impl MD009TrailingSpaces {
         Self { br_spaces, strict }
     }
 
-    fn is_in_code_block(lines: &[&str], current_line: usize) -> bool {
-        let mut fence_count = 0;
-        for (i, line) in lines.iter().enumerate() {
-            if i == current_line {
-                // Check if we're inside a code block at this point
-                return fence_count % 2 == 1;
-            }
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                fence_count += 1;
-            }
-        }
-        false
-    }
 
     fn is_empty_blockquote_line(line: &str) -> bool {
         let trimmed = line.trim_start();
@@ -113,8 +99,15 @@ impl Rule for MD009TrailingSpaces {
             }
 
             // Handle code blocks if not in strict mode
-            if !self.strict && Self::is_in_code_block(&lines, line_num) {
-                continue;
+            if !self.strict {
+                // Calculate byte position for this line
+                let mut byte_pos = 0;
+                for i in 0..line_num {
+                    byte_pos += lines[i].len() + 1; // +1 for newline
+                }
+                if ctx.is_in_code_block_or_span(byte_pos) {
+                    continue;
+                }
             }
 
             // Check if it's a valid line break
@@ -209,7 +202,12 @@ impl Rule for MD009TrailingSpaces {
             }
 
             // Handle code blocks if not in strict mode
-            if Self::is_in_code_block(&lines, i) {
+            // Calculate byte position for this line
+            let mut byte_pos = 0;
+            for j in 0..i {
+                byte_pos += lines[j].len() + 1; // +1 for newline
+            }
+            if ctx.is_in_code_block_or_span(byte_pos) {
                 result.push_str(line);
                 result.push('\n');
                 continue;

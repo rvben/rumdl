@@ -151,29 +151,14 @@ impl MD052ReferenceLinkImages {
         &self,
         content: &str,
         references: &HashSet<String>,
+        ctx: &crate::lint_context::LintContext,
     ) -> Vec<(usize, usize, usize, String)> {
         let mut undefined = Vec::new();
         let mut reported_refs = HashMap::new();
-
-        let mut in_code_block = false;
-        let mut code_fence_marker = String::new();
+        let mut byte_pos = 0;
         let mut in_example_section = false;
 
         for (line_num, line) in content.lines().enumerate() {
-            // Handle code block boundaries
-            if let Some(cap) = FENCED_CODE_START.captures(line) {
-                if let Some(marker) = cap.get(0) {
-                    let marker_str = marker.as_str().to_string();
-                    if !in_code_block {
-                        in_code_block = true;
-                        code_fence_marker = marker_str;
-                    } else if line.trim().starts_with(&code_fence_marker) {
-                        in_code_block = false;
-                        code_fence_marker.clear();
-                    }
-                }
-                continue;
-            }
 
             // Check if we're entering an example section
             if OUTPUT_EXAMPLE_START.is_match(line) {
@@ -187,7 +172,8 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip lines in code blocks, example sections, or list items
-            if in_code_block || in_example_section || LIST_ITEM_REGEX.is_match(line) {
+            if ctx.is_in_code_block_or_span(byte_pos) || in_example_section || LIST_ITEM_REGEX.is_match(line) {
+                byte_pos += line.len() + 1;
                 continue;
             }
 
@@ -307,6 +293,8 @@ impl MD052ReferenceLinkImages {
                     }
                 }
             }
+            
+            byte_pos += line.len() + 1;
         }
 
         undefined
@@ -328,7 +316,7 @@ impl Rule for MD052ReferenceLinkImages {
         let references = self.extract_references(content);
 
         for (line_num, col, match_len, reference) in
-            self.find_undefined_references(content, &references)
+            self.find_undefined_references(content, &references, ctx)
         {
             let lines: Vec<&str> = content.lines().collect();
             let line_content = lines.get(line_num).unwrap_or(&"");

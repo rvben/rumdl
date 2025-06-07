@@ -256,3 +256,130 @@ fn test_nested_markdown_blocks_allowed() {
     let nested_warning = result.iter().find(|w| w.line == 1);
     assert!(nested_warning.is_some(), "Should flag the opening bash block");
 }
+
+#[test]
+fn test_markdown_block_with_multiple_languages() {
+    // Test markdown block containing multiple nested code blocks
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = r#"```markdown
+# Example
+
+Here's Python:
+```python
+print("Hello")
+```
+
+And JavaScript:
+```javascript
+console.log("Hello");
+```
+
+And unclosed:
+```rust
+fn main() {
+```
+```"#;  // Close the markdown block
+    
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // Should not flag anything - all nested blocks are inside markdown documentation
+    assert!(result.is_empty(), "Nested blocks in markdown documentation should be allowed");
+}
+
+#[test]
+fn test_nested_same_language() {
+    // Test nested blocks with same language (not markdown)
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = "```python\n\n```python\nprint('nested')\n```";
+    
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    assert_eq!(result.len(), 1, "Should flag nested non-markdown blocks");
+    assert!(result[0].message.contains("should be closed before starting new one"));
+}
+
+#[test]
+fn test_deeply_nested_markdown_blocks() {
+    // Test markdown blocks inside markdown blocks
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = r#"````markdown
+# Outer markdown
+
+```markdown
+## Inner markdown
+
+```python
+print("code")
+```
+```
+
+More content
+````"#;
+    
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    assert!(result.is_empty(), "Deeply nested markdown blocks should be allowed");
+}
+
+#[test]
+fn test_mixed_fence_lengths() {
+    // Test with different fence lengths
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = "````python\n\n```javascript\ncode\n```\n\n````";
+    
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // Should work correctly with 4-backtick fences
+    assert!(result.is_empty(), "Different fence lengths should work correctly");
+}
+
+#[test]
+fn test_adjacent_code_blocks() {
+    // Test code blocks that are adjacent (not nested)
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = "```rust\ncode1\n```\n```python\ncode2\n```";
+    
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    assert!(result.is_empty(), "Adjacent blocks should not be flagged as nested");
+}
+
+#[test]
+fn test_markdown_block_at_end() {
+    // Test markdown block that ends the document
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = "# Doc\n\n```markdown\n## Example\n\n```rust\nfn test() {}\n```";
+    
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // The markdown block is unclosed but contains properly formatted examples
+    assert_eq!(result.len(), 1, "Should flag unclosed markdown block");
+    assert!(result[0].message.contains("never closed"));
+}
+
+#[test]
+fn test_fence_in_list_context() {
+    // Test code blocks in list items
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = r#"1. First item
+   ```rust
+   fn in_list() {}
+   ```
+
+2. Second item
+   ```python
+   def also_in_list():
+       pass
+   ```"#;
+    
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    assert!(result.is_empty(), "Code blocks in lists should not cause issues");
+}

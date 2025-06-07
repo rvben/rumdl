@@ -1,6 +1,5 @@
 use crate::utils::fast_hash;
 use crate::utils::range_utils::LineIndex;
-use crate::utils::regex_cache::*;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex;
@@ -89,10 +88,6 @@ impl MD044ProperNames {
         }
     }
 
-    // Helper method for checking code blocks
-    fn is_code_block(&self, line: &str, in_code_block: bool) -> bool {
-        in_code_block || INDENTED_CODE_BLOCK_PATTERN.is_match(line)
-    }
 
     // Create a regex-safe version of the name for word boundary matches
     fn create_safe_pattern(&self, name: &str) -> String {
@@ -134,7 +129,7 @@ impl MD044ProperNames {
     }
 
     // Find all name violations in the content and return positions
-    fn find_name_violations(&self, content: &str) -> Vec<WarningPosition> {
+    fn find_name_violations(&self, content: &str, ctx: &crate::lint_context::LintContext) -> Vec<WarningPosition> {
         // Early return: if no names configured or content is empty
         if self.names.is_empty() || content.is_empty() {
             return Vec::new();
@@ -163,7 +158,6 @@ impl MD044ProperNames {
         }
 
         let mut violations = Vec::new();
-        let mut in_code_block = false;
 
         // Pre-compile and prepare regex patterns before the line loop
         let patterns: Vec<(&String, Regex)> = self
@@ -171,15 +165,20 @@ impl MD044ProperNames {
             .iter()
             .map(|name| (name, self.get_compiled_regex(name)))
             .collect();
+        
+        let mut byte_pos = 0;
 
         for (line_num, line) in content.lines().enumerate() {
-            // Handle code blocks (using standard regex for simple fence matching)
-            if CODE_FENCE_REGEX.is_match(line.trim_start()) {
-                in_code_block = !in_code_block;
+            // Skip code fence lines (```language or ~~~language)
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                byte_pos += line.len() + 1;
                 continue;
             }
-
-            if self.code_blocks && self.is_code_block(line, in_code_block) {
+            
+            // Skip if in code block
+            if self.code_blocks && ctx.is_in_code_block_or_span(byte_pos) {
+                byte_pos += line.len() + 1;
                 continue;
             }
 
@@ -192,6 +191,7 @@ impl MD044ProperNames {
             });
 
             if !has_line_matches {
+                byte_pos += line.len() + 1;
                 continue;
             }
 
@@ -223,6 +223,8 @@ impl MD044ProperNames {
                     }
                 }
             }
+            
+            byte_pos += line.len() + 1;
         }
 
         // Store in cache
@@ -269,7 +271,7 @@ impl Rule for MD044ProperNames {
         }
 
         let line_index = LineIndex::new(content.to_string());
-        let violations = self.find_name_violations(content);
+        let violations = self.find_name_violations(content, ctx);
 
         let warnings = violations
             .into_iter()
@@ -304,7 +306,7 @@ impl Rule for MD044ProperNames {
             return Ok(content.to_string());
         }
 
-        let mut violations = self.find_name_violations(content);
+        let mut violations = self.find_name_violations(content, ctx);
         if violations.is_empty() {
             return Ok(content.to_string());
         }

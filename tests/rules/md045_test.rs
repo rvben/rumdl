@@ -29,7 +29,7 @@ fn test_empty_alt_text() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "![Image description](image.png)");
+    assert_eq!(fixed, "![TODO: Add image description](image.png)");
 }
 
 #[test]

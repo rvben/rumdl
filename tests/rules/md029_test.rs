@@ -147,3 +147,61 @@ fn test_md029_nested_with_code_blocks() {
         "Content should remain unchanged as it's already correct"
     );
 }
+
+#[test]
+fn test_md029_code_blocks_in_nested_lists() {
+    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::One);
+    
+    let content = r#"1. First item
+   
+   ```rust
+   fn code() {}
+   ```
+   
+   More content
+
+2. Second item
+   
+   1. Nested item
+      
+      ```python
+      def nested_code():
+          pass
+      ```
+   
+   2. Another nested"#;
+    
+    let ctx = LintContext::new(content);
+    let warnings = rule.check(&ctx).unwrap();
+    
+    // Should handle numbering correctly despite code blocks
+    assert_eq!(warnings.len(), 2, "Should flag both issues with ListStyle::One");
+    // With ListStyle::One, both "2. Second item" and "2. Another nested" should be flagged
+}
+
+#[test]
+fn test_md029_fenced_vs_indented_in_list() {
+    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::Ordered);
+    
+    let content = r#"1. Item with fenced code:
+   ```js
+   console.log(1);
+   ```
+
+2. Item with indented code:
+   
+       indented code
+       more code
+
+3. Final item"#;
+    
+    let ctx = LintContext::new(content);
+    let warnings = rule.check(&ctx).unwrap();
+    
+    assert!(warnings.is_empty(), "Ordered numbering should be accepted");
+    
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(fixed.contains("1. Item"), "First item preserved");
+    assert!(fixed.contains("2. Item"), "Second item preserved");
+    assert!(fixed.contains("3. Final"), "Third item preserved");
+}

@@ -35,9 +35,10 @@ impl MD039NoSpaceInLinks {
     }
 
     /// Optimized link parsing using regex with early returns
-    fn parse_links_and_images(
-        content: &str,
-    ) -> Vec<(bool, &str, &str, usize, usize, usize, usize)> {
+    fn parse_links_and_images<'a>(
+        content: &'a str,
+        ctx: &crate::lint_context::LintContext,
+    ) -> Vec<(bool, &'a str, &'a str, usize, usize, usize, usize)> {
         let mut results = Vec::new();
 
         // Early return if no potential links
@@ -45,20 +46,13 @@ impl MD039NoSpaceInLinks {
             return results;
         }
 
-        // Pre-compute code block ranges once for efficiency
-        let code_block_ranges =
-            crate::utils::code_block_utils::CodeBlockUtils::detect_code_blocks(content);
-
         // Use optimized regex parsing instead of character-by-character iteration
         for m in LINK_PATTERN.find_iter(content) {
             let match_start = m.start();
             let match_end = m.end();
 
-            // Skip if in code block (optimized check)
-            if code_block_ranges
-                .iter()
-                .any(|&(start, end)| match_start >= start && match_start < end)
-            {
+            // Skip if in code block (using cached code blocks from context)
+            if ctx.is_in_code_block_or_span(match_start) {
                 continue;
             }
 
@@ -175,7 +169,7 @@ impl Rule for MD039NoSpaceInLinks {
         let mut warnings = Vec::new();
 
         // Parse links and images once with optimized algorithm
-        let links_and_images = Self::parse_links_and_images(content);
+        let links_and_images = Self::parse_links_and_images(content, ctx);
 
         // Early return if no links found
         if links_and_images.is_empty() {
@@ -245,7 +239,7 @@ impl Rule for MD039NoSpaceInLinks {
         }
 
         let content = ctx.content;
-        let links_and_images = Self::parse_links_and_images(content);
+        let links_and_images = Self::parse_links_and_images(content, ctx);
 
         if links_and_images.is_empty() {
             return Ok(content.to_string());

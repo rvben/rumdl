@@ -2,7 +2,6 @@
 ///
 /// This module provides optimized table detection and processing functionality
 /// that can be shared across multiple table-related rules (MD055, MD056, MD058).
-use crate::utils::code_block_utils::CodeBlockUtils;
 
 /// Represents a table block in the document
 #[derive(Debug, Clone)]
@@ -90,9 +89,8 @@ impl TableUtils {
     }
 
     /// Find all table blocks in the content with optimized detection
-    pub fn find_table_blocks(content: &str) -> Vec<TableBlock> {
+    pub fn find_table_blocks(content: &str, ctx: &crate::lint_context::LintContext) -> Vec<TableBlock> {
         let lines: Vec<&str> = content.lines().collect();
-        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
         let mut tables = Vec::new();
         let mut i = 0;
 
@@ -105,12 +103,9 @@ impl TableUtils {
         }
 
         while i < lines.len() {
-            // Skip lines in code blocks using pre-computed positions
+            // Skip lines in code blocks using cached code blocks from context
             let line_start = line_positions[i];
-            if code_blocks
-                .iter()
-                .any(|(start, end)| line_start >= *start && line_start < *end)
-            {
+            if ctx.is_in_code_block_or_span(line_start) {
                 i += 1;
                 continue;
             }

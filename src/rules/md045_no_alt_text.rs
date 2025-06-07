@@ -1,5 +1,4 @@
 use crate::utils::range_utils::{calculate_match_range, LineIndex};
-use crate::utils::code_block_utils::CodeBlockUtils;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
@@ -44,9 +43,6 @@ impl Rule for MD045NoAltText {
 
         let mut warnings = Vec::new();
         
-        // Detect all code blocks and code spans
-        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
-        
         // Track byte positions for each line
         let mut byte_pos = 0;
 
@@ -61,7 +57,7 @@ impl Rule for MD045NoAltText {
                     let match_byte_pos = byte_pos + full_match.start();
                     
                     // Skip if this image is inside a code block or code span
-                    if CodeBlockUtils::is_in_code_block_or_span(&code_blocks, match_byte_pos) {
+                    if ctx.is_in_code_block_or_span(match_byte_pos) {
                         continue;
                     }
 
@@ -103,9 +99,6 @@ impl Rule for MD045NoAltText {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
         
-        // Detect all code blocks and code spans
-        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
-        
         let mut result = String::new();
         let mut last_end = 0;
 
@@ -118,7 +111,7 @@ impl Rule for MD045NoAltText {
             result.push_str(&content[last_end..full_match.start()]);
             
             // Check if this image is inside a code block
-            if CodeBlockUtils::is_in_code_block_or_span(&code_blocks, full_match.start()) {
+            if ctx.is_in_code_block_or_span(full_match.start()) {
                 // Keep the original image if it's in a code block
                 result.push_str(&caps[0]);
             } else if alt_text.trim().is_empty() {

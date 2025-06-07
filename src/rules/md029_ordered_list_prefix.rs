@@ -96,19 +96,16 @@ impl Rule for MD029OrderedListPrefix {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
         let mut result = String::new();
-        let mut in_code_block = false;
         let mut indent_stack: Vec<(usize, usize)> = Vec::new(); // (indent, index)
         let lines: Vec<&str> = content.lines().collect();
+        let mut byte_pos = 0;
+        
         for line in lines.iter() {
-            if line.trim().starts_with("```") {
-                in_code_block = !in_code_block;
+            // Skip if in code block
+            if ctx.is_in_code_block_or_span(byte_pos) {
                 result.push_str(line);
                 result.push('\n');
-                continue;
-            }
-            if in_code_block {
-                result.push_str(line);
-                result.push('\n');
+                byte_pos += line.len() + 1;
                 continue;
             }
             if Self::get_list_number(line).is_some() {
@@ -143,16 +140,37 @@ impl Rule for MD029OrderedListPrefix {
                     *idx += 1;
                 }
             } else if !line.trim().is_empty() {
-                // Non-list, non-blank line breaks the list
-                indent_stack.clear();
-                result.push_str(line);
-                result.push('\n');
+                // Check if this is a code fence line - don't break the list for these
+                let trimmed = line.trim();
+                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                    // Code fence lines don't break the list
+                    result.push_str(line);
+                    result.push('\n');
+                } else {
+                    // Check if the line is indented enough to be part of a list item
+                    let line_indent = line.chars().take_while(|c| c.is_whitespace()).count();
+                    let is_continuation = indent_stack.last()
+                        .map(|&(list_indent, _)| line_indent >= list_indent + 3)
+                        .unwrap_or(false);
+                    
+                    if is_continuation {
+                        // This line is part of the list item (indented continuation)
+                        result.push_str(line);
+                        result.push('\n');
+                    } else {
+                        // Non-list, non-blank line breaks the list
+                        indent_stack.clear();
+                        result.push_str(line);
+                        result.push('\n');
+                    }
+                }
             } else {
-                // Blank line breaks the list
-                indent_stack.clear();
+                // Blank line - don't clear the stack, as lists can have blank lines within them
                 result.push_str(line);
                 result.push('\n');
             }
+            
+            byte_pos += line.len() + 1;
         }
         // Remove trailing newline if the original content didn't have one
         if !content.ends_with('\n') && result.ends_with('\n') {

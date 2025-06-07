@@ -152,22 +152,6 @@ impl MD011NoReversedLinks {
         has_url_indicator && text_looks_reasonable && url_looks_reasonable
     }
 
-    fn is_in_code_block(&self, content: &str, position: usize) -> bool {
-        let mut in_code_block = false;
-        let mut current_pos = 0;
-
-        for line in content.lines() {
-            if CODE_FENCE_REGEX.is_match(line) {
-                in_code_block = !in_code_block;
-            }
-            current_pos += line.len() + 1;
-            if current_pos > position {
-                break;
-            }
-        }
-
-        in_code_block
-    }
 }
 
 impl Default for MD011NoReversedLinks {
@@ -188,8 +172,15 @@ impl Rule for MD011NoReversedLinks {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let mut warnings = Vec::new();
+        let mut byte_pos = 0;
 
         for (line_num, line) in content.lines().enumerate() {
+            // Skip if this line is in a code block
+            if ctx.is_in_code_block_or_span(byte_pos) {
+                byte_pos += line.len() + 1;
+                continue;
+            }
+
             // Part 1: Check for existing perfectly formed reversed links
             for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
                 let match_obj = cap.get(0).unwrap();
@@ -246,6 +237,8 @@ impl Rule for MD011NoReversedLinks {
                     }),
                 });
             }
+            
+            byte_pos += line.len() + 1; // Update byte position for next line
         }
 
         Ok(warnings)
@@ -267,7 +260,7 @@ impl Rule for MD011NoReversedLinks {
                 pos += line.len() + 1;
             }
 
-            if !self.is_in_code_block(content, pos) {
+            if !ctx.is_in_code_block_or_span(pos) {
                 let adjusted_pos = pos + offset;
                 let original_len = format!("({})[{}]", text, url).len();
                 let replacement = format!("[{}]({})", text, url);
@@ -462,5 +455,28 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_skip_code_blocks() {
+        let rule = MD011NoReversedLinks;
+
+        // Test that patterns inside code blocks are not flagged
+        let content = r#"Here's an example:
+
+```rust
+// This regex pattern [.!?]+\s*$ should not be flagged
+static ref TRAILING_PUNCTUATION: Regex = Regex::new(r"(?m)[.!?]+\s*$").unwrap();
+```
+
+But this (https://example.com)[reversed link] should be flagged."#;
+        
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should only flag the reversed link outside the code block
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Reversed link syntax"));
+        assert_eq!(result[0].line, 8); // The line with the actual reversed link
     }
 }

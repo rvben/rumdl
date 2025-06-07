@@ -162,3 +162,76 @@ fn test_performance_code_block_utils() {
     let total_lines = content.lines().count();
     assert!(total_lines > 50);
 }
+
+#[test]
+fn test_indented_list_items_not_code_blocks() {
+    // Test that indented list items are not detected as code blocks
+    let content = "- Item 1\n    - Nested item\n    - Another nested\n- Item 2";
+    // Using LintContext to get proper code block detection
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    assert!(ctx.code_blocks.is_empty(), "Indented list items should not be detected as code blocks");
+}
+
+#[test]
+fn test_numbered_list_indentation() {
+    // Test numbered lists with various formats
+    let content = "1. First item\n    1) Nested with parenthesis\n    2. Another nested\n2. Second item";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    assert!(ctx.code_blocks.is_empty(), "Indented numbered list items should not be detected as code blocks");
+}
+
+#[test]
+fn test_code_block_requires_blank_line() {
+    // Test that indented code blocks require a blank line before them
+    let content = "Some text\n    This should not be a code block\n\n    This should be a code block";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    assert_eq!(ctx.code_blocks.len(), 1, "Should have code block after blank line");
+}
+
+#[test]
+fn test_document_start_indented_code() {
+    // Test that indented content at document start needs blank line
+    let content = "    Not a code block at start\n\n    This is a code block";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    assert_eq!(ctx.code_blocks.len(), 1, "Should have code block after blank line");
+}
+
+#[test]
+fn test_mixed_list_markers() {
+    // Test various list markers
+    let content = "- Dash list\n    - Nested\n* Star list\n    * Nested\n+ Plus list\n    + Nested";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    assert!(ctx.code_blocks.is_empty(), "All list types should be recognized");
+}
+
+#[test]
+fn test_list_continuation_with_code() {
+    // Test list items that contain actual code blocks
+    let content = r#"1. List item
+    More content in the list
+
+    ```rust
+    fn code_in_list() {}
+    ```
+
+2. Next item"#;
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    // Should find the fenced code block in the list
+    assert!(ctx.code_blocks.len() >= 1, "Should find the fenced code block");
+}
+
+#[test]
+fn test_tab_indented_lists() {
+    // Test with tab indentation
+    let content = "-\tTab after marker\n\t-\tNested with tabs\n\t\tContent";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    assert!(ctx.code_blocks.is_empty(), "Tab-indented lists should not be code blocks");
+}
+
+#[test]
+fn test_edge_case_single_digit_lists() {
+    // Test edge cases with single digit followed by period/paren
+    let content = "5. Five\n    5) Sub item\n6) Six with paren\n    6. Sub item";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    assert!(ctx.code_blocks.is_empty(), "All numbered list formats should be recognized");
+}

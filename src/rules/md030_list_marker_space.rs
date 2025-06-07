@@ -67,24 +67,16 @@ impl Rule for MD030ListMarkerSpace {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
         let lines: Vec<String> = ctx.content.lines().map(|l| l.to_string()).collect();
-        let mut in_fenced_code_block = false;
-        let mut fenced_code_block_delim = "";
         let mut in_blockquote = false;
         for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1;
-            let trimmed = line.trim_start();
-            // Detect fenced code blocks
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                let fence = &trimmed[..3];
-                if !in_fenced_code_block {
-                    in_fenced_code_block = true;
-                    fenced_code_block_delim = fence;
-                } else if trimmed.starts_with(fenced_code_block_delim) {
-                    in_fenced_code_block = false;
-                    fenced_code_block_delim = "";
-                }
+            
+            // Skip if in code block
+            let mut byte_pos = 0;
+            for j in 0..i {
+                byte_pos += lines[j].len() + 1; // +1 for newline
             }
-            if in_fenced_code_block {
+            if ctx.is_in_code_block_or_span(byte_pos) {
                 continue;
             }
             // Skip indented code blocks (4+ spaces or tab)
@@ -222,27 +214,16 @@ impl Rule for MD030ListMarkerSpace {
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
         let lines: Vec<&str> = content.lines().collect();
         let mut result_lines = Vec::new();
-        let mut in_fenced_code_block = false;
-        let mut fenced_code_block_delim = "";
 
         for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
-            let trimmed = line.trim_start();
 
-            // Detect fenced code blocks
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                let fence = &trimmed[..3];
-                if !in_fenced_code_block {
-                    in_fenced_code_block = true;
-                    fenced_code_block_delim = fence;
-                } else if trimmed.starts_with(fenced_code_block_delim) {
-                    in_fenced_code_block = false;
-                    fenced_code_block_delim = "";
-                }
+            // Skip if in code block
+            let mut byte_pos = 0;
+            for j in 0..line_idx {
+                byte_pos += lines[j].len() + 1; // +1 for newline
             }
-
-            // Skip if in fenced code block
-            if in_fenced_code_block {
+            if ctx.is_in_code_block_or_span(byte_pos) {
                 result_lines.push(line.to_string());
                 continue;
             }

@@ -49,6 +49,57 @@ impl CodeBlockUtils {
             blocks.push((code_block_start, content.len()));
         }
 
+        // Find indented code blocks (4+ spaces or tab at start of line)
+        // According to CommonMark, indented code blocks must be preceded by a blank line
+        // (unless they're at the start of the document or after a block-level element)
+        let mut in_indented_block = false;
+        let mut indented_block_start = 0;
+        
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_start = if line_idx < line_positions.len() {
+                line_positions[line_idx]
+            } else {
+                0
+            };
+            
+            // Check if this line is indented code
+            let is_indented = line.starts_with("    ") || line.starts_with("\t");
+            
+            // Check if this looks like a list item (has list marker after indentation)
+            let trimmed = line.trim_start();
+            let is_list_item = trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") ||
+                               trimmed.chars().next().map_or(false, |c| c.is_numeric()) && 
+                               trimmed.chars().nth(1).map_or(false, |c| c == '.' || c == ')');
+            
+            // Check if previous line was blank 
+            let prev_blank = line_idx > 0 && lines[line_idx - 1].trim().is_empty();
+            
+            if is_indented && !line.trim().is_empty() && !is_list_item {
+                if !in_indented_block {
+                    // Only start an indented code block if preceded by a blank line
+                    if prev_blank {
+                        in_indented_block = true;
+                        indented_block_start = line_start;
+                    }
+                    // Otherwise, this is just an indented line, not a code block
+                }
+            } else if in_indented_block {
+                // End of indented code block
+                let block_end = if line_idx > 0 && line_idx - 1 < line_positions.len() {
+                    line_positions[line_idx - 1] + lines[line_idx - 1].len()
+                } else {
+                    line_start
+                };
+                blocks.push((indented_block_start, block_end));
+                in_indented_block = false;
+            }
+        }
+        
+        // Handle indented block that goes to end of file
+        if in_indented_block {
+            blocks.push((indented_block_start, content.len()));
+        }
+
         // Find inline code spans
         let mut i = 0;
         while i < content.len() {

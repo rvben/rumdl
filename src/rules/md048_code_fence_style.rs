@@ -1,7 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::code_fence_utils::CodeFenceStyle;
 use crate::utils::range_utils::{calculate_match_range, LineIndex};
-use crate::utils::code_block_utils::CodeBlockUtils;
 use toml;
 
 /// Rule MD048: Code fence style
@@ -17,25 +16,23 @@ impl MD048CodeFenceStyle {
         Self { style }
     }
 
-    fn detect_style(&self, content: &str) -> Option<CodeFenceStyle> {
-        // Detect all code blocks to skip nested ones
-        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
-        let mut byte_pos = 0;
+    fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<CodeFenceStyle> {
+        // Find the first code fence by looking for opening fences
         
-        for line in content.lines() {
+        for line in ctx.content.lines() {
             let trimmed = line.trim_start();
-            let fence_start = byte_pos + (line.len() - trimmed.len());
             
-            // Skip if this fence is inside a code block
-            if !CodeBlockUtils::is_in_code_block_or_span(&code_blocks, fence_start) {
-                if trimmed.starts_with("```") {
+            // Check for code fence markers
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
+                
+                // This is an opening fence - return its style immediately
+                if fence_char == '`' {
                     return Some(CodeFenceStyle::Backtick);
-                } else if trimmed.starts_with("~~~") {
+                } else {
                     return Some(CodeFenceStyle::Tilde);
                 }
             }
-            
-            byte_pos += line.len() + 1; // +1 for newline
         }
         None
     }
@@ -58,7 +55,7 @@ impl Rule for MD048CodeFenceStyle {
 
         let target_style = match self.style {
             CodeFenceStyle::Consistent => self
-                .detect_style(content)
+                .detect_style(ctx)
                 .unwrap_or(CodeFenceStyle::Backtick),
             _ => self.style,
         };
@@ -195,7 +192,7 @@ impl Rule for MD048CodeFenceStyle {
 
         let target_style = match self.style {
             CodeFenceStyle::Consistent => self
-                .detect_style(content)
+                .detect_style(ctx)
                 .unwrap_or(CodeFenceStyle::Backtick),
             _ => self.style,
         };

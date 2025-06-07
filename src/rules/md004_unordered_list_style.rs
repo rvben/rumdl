@@ -122,7 +122,6 @@ impl Rule for MD004UnorderedListStyle {
 
         let mut warnings = Vec::new();
         let content = &ctx.content;
-        let mut in_code_block = false;
         let mut in_front_matter = false;
         let mut first_marker: Option<char> = None;
 
@@ -136,12 +135,8 @@ impl Rule for MD004UnorderedListStyle {
         }
 
         for (i, line) in lines.iter().enumerate() {
-            // Check for code block markers
-            if CODE_BLOCK_START.is_match(line) {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if in_code_block {
+            // Skip if in code block
+            if ctx.is_in_code_block_or_span(line_positions[i]) {
                 continue;
             }
 
@@ -245,7 +240,6 @@ impl Rule for MD004UnorderedListStyle {
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
         let content = &ctx.content;
         let mut result = content.to_string();
-        let mut in_code_block = false;
         let mut in_front_matter = false;
         let mut first_marker: Option<char> = None;
         let mut edits = Vec::new();
@@ -260,12 +254,8 @@ impl Rule for MD004UnorderedListStyle {
         }
 
         for (i, line) in lines.iter().enumerate() {
-            // Check for code block markers
-            if CODE_BLOCK_START.is_match(line) {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if in_code_block {
+            // Skip if in code block
+            if ctx.is_in_code_block_or_span(line_positions[i]) {
                 continue;
             }
 

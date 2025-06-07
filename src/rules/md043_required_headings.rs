@@ -24,37 +24,18 @@ impl MD043RequiredHeadings {
         Self { headings }
     }
 
-    fn extract_headings(&self, content: &str) -> Vec<String> {
+    fn extract_headings(&self, content: &str, ctx: &crate::lint_context::LintContext) -> Vec<String> {
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         let mut i = 0;
-        let mut in_code_block = false;
-        let mut code_fence_char = None;
+        let mut byte_pos = 0;
 
         while i < lines.len() {
             let line = lines[i];
-            let trimmed = line.trim();
-
-            // Handle code block state
-            if trimmed.len() >= 3 {
-                let first_chars: Vec<char> = trimmed.chars().take(3).collect();
-                if first_chars.iter().all(|&c| c == '`' || c == '~') {
-                    if in_code_block && Some(first_chars[0]) == code_fence_char {
-                        // End of code block
-                        in_code_block = false;
-                        code_fence_char = None;
-                    } else if !in_code_block {
-                        // Start of code block
-                        in_code_block = true;
-                        code_fence_char = Some(first_chars[0]);
-                    }
-                    i += 1;
-                    continue;
-                }
-            }
 
             // Skip content within code blocks
-            if in_code_block {
+            if ctx.is_in_code_block_or_span(byte_pos) {
+                byte_pos += line.len() + 1;
                 i += 1;
                 continue;
             }
@@ -75,45 +56,24 @@ impl MD043RequiredHeadings {
             }
 
             i += 1;
+            byte_pos += line.len() + 1;
         }
 
         result
     }
 
-    fn is_heading(&self, content: &str, line_index: usize) -> bool {
+    fn is_heading(&self, content: &str, line_index: usize, ctx: &crate::lint_context::LintContext) -> bool {
         let lines: Vec<&str> = content.lines().collect();
         let line = lines[line_index];
 
-        // If this line is in a code block, it's not a heading
-        let mut in_code_block = false;
-        let mut code_fence_char = None;
-
-        for (idx, curr_line) in lines.iter().enumerate() {
-            if idx > line_index {
-                break;
-            }
-
-            let trimmed = curr_line.trim();
-
-            // Handle code block state
-            if trimmed.len() >= 3 {
-                let first_chars: Vec<char> = trimmed.chars().take(3).collect();
-                if first_chars.iter().all(|&c| c == '`' || c == '~') {
-                    if in_code_block && Some(first_chars[0]) == code_fence_char {
-                        // End of code block
-                        in_code_block = false;
-                        code_fence_char = None;
-                    } else if !in_code_block {
-                        // Start of code block
-                        in_code_block = true;
-                        code_fence_char = Some(first_chars[0]);
-                    }
-                }
-            }
+        // Calculate byte position for this line
+        let mut byte_pos = 0;
+        for i in 0..line_index {
+            byte_pos += lines[i].len() + 1;
         }
-
-        // If we're in a code block, it's not a heading
-        if in_code_block {
+        
+        // If this line is in a code block, it's not a heading
+        if ctx.is_in_code_block_or_span(byte_pos) {
             return false;
         }
 
@@ -146,7 +106,7 @@ impl Rule for MD043RequiredHeadings {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let mut warnings = Vec::new();
-        let actual_headings = self.extract_headings(content);
+        let actual_headings = self.extract_headings(content, ctx);
 
         // If no required headings are specified, the rule is disabled
         if self.headings.is_empty() {
@@ -156,7 +116,7 @@ impl Rule for MD043RequiredHeadings {
         if actual_headings != self.headings {
             let lines: Vec<&str> = content.lines().collect();
             for (i, line) in lines.iter().enumerate() {
-                if self.is_heading(content, i) {
+                if self.is_heading(content, i, ctx) {
                     // Calculate precise character range for the entire heading
                     let (start_line, start_col, end_line, end_col) =
                         calculate_heading_range(i + 1, line);
@@ -457,7 +417,8 @@ mod tests {
 
         // Test 1: Basic content with code block
         let content = "# Test Document\n\nThis is regular content.\n\n```markdown\n# This is a heading in a code block\n## Another heading in code block\n```\n\n## Real heading 2\n\nSome content.";
-        let actual_headings = rule.extract_headings(content);
+        let ctx = crate::lint_context::LintContext::new(content);
+        let actual_headings = rule.extract_headings(content, &ctx);
         assert_eq!(
             actual_headings,
             vec!["Test Document".to_string(), "Real heading 2".to_string()],
@@ -466,7 +427,8 @@ mod tests {
 
         // Test 2: Content with invalid headings
         let content = "# Test Document\n\nThis is regular content.\n\n```markdown\n# This is a heading in a code block\n## This should be ignored\n```\n\n## Not Real heading 2\n\nSome content.";
-        let actual_headings = rule.extract_headings(content);
+        let ctx = crate::lint_context::LintContext::new(content);
+        let actual_headings = rule.extract_headings(content, &ctx);
         assert_eq!(
             actual_headings,
             vec![

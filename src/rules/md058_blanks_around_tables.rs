@@ -46,7 +46,7 @@ impl Rule for MD058BlanksAroundTables {
         let lines: Vec<&str> = content.lines().collect();
 
         // Use shared table detection for better performance
-        let table_blocks = TableUtils::find_table_blocks(content);
+        let table_blocks = TableUtils::find_table_blocks(content, ctx);
 
         for table_block in table_blocks {
             // Check for blank line before table

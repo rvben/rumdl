@@ -1,11 +1,13 @@
 use log::warn;
 use markdown::{mdast::Node, to_mdast, ParseOptions};
 use std::panic;
+use crate::utils::code_block_utils::CodeBlockUtils;
 
 pub struct LintContext<'a> {
     pub content: &'a str,
     pub ast: Node, // The root of the AST
     pub line_offsets: Vec<usize>,
+    pub code_blocks: Vec<(usize, usize)>, // Cached code block and code span ranges
 }
 
 impl<'a> LintContext<'a> {
@@ -24,10 +26,15 @@ impl<'a> LintContext<'a> {
                     line_offsets.push(i + 1);
                 }
             }
+            
+            // Detect code blocks once and cache them
+            let code_blocks = CodeBlockUtils::detect_code_blocks(content);
+            
             return Self {
                 content,
                 ast,
                 line_offsets,
+                code_blocks,
             };
         }
 
@@ -63,10 +70,15 @@ impl<'a> LintContext<'a> {
                 line_offsets.push(i + 1);
             }
         }
+        
+        // Detect code blocks once and cache them
+        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
+        
         Self {
             content,
             ast,
             line_offsets,
+            code_blocks,
         }
     }
 
@@ -83,6 +95,11 @@ impl<'a> LintContext<'a> {
                 (line, offset - line_start + 1)
             }
         }
+    }
+    
+    /// Check if a position is within a code block or code span
+    pub fn is_in_code_block_or_span(&self, pos: usize) -> bool {
+        CodeBlockUtils::is_in_code_block_or_span(&self.code_blocks, pos)
     }
 }
 

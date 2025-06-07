@@ -241,8 +241,8 @@ impl MD046CodeBlockStyle {
         let mut fence_stack: Vec<(String, usize, usize, bool, bool)> = Vec::new(); // (fence_marker, fence_length, opening_line, flagged_for_nested, is_markdown_example)
         
         // Track if we're inside a markdown code block (for documentation examples)
-        let mut in_markdown_block = false;
-        let mut markdown_block_depth = 0;
+        // This is used to allow nested code blocks in markdown documentation
+        let mut inside_markdown_documentation_block = false;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
@@ -254,13 +254,7 @@ impl MD046CodeBlockStyle {
                 // Count the fence length
                 let fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
                 
-                // Check if this is a markdown code block start
-                let after_fence = &trimmed[fence_length..];
-                let lang_info = after_fence.trim().to_lowercase();
-                if lang_info.starts_with("markdown") || lang_info.starts_with("md") {
-                    in_markdown_block = true;
-                    markdown_block_depth = fence_stack.len();
-                }
+                // We'll check if this is a markdown block after determining if it's an opening fence
 
                 // Check if this is a closing fence for the current open fence
                 if let Some((open_marker, open_length, _open_line, _flagged, _is_md)) = fence_stack.last() {
@@ -272,9 +266,11 @@ impl MD046CodeBlockStyle {
                             // This is a valid closing fence
                             let _popped = fence_stack.pop();
                             
-                            // Check if we're exiting a markdown block
-                            if in_markdown_block && fence_stack.len() == markdown_block_depth {
-                                in_markdown_block = false;
+                            // Check if we're exiting a markdown documentation block
+                            if let Some((_,_,_,_,is_md)) = _popped {
+                                if is_md {
+                                    inside_markdown_documentation_block = false;
+                                }
                             }
                             continue;
                         }
@@ -286,10 +282,10 @@ impl MD046CodeBlockStyle {
                 if !after_fence.trim().is_empty() || fence_stack.is_empty() {
                     // Only flag as problematic if we're opening a new fence while another is still open
                     // AND they use the same fence character (indicating potential confusion)
-                    // BUT skip this check if we're inside a markdown example block
-                                        let has_nested_issue = if !in_markdown_block {
+                    // AND we're not inside a markdown documentation block
+                    let has_nested_issue = 
                         if let Some((open_marker, open_length, open_line, _, _)) = fence_stack.last_mut() {
-                            if fence_char == open_marker.chars().next().unwrap() && fence_length >= *open_length {
+                            if fence_char == open_marker.chars().next().unwrap() && fence_length >= *open_length && !inside_markdown_documentation_block {
                                 // This is problematic - same fence character used with equal or greater length while another is open
                                 let (opening_start_line, opening_start_col, opening_end_line, opening_end_col) =
                                     calculate_line_range(*open_line, &lines[*open_line - 1]);
@@ -320,23 +316,29 @@ impl MD046CodeBlockStyle {
                             }
                         } else {
                             false
-                        }
-                    } else {
-                        false
-                    };
+                        };
 
+                    // Check if this opening fence is a markdown code block
+                    let after_fence_for_lang = &trimmed[fence_length..];
+                    let lang_info = after_fence_for_lang.trim().to_lowercase();
+                    let is_markdown_fence = lang_info.starts_with("markdown") || lang_info.starts_with("md");
+                    
+                    // If we're opening a markdown documentation block, mark that we're inside one
+                    if is_markdown_fence && !inside_markdown_documentation_block {
+                        inside_markdown_documentation_block = true;
+                    }
+                    
                     // Add this fence to the stack
                     let fence_marker = fence_char.to_string().repeat(fence_length);
-                    fence_stack.push((fence_marker, fence_length, i + 1, has_nested_issue, in_markdown_block));
+                    fence_stack.push((fence_marker, fence_length, i + 1, has_nested_issue, is_markdown_fence));
                 }
             }
         }
 
         // Check for unclosed fences at end of file
         // Only flag unclosed if we haven't already flagged for nested issues
-        // AND if they're not inside markdown example blocks
-        for (fence_marker, _, opening_line, flagged_for_nested, is_in_markdown_example) in fence_stack {
-            if !flagged_for_nested && !is_in_markdown_example {
+        for (fence_marker, _, opening_line, flagged_for_nested, _) in fence_stack {
+            if !flagged_for_nested {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_line_range(opening_line, lines[opening_line - 1]);
 
