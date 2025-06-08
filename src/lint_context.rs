@@ -2,6 +2,39 @@ use log::warn;
 use markdown::{mdast::Node, to_mdast, ParseOptions};
 use std::panic;
 use crate::utils::code_block_utils::CodeBlockUtils;
+use regex::Regex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    // Comprehensive link pattern that captures both inline and reference links
+    // Use (?s) flag to make . match newlines
+    static ref LINK_PATTERN: Regex = Regex::new(
+        r"(?sx)
+        \[([^\]]*)\]          # Link text in group 1
+        (?:
+            \(([^)]*)\)       # Inline URL in group 2 (can be empty)
+            |
+            \[([^\]]*)\]      # Reference ID in group 3
+        )"
+    ).unwrap();
+    
+    // Image pattern (similar to links but with ! prefix)
+    // Use (?s) flag to make . match newlines
+    static ref IMAGE_PATTERN: Regex = Regex::new(
+        r"(?sx)
+        !\[([^\]]*)\]         # Alt text in group 1
+        (?:
+            \(([^)]*)\)       # Inline URL in group 2 (can be empty)
+            |
+            \[([^\]]*)\]      # Reference ID in group 3
+        )"
+    ).unwrap();
+    
+    // Reference definition pattern
+    static ref REF_DEF_PATTERN: Regex = Regex::new(
+        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
+    ).unwrap();
+}
 
 /// Pre-computed information about a line
 #[derive(Debug, Clone)]
@@ -48,6 +81,65 @@ pub enum HeadingStyle {
     Setext2,
 }
 
+/// Parsed link information
+#[derive(Debug, Clone)]
+pub struct ParsedLink {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Start column (0-indexed) in the line
+    pub start_col: usize,
+    /// End column (0-indexed) in the line
+    pub end_col: usize,
+    /// Byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+    /// Link text
+    pub text: String,
+    /// Link URL or reference
+    pub url: String,
+    /// Whether this is a reference link [text][ref] vs inline [text](url)
+    pub is_reference: bool,
+    /// Reference ID for reference links
+    pub reference_id: Option<String>,
+}
+
+/// Parsed image information
+#[derive(Debug, Clone)]
+pub struct ParsedImage {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Start column (0-indexed) in the line
+    pub start_col: usize,
+    /// End column (0-indexed) in the line
+    pub end_col: usize,
+    /// Byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+    /// Alt text
+    pub alt_text: String,
+    /// Image URL or reference
+    pub url: String,
+    /// Whether this is a reference image ![alt][ref] vs inline ![alt](url)
+    pub is_reference: bool,
+    /// Reference ID for reference images
+    pub reference_id: Option<String>,
+}
+
+/// Reference definition [ref]: url "title"
+#[derive(Debug, Clone)]
+pub struct ReferenceDef {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Reference ID (normalized to lowercase)
+    pub id: String,
+    /// URL
+    pub url: String,
+    /// Optional title
+    pub title: Option<String>,
+}
+
 /// Information about a heading
 #[derive(Debug, Clone)]
 pub struct HeadingInfo {
@@ -75,6 +167,9 @@ pub struct LintContext<'a> {
     pub line_offsets: Vec<usize>,
     pub code_blocks: Vec<(usize, usize)>, // Cached code block and code span ranges
     pub lines: Vec<LineInfo>, // Pre-computed line information
+    pub links: Vec<ParsedLink>, // Pre-parsed links
+    pub images: Vec<ParsedImage>, // Pre-parsed images
+    pub reference_defs: Vec<ReferenceDef>, // Reference definitions
 }
 
 impl<'a> LintContext<'a> {
@@ -100,12 +195,20 @@ impl<'a> LintContext<'a> {
             // Pre-compute line information
             let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
             
+            // Parse links, images, and references
+            let links = Self::parse_links(content, &lines, &code_blocks);
+            let images = Self::parse_images(content, &lines, &code_blocks);
+            let reference_defs = Self::parse_reference_defs(content, &lines);
+            
             return Self {
                 content,
                 ast,
                 line_offsets,
                 code_blocks,
                 lines,
+                links,
+                images,
+                reference_defs,
             };
         }
 
@@ -148,12 +251,20 @@ impl<'a> LintContext<'a> {
         // Pre-compute line information
         let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
         
+        // Parse links, images, and references
+        let links = Self::parse_links(content, &lines, &code_blocks);
+        let images = Self::parse_images(content, &lines, &code_blocks);
+        let reference_defs = Self::parse_reference_defs(content, &lines);
+        
         Self {
             content,
             ast,
             line_offsets,
             code_blocks,
             lines,
+            links,
+            images,
+            reference_defs,
         }
     }
 
@@ -189,6 +300,244 @@ impl<'a> LintContext<'a> {
     /// Get byte offset for a line number (1-indexed)
     pub fn line_to_byte_offset(&self, line_num: usize) -> Option<usize> {
         self.line_info(line_num).map(|info| info.byte_offset)
+    }
+    
+    /// Get URL for a reference link/image by its ID
+    pub fn get_reference_url(&self, ref_id: &str) -> Option<&str> {
+        let normalized_id = ref_id.to_lowercase();
+        self.reference_defs
+            .iter()
+            .find(|def| def.id == normalized_id)
+            .map(|def| def.url.as_str())
+    }
+    
+    /// Get links on a specific line
+    pub fn links_on_line(&self, line_num: usize) -> Vec<&ParsedLink> {
+        self.links
+            .iter()
+            .filter(|link| link.line == line_num)
+            .collect()
+    }
+    
+    /// Get images on a specific line
+    pub fn images_on_line(&self, line_num: usize) -> Vec<&ParsedImage> {
+        self.images
+            .iter()
+            .filter(|img| img.line == line_num)
+            .collect()
+    }
+    
+    /// Parse all links in the content
+    fn parse_links(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<ParsedLink> {
+        let mut links = Vec::new();
+        
+        // Parse links across the entire content, not line by line
+        for cap in LINK_PATTERN.captures_iter(content) {
+            let full_match = cap.get(0).unwrap();
+            let match_start = full_match.start();
+            let match_end = full_match.end();
+            
+            // Skip if this is actually an image (preceded by !)
+            if match_start > 0 && content.as_bytes().get(match_start - 1) == Some(&b'!') {
+                continue;
+            }
+            
+            // Skip if in code block or span
+            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+                continue;
+            }
+            
+            // Find which line this link starts on
+            let mut line_num = 1;
+            let mut col_start = match_start;
+            for (idx, line_info) in lines.iter().enumerate() {
+                if match_start >= line_info.byte_offset {
+                    line_num = idx + 1;
+                    col_start = match_start - line_info.byte_offset;
+                } else {
+                    break;
+                }
+            }
+            
+            // Find which line this link ends on (and calculate column on that line)
+            let mut end_line_num = 1;
+            let mut col_end = match_end;
+            for (idx, line_info) in lines.iter().enumerate() {
+                if match_end > line_info.byte_offset {
+                    end_line_num = idx + 1;
+                    col_end = match_end - line_info.byte_offset;
+                } else {
+                    break;
+                }
+            }
+            
+            // For single-line links, use the same approach as before
+            if line_num == end_line_num {
+                // col_end is already correct
+            } else {
+                // For multi-line links, col_end represents the column on the ending line
+                // which is what we want
+            }
+            
+            let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+            
+            if let Some(inline_url) = cap.get(2) {
+                // Inline link
+                links.push(ParsedLink {
+                    line: line_num,
+                    start_col: col_start,
+                    end_col: col_end,
+                    byte_offset: match_start,
+                    byte_end: match_end,
+                    text,
+                    url: inline_url.as_str().to_string(),
+                    is_reference: false,
+                    reference_id: None,
+                });
+            } else if let Some(ref_id) = cap.get(3) {
+                // Reference link
+                let ref_id_str = ref_id.as_str();
+                let normalized_ref = if ref_id_str.is_empty() {
+                    text.to_lowercase() // Implicit reference
+                } else {
+                    ref_id_str.to_lowercase()
+                };
+                
+                links.push(ParsedLink {
+                    line: line_num,
+                    start_col: col_start,
+                    end_col: col_end,
+                    byte_offset: match_start,
+                    byte_end: match_end,
+                    text,
+                    url: String::new(), // Will be resolved with reference_defs
+                    is_reference: true,
+                    reference_id: Some(normalized_ref),
+                });
+            }
+        }
+        
+        links
+    }
+    
+    /// Parse all images in the content
+    fn parse_images(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<ParsedImage> {
+        let mut images = Vec::new();
+        
+        // Parse images across the entire content, not line by line
+        for cap in IMAGE_PATTERN.captures_iter(content) {
+            let full_match = cap.get(0).unwrap();
+            let match_start = full_match.start();
+            let match_end = full_match.end();
+            
+            // Skip if in code block or span
+            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+                continue;
+            }
+            
+            // Find which line this image starts on
+            let mut line_num = 1;
+            let mut col_start = match_start;
+            for (idx, line_info) in lines.iter().enumerate() {
+                if match_start >= line_info.byte_offset {
+                    line_num = idx + 1;
+                    col_start = match_start - line_info.byte_offset;
+                } else {
+                    break;
+                }
+            }
+            
+            // Find which line this image ends on (and calculate column on that line)
+            let mut end_line_num = 1;
+            let mut col_end = match_end;
+            for (idx, line_info) in lines.iter().enumerate() {
+                if match_end > line_info.byte_offset {
+                    end_line_num = idx + 1;
+                    col_end = match_end - line_info.byte_offset;
+                } else {
+                    break;
+                }
+            }
+            
+            // For single-line images, use the same approach as before
+            if line_num == end_line_num {
+                // col_end is already correct
+            } else {
+                // For multi-line images, col_end represents the column on the ending line
+                // which is what we want
+            }
+            
+            let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+            
+            if let Some(inline_url) = cap.get(2) {
+                // Inline image
+                images.push(ParsedImage {
+                    line: line_num,
+                    start_col: col_start,
+                    end_col: col_end,
+                    byte_offset: match_start,
+                    byte_end: match_end,
+                    alt_text,
+                    url: inline_url.as_str().to_string(),
+                    is_reference: false,
+                    reference_id: None,
+                });
+            } else if let Some(ref_id) = cap.get(3) {
+                // Reference image
+                let ref_id_str = ref_id.as_str();
+                let normalized_ref = if ref_id_str.is_empty() {
+                    alt_text.to_lowercase() // Implicit reference
+                } else {
+                    ref_id_str.to_lowercase()
+                };
+                
+                images.push(ParsedImage {
+                    line: line_num,
+                    start_col: col_start,
+                    end_col: col_end,
+                    byte_offset: match_start,
+                    byte_end: match_end,
+                    alt_text,
+                    url: String::new(), // Will be resolved with reference_defs
+                    is_reference: true,
+                    reference_id: Some(normalized_ref),
+                });
+            }
+        }
+        
+        images
+    }
+    
+    /// Parse reference definitions
+    fn parse_reference_defs(_content: &str, lines: &[LineInfo]) -> Vec<ReferenceDef> {
+        let mut refs = Vec::new();
+        
+        for (line_idx, line_info) in lines.iter().enumerate() {
+            // Skip lines in code blocks
+            if line_info.in_code_block {
+                continue;
+            }
+            
+            let line = &line_info.content;
+            let line_num = line_idx + 1;
+            
+            if let Some(cap) = REF_DEF_PATTERN.captures(line) {
+                let id = cap.get(1).unwrap().as_str().to_lowercase();
+                let url = cap.get(2).unwrap().as_str().to_string();
+                let title = cap.get(3)
+                    .or_else(|| cap.get(4))
+                    .map(|m| m.as_str().to_string());
+                
+                refs.push(ReferenceDef {
+                    line: line_num,
+                    id,
+                    url,
+                    title,
+                });
+            }
+        }
+        
+        refs
     }
     
     /// Pre-compute line information

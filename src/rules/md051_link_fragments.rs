@@ -1,6 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::*;
 use std::collections::HashSet;
 use lazy_static::lazy_static;
@@ -42,9 +41,10 @@ impl MD051LinkFragments {
         &self,
         ctx: &crate::lint_context::LintContext,
     ) -> HashSet<String> {
-        let mut headings = HashSet::new();
+        let mut headings = HashSet::with_capacity(32); // Pre-allocate reasonable capacity
         let mut in_toc = false;
 
+        // Single pass through lines, only processing lines with headings
         for line_info in &ctx.lines {
             if let Some(heading) = &line_info.heading {
                 let line = &line_info.content;
@@ -130,6 +130,11 @@ impl MD051LinkFragments {
     /// Optimized markdown stripping using single-pass regex
     #[inline]
     fn strip_markdown_formatting_fast(&self, text: &str) -> String {
+        // Fast path: if no markdown characters, return as-is
+        if !QUICK_MARKDOWN_CHECK.is_match(text) {
+            return text.to_string();
+        }
+        
         // Use single regex to capture all markdown formatting at once
         let result = MARKDOWN_STRIP.replace_all(text, |caps: &regex::Captures| {
             // Return the captured content (group 1-7 for different formatting types)
@@ -141,8 +146,12 @@ impl MD051LinkFragments {
             caps.get(0).unwrap().as_str().to_string()
         });
 
-        // Remove any remaining backticks
-        result.replace('`', "")
+        // Remove any remaining backticks only if they exist
+        if result.contains('`') {
+            result.replace('`', "")
+        } else {
+            result.to_string()
+        }
     }
 
     /// Fast external URL detection with optimized patterns
@@ -175,37 +184,6 @@ impl MD051LinkFragments {
         }
 
         false
-    }
-
-    /// Optimized link extraction with fast pattern matching
-    fn find_fragment_links_fast(&self, line: &str) -> Vec<(usize, usize, String)> {
-        let mut links = Vec::new();
-
-        // Quick check: if no potential links, return early
-        if !QUICK_LINK_CHECK.is_match(line) {
-            return links;
-        }
-
-        // Use LINK_REGEX from regex_cache which is already defined for this purpose
-        let iter = LINK_REGEX.captures_iter(line);
-        for cap_result in iter {
-            if let Ok(cap) = cap_result {
-                let full_match = cap.get(0).unwrap();
-                let url = cap.get(2).map(|m| m.as_str()).unwrap_or("");
-                let fragment = cap.get(3).map(|m| m.as_str()).unwrap_or("");
-
-                // Only check internal links (use fast external check)
-                if !self.is_external_url_fast(url) {
-                    links.push((
-                        full_match.start(),
-                        full_match.end(),
-                        fragment.to_lowercase(),
-                    ));
-                }
-            }
-        }
-
-        links
     }
 }
 
@@ -244,61 +222,69 @@ impl Rule for MD051LinkFragments {
             return Ok(Vec::new());
         }
 
-        let mut warnings = Vec::new();
+        // Extract headings once for the entire document
         let headings = self.extract_headings_from_context(ctx);
-
+        
+        // If no headings, no need to check TOC sections
+        let has_headings = !headings.is_empty();
+        
+        let mut warnings = Vec::new();
         let mut in_toc_section = false;
 
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            let line = &line_info.content;
+        // Use centralized link parsing from LintContext
+        for link in &ctx.links {
+            // Skip external links
+            let url = if link.is_reference {
+                // Resolve reference URL
+                if let Some(ref_id) = &link.reference_id {
+                    ctx.get_reference_url(ref_id).unwrap_or("")
+                } else {
+                    ""
+                }
+            } else {
+                &link.url
+            };
             
-            // Check if we're entering a TOC section
-            if TOC_SECTION_START.is_match(line) {
-                in_toc_section = true;
+            // Skip if external URL
+            if self.is_external_url_fast(url) {
                 continue;
             }
-
-            // Check if we're exiting a TOC section (next heading)
-            if in_toc_section && line.starts_with('#') && !TOC_SECTION_START.is_match(line) {
-                in_toc_section = false;
-            }
-
-            // Early return: skip lines without links or fragments
-            if !line.contains('[') || !line.contains('#') {
-                continue;
-            }
-
-            // Skip lines in code blocks or TOC section
-            if line_info.in_code_block || in_toc_section {
-                continue;
-            }
-
-            // Use optimized link extraction
-            let fragment_links = self.find_fragment_links_fast(line);
-
-            for (start_pos, end_pos, fragment) in fragment_links {
-                // Calculate the byte position of this link in the document
-                let byte_offset = line_info.byte_offset + start_pos;
+            
+            // Check if URL has a fragment
+            if let Some(hash_pos) = url.find('#') {
+                let fragment = &url[hash_pos + 1..].to_lowercase();
                 
-                // Check if the link is inside a code span
-                if ctx.is_in_code_block_or_span(byte_offset) {
+                // Skip empty fragments
+                if fragment.is_empty() {
                     continue;
                 }
                 
-                // Check if the fragment exists in headings
-                // If no headings exist, all fragment links should warn
-                if headings.is_empty() || !headings.contains(&fragment) {
-                    // Calculate precise character range for the entire link
-                    let match_len = end_pos - start_pos;
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_match_range(line_num + 1, line, start_pos, match_len);
+                // Check if in TOC section
+                if in_toc_section {
+                    continue;
+                }
+                
+                let line_info = &ctx.lines[link.line - 1];
+                
+                // Check if we're entering a TOC section
+                if has_headings && TOC_SECTION_START.is_match(&line_info.content) {
+                    in_toc_section = true;
+                    continue;
+                }
 
+                // Check if we're exiting a TOC section (next heading)
+                if in_toc_section && line_info.content.starts_with('#') && !TOC_SECTION_START.is_match(&line_info.content) {
+                    in_toc_section = false;
+                }
+                
+                // Check if the fragment exists in headings
+                if !has_headings || !headings.contains(fragment) {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
+                        line: link.line,
+                        column: link.start_col + 1, // Convert to 1-indexed
+                        end_line: link.line,
+                        end_column: link.end_col + 1, // Convert to 1-indexed
                         message: format!(
                             "Link anchor '#{}' does not exist in document headings",
                             fragment

@@ -190,14 +190,13 @@ Final empty link: []()"#;
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should flag: line 3 (regular), line 21 (in blockquote), line 25 (quoted code - limitation), line 28 (final)
-    // Should NOT flag: lines 10, 15, 17 (all in code)
-    // Note: Line 25 is currently flagged due to limitation in fenced code detection inside blockquotes
-    assert_eq!(warnings.len(), 4);
+    // Should flag: line 3 (regular), line 21 (in blockquote), line 28 (final)
+    // Should NOT flag: lines 10, 15, 17, 25 (all in code)
+    // Note: We correctly detect code blocks in blockquotes, unlike markdownlint
+    assert_eq!(warnings.len(), 3);
     assert_eq!(warnings[0].line, 3);  // Regular empty link
     assert_eq!(warnings[1].line, 21); // Empty link in blockquote
-    assert_eq!(warnings[2].line, 25); // Empty link in quoted code (limitation)
-    assert_eq!(warnings[3].line, 28); // Final empty link
+    assert_eq!(warnings[2].line, 28); // Final empty link
 }
 
 #[test]

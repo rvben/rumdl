@@ -1,4 +1,3 @@
-use crate::utils::range_utils::{calculate_match_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
@@ -38,59 +37,35 @@ impl Rule for MD045NoAltText {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
-
         let mut warnings = Vec::new();
-        
-        // Track byte positions for each line
-        let mut byte_pos = 0;
 
-        for (line_num, line) in content.lines().enumerate() {
-            for cap in IMAGE_REGEX.captures_iter(line) {
-                let alt_text = cap.get(1).map_or("", |m| m.as_str());
-                if alt_text.trim().is_empty() {
-                    let full_match = cap.get(0).unwrap();
-                    let url_part = cap.get(2).unwrap();
-                    
-                    // Calculate the byte position of this match in the document
-                    let match_byte_pos = byte_pos + full_match.start();
-                    
-                    // Skip if this image is inside a code block or code span
-                    if ctx.is_in_code_block_or_span(match_byte_pos) {
-                        continue;
+        // Use centralized image parsing from LintContext
+        for image in &ctx.images {
+            if image.alt_text.trim().is_empty() {
+                let url_part = if image.is_reference {
+                    if let Some(ref_id) = &image.reference_id {
+                        format!("[{}]", ref_id)
+                    } else {
+                        "[]".to_string()
                     }
+                } else {
+                    format!("({})", image.url)
+                };
 
-                    // Calculate precise character range for the entire image syntax
-                    let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                        line_num + 1,
-                        line,
-                        full_match.start(),
-                        full_match.len(),
-                    );
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: "Image missing alt text (add description for accessibility: ![description](url))".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: _line_index
-                                .line_col_to_byte_range_with_length(line_num + 1, full_match.start() + 1, full_match.len()),
-                            replacement: format!(
-                                "![TODO: Add image description]{}",
-                                url_part.as_str()
-                            ),
-                        }),
-                    });
-                }
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: image.line,
+                    column: image.start_col + 1, // Convert to 1-indexed
+                    end_line: image.line,
+                    end_column: image.end_col + 1, // Convert to 1-indexed
+                    message: "Image missing alt text (add description for accessibility: ![description](url))".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: image.byte_offset..image.byte_offset + (image.end_col - image.start_col),
+                        replacement: format!("![TODO: Add image description]{}", url_part),
+                    }),
+                });
             }
-            
-            // Update byte position for next line
-            byte_pos += line.len() + 1; // +1 for newline
         }
 
         Ok(warnings)

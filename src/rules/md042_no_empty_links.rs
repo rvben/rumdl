@@ -34,16 +34,37 @@ impl Rule for MD042NoEmptyLinks {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
+        let mut warnings = Vec::new();
 
-        // Early return for empty content or content without links
-        if content.is_empty() || !content.contains('[') {
-            return Ok(Vec::new());
+        // Use centralized link parsing from LintContext
+        for link in &ctx.links {
+            // Check for empty links
+            if link.text.trim().is_empty() || link.url.trim().is_empty() {
+                let replacement = if link.text.trim().is_empty() && link.url.trim().is_empty() {
+                    "[Link text](https://example.com)".to_string()
+                } else if link.text.trim().is_empty() {
+                    format!("[Link text]({})", link.url)
+                } else {
+                    format!("[{}](https://example.com)", link.text)
+                };
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    message: format!("Empty link found: [{}]({})", link.text, link.url),
+                    line: link.line,
+                    column: link.start_col + 1, // Convert to 1-indexed
+                    end_line: link.line,
+                    end_column: link.end_col + 1, // Convert to 1-indexed
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: link.byte_offset..link.byte_end,
+                        replacement,
+                    }),
+                });
+            }
         }
 
-        // Use document structure for proper code block and code span detection
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
+        Ok(warnings)
     }
 
     /// Optimized check using document structure
@@ -75,11 +96,7 @@ impl Rule for MD042NoEmptyLinks {
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
-                message: format!(
-                    "Empty link found: [{
-            }]({})",
-                    link.text, link.url
-                ),
+                message: format!("Empty link found: [{}]({})", link.text, link.url),
                 line: link.line,
                 column: link.start_col,
                 end_line: link.line,

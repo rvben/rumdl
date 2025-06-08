@@ -34,55 +34,6 @@ impl MD039NoSpaceInLinks {
         LINK_PATTERN.is_match(content)
     }
 
-    /// Optimized link parsing using regex with early returns
-    fn parse_links_and_images<'a>(
-        content: &'a str,
-        ctx: &crate::lint_context::LintContext,
-    ) -> Vec<(bool, &'a str, &'a str, usize, usize, usize, usize)> {
-        let mut results = Vec::new();
-
-        // Early return if no potential links
-        if !LINK_PATTERN.is_match(content) {
-            return results;
-        }
-
-        // Use optimized regex parsing instead of character-by-character iteration
-        for m in LINK_PATTERN.find_iter(content) {
-            let match_start = m.start();
-            let match_end = m.end();
-
-            // Skip if in code block (using cached code blocks from context)
-            if ctx.is_in_code_block_or_span(match_start) {
-                continue;
-            }
-
-            let full_match = m.as_str();
-            let is_image = full_match.starts_with('!');
-
-            // Extract using the regex capture groups for better performance
-            if let Some(captures) = LINK_PATTERN.captures(full_match) {
-                if let (Some(text_match), Some(url_match)) = (captures.get(1), captures.get(2)) {
-                    let text = text_match.as_str();
-                    let url = url_match.as_str();
-
-                    // Calculate absolute positions
-                    let text_start = match_start + text_match.start() + if is_image { 2 } else { 1 };
-                    let text_end = match_start + text_match.end() + if is_image { 2 } else { 1 };
-
-                    results.push((
-                        is_image,
-                        text,
-                        url,
-                        match_start,
-                        match_end,
-                        text_start,
-                        text_end,
-                    ));
-                }
-            }
-        }
-        results
-    }
 
     #[inline]
     fn trim_link_text_preserve_escapes(text: &str) -> &str {
@@ -161,127 +112,230 @@ impl Rule for MD039NoSpaceInLinks {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        if self.should_skip(ctx) {
-            return Ok(Vec::new());
-        }
-
-        let content = ctx.content;
         let mut warnings = Vec::new();
 
-        // Parse links and images once with optimized algorithm
-        let links_and_images = Self::parse_links_and_images(content, ctx);
-
-        // Early return if no links found
-        if links_and_images.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        for (is_image, text, url, link_start, _link_end, _text_start, _text_end) in links_and_images {
+        // Use centralized link parsing from LintContext
+        for link in &ctx.links {
+            // Skip reference links (markdownlint doesn't check these)
+            if link.is_reference {
+                continue;
+            }
+            
             // Fast check if trimming is needed
-            if !self.needs_trimming(text) {
+            if !self.needs_trimming(&link.text) {
                 continue;
             }
 
             // Optimized unescaping for whitespace check
-            let unescaped = self.unescape_fast(text);
+            let unescaped = self.unescape_fast(&link.text);
 
             let needs_warning = if ALL_WHITESPACE.is_match(&unescaped) {
                 true
             } else {
-                let trimmed = text.trim_matches(|c: char| c.is_whitespace());
-                text != trimmed
+                let trimmed = link.text.trim_matches(|c: char| c.is_whitespace());
+                link.text.as_str() != trimmed
             };
 
             if needs_warning {
-                let original = if is_image {
-                    format!("![{}]({})", text, url)
+                let url = if link.is_reference {
+                    if let Some(ref_id) = &link.reference_id {
+                        format!("[{}]", ref_id)
+                    } else {
+                        "[]".to_string()
+                    }
                 } else {
-                    format!("[{}]({})", text, url)
+                    format!("({})", link.url)
                 };
 
                 let fixed = if ALL_WHITESPACE.is_match(&unescaped) {
-                    if is_image {
-                        format!("![]({})", url)
-                    } else {
-                        format!("[]({})", url)
-                    }
+                    format!("[]{}", url)
                 } else {
-                    let trimmed = Self::trim_link_text_preserve_escapes(text);
-                    if is_image {
-                        format!("![{}]({})", trimmed, url)
-                    } else {
-                        format!("[{}]({})", trimmed, url)
-                    }
+                    let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
+                    format!("[{}]{}", trimmed, url)
                 };
 
-                let (line, column) = ctx.offset_to_line_col(link_start);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
-                    line,
-                    column,
-                    end_line: line,
-                    end_column: column + original.len(),
+                    line: link.line,
+                    column: link.start_col + 1, // Convert to 1-indexed
+                    end_line: link.line,
+                    end_column: link.end_col + 1, // Convert to 1-indexed
                     message: WARNING_MESSAGE.to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: link_start..link_start + original.len(),
+                        range: link.byte_offset..link.byte_end,
                         replacement: fixed,
                     }),
                 });
             }
         }
-        Ok(warnings)
-    }
 
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        if self.should_skip(ctx) {
-            return Ok(ctx.content.to_string());
-        }
-
-        let content = ctx.content;
-        let links_and_images = Self::parse_links_and_images(content, ctx);
-
-        if links_and_images.is_empty() {
-            return Ok(content.to_string());
-        }
-
-        let mut fixes = Vec::new();
-
-        for (is_image, text, url, link_start, link_end, _text_start, _text_end) in links_and_images {
+        // Also check images
+        for image in &ctx.images {
+            // Skip reference images (markdownlint doesn't check these)
+            if image.is_reference {
+                continue;
+            }
+            
             // Fast check if trimming is needed
-            if !self.needs_trimming(text) {
+            if !self.needs_trimming(&image.alt_text) {
                 continue;
             }
 
             // Optimized unescaping for whitespace check
-            let unescaped = self.unescape_fast(text);
+            let unescaped = self.unescape_fast(&image.alt_text);
 
-            let replacement = if ALL_WHITESPACE.is_match(&unescaped) {
-                if is_image {
-                    format!("![]({})", url)
-                } else {
-                    format!("[]({})", url)
-                }
+            let needs_warning = if ALL_WHITESPACE.is_match(&unescaped) {
+                true
             } else {
-                let trimmed = Self::trim_link_text_preserve_escapes(text);
-                if is_image {
-                    format!("![{}]({})", trimmed, url)
-                } else {
-                    format!("[{}]({})", trimmed, url)
-                }
+                let trimmed = image.alt_text.trim_matches(|c: char| c.is_whitespace());
+                image.alt_text.as_str() != trimmed
             };
-            fixes.push((link_start, link_end, replacement));
+
+            if needs_warning {
+                let url = if image.is_reference {
+                    if let Some(ref_id) = &image.reference_id {
+                        format!("[{}]", ref_id)
+                    } else {
+                        "[]".to_string()
+                    }
+                } else {
+                    format!("({})", image.url)
+                };
+
+                let fixed = if ALL_WHITESPACE.is_match(&unescaped) {
+                    format!("![]{}", url)
+                } else {
+                    let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
+                    format!("![{}]{}", trimmed, url)
+                };
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: image.line,
+                    column: image.start_col + 1, // Convert to 1-indexed
+                    end_line: image.line,
+                    end_column: image.end_col + 1, // Convert to 1-indexed
+                    message: WARNING_MESSAGE.to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: image.byte_offset..image.byte_end,
+                        replacement: fixed,
+                    }),
+                });
+            }
+        }
+
+        Ok(warnings)
+    }
+
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
+        let mut fixes = Vec::new();
+
+        // Process links
+        for link in &ctx.links {
+            // Skip reference links (markdownlint doesn't check these)
+            if link.is_reference {
+                continue;
+            }
+            
+            if !self.needs_trimming(&link.text) {
+                continue;
+            }
+
+            let unescaped = self.unescape_fast(&link.text);
+            
+            let needs_fix = if ALL_WHITESPACE.is_match(&unescaped) {
+                true
+            } else {
+                let trimmed = link.text.trim_matches(|c: char| c.is_whitespace());
+                link.text.as_str() != trimmed
+            };
+
+            if needs_fix {
+                let url_part = if link.is_reference {
+                    if let Some(ref_id) = &link.reference_id {
+                        format!("[{}]", ref_id)
+                    } else {
+                        "[]".to_string()
+                    }
+                } else {
+                    format!("({})", link.url)
+                };
+
+                let replacement = if ALL_WHITESPACE.is_match(&unescaped) {
+                    format!("[]{}", url_part)
+                } else {
+                    let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
+                    format!("[{}]{}", trimmed, url_part)
+                };
+                
+                fixes.push((link.byte_offset, link.byte_end, replacement));
+            }
+        }
+
+        // Process images
+        for image in &ctx.images {
+            // Skip reference images (markdownlint doesn't check these)
+            if image.is_reference {
+                continue;
+            }
+            
+            if !self.needs_trimming(&image.alt_text) {
+                continue;
+            }
+
+            let unescaped = self.unescape_fast(&image.alt_text);
+            
+            let needs_fix = if ALL_WHITESPACE.is_match(&unescaped) {
+                true
+            } else {
+                let trimmed = image.alt_text.trim_matches(|c: char| c.is_whitespace());
+                image.alt_text.as_str() != trimmed
+            };
+
+            if needs_fix {
+                let url_part = if image.is_reference {
+                    if let Some(ref_id) = &image.reference_id {
+                        format!("[{}]", ref_id)
+                    } else {
+                        "[]".to_string()
+                    }
+                } else {
+                    format!("({})", image.url)
+                };
+
+                let replacement = if ALL_WHITESPACE.is_match(&unescaped) {
+                    format!("![]{}", url_part)
+                } else {
+                    let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
+                    format!("![{}]{}", trimmed, url_part)
+                };
+                
+                fixes.push((image.byte_offset, image.byte_end, replacement));
+            }
         }
 
         if fixes.is_empty() {
             return Ok(content.to_string());
         }
 
+        // Sort fixes by position to apply them in order
+        fixes.sort_by_key(|&(start, _, _)| start);
+
         // Apply fixes efficiently
         let mut result = String::with_capacity(content.len());
         let mut last_pos = 0;
 
         for (start, end, replacement) in fixes {
+            if start < last_pos {
+                // This should not happen if fixes are properly sorted and non-overlapping
+                return Err(LintError::FixFailed(format!(
+                    "Overlapping fixes detected: last_pos={}, start={}", 
+                    last_pos, start
+                )));
+            }
             result.push_str(&content[last_pos..start]);
             result.push_str(&replacement);
             last_pos = end;
