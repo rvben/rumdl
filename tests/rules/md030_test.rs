@@ -68,7 +68,8 @@ mod tests {
         let content = "*Item 1\n-Item 2\n+Item 3";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Per CommonMark and markdownlint, these are not valid list items, so no warnings expected
+        // These look like intended list items missing spaces, but per current detection logic
+        // they are not detected as list items (matching markdownlint behavior)
         assert_eq!(result.len(), 0);
     }
 
@@ -78,7 +79,8 @@ mod tests {
         let content = "1.First\n2.Second\n3.Third";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Per CommonMark and markdownlint, these are not valid list items, so no warnings expected
+        // These look like intended list items missing spaces, but per current detection logic
+        // they are not detected as list items (matching markdownlint behavior)
         assert_eq!(result.len(), 0);
     }
 
@@ -88,7 +90,8 @@ mod tests {
         let content = "*Item 1\n1.First\n-Item 2\n2.Second";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Per CommonMark and markdownlint, these are not valid list items, so no warnings expected
+        // These look like intended list items missing spaces, but per current detection logic
+        // they are not detected as list items (matching markdownlint behavior)
         assert_eq!(result.len(), 0);
     }
 

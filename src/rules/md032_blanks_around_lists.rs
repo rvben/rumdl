@@ -160,6 +160,7 @@ impl MD032BlanksAroundLists {
     // Updated to return blockquote prefix along with block ranges
     fn find_md032_list_blocks(
         &self,
+        ctx: &crate::lint_context::LintContext,
         lines: &[&str],
         structure: &DocumentStructure,
     ) -> Vec<(usize, usize, String)> {
@@ -188,17 +189,16 @@ impl MD032BlanksAroundLists {
 
                     if is_indented_code {
                         // Check if this "indented code block" line actually looks like a list item
-                        let blockquote_prefix = BLOCKQUOTE_PREFIX_RE
-                            .find(line_str)
-                            .map_or(String::new(), |m| m.as_str().to_string());
-                        let line_content = line_str.trim_start_matches(&blockquote_prefix);
-
-                        // If it matches our list item pattern, treat it as a list item for linting purposes
-                        if LIST_ITEM_START_REGEX.is_match(line_content) {
-                            // Don't skip - process it as a potential list item
+                        if let Some(line_info) = ctx.line_info(current_line_idx_1) {
+                            if line_info.list_item.is_some() {
+                                // Don't skip - process it as a potential list item
+                            } else {
+                                current_line_idx_0 += 1;
+                                continue;
+                            }
                         } else {
-                current_line_idx_0 += 1;
-                continue;
+                            current_line_idx_0 += 1;
+                            continue;
                         }
                     } else {
                         // Fenced code block - always skip
@@ -218,10 +218,34 @@ impl MD032BlanksAroundLists {
                 .map_or(String::new(), |m| m.as_str().to_string());
             let line_content = line_str.trim_start_matches(&blockquote_prefix);
 
-            // Check for list item start on the line *content*
-            if let Some(captures) = LIST_ITEM_START_REGEX.captures(line_content) {
-                // Use indent calculated from the *content* line for comparison
-                if let Some(first_item_content_indent) = get_content_start_column(&captures) {
+            // Check for list item start using cached information OR regex for blockquoted content
+            let mut is_list_item = false;
+            let mut first_item_content_indent = 0;
+            
+            // First check cached info - but verify it's not a false positive (emphasis)
+            if let Some(line_info) = ctx.line_info(current_line_idx_1) {
+                if let Some(list_item_info) = &line_info.list_item {
+                    // Additional check: ensure there's space after the marker
+                    // This filters out emphasis patterns like "*text*"
+                    let marker_end = list_item_info.marker_column + list_item_info.marker.len();
+                    let has_space_after = list_item_info.content_column > marker_end;
+                    if has_space_after || line_str[marker_end..].trim().is_empty() {
+                        is_list_item = true;
+                        first_item_content_indent = list_item_info.content_column;
+                    }
+                }
+            }
+            
+            // If not detected in cached info (or was filtered out) and we have a blockquote prefix, 
+            // check the content after prefix using our more accurate regex
+            if !is_list_item && (!blockquote_prefix.is_empty() || ctx.line_info(current_line_idx_1).is_none()) {
+                if let Some(captures) = LIST_ITEM_START_REGEX.captures(line_content) {
+                    is_list_item = true;
+                    first_item_content_indent = get_content_start_column(&captures).unwrap_or(0);
+                }
+            }
+            
+            if is_list_item {
                     let block_start_line_1 = current_line_idx_1;
                     let mut block_end_line_1 = current_line_idx_1;
 
@@ -260,9 +284,26 @@ impl MD032BlanksAroundLists {
                             continue;
                         }
 
-                        // Check continuation based on *content* after prefix
-                        let is_next_list_item_start =
-                            LIST_ITEM_START_REGEX.is_match(next_line_content);
+                        // Check continuation based on cached line info OR regex for blockquoted content
+                        let mut is_next_list_item_start = false;
+                        
+                        // First check cached info with same emphasis filtering
+                        if let Some(next_line_info) = ctx.line_info(next_line_idx_1) {
+                            if let Some(list_item_info) = &next_line_info.list_item {
+                                // Same check as above to filter out emphasis
+                                let marker_end = list_item_info.marker_column + list_item_info.marker.len();
+                                let has_space_after = list_item_info.content_column > marker_end;
+                                if has_space_after || next_line_str[marker_end..].trim().is_empty() {
+                                    is_next_list_item_start = true;
+                                }
+                            }
+                        }
+                        
+                        // If not detected in cached info and we have a blockquote prefix, check the content after prefix
+                        if !is_next_list_item_start && (!blockquote_prefix.is_empty() || ctx.line_info(next_line_idx_1).is_none()) {
+                            is_next_list_item_start = LIST_ITEM_START_REGEX.is_match(next_line_content);
+                        }
+                        
                         let next_line_indent = calculate_indent(next_line_content); // Calculate indent on content only
 
                         // A line continues the list if:
@@ -293,10 +334,6 @@ impl MD032BlanksAroundLists {
 
                     list_blocks.push((block_start_line_1, block_end_line_1, blockquote_prefix)); // Store prefix
                     current_line_idx_0 = block_end_line_1;
-                } else {
-                    // Should not happen if regex matched, but handle gracefully
-                    current_line_idx_0 += 1;
-                }
             } else {
                 current_line_idx_0 += 1;
             }
@@ -438,7 +475,7 @@ impl Rule for MD032BlanksAroundLists {
         let lines: Vec<&str> = content.lines().collect();
         let line_index = LineIndex::new(content.to_string());
 
-        let list_blocks = self.find_md032_list_blocks(&lines, &structure);
+        let list_blocks = self.find_md032_list_blocks(ctx, &lines, &structure);
 
         if list_blocks.is_empty() {
             return Ok(Vec::new());
@@ -462,7 +499,7 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(Vec::new());
         }
 
-        let list_blocks = self.find_md032_list_blocks(&lines, structure);
+        let list_blocks = self.find_md032_list_blocks(ctx, &lines, structure);
 
         if list_blocks.is_empty() {
             return Ok(Vec::new());
@@ -479,7 +516,7 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(String::new());
         }
 
-        let list_blocks = self.find_md032_list_blocks(&lines, &structure);
+        let list_blocks = self.find_md032_list_blocks(ctx, &lines, &structure);
         if list_blocks.is_empty() {
             return Ok(ctx.content.to_string());
         }
@@ -622,7 +659,7 @@ impl DocumentStructureExtensions for MD032BlanksAroundLists {
         let lines: Vec<&str> = content.lines().collect();
 
         // Use MD032's own sophisticated list detection to check for list blocks
-        let list_blocks = self.find_md032_list_blocks(&lines, doc_structure);
+        let list_blocks = self.find_md032_list_blocks(ctx, &lines, doc_structure);
 
         // This rule is relevant if we found any list blocks
         !list_blocks.is_empty()

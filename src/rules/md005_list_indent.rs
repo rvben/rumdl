@@ -7,68 +7,14 @@ use crate::utils::range_utils::{calculate_match_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::DocumentStructure;
-use lazy_static::lazy_static;
-use regex::Regex;
 use std::collections::HashMap;
 use toml;
-
-lazy_static! {
-    static ref LIST_MARKER_REGEX: Regex = Regex::new(r"^\d+[.)]").unwrap();
-    // Pre-compiled pattern for quick list detection
-    static ref QUICK_LIST_CHECK: Regex = Regex::new(r"^( *)([*+\-]|\d+[.)])").unwrap();
-}
 
 /// Rule MD005: Inconsistent indentation for list items at the same level
 #[derive(Clone)]
 pub struct MD005ListIndent;
 
 impl MD005ListIndent {
-    #[inline]
-    fn get_list_marker_info(line: &str) -> Option<(usize, char, usize)> {
-        // Early return for empty or whitespace-only lines
-        if line.is_empty() || line.trim().is_empty() {
-            return None;
-        }
-
-        let indentation = line.len() - line.trim_start().len();
-        let trimmed = line.trim_start();
-
-        // Fast path check for unordered list markers
-        if !trimmed.is_empty() {
-            let first_char = trimmed.chars().next().unwrap();
-
-            // Check for unordered list markers (* - +)
-            if (first_char == '*' || first_char == '-' || first_char == '+')
-                && trimmed.len() > 1
-                && trimmed.chars().nth(1).map_or(false, |c| c.is_whitespace())
-            {
-                return Some((indentation, first_char, 1)); // 1 char marker
-            }
-
-            // Fast path check for ordered list markers (digits followed by . or ))
-            if first_char.is_ascii_digit() {
-                if let Some(marker_match) = LIST_MARKER_REGEX.find(trimmed) {
-                    let marker_char = trimmed.chars().nth(marker_match.end() - 1).unwrap();
-                    if trimmed.len() > marker_match.end()
-                        && trimmed
-                            .chars()
-                            .nth(marker_match.end())
-                            .map_or(false, |c| c.is_whitespace())
-                    {
-                        return Some((indentation, marker_char, marker_match.end()));
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
-    #[inline]
-    fn is_blank_line(line: &str) -> bool {
-        line.trim().is_empty()
-    }
-
     // Determine the expected indentation for a list item at a specific level
     #[inline]
     fn get_expected_indent(level: usize) -> usize {
@@ -81,7 +27,7 @@ impl MD005ListIndent {
 
     // Determine if a line is a continuation of a list item
     #[inline]
-    fn is_list_continuation(prev_line: &str, current_line: &str) -> bool {
+    fn is_list_continuation(prev_list_indent: usize, current_line: &str, current_is_list: bool) -> bool {
         // Early return for empty lines
         if current_line.trim().is_empty() {
             return false;
@@ -89,12 +35,8 @@ impl MD005ListIndent {
 
         // If the previous line is a list item and the current line has more indentation
         // but is not a list item itself, it's a continuation
-        if let Some((prev_indent, _, _)) = Self::get_list_marker_info(prev_line) {
-            let current_indent = current_line.len() - current_line.trim_start().len();
-            return current_indent > prev_indent
-                && Self::get_list_marker_info(current_line).is_none();
-        }
-        false
+        let current_indent = current_line.len() - current_line.trim_start().len();
+        current_indent > prev_list_indent && !current_is_list
     }
 
     /// Optimized check that combines all passes into one
@@ -102,35 +44,18 @@ impl MD005ListIndent {
         let content = ctx.content;
 
         // Early returns for common cases
-        if content.is_empty() {
+        if content.is_empty() || ctx.lines.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Quick check to avoid processing files without list markers
-        if !QUICK_LIST_CHECK.is_match(content) {
+        // Quick check to avoid processing files without lists
+        let has_lists = ctx.lines.iter().any(|line| line.list_item.is_some());
+        if !has_lists {
             return Ok(Vec::new());
         }
 
         let line_index = LineIndex::new(content.to_string());
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Early return if there are no lines
-        if lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
         let mut warnings = Vec::new();
-
-        // Pre-compute code blocks once
-        let mut in_code_blocks = vec![false; lines.len()];
-        let mut in_block = false;
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                in_block = !in_block;
-            }
-            in_code_blocks[i] = in_block;
-        }
 
         // Single pass processing with efficient data structures
         let mut list_items: Vec<(usize, usize, usize)> = Vec::new(); // (line_num, indent, list_id)
@@ -139,14 +64,16 @@ impl MD005ListIndent {
         let mut list_level_maps: HashMap<usize, HashMap<usize, usize>> = HashMap::new(); // list_id -> { indent -> level }
         let mut level_indents: HashMap<(usize, usize), usize> = HashMap::new(); // (list_id, level) -> expected_indent
 
-        for (line_num, line) in lines.iter().enumerate() {
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
             // Skip blank lines and code blocks
-            if Self::is_blank_line(line) || in_code_blocks[line_num] {
+            if line_info.is_blank || line_info.in_code_block {
                 continue;
             }
 
-            // Check if this is a list item
-            if let Some((indent, _marker, _)) = Self::get_list_marker_info(line) {
+            // Check if this is a list item using cached info
+            if let Some(list_item) = &line_info.list_item {
+                let indent = list_item.marker_column;
+                
                 // Determine if this starts a new list
                 let is_new_list = !in_list
                     || indent == 0
@@ -199,6 +126,7 @@ impl MD005ListIndent {
                         level
                     );
 
+                    let line = &line_info.content;
                     let (start_line, start_col, end_line, end_col) = if indent > 0 {
                         calculate_match_range(line_num + 1, line, 0, indent)
                     } else {
@@ -250,6 +178,7 @@ impl MD005ListIndent {
 
                         // Only add if we don't already have a warning for this line
                         if !warnings.iter().any(|w| w.line == line_num + 1) {
+                            let line = &line_info.content;
                             let (start_line, start_col, end_line, end_col) = if indent > 0 {
                                 calculate_match_range(line_num + 1, line, 0, indent)
                             } else {
@@ -300,8 +229,10 @@ impl MD005ListIndent {
                     continue;
                 }
 
-                let (prev_line_num, _, _) = list_items.last().unwrap();
-                if !Self::is_list_continuation(lines[*prev_line_num], line) {
+                let (prev_line_num, prev_indent, _) = list_items.last().unwrap();
+                let prev_line_info = &ctx.lines[*prev_line_num];
+                if prev_line_info.list_item.is_some() && 
+                   !Self::is_list_continuation(*prev_indent, &line_info.content, false) {
                     in_list = false;
                 }
             }
@@ -363,8 +294,7 @@ impl Rule for MD005ListIndent {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty() || !QUICK_LIST_CHECK.is_match(content)
+        ctx.content.is_empty() || (!ctx.content.contains('*') && !ctx.content.contains('-') && !ctx.content.contains('+') && !ctx.content.contains(|c: char| c.is_ascii_digit()))
     }
 
     /// Optimized check using document structure

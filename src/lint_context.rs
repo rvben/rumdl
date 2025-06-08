@@ -16,6 +16,23 @@ pub struct LineInfo {
     pub is_blank: bool,
     /// Whether this line is inside a code block
     pub in_code_block: bool,
+    /// List item information if this line starts a list item
+    pub list_item: Option<ListItemInfo>,
+}
+
+/// Information about a list item
+#[derive(Debug, Clone)]
+pub struct ListItemInfo {
+    /// The marker used (*, -, +, or number with . or ))
+    pub marker: String,
+    /// Whether it's ordered (true) or unordered (false)
+    pub is_ordered: bool,
+    /// The number for ordered lists
+    pub number: Option<usize>,
+    /// Column where the marker starts (0-based)
+    pub marker_column: usize,
+    /// Column where content after marker starts
+    pub content_column: usize,
 }
 
 pub struct LintContext<'a> {
@@ -145,11 +162,91 @@ impl<'a> LintContext<'a> {
         let mut lines = Vec::new();
         let content_lines: Vec<&str> = content.lines().collect();
         
+        // Regex for list detection - allow any whitespace including no space (to catch malformed lists)
+        let unordered_regex = regex::Regex::new(r"^(\s*)([-*+])([ \t]*)(.*)").unwrap();
+        let ordered_regex = regex::Regex::new(r"^(\s*)(\d+)([.)])([ \t]*)(.*)").unwrap();
+        
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
             let indent = line.len() - line.trim_start().len();
             let is_blank = line.trim().is_empty();
             let in_code_block = CodeBlockUtils::is_in_code_block_or_span(code_blocks, byte_offset);
+            
+            // Detect list items
+            let list_item = if !in_code_block && !is_blank {
+                if let Some(caps) = unordered_regex.captures(line) {
+                    let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
+                    let marker = caps.get(2).map_or("", |m| m.as_str());
+                    let spacing = caps.get(3).map_or("", |m| m.as_str());
+                    let content = caps.get(4).map_or("", |m| m.as_str());
+                    let marker_column = leading_spaces.len();
+                    let content_column = marker_column + marker.len() + spacing.len();
+                    
+                    // Check if this is likely emphasis or not a list item
+                    if spacing.is_empty() {
+                        // No space after marker - check if it's likely emphasis or just text
+                        if marker == "*" && content.ends_with('*') && !content[..content.len()-1].contains('*') {
+                            // Likely emphasis like *text*
+                            None
+                        } else if marker == "*" && content.starts_with('*') {
+                            // Likely bold emphasis like **text** or horizontal rule like ***
+                            None
+                        } else if (marker == "*" || marker == "-") && content.chars().all(|c| c == marker.chars().next().unwrap()) && content.len() >= 2 {
+                            // Likely horizontal rule like *** or ---
+                            None
+                        } else if content.len() > 0 && content.chars().next().unwrap().is_alphabetic() {
+                            // Single word starting with marker, likely not intended as list
+                            // This matches markdownlint behavior
+                            None
+                        } else {
+                            // Other cases with no space - treat as malformed list item
+                            Some(ListItemInfo {
+                                marker: marker.to_string(),
+                                is_ordered: false,
+                                number: None,
+                                marker_column,
+                                content_column,
+                            })
+                        }
+                    } else {
+                        Some(ListItemInfo {
+                            marker: marker.to_string(),
+                            is_ordered: false,
+                            number: None,
+                            marker_column,
+                            content_column,
+                        })
+                    }
+                } else if let Some(caps) = ordered_regex.captures(line) {
+                    let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
+                    let number_str = caps.get(2).map_or("", |m| m.as_str());
+                    let delimiter = caps.get(3).map_or("", |m| m.as_str());
+                    let spacing = caps.get(4).map_or("", |m| m.as_str());
+                    let content = caps.get(5).map_or("", |m| m.as_str());
+                    let marker = format!("{}{}", number_str, delimiter);
+                    let marker_column = leading_spaces.len();
+                    let content_column = marker_column + marker.len() + spacing.len();
+                    
+                    // Check if this is likely not a list item
+                    if spacing.is_empty() && content.len() > 0 && content.chars().next().unwrap().is_alphabetic() {
+                        // No space after marker and starts with alphabetic, likely not intended as list
+                        // This matches markdownlint behavior
+                        None
+                    } else {
+                        Some(ListItemInfo {
+                            marker,
+                            is_ordered: true,
+                            number: number_str.parse().ok(),
+                            marker_column,
+                            content_column,
+                        })
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             
             lines.push(LineInfo {
                 content: line.to_string(),
@@ -157,6 +254,7 @@ impl<'a> LintContext<'a> {
                 indent,
                 is_blank,
                 in_code_block,
+                list_item,
             });
         }
         
@@ -262,6 +360,7 @@ mod tests {
         assert_eq!(line1.indent, 0);
         assert!(!line1.is_blank);
         assert!(!line1.in_code_block);
+        assert!(line1.list_item.is_none());
         
         // Line 2: "    indented"
         let line2 = &ctx.lines[1];
@@ -280,6 +379,40 @@ mod tests {
         assert_eq!(ctx.line_to_byte_offset(2), Some(8));
         assert_eq!(ctx.line_info(1).map(|l| l.indent), Some(0));
         assert_eq!(ctx.line_info(2).map(|l| l.indent), Some(4));
+    }
+
+    #[test]
+    fn test_list_item_detection() {
+        let content = "- Unordered item\n  * Nested item\n1. Ordered item\n   2) Nested ordered\n\nNot a list";
+        let ctx = LintContext::new(content);
+        
+        // Line 1: "- Unordered item"
+        let line1 = &ctx.lines[0];
+        assert!(line1.list_item.is_some());
+        let list1 = line1.list_item.as_ref().unwrap();
+        assert_eq!(list1.marker, "-");
+        assert!(!list1.is_ordered);
+        assert_eq!(list1.marker_column, 0);
+        assert_eq!(list1.content_column, 2);
+        
+        // Line 2: "  * Nested item"
+        let line2 = &ctx.lines[1];
+        assert!(line2.list_item.is_some());
+        let list2 = line2.list_item.as_ref().unwrap();
+        assert_eq!(list2.marker, "*");
+        assert_eq!(list2.marker_column, 2);
+        
+        // Line 3: "1. Ordered item"
+        let line3 = &ctx.lines[2];
+        assert!(line3.list_item.is_some());
+        let list3 = line3.list_item.as_ref().unwrap();
+        assert_eq!(list3.marker, "1.");
+        assert!(list3.is_ordered);
+        assert_eq!(list3.number, Some(1));
+        
+        // Line 6: "Not a list"
+        let line6 = &ctx.lines[5];
+        assert!(line6.list_item.is_none());
     }
 
     #[test]

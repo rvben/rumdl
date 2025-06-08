@@ -7,14 +7,7 @@ use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::list_utils::ListType;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::calculate_match_range;
-use lazy_static::lazy_static;
-use regex::Regex;
 use toml;
-
-lazy_static! {
-    // Matches indentation, marker, and whitespace after marker
-    static ref LIST_MARKER_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)([ \t]+)").unwrap();
-}
 
 #[derive(Clone)]
 pub struct MD030ListMarkerSpace {
@@ -91,52 +84,78 @@ impl Rule for MD030ListMarkerSpace {
                 in_blockquote = false;
                 continue;
             }
-            if let Some(cap) = LIST_MARKER_REGEX.captures(line) {
-                let marker = cap.get(2).map_or("", |m| m.as_str());
-                let whitespace = cap.get(3).map_or("", |m| m.as_str());
-                let list_type = if marker.chars().next().map_or(false, |c| c.is_ascii_digit()) {
-                    ListType::Ordered
-                } else {
-                    ListType::Unordered
-                };
-                let expected_spaces = self.get_expected_spaces(list_type, false); // single-line by default
-                if whitespace.contains('\t') || whitespace.len() > expected_spaces {
-                    // Calculate precise character range for the problematic spacing
-                    let marker_end_pos = cap.get(2).map_or(0, |m| m.end());
-                    let whitespace_start_pos = marker_end_pos;
-                    let whitespace_len = whitespace.len();
-
-                    // Calculate the range that needs to be replaced (the entire whitespace after marker)
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_match_range(line_num, line, whitespace_start_pos, whitespace_len);
-
-                    // Generate the correct replacement text (just the correct spacing)
-                    let correct_spaces = " ".repeat(expected_spaces);
+            // Use pre-computed list item information
+            if let Some(line_info) = ctx.line_info(line_num) {
+                if let Some(list_info) = &line_info.list_item {
+                    let list_type = if list_info.is_ordered {
+                        ListType::Ordered
+                    } else {
+                        ListType::Unordered
+                    };
                     
-                    // Calculate byte positions for the fix range
-                    let line_start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-                    let whitespace_start_byte = line_start_byte + whitespace_start_pos;
-                    let whitespace_end_byte = whitespace_start_byte + whitespace.len();
+                    // Calculate actual spacing after marker
+                    let marker_end = list_info.marker_column + list_info.marker.len();
+                    let actual_spaces = if list_info.content_column > marker_end {
+                        list_info.content_column - marker_end
+                    } else {
+                        // No space after marker
+                        0
+                    };
                     
-                    let fix = Some(crate::rule::Fix {
-                        range: whitespace_start_byte..whitespace_end_byte,
-                        replacement: correct_spaces,
-                    });
+                    let expected_spaces = self.get_expected_spaces(list_type, false);
+                    
+                    // Check for tabs in the spacing
+                    let line_content = &line[list_info.marker_column..];
+                    let spacing_content = if line_content.len() > list_info.marker.len() {
+                        let after_marker_start = list_info.marker.len();
+                        let after_marker_end = after_marker_start + actual_spaces;
+                        &line_content[after_marker_start..after_marker_end.min(line_content.len())]
+                    } else {
+                        ""
+                    };
+                    let has_tabs = spacing_content.contains('\t');
+                    
+                    // Check if spacing is incorrect or contains tabs
+                    if actual_spaces != expected_spaces || has_tabs {
+                        // Calculate precise character range for the problematic spacing
+                        let whitespace_start_pos = marker_end;
+                        let whitespace_len = actual_spaces;
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        severity: Severity::Warning,
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: format!(
+                        // Calculate the range that needs to be replaced (the entire whitespace after marker)
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_match_range(line_num, line, whitespace_start_pos, whitespace_len);
+
+                        // Generate the correct replacement text (just the correct spacing)
+                        let correct_spaces = " ".repeat(expected_spaces);
+                        
+                        // Calculate byte positions for the fix range
+                        let line_start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+                        let whitespace_start_byte = line_start_byte + whitespace_start_pos;
+                        let whitespace_end_byte = whitespace_start_byte + whitespace_len;
+                        
+                        let fix = Some(crate::rule::Fix {
+                            range: whitespace_start_byte..whitespace_end_byte,
+                            replacement: correct_spaces,
+                        });
+
+                        // Generate appropriate message
+                        let message = format!(
                             "Spaces after list markers (Expected: {}; Actual: {})",
                             expected_spaces,
-                            whitespace.len()
-                        ),
-                        fix,
-                    });
+                            actual_spaces
+                        );
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            severity: Severity::Warning,
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message,
+                            fix,
+                        });
+                    }
                 }
             }
         }

@@ -320,7 +320,7 @@ fn test_cli_options() {
     let mut disabled_cmd = Command::cargo_bin("rumdl").unwrap();
     let disabled_assert = disabled_cmd
         .arg("--disable")
-        .arg("MD022,MD033,MD032") // Also disable MD032 since the test content triggers it
+        .arg("MD022,MD033,MD032,MD030") // Disable all rules that would trigger on this content
         .arg(&markdown_path)
         .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
