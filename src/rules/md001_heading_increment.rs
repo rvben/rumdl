@@ -1,6 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingUtils;
-use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::{calculate_heading_range, LineIndex};
 use crate::HeadingStyle;
 
@@ -70,177 +69,104 @@ impl Rule for MD001HeadingIncrement {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        // Early return for empty content
-        if content.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Quick check for headings
-        if !content.contains('#') && !content.contains("===") && !content.contains("---") {
-            return Ok(vec![]);
-        }
-
-        // Fallback path: create structure manually (should rarely be used)
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
-        // Early return for empty content or if no headings exist
-        if content.is_empty() || structure.heading_lines.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
         let mut prev_level = 0;
-        let lines: Vec<&str> = content.lines().collect();
 
-        // Process headings using pre-computed heading information
-        for i in 0..structure.heading_lines.len() {
-            let line_num = structure.heading_lines[i];
-            let level = structure.heading_levels[i];
+        // Process headings using cached heading information
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            if let Some(heading) = &line_info.heading {
+                let level = heading.level;
 
-            // Check if this heading level is more than one level deeper than the previous
-            if prev_level > 0 && level > prev_level + 1 {
-                let adjusted_line_num = line_num - 1; // Convert 1-indexed to 0-indexed
-                let indentation = if adjusted_line_num < lines.len() {
-                    HeadingUtils::get_indentation(lines[adjusted_line_num])
-                } else {
-                    0
-                };
+                // Check if this heading level is more than one level deeper than the previous
+                if prev_level > 0 && level > prev_level + 1 {
+                    let indentation = line_info.indent;
+                    let heading_text = &heading.text;
 
-                // Get the heading text
-                let heading_text = if adjusted_line_num < lines.len() {
-                    lines[adjusted_line_num]
-                        .trim_start()
-                        .trim_start_matches('#')
-                        .trim()
-                        .to_string()
-                } else {
-                    String::new()
-                };
+                    // Map heading style
+                    let style = match heading.style {
+                        crate::lint_context::HeadingStyle::ATX => HeadingStyle::Atx,
+                        crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
+                        crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
+                    };
 
-                // Determine heading style
-                let style = if adjusted_line_num + 1 < lines.len()
-                    && (lines[adjusted_line_num + 1].trim().starts_with('=')
-                        || lines[adjusted_line_num + 1].trim().starts_with('-'))
-                {
-                    if lines[adjusted_line_num + 1].trim().starts_with('=') {
-                        HeadingStyle::Setext1
-                    } else {
-                        HeadingStyle::Setext2
-                    }
-                } else {
-                    HeadingStyle::Atx
-                };
+                    // Create a fix with the correct heading level
+                    let fixed_level = prev_level + 1;
+                    let replacement =
+                        HeadingUtils::convert_heading_style(heading_text, fixed_level as u32, style);
 
-                // Create a fix with the correct heading level
-                let fixed_level = prev_level + 1;
-                let replacement =
-                    HeadingUtils::convert_heading_style(&heading_text, fixed_level as u32, style);
+                    // Calculate precise range: highlight the entire heading
+                    let line_content = &line_info.content;
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_heading_range(line_num + 1, line_content);
 
-                // Calculate precise range: highlight the entire heading
-                let line_content = if adjusted_line_num < lines.len() {
-                    lines[adjusted_line_num]
-                } else {
-                    ""
-                };
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_heading_range(line_num, line_content);
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: format!("Expected heading level {}", prev_level + 1),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_content_range(line_num + 1),
+                            replacement: format!("{}{}", " ".repeat(indentation), replacement),
+                        }),
+                    });
+                }
 
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    message: format!("Expected heading level {}", prev_level + 1),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_content_range(line_num),
-                        replacement: format!("{}{}", " ".repeat(indentation), replacement),
-                    }),
-                });
+                prev_level = level;
             }
-
-            prev_level = level;
         }
 
         Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
         let mut fixed_lines = Vec::new();
         let mut prev_level = 0;
-        let lines: Vec<&str> = content.lines().collect();
-        let ends_with_newline = content.ends_with('\n');
 
-        let structure = DocumentStructure::new(content);
-
-        let mut i = 0;
-        while i < lines.len() {
-            // Check if this line is a heading (by 1-indexed line number)
-            if let Some(idx) = structure.heading_lines.iter().position(|&ln| ln == i + 1) {
-                let level = structure.heading_levels[idx];
-                let region = structure.heading_regions[idx];
-                let start = region.0 - 1; // 0-indexed
-                let end = region.1 - 1; // 0-indexed
-                let indentation = HeadingUtils::get_indentation(lines[start]);
-                let is_setext = start != end;
-
-                // Determine style
-                let style = if is_setext {
-                    if lines.get(end).map_or("", |l| l.trim()).starts_with('=') {
-                        HeadingStyle::Setext1
-                    } else {
-                        HeadingStyle::Setext2
-                    }
-                } else {
-                    HeadingStyle::Atx
-                };
-
-                let heading_text: String = if is_setext && start + 1 < lines.len() {
-                    let joined = lines[start..end].join(" ");
-                    joined.trim().to_string()
-                } else {
-                    lines[start]
-                        .trim_start()
-                        .trim_start_matches('#')
-                        .trim()
-                        .to_string()
-                };
-
+        for (_line_num, line_info) in ctx.lines.iter().enumerate() {
+            if let Some(heading) = &line_info.heading {
+                let level = heading.level;
                 let mut fixed_level = level;
+
+                // Check if this heading needs fixing
                 if prev_level > 0 && level > prev_level + 1 {
                     fixed_level = prev_level + 1;
                 }
 
+                // Map heading style - when fixing, we may need to change Setext style based on level
+                let style = match heading.style {
+                    crate::lint_context::HeadingStyle::ATX => HeadingStyle::Atx,
+                    crate::lint_context::HeadingStyle::Setext1 => {
+                        if fixed_level == 1 {
+                            HeadingStyle::Setext1
+                        } else {
+                            HeadingStyle::Setext2
+                        }
+                    }
+                    crate::lint_context::HeadingStyle::Setext2 => {
+                        if fixed_level == 1 {
+                            HeadingStyle::Setext1
+                        } else {
+                            HeadingStyle::Setext2
+                        }
+                    }
+                };
+
                 let replacement =
-                    HeadingUtils::convert_heading_style(&heading_text, fixed_level as u32, style);
-                fixed_lines.push(format!("{}{}", " ".repeat(indentation), replacement));
-                if is_setext {
-                    // Add the underline for setext
-                    fixed_lines.push(lines[end].to_string());
-                    i = end;
-                }
+                    HeadingUtils::convert_heading_style(&heading.text, fixed_level as u32, style);
+                fixed_lines.push(format!("{}{}", " ".repeat(line_info.indent), replacement));
+
                 prev_level = fixed_level;
             } else {
-                fixed_lines.push(lines[i].to_string());
+                fixed_lines.push(line_info.content.clone());
             }
-            i += 1;
         }
 
         let mut result = fixed_lines.join("\n");
-        if ends_with_newline {
+        if ctx.content.ends_with('\n') && !result.ends_with('\n') {
             result.push('\n');
         }
         Ok(result)
@@ -260,7 +186,7 @@ impl Rule for MD001HeadingIncrement {
     }
 
     fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
+        None
     }
 
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
@@ -271,16 +197,6 @@ impl Rule for MD001HeadingIncrement {
     }
 }
 
-impl crate::utils::document_structure::DocumentStructureExtensions for MD001HeadingIncrement {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        let content = ctx.content;
-        !content.is_empty() && !doc_structure.heading_lines.is_empty()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -288,21 +204,19 @@ mod tests {
     use crate::lint_context::LintContext;
 
     #[test]
-    fn test_with_document_structure() {
+    fn test_basic_functionality() {
         let rule = MD001HeadingIncrement;
 
         // Test with valid headings
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with invalid headings
         let content = "# Heading 1\n### Heading 3\n#### Heading 4";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
     }

@@ -11,7 +11,7 @@ fn test_md003_heading_style() {
     let test = simple_test(
         "MD003",
         "# ATX Heading\n\nSetext Heading\n==============",
-        ExpectedWarning::new(4, 1, 4, 15, "=============="),
+        ExpectedWarning::new(3, 1, 3, 15, "Setext Heading"),
     );
     test_character_ranges(test);
 }
@@ -73,8 +73,8 @@ fn test_md003_mixed_styles() {
         "MD003",
         "# First ATX\n\nSecond Heading\n--------------\n\n### Third ATX\n\nFourth Heading\n==============",
         vec![
-            ExpectedWarning::new(4, 1, 4, 15, "--------------"),
-            ExpectedWarning::new(9, 1, 9, 15, "=============="),
+            ExpectedWarning::new(3, 1, 3, 15, "Second Heading"),
+            ExpectedWarning::new(8, 1, 8, 15, "Fourth Heading"),
         ]
     );
     test_character_ranges(test);

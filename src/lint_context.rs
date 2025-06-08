@@ -18,6 +18,8 @@ pub struct LineInfo {
     pub in_code_block: bool,
     /// List item information if this line starts a list item
     pub list_item: Option<ListItemInfo>,
+    /// Heading information if this line is a heading
+    pub heading: Option<HeadingInfo>,
 }
 
 /// Information about a list item
@@ -33,6 +35,38 @@ pub struct ListItemInfo {
     pub marker_column: usize,
     /// Column where content after marker starts
     pub content_column: usize,
+}
+
+/// Heading style type
+#[derive(Debug, Clone, PartialEq)]
+pub enum HeadingStyle {
+    /// ATX style heading (# Heading)
+    ATX,
+    /// Setext style heading with = underline
+    Setext1,
+    /// Setext style heading with - underline
+    Setext2,
+}
+
+/// Information about a heading
+#[derive(Debug, Clone)]
+pub struct HeadingInfo {
+    /// Heading level (1-6 for ATX, 1-2 for Setext)
+    pub level: u8,
+    /// Style of heading
+    pub style: HeadingStyle,
+    /// The heading marker (# characters or underline)
+    pub marker: String,
+    /// Column where the marker starts (0-based)
+    pub marker_column: usize,
+    /// Column where heading text starts
+    pub content_column: usize,
+    /// The heading text (without markers)
+    pub text: String,
+    /// Whether it has a closing sequence (for ATX)
+    pub has_closing_sequence: bool,
+    /// The closing sequence if present
+    pub closing_sequence: String,
 }
 
 pub struct LintContext<'a> {
@@ -166,11 +200,26 @@ impl<'a> LintContext<'a> {
         let unordered_regex = regex::Regex::new(r"^(\s*)([-*+])([ \t]*)(.*)").unwrap();
         let ordered_regex = regex::Regex::new(r"^(\s*)(\d+)([.)])([ \t]*)(.*)").unwrap();
         
+        // Regex for heading detection
+        let atx_heading_regex = regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap();
+        let setext_underline_regex = regex::Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
+        
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
             let indent = line.len() - line.trim_start().len();
             let is_blank = line.trim().is_empty();
-            let in_code_block = CodeBlockUtils::is_in_code_block_or_span(code_blocks, byte_offset);
+            // Check if this line is inside a code block (not inline code span)
+            // We only want to check for fenced/indented code blocks, not inline code
+            let in_code_block = code_blocks.iter().any(|&(start, end)| {
+                // Only consider ranges that span multiple lines (code blocks)
+                // Inline code spans are typically on a single line
+                let block_content = &content[start..end];
+                let is_multiline = block_content.contains('\n');
+                let is_fenced = block_content.starts_with("```") || block_content.starts_with("~~~");
+                let is_indented = !is_fenced && block_content.lines().all(|l| l.starts_with("    ") || l.starts_with("\t") || l.trim().is_empty());
+                
+                byte_offset >= start && byte_offset < end && (is_multiline || is_fenced || is_indented)
+            });
             
             // Detect list items
             let list_item = if !in_code_block && !is_blank {
@@ -255,7 +304,112 @@ impl<'a> LintContext<'a> {
                 is_blank,
                 in_code_block,
                 list_item,
+                heading: None, // Will be populated in second pass for Setext headings
             });
+        }
+        
+        // Detect front matter boundaries
+        let mut in_front_matter = false;
+        let mut front_matter_end = 0;
+        if content_lines.first().map(|l| l.trim()) == Some("---") {
+            in_front_matter = true;
+            for (idx, line) in content_lines.iter().enumerate().skip(1) {
+                if line.trim() == "---" {
+                    front_matter_end = idx;
+                    break;
+                }
+            }
+        }
+        
+        // Second pass: detect headings (including Setext which needs look-ahead)
+        for i in 0..content_lines.len() {
+            if lines[i].in_code_block || lines[i].is_blank {
+                continue;
+            }
+            
+            // Skip lines in front matter
+            if in_front_matter && i <= front_matter_end {
+                continue;
+            }
+            
+            let line = content_lines[i];
+            
+            // Check for ATX headings
+            if let Some(caps) = atx_heading_regex.captures(line) {
+                let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
+                let hashes = caps.get(2).map_or("", |m| m.as_str());
+                let spaces_after = caps.get(3).map_or("", |m| m.as_str());
+                let rest = caps.get(4).map_or("", |m| m.as_str());
+                
+                let level = hashes.len() as u8;
+                let marker_column = leading_spaces.len();
+                
+                // Check for closing sequence
+                let (text, has_closing, closing_seq) = {
+                    // Find the start of a potential closing sequence
+                    let trimmed_rest = rest.trim_end();
+                    if let Some(last_hash_pos) = trimmed_rest.rfind('#') {
+                        // Look for the start of the hash sequence
+                        let mut start_of_hashes = last_hash_pos;
+                        while start_of_hashes > 0 && trimmed_rest.chars().nth(start_of_hashes - 1) == Some('#') {
+                            start_of_hashes -= 1;
+                        }
+                        
+                        // Check if this is a valid closing sequence (all hashes to end of line)
+                        let potential_closing = &trimmed_rest[start_of_hashes..];
+                        let is_all_hashes = potential_closing.chars().all(|c| c == '#');
+                        
+                        if is_all_hashes {
+                            // This is a closing sequence, regardless of spacing
+                            let closing_hashes = potential_closing.to_string();
+                            let text_part = rest[..start_of_hashes].trim_end();
+                            (text_part.to_string(), true, closing_hashes)
+                        } else {
+                            (rest.to_string(), false, String::new())
+                        }
+                    } else {
+                        (rest.to_string(), false, String::new())
+                    }
+                };
+                
+                let content_column = marker_column + hashes.len() + spaces_after.len();
+                
+                lines[i].heading = Some(HeadingInfo {
+                    level,
+                    style: HeadingStyle::ATX,
+                    marker: hashes.to_string(),
+                    marker_column,
+                    content_column,
+                    text: text.trim().to_string(),
+                    has_closing_sequence: has_closing,
+                    closing_sequence: closing_seq,
+                });
+            }
+            // Check for Setext headings (need to look at next line)
+            else if i + 1 < content_lines.len() {
+                let next_line = content_lines[i + 1];
+                if !lines[i + 1].in_code_block && setext_underline_regex.is_match(next_line) {
+                    // Skip if next line is front matter delimiter
+                    if in_front_matter && i + 1 <= front_matter_end {
+                        continue;
+                    }
+                    
+                    let underline = next_line.trim();
+                    let level = if underline.starts_with('=') { 1 } else { 2 };
+                    let style = if level == 1 { HeadingStyle::Setext1 } else { HeadingStyle::Setext2 };
+                    
+                    lines[i].heading = Some(HeadingInfo {
+                        level,
+                        style,
+                        marker: underline.to_string(),
+                        marker_column: next_line.len() - next_line.trim_start().len(),
+                        content_column: lines[i].indent,
+                        text: line.trim().to_string(),
+                        has_closing_sequence: false,
+                        closing_sequence: String::new(),
+                    });
+                }
+            }
         }
         
         lines

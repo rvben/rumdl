@@ -45,6 +45,7 @@ fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String>
         let line = lines[warning_start_line - 1]; // Convert to 0-indexed
 
         // Convert 1-indexed columns to 0-indexed byte positions
+        // Note: end_column is exclusive (points after the last character)
         let start_byte = warning_start_col.saturating_sub(1);
         let end_byte = warning_end_col.saturating_sub(1);
 
@@ -58,8 +59,8 @@ fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String>
         let new_line = format!("{}{}{}", before, fix.replacement, after);
 
         // Reconstruct the full content
-        let mut result_lines = lines.to_vec();
-        result_lines[warning_start_line - 1] = &new_line;
+        let mut result_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+        result_lines[warning_start_line - 1] = new_line;
 
         Ok(result_lines.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
     } else {

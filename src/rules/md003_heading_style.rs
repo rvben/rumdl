@@ -5,7 +5,6 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingStyle;
-use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::calculate_heading_range;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -37,77 +36,6 @@ impl MD003HeadingStyle {
         Self { style }
     }
 
-    /// Detects the first heading style in the document for "consistent" mode
-    /// Note: This is only used as a fallback if DocumentStructure is not available
-    fn detect_first_heading_style(&self, content: &str) -> Option<HeadingStyle> {
-        lazy_static! {
-            static ref ATX_PATTERN: Regex =
-                Regex::new(r"^(#{1,6})(\s+)([^#\n]+?)(?:\s+(#{1,6}))?\s*$").unwrap();
-        }
-
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Check for front matter first
-        let mut in_front_matter = false;
-        let mut line_idx = 0;
-
-        // Skip front matter if present
-        if !lines.is_empty() && lines[0].trim() == "---" {
-            in_front_matter = true;
-            for (i, line) in lines.iter().enumerate().skip(1) {
-                if line.trim() == "---" {
-                    in_front_matter = false;
-                    line_idx = i + 1; // Start looking for headings after front matter
-                    break;
-                }
-            }
-        }
-
-        // Look for the first heading
-        for i in line_idx..lines.len() {
-            let line = lines[i];
-
-            // Skip if still in front matter
-            if in_front_matter {
-                continue;
-            }
-
-            // Check for ATX headings
-            if ATX_PATTERN.is_match(line) {
-                // Check for closed ATX (with trailing hashes)
-                if line.trim().ends_with('#')
-                    && !line.trim().chars().filter(|&c| c == '#').count() == line.trim().len()
-                {
-                    return Some(HeadingStyle::AtxClosed);
-                } else {
-                    return Some(HeadingStyle::Atx);
-                }
-            }
-
-            // Check for Setext headings
-            if i < lines.len() - 1 {
-                let next_line = lines[i + 1];
-                if !line.trim().is_empty() {
-                    // Make sure this isn't a front matter delimiter
-                    if line.trim() != "---" && next_line.trim() != "---" {
-                        if next_line.trim().starts_with('=') {
-                            return Some(HeadingStyle::Setext1);
-                        } else if next_line.trim().starts_with('-') {
-                            // Make sure this is actually a setext heading and not a list item
-                            // or horizontal rule. A setext heading underline should consist of only -
-                            let is_all_dashes = next_line.trim().chars().all(|c| c == '-');
-                            if is_all_dashes && next_line.trim().len() >= 2 {
-                                return Some(HeadingStyle::Setext2);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Default to ATX style if no headings are found
-        Some(HeadingStyle::Atx)
-    }
 
     /// Check if we should use consistent mode (detect first style)
     fn is_consistent_mode(&self) -> bool {
@@ -118,24 +46,32 @@ impl MD003HeadingStyle {
     /// Gets the target heading style based on configuration and document content
     fn get_target_style(
         &self,
-        content: &str,
-        structure: Option<&DocumentStructure>,
+        ctx: &crate::lint_context::LintContext,
     ) -> HeadingStyle {
         if !self.is_consistent_mode() {
             return self.style;
         }
 
-        // If DocumentStructure is available, use the pre-computed first_heading_style
-        if let Some(doc_structure) = structure {
-            // Use the pre-computed style from the structure
-            doc_structure
-                .first_heading_style
-                .unwrap_or(HeadingStyle::Atx)
-        } else {
-            // Fallback to manual detection if structure isn't available
-            self.detect_first_heading_style(content)
-                .unwrap_or(HeadingStyle::Atx)
+        // Find the first heading from cached info
+        for line_info in &ctx.lines {
+            if let Some(heading) = &line_info.heading {
+                // Map from LintContext heading style to rules heading style
+                return match heading.style {
+                    crate::lint_context::HeadingStyle::ATX => {
+                        if heading.has_closing_sequence {
+                            HeadingStyle::AtxClosed
+                        } else {
+                            HeadingStyle::Atx
+                        }
+                    }
+                    crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
+                    crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
+                };
+            }
         }
+        
+        // Default to ATX if no headings found
+        HeadingStyle::Atx
     }
 }
 
@@ -149,20 +85,110 @@ impl Rule for MD003HeadingStyle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        // Early return for empty content
-        if content.is_empty() {
-            return Ok(Vec::new());
+        let mut result = Vec::new();
+
+        // Get the target style using cached heading information
+        let target_style = self.get_target_style(ctx);
+        
+        // Create LineIndex once outside the loop
+        let line_index = crate::utils::range_utils::LineIndex::new(ctx.content.to_string());
+
+        // Process headings using cached heading information
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            if let Some(heading) = &line_info.heading {
+                let level = heading.level;
+                
+                // Map the cached heading style to the rule's HeadingStyle
+                let current_style = match heading.style {
+                    crate::lint_context::HeadingStyle::ATX => {
+                        if heading.has_closing_sequence {
+                            HeadingStyle::AtxClosed
+                        } else {
+                            HeadingStyle::Atx
+                        }
+                    }
+                    crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
+                    crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
+                };
+
+                // Determine expected style based on level and target
+                let expected_style = if level > 2
+                    && (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2)
+                {
+                    // Setext only supports levels 1-2, so levels 3+ must be ATX
+                    HeadingStyle::Atx
+                } else if (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2)
+                    && level <= 2
+                {
+                    // For Setext target, use appropriate style based on level
+                    if level == 1 {
+                        HeadingStyle::Setext1
+                    } else {
+                        HeadingStyle::Setext2
+                    }
+                } else {
+                    target_style
+                };
+
+                if current_style != expected_style {
+                    // Generate fix for this heading
+                    let fix = {
+                        use crate::rules::heading_utils::HeadingUtils;
+
+                        // Convert heading to target style
+                        let converted_heading = HeadingUtils::convert_heading_style(
+                            &heading.text,
+                            level as u32,
+                            expected_style,
+                        );
+
+                        // Add indentation
+                        let final_heading = format!("{}{}", " ".repeat(line_info.indent), converted_heading);
+
+                        // Calculate the correct range for the heading
+                        let range = line_index.line_content_range(line_num + 1);
+
+                        Some(crate::rule::Fix {
+                            range,
+                            replacement: final_heading,
+                        })
+                    };
+
+                    // Calculate precise character range for the heading marker
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_heading_range(line_num + 1, &line_info.content);
+
+                    result.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: format!(
+                            "Heading style should be {}, found {}",
+                            match expected_style {
+                                HeadingStyle::Atx => "# Heading",
+                                HeadingStyle::AtxClosed => "# Heading #",
+                                HeadingStyle::Setext1 => "Heading\n=======",
+                                HeadingStyle::Setext2 => "Heading\n-------",
+                                HeadingStyle::Consistent => "consistent with the first heading",
+                            },
+                            match current_style {
+                                HeadingStyle::Atx => "# Heading",
+                                HeadingStyle::AtxClosed => "# Heading #",
+                                HeadingStyle::Setext1 => "Heading (underlined with =)",
+                                HeadingStyle::Setext2 => "Heading (underlined with -)",
+                                HeadingStyle::Consistent => "consistent style",
+                            }
+                        ),
+                        severity: Severity::Warning,
+                        fix,
+                    });
+                }
+            }
         }
 
-        // Quick check if there are any headings at all
-        if !QUICK_HEADING_CHECK.is_match(content) {
-            return Ok(Vec::new());
-        }
-
-        // Fallback path: create structure manually (should rarely be used)
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
+        Ok(result)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -196,190 +222,6 @@ impl Rule for MD003HeadingStyle {
         Ok(result)
     }
 
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
-        // Early return for empty content or no headings
-        if content.is_empty() || structure.heading_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut result = Vec::new();
-
-        // Get the target style using the pre-computed value from DocumentStructure
-        let target_style = self.get_target_style(content, Some(structure));
-
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Process only heading lines using structure.heading_lines
-        for (i, &line_num) in structure.heading_lines.iter().enumerate() {
-            // Skip headings in front matter
-            if structure.is_in_front_matter(line_num) {
-                continue;
-            }
-
-            let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-
-            // Get the heading level from the structure
-            let level = *structure.heading_levels.get(i).unwrap_or(&1);
-
-            // Determine the current style of the heading
-            let current_line = lines.get(line_idx).unwrap_or(&"");
-            let next_line_idx = line_idx + 1;
-
-            let style = if next_line_idx < lines.len() {
-                let next_line = lines[next_line_idx];
-                // Check if it's a setext heading
-                if next_line.trim_start().starts_with('=') {
-                    HeadingStyle::Setext1
-                } else if next_line.trim_start().starts_with('-')
-                    && !current_line.trim_start().starts_with('#')
-                {
-                    HeadingStyle::Setext2
-                } else if current_line.trim().ends_with('#') {
-                    HeadingStyle::AtxClosed
-                } else {
-                    HeadingStyle::Atx
-                }
-            } else {
-                // Must be ATX style (no next line available)
-                if current_line.trim().ends_with('#') {
-                    HeadingStyle::AtxClosed
-                } else {
-                    HeadingStyle::Atx
-                }
-            };
-
-            // For Setext, levels 3+ must be ATX regardless of the target style
-            let expected_style = if level > 2
-                && (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2)
-            {
-                HeadingStyle::Atx
-            } else {
-                // For Setext, use the appropriate style based on level
-                if (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2)
-                    && level <= 2
-                {
-                    if level == 1 {
-                        HeadingStyle::Setext1
-                    } else {
-                        HeadingStyle::Setext2
-                    }
-                } else {
-                    target_style
-                }
-            };
-
-            if style != expected_style {
-                // Generate fix for this heading
-                let fix = {
-                    use crate::rules::heading_utils::HeadingUtils;
-
-                    // Get the text content from the heading
-                    let text_content = if next_line_idx < lines.len()
-                        && (lines[next_line_idx].trim_start().starts_with('=')
-                            || lines[next_line_idx].trim_start().starts_with('-'))
-                    {
-                        // Setext heading
-                        current_line.to_string()
-                    } else {
-                        // ATX heading
-                        HeadingUtils::get_heading_text(current_line).unwrap_or_default()
-                    };
-
-                    // Get indentation
-                    let indentation = current_line
-                        .chars()
-                        .take_while(|c| c.is_whitespace())
-                        .collect::<String>();
-
-                    // Convert heading to target style
-                    let converted_heading = HeadingUtils::convert_heading_style(
-                        &format!("{}{}", indentation, text_content.trim()),
-                        level as u32,
-                        expected_style,
-                    );
-
-                    // Calculate the correct range for the heading
-                    let line_index =
-                        crate::utils::range_utils::LineIndex::new(ctx.content.to_string());
-                    let range = if next_line_idx < lines.len()
-                        && (lines[next_line_idx].trim_start().starts_with('=')
-                            || lines[next_line_idx].trim_start().starts_with('-'))
-                    {
-                        // Setext heading spans two lines
-                        let start_byte = line_index.line_col_to_byte_range(line_num, 1).start;
-                        let end_byte = if line_num + 1 < lines.len() {
-                            line_index.line_col_to_byte_range(line_num + 2, 1).start - 1
-                        } else {
-                            ctx.content.len()
-                        };
-                        start_byte..end_byte
-                    } else {
-                        // ATX heading is single line
-                        let start_byte = line_index.line_col_to_byte_range(line_num, 1).start;
-                        let end_byte = if line_num < lines.len() {
-                            line_index.line_col_to_byte_range(line_num + 1, 1).start - 1
-                        } else {
-                            ctx.content.len()
-                        };
-                        start_byte..end_byte
-                    };
-
-                    Some(crate::rule::Fix {
-                        range,
-                        replacement: converted_heading,
-                    })
-                };
-
-                // Calculate precise character range for the heading marker
-                let (start_line, start_col, end_line, end_col) =
-                    if style == HeadingStyle::Setext1 || style == HeadingStyle::Setext2 {
-                        // For Setext headings, highlight the underline
-                        if next_line_idx < lines.len() {
-                            calculate_heading_range(line_num + 1, lines[next_line_idx])
-                        } else {
-                            calculate_heading_range(line_num, current_line)
-                        }
-                    } else {
-                        // For ATX headings, highlight the hash markers
-                        calculate_heading_range(line_num, current_line)
-                    };
-
-                result.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    message: format!(
-                        "Heading style should be {}, found {}",
-                        match expected_style {
-                            HeadingStyle::Atx => "# Heading",
-                            HeadingStyle::AtxClosed => "# Heading #",
-                            HeadingStyle::Setext1 => "Heading\n=======",
-                            HeadingStyle::Setext2 => "Heading\n-------",
-                            HeadingStyle::Consistent => "consistent with the first heading",
-                        },
-                        match style {
-                            HeadingStyle::Atx => "# Heading",
-                            HeadingStyle::AtxClosed => "# Heading #",
-                            HeadingStyle::Setext1 => "Heading (underlined with =)",
-                            HeadingStyle::Setext2 => "Heading (underlined with -)",
-                            HeadingStyle::Consistent => "consistent style",
-                        }
-                    ),
-                    severity: Severity::Warning,
-                    fix,
-                });
-            }
-        }
-
-        Ok(result)
-    }
 
     fn category(&self) -> RuleCategory {
         RuleCategory::Heading
@@ -395,7 +237,7 @@ impl Rule for MD003HeadingStyle {
     }
 
     fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
+        None
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -418,16 +260,6 @@ impl Rule for MD003HeadingStyle {
     }
 }
 
-impl crate::utils::document_structure::DocumentStructureExtensions for MD003HeadingStyle {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> bool {
-        // This rule is only relevant if there are headings
-        !doc_structure.heading_lines.is_empty()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -457,27 +289,8 @@ mod tests {
         let rule = MD003HeadingStyle::default();
         let content = "---\ntitle: Test\n---\n\n# Heading 1\n## Heading 2";
 
-        // Test using document structure which should properly detect front matter
-        let structure = DocumentStructure::new(content);
-        assert!(
-            structure.has_front_matter,
-            "Document structure should detect front matter"
-        );
-        assert_eq!(
-            structure.front_matter_range,
-            Some((1, 3)),
-            "Front matter should span lines 1-3"
-        );
-
-        // Make test more resilient - print details if warnings are found
+        // Test should detect headings and apply consistent style
         let ctx = LintContext::new(content);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert!(
-            result.is_empty(),
-            "No warnings expected for content with front matter, found: {:?}",
-            result
-        );
-        // Also check the direct check method
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -497,13 +310,12 @@ mod tests {
     }
 
     #[test]
-    fn test_with_document_structure() {
+    fn test_with_different_styles() {
         // Test with consistent style (ATX)
         let rule = MD003HeadingStyle::new(HeadingStyle::Consistent);
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
 
         // Make test more resilient
         assert!(
@@ -515,9 +327,8 @@ mod tests {
         // Test with incorrect style
         let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
         let content = "# Heading 1 #\nHeading 2\n-----\n### Heading 3";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(
             !result.is_empty(),
             "Should have warnings for inconsistent heading styles"
@@ -526,9 +337,8 @@ mod tests {
         // Test with setext style
         let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
         let content = "Heading 1\n=========\nHeading 2\n---------\n### Heading 3";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         // The level 3 heading can't be setext, so it's valid as ATX
         assert!(
             result.is_empty(),

@@ -2,7 +2,6 @@
 ///
 /// See [docs/md025.md](../../docs/md025.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::{calculate_match_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -11,6 +10,14 @@ use toml;
 lazy_static! {
     // Pattern for quick check if content has any headings at all
     static ref HEADING_CHECK: Regex = Regex::new(r"(?m)^(?:\s*)#").unwrap();
+    
+    // Horizontal rule patterns (from MD035)
+    static ref HR_DASH: Regex = Regex::new(r"^\-{3,}\s*$").unwrap();
+    static ref HR_ASTERISK: Regex = Regex::new(r"^\*{3,}\s*$").unwrap();
+    static ref HR_UNDERSCORE: Regex = Regex::new(r"^_{3,}\s*$").unwrap();
+    static ref HR_SPACED_DASH: Regex = Regex::new(r"^(\-\s+){2,}\-\s*$").unwrap();
+    static ref HR_SPACED_ASTERISK: Regex = Regex::new(r"^(\*\s+){2,}\*\s*$").unwrap();
+    static ref HR_SPACED_UNDERSCORE: Regex = Regex::new(r"^(_\s+){2,}_\s*$").unwrap();
 }
 
 #[derive(Clone)]
@@ -94,9 +101,35 @@ impl MD025SingleTitle {
         })
     }
 
+    /// Check if a line is a horizontal rule
+    fn is_horizontal_rule(line: &str) -> bool {
+        let trimmed = line.trim();
+        HR_DASH.is_match(trimmed)
+            || HR_ASTERISK.is_match(trimmed)
+            || HR_UNDERSCORE.is_match(trimmed)
+            || HR_SPACED_DASH.is_match(trimmed)
+            || HR_SPACED_ASTERISK.is_match(trimmed)
+            || HR_SPACED_UNDERSCORE.is_match(trimmed)
+    }
+    
+    /// Check if a line might be a Setext heading underline
+    fn is_potential_setext_heading(ctx: &crate::lint_context::LintContext, line_num: usize) -> bool {
+        if line_num == 0 || line_num >= ctx.lines.len() {
+            return false;
+        }
+        
+        let line = ctx.lines[line_num].content.trim();
+        let prev_line = if line_num > 0 { ctx.lines[line_num - 1].content.trim() } else { "" };
+        
+        let is_dash_line = !line.is_empty() && line.chars().all(|c| c == '-');
+        let is_equals_line = !line.is_empty() && line.chars().all(|c| c == '=');
+        let prev_line_has_content = !prev_line.is_empty() && !Self::is_horizontal_rule(prev_line);
+        (is_dash_line || is_equals_line) && prev_line_has_content
+    }
+
     /// Check if headings are separated by horizontal rules
-    fn has_separator_before_heading(&self, structure: &DocumentStructure, heading_line: usize) -> bool {
-        if !self.allow_with_separators {
+    fn has_separator_before_heading(&self, ctx: &crate::lint_context::LintContext, heading_line: usize) -> bool {
+        if !self.allow_with_separators || heading_line == 0 {
             return false;
         }
 
@@ -104,12 +137,17 @@ impl MD025SingleTitle {
         // Check up to 5 lines before the heading for a horizontal rule
         let search_start = heading_line.saturating_sub(5);
         
-        for &hr_line in &structure.horizontal_rule_lines {
-            if hr_line >= search_start && hr_line < heading_line {
+        for line_num in search_start..heading_line {
+            if line_num >= ctx.lines.len() {
+                continue;
+            }
+            
+            let line = &ctx.lines[line_num].content;
+            if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(ctx, line_num) {
                 // Found a horizontal rule before this heading
                 // Check that there's no other heading between the HR and this heading
-                let has_intermediate_heading = structure.heading_lines.iter().any(|&h_line| {
-                    h_line > hr_line && h_line < heading_line
+                let has_intermediate_heading = ((line_num + 1)..heading_line).any(|idx| {
+                    idx < ctx.lines.len() && ctx.lines[idx].heading.is_some()
                 });
                 
                 if !has_intermediate_heading {
@@ -132,141 +170,48 @@ impl Rule for MD025SingleTitle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-
         // Early return for empty content
-        if content.is_empty() {
+        if ctx.lines.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Quick check for headings
-        if !content.contains('#') && !content.contains('=') && !content.contains('-') {
-            return Ok(Vec::new());
-        }
-
-        // Fallback path: create structure manually (should rarely be used)
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let lines: Vec<&str> = content.lines().collect();
-        let ends_with_newline = content.ends_with('\n');
-        let structure = DocumentStructure::new(content);
-        let mut fixed_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
-
-        // Find all headings at the target level
-        let mut found_first = false;
-        for (idx, &_line_num) in structure.heading_lines.iter().enumerate() {
-            let level = structure.heading_levels[idx];
-            if level == self.level {
-                if !found_first {
-                    found_first = true;
-                } else {
-                    // Demote this heading to the next level
-                    let region = structure.heading_regions[idx];
-                    let start = region.0 - 1;
-                    let style = if region.0 != region.1 {
-                        if lines
-                            .get(region.1 - 1)
-                            .map_or("", |l| l.trim())
-                            .starts_with('=')
-                        {
-                            crate::rules::heading_utils::HeadingStyle::Setext1
-                        } else {
-                            crate::rules::heading_utils::HeadingStyle::Setext2
-                        }
-                    } else {
-                        crate::rules::heading_utils::HeadingStyle::Atx
-                    };
-                    let text = lines[start].trim_start_matches('#').trim();
-                    let replacement =
-                        crate::rules::heading_utils::HeadingUtils::convert_heading_style(
-                            text,
-                            (self.level + 1).try_into().unwrap(),
-                            style,
-                        );
-                    fixed_lines[start] = replacement;
-                }
-            }
-        }
-
-        let mut result = fixed_lines.join("\n");
-        if ends_with_newline {
-            result.push('\n');
-        }
-        Ok(result)
-    }
-
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        // Early return if no headings
-        if structure.heading_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let content = _ctx.content;
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
 
         // Check for front matter title if configured
         let mut _found_title_in_front_matter = false;
-        if !self.front_matter_title.is_empty() && structure.has_front_matter {
-            if let Some((start, end)) = structure.front_matter_range {
-                // Extract front matter content
-                let front_matter_content: String = _ctx
-                    .content
-                    .lines()
-                    .skip(start - 1) // Convert from 1-indexed to 0-indexed
-                    .take(end - start + 1)
-                    .collect::<Vec<&str>>()
-                    .join("\n");
-
-                // Check if it contains a title field
-                _found_title_in_front_matter = front_matter_content.lines().any(|line| {
-                    line.trim()
-                        .starts_with(&format!("{}:", self.front_matter_title))
-                });
+        if !self.front_matter_title.is_empty() {
+            // Detect front matter manually
+            let content_lines: Vec<&str> = ctx.content.lines().collect();
+            if content_lines.first().map(|l| l.trim()) == Some("---") {
+                // Look for the end of front matter
+                for (idx, line) in content_lines.iter().enumerate().skip(1) {
+                    if line.trim() == "---" {
+                        // Extract front matter content
+                        let front_matter_content = content_lines[1..idx].join("\n");
+                        
+                        // Check if it contains a title field
+                        _found_title_in_front_matter = front_matter_content.lines().any(|line| {
+                            line.trim()
+                                .starts_with(&format!("{}:", self.front_matter_title))
+                        });
+                        break;
+                    }
+                }
             }
         }
 
-        // Find all level-1 headings (both ATX and Setext) not in code blocks
-        let lines: Vec<&str> = _ctx.content.lines().collect();
+        // Find all headings at the target level using cached information
         let mut target_level_headings = Vec::new();
-        for (i, &_line_num) in structure.heading_lines.iter().enumerate() {
-            if i < structure.heading_levels.len() && structure.heading_levels[i] == self.level {
-                // Use heading_regions to get the correct line for heading text
-                let (content_line, _marker_line) = if i < structure.heading_regions.len() {
-                    structure.heading_regions[i]
-                } else {
-                    (i, i)
-                };
-                let idx = content_line - 1;
-                if idx >= lines.len() {
-                    continue;
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            if let Some(heading) = &line_info.heading {
+                if heading.level as usize == self.level {
+                    // Ignore if indented 4+ spaces (code block)
+                    if line_info.indent >= 4 {
+                        continue;
+                    }
+                    target_level_headings.push(line_num);
                 }
-
-                // Ignore if inside a fenced code block
-                if structure.is_in_code_block(idx + 1) {
-                    continue;
-                }
-
-                let line = lines[idx];
-                let trimmed = line.trim_start();
-                let leading_spaces = line.len() - trimmed.len();
-
-                // Ignore if indented 4+ spaces (code block)
-                if leading_spaces >= 4 {
-                    continue;
-                }
-
-                // Accept both ATX and Setext headings (DocumentStructure already parsed them correctly)
-                target_level_headings.push(idx);
             }
         }
 
@@ -274,96 +219,201 @@ impl Rule for MD025SingleTitle {
         // unless they are legitimate document sections
         if target_level_headings.len() > 1 {
             // Skip the first heading, check the rest for legitimacy
-            for &line in &target_level_headings[1..] {
-                // Skip if out of bounds
-                if line >= lines.len() {
-                    continue;
-                }
-                let line_content = lines[line];
+            for &line_num in &target_level_headings[1..] {
+                if let Some(heading) = &ctx.lines[line_num].heading {
+                    let heading_text = &heading.text;
 
-                // Extract the heading text content
-                let heading_text = if line_content.trim_start().starts_with('#') {
-                    // ATX heading: extract text after hash markers
-                    let trimmed = line_content.trim_start();
-                    let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-                    trimmed[hash_count..].trim().trim_end_matches('#').trim()
-                } else {
-                    // Setext heading: use the entire line content
-                    line_content.trim()
-                };
+                    // Check if this heading should be allowed
+                    let should_allow = self.is_document_section_heading(heading_text) ||
+                        self.has_separator_before_heading(ctx, line_num);
 
-                // Check if this heading should be allowed
-                let should_allow = self.is_document_section_heading(heading_text) ||
-                    self.has_separator_before_heading(structure, line + 1);
-
-                if should_allow {
-                    continue; // Skip flagging this heading
-                }
-
-                // Calculate precise character range for the heading text content
-                let text_start_in_line = if let Some(pos) = line_content.find(heading_text) {
-                    pos
-                } else {
-                    // Fallback: find after hash markers for ATX headings
-                    if line_content.trim_start().starts_with('#') {
-                        let trimmed = line_content.trim_start();
-                        let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-                        let after_hashes = &trimmed[hash_count..];
-                        let text_start_in_trimmed = after_hashes.find(heading_text).unwrap_or(0);
-                        (line_content.len() - trimmed.len()) + hash_count + text_start_in_trimmed
-                    } else {
-                        0 // Setext headings start at beginning
+                    if should_allow {
+                        continue; // Skip flagging this heading
                     }
-                };
 
-                let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                    line + 1, // Convert to 1-indexed
-                    line_content,
-                    text_start_in_line,
-                    heading_text.len(),
-                );
+                    // Calculate precise character range for the heading text content
+                    let line_content = &ctx.lines[line_num].content;
+                    let text_start_in_line = if let Some(pos) = line_content.find(heading_text) {
+                        pos
+                    } else {
+                        // Fallback: find after hash markers for ATX headings
+                        if line_content.trim_start().starts_with('#') {
+                            let trimmed = line_content.trim_start();
+                            let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+                            let after_hashes = &trimmed[hash_count..];
+                            let text_start_in_trimmed = after_hashes.find(heading_text).unwrap_or(0);
+                            (line_content.len() - trimmed.len()) + hash_count + text_start_in_trimmed
+                        } else {
+                            0 // Setext headings start at beginning
+                        }
+                    };
 
-                // For ATX headings, find the '#' position; for Setext, use column 1
-                let _col = if line_content.trim_start().starts_with('#') {
-                    line_content.find('#').unwrap_or(0)
-                } else {
-                    0 // Setext headings start at column 1
-                };
+                    let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                        line_num + 1, // Convert to 1-indexed
+                        line_content,
+                        text_start_in_line,
+                        heading_text.len(),
+                    );
 
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: format!(
-                        "Multiple top-level headings (level {}) in the same document",
-                        self.level
-                    ),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_content_range(line + 1),
-                        replacement: {
-                            let leading_spaces = line_content.len() - line_content.trim_start().len();
-                            let indentation = " ".repeat(leading_spaces);
-                            let heading_text = if line_content.trim_start().starts_with('#') {
-                                // ATX heading: extract text after existing #'s
-                                line_content.trim_start()
-                                    .trim_start_matches('#')
-                                    .trim()
-                            } else {
-                                // Setext heading: use the whole line text
-                                line_content.trim()
-                            };
-                            format!("{}{} {}", indentation, "#".repeat(self.level + 1), heading_text)
-                        },
-                    }),
-                });
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        message: format!(
+                            "Multiple top-level headings (level {}) in the same document",
+                            self.level
+                        ),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_content_range(line_num + 1),
+                            replacement: {
+                                let leading_spaces = line_content.len() - line_content.trim_start().len();
+                                let indentation = " ".repeat(leading_spaces);
+                                if heading_text.is_empty() {
+                                    format!("{}{}", indentation, "#".repeat(self.level + 1))
+                                } else {
+                                    format!("{}{} {}", indentation, "#".repeat(self.level + 1), heading_text)
+                                }
+                            },
+                        }),
+                    });
+                }
             }
         }
 
         Ok(warnings)
     }
+
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let mut fixed_lines = Vec::new();
+        let mut found_first = false;
+        let mut skip_next = false;
+
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            
+            if let Some(heading) = &line_info.heading {
+                if heading.level as usize == self.level {
+                    if !found_first {
+                        found_first = true;
+                        // Keep the first heading as-is
+                        fixed_lines.push(line_info.content.clone());
+                        
+                        // For Setext headings, also add the underline
+                        if matches!(heading.style, crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2) {
+                            if line_num + 1 < ctx.lines.len() {
+                                fixed_lines.push(ctx.lines[line_num + 1].content.clone());
+                                skip_next = true;
+                            }
+                        }
+                    } else {
+                        // Check if this heading should be allowed
+                        let should_allow = self.is_document_section_heading(&heading.text) ||
+                            self.has_separator_before_heading(ctx, line_num);
+
+                        if should_allow {
+                            // Keep the heading as-is
+                            fixed_lines.push(line_info.content.clone());
+                            
+                            // For Setext headings, also add the underline
+                            if matches!(heading.style, crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2) {
+                                if line_num + 1 < ctx.lines.len() {
+                                    fixed_lines.push(ctx.lines[line_num + 1].content.clone());
+                                    skip_next = true;
+                                }
+                            }
+                        } else {
+                            // Demote this heading to the next level
+                            let style = match heading.style {
+                                crate::lint_context::HeadingStyle::ATX => {
+                                    if heading.has_closing_sequence {
+                                        crate::rules::heading_utils::HeadingStyle::AtxClosed
+                                    } else {
+                                        crate::rules::heading_utils::HeadingStyle::Atx
+                                    }
+                                }
+                                crate::lint_context::HeadingStyle::Setext1 => {
+                                    // When demoting from level 1 to 2, use Setext2
+                                    if self.level == 1 {
+                                        crate::rules::heading_utils::HeadingStyle::Setext2
+                                    } else {
+                                        // For higher levels, use ATX
+                                        crate::rules::heading_utils::HeadingStyle::Atx
+                                    }
+                                }
+                                crate::lint_context::HeadingStyle::Setext2 => {
+                                    // Setext2 can only go to ATX
+                                    crate::rules::heading_utils::HeadingStyle::Atx
+                                }
+                            };
+                            
+                            let replacement = if heading.text.is_empty() {
+                                // For empty headings, manually construct the replacement
+                                match style {
+                                    crate::rules::heading_utils::HeadingStyle::Atx => {
+                                        "#".repeat(self.level + 1)
+                                    }
+                                    crate::rules::heading_utils::HeadingStyle::AtxClosed => {
+                                        format!("{} {}", "#".repeat(self.level + 1), "#".repeat(self.level + 1))
+                                    }
+                                    crate::rules::heading_utils::HeadingStyle::Setext1 | 
+                                    crate::rules::heading_utils::HeadingStyle::Setext2 |
+                                    crate::rules::heading_utils::HeadingStyle::Consistent => {
+                                        // For empty Setext or Consistent, use ATX style
+                                        "#".repeat(self.level + 1)
+                                    }
+                                }
+                            } else {
+                                crate::rules::heading_utils::HeadingUtils::convert_heading_style(
+                                    &heading.text,
+                                    (self.level + 1) as u32,
+                                    style,
+                                )
+                            };
+                            
+                            // Add indentation
+                            let indentation = " ".repeat(line_info.indent);
+                            fixed_lines.push(format!("{}{}", indentation, replacement));
+                            
+                            // For Setext headings, skip the original underline
+                            if matches!(heading.style, crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2) {
+                                if line_num + 1 < ctx.lines.len() {
+                                    skip_next = true;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Not a target level heading, keep as-is
+                    fixed_lines.push(line_info.content.clone());
+                    
+                    // For Setext headings, also add the underline
+                    if matches!(heading.style, crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2) {
+                        if line_num + 1 < ctx.lines.len() {
+                            fixed_lines.push(ctx.lines[line_num + 1].content.clone());
+                            skip_next = true;
+                        }
+                    }
+                }
+            } else {
+                // Not a heading line, keep as-is
+                fixed_lines.push(line_info.content.clone());
+            }
+        }
+
+        let result = fixed_lines.join("\n");
+        if ctx.content.ends_with('\n') {
+            Ok(result + "\n")
+        } else {
+            Ok(result)
+        }
+    }
+
 
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
@@ -383,7 +433,7 @@ impl Rule for MD025SingleTitle {
     }
 
     fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
+        None
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -429,48 +479,31 @@ impl Rule for MD025SingleTitle {
     }
 }
 
-impl DocumentStructureExtensions for MD025SingleTitle {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        // This rule is only relevant if there are headings
-        !doc_structure.heading_lines.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_with_document_structure() {
+    fn test_with_cached_headings() {
         let rule = MD025SingleTitle::default();
 
         // Test with only one level-1 heading
         let content = "# Title\n\n## Section 1\n\n## Section 2";
-        let structure = DocumentStructure::new(content);
-        let result = rule
-            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with multiple level-1 headings (non-section names) - should flag
         let content = "# Title 1\n\n## Section 1\n\n# Another Title\n\n## Section 2";
-        let structure = DocumentStructure::new(content);
-        let result = rule
-            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1); // Should flag the second level-1 heading
         assert_eq!(result[0].line, 5);
 
         // Test with front matter title and a level-1 heading
         let content = "---\ntitle: Document Title\n---\n\n# Main Heading\n\n## Section 1";
-        let structure = DocumentStructure::new(content);
-        let result = rule
-            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
             "Should not flag a single title after front matter"
@@ -493,10 +526,8 @@ mod tests {
         ];
 
         for case in valid_cases {
-            let structure = DocumentStructure::new(case);
-            let result = rule
-                .check_with_structure(&crate::lint_context::LintContext::new(case), &structure)
-                .unwrap();
+            let ctx = crate::lint_context::LintContext::new(case);
+            let result = rule.check(&ctx).unwrap();
             assert!(
                 result.is_empty(),
                 "Should not flag document sections in: {}",
@@ -511,10 +542,8 @@ mod tests {
         ];
 
         for case in invalid_cases {
-            let structure = DocumentStructure::new(case);
-            let result = rule
-                .check_with_structure(&crate::lint_context::LintContext::new(case), &structure)
-                .unwrap();
+            let ctx = crate::lint_context::LintContext::new(case);
+            let result = rule.check(&ctx).unwrap();
             assert!(
                 !result.is_empty(),
                 "Should flag non-section headings in: {}",
@@ -529,10 +558,8 @@ mod tests {
 
         // Even document sections should be flagged in strict mode
         let content = "# Main Title\n\n## Content\n\n# Appendix A\n\nAppendix content";
-        let structure = DocumentStructure::new(content);
-        let result = rule
-            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Strict mode should flag all multiple H1s");
     }
 
@@ -593,28 +620,22 @@ mod tests {
 
         // Test that headings separated by horizontal rules are allowed
         let content = "# First Title\n\nContent here.\n\n---\n\n# Second Title\n\nMore content.\n\n***\n\n# Third Title\n\nFinal content.";
-        let structure = DocumentStructure::new(content);
-        let result = rule
-            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag headings separated by horizontal rules");
 
         // Test that headings without separators are still flagged
         let content = "# First Title\n\nContent here.\n\n---\n\n# Second Title\n\nMore content.\n\n# Third Title\n\nNo separator before this one.";
-        let structure = DocumentStructure::new(content);
-        let result = rule
-            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should flag the heading without separator");
         assert_eq!(result[0].line, 11); // Third title on line 11
 
         // Test with allow_with_separators = false
         let strict_rule = MD025SingleTitle::strict();
         let content = "# First Title\n\nContent here.\n\n---\n\n# Second Title\n\nMore content.";
-        let structure = DocumentStructure::new(content);
-        let result = strict_rule
-            .check_with_structure(&crate::lint_context::LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = strict_rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Strict mode should flag all multiple H1s regardless of separators");
     }
 }

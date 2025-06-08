@@ -2,8 +2,7 @@
 ///
 /// See [docs/md020.md](../../docs/md020.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::calculate_single_line_range;
+use crate::utils::range_utils::{calculate_single_line_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -75,30 +74,6 @@ impl MD020NoMissingSpaceClosedAtx {
         }
     }
 
-    // Calculate the byte range for a specific line in the content
-    fn get_line_byte_range(&self, content: &str, line_num: usize) -> std::ops::Range<usize> {
-        let mut current_line = 1;
-        let mut start_byte = 0;
-
-        for (i, c) in content.char_indices() {
-            if current_line == line_num && c == '\n' {
-                return start_byte..i;
-            } else if c == '\n' {
-                current_line += 1;
-                if current_line == line_num {
-                    start_byte = i + 1;
-                }
-            }
-        }
-
-        // If we're looking for the last line and it doesn't end with a newline
-        if current_line == line_num {
-            return start_byte..content.len();
-        }
-
-        // Fallback if line not found (shouldn't happen)
-        0..0
-    }
 }
 
 impl Rule for MD020NoMissingSpaceClosedAtx {
@@ -111,124 +86,120 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        if content.is_empty() {
-            return Ok(String::new());
-        }
-        let structure = DocumentStructure::new(content);
-        let lines: Vec<&str> = content.lines().collect();
-        let mut result = String::new();
-        for (i, line) in lines.iter().enumerate() {
-            // Only process heading lines
-            let is_heading_line = structure.heading_lines.iter().any(|&ln| ln == i + 1);
-            if is_heading_line && self.is_closed_atx_heading_without_space(line) {
-                result.push_str(&self.fix_closed_atx_heading(line));
-            } else {
-                result.push_str(line);
-            }
-            if i < lines.len() - 1 {
-                result.push('\n');
-            }
-        }
-        // Preserve trailing newline if original had it
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
-        }
-        Ok(result)
-    }
-
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        // Early return if no headings
-        if structure.heading_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = _ctx.content.lines().collect();
-
-        // Process only heading lines using structure.heading_lines
-        for &line_num in &structure.heading_lines {
-            let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
-
-            // Skip if out of bounds
-            if line_idx >= lines.len() {
-                continue;
-            }
-
-            let line = lines[line_idx];
-
-            // Check if line matches closed ATX pattern without space
-            if self.is_closed_atx_heading_without_space(line) {
-                let line_range = self.get_line_byte_range(_ctx.content, line_num);
-
-                let mut start_col = 1;
-                let mut length = 1;
-                let mut message = String::new();
-
-                if let Some(captures) = CLOSED_ATX_NO_SPACE_PATTERN.captures(line) {
-                    // Missing space at both start and end: #Heading#
-                    let opening_hashes = captures.get(2).unwrap();
-                    message = format!(
-                        "Missing space inside hashes on closed heading (with {} at start and end)",
-                        "#".repeat(opening_hashes.as_str().len())
-                    );
-                    // Highlight the position right after the opening hashes
-                    start_col = opening_hashes.end() + 1;
-                    length = 1;
-                } else if let Some(captures) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
-                    // Missing space at start: #Heading #
-                    let opening_hashes = captures.get(2).unwrap();
-                    message = format!(
-                        "Missing space after {} at start of closed heading",
-                        "#".repeat(opening_hashes.as_str().len())
-                    );
-                    // Highlight the position right after the opening hashes
-                    start_col = opening_hashes.end() + 1;
-                    length = 1;
-                } else if let Some(captures) = CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line) {
-                    // Missing space at end: # Heading#
-                    let content = captures.get(3).unwrap();
-                    let closing_hashes = captures.get(5).unwrap();
-                    message = format!(
-                        "Missing space before {} at end of closed heading",
-                        "#".repeat(closing_hashes.as_str().len())
-                    );
-                    // Highlight the position right before the closing hashes
-                    start_col = content.end() + 1;
-                    length = 1;
+        
+        // Check all closed ATX headings from cached info
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            if let Some(heading) = &line_info.heading {
+                // Skip headings indented 4+ spaces (they're code blocks)
+                if line_info.indent >= 4 {
+                    continue;
                 }
+                
+                // Only check closed ATX headings
+                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) && heading.has_closing_sequence {
+                    let line = &line_info.content;
+                    
+                    // Check if line matches closed ATX pattern without space
+                    if self.is_closed_atx_heading_without_space(line) {
+                        let line_index = LineIndex::new(ctx.content.to_string());
+                        let line_range = line_index.line_content_range(line_num + 1);
 
-                let (start_line, start_col_calc, end_line, end_col) =
-                    calculate_single_line_range(line_num, start_col, length);
+                        let mut start_col = 1;
+                        let mut length = 1;
+                        let mut message = String::new();
 
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message,
-                    line: start_line,
-                    column: start_col_calc,
-                    end_line,
-                    end_column: end_col,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_range,
-                        replacement: self.fix_closed_atx_heading(line),
-                    }),
-                });
+                        if let Some(captures) = CLOSED_ATX_NO_SPACE_PATTERN.captures(line) {
+                            // Missing space at both start and end: #Heading#
+                            let opening_hashes = captures.get(2).unwrap();
+                            message = format!(
+                                "Missing space inside hashes on closed heading (with {} at start and end)",
+                                "#".repeat(opening_hashes.as_str().len())
+                            );
+                            // Highlight the position right after the opening hashes
+                            start_col = opening_hashes.end() + 1;
+                            length = 1;
+                        } else if let Some(captures) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
+                            // Missing space at start: #Heading #
+                            let opening_hashes = captures.get(2).unwrap();
+                            message = format!(
+                                "Missing space after {} at start of closed heading",
+                                "#".repeat(opening_hashes.as_str().len())
+                            );
+                            // Highlight the position right after the opening hashes
+                            start_col = opening_hashes.end() + 1;
+                            length = 1;
+                        } else if let Some(captures) = CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line) {
+                            // Missing space at end: # Heading#
+                            let content = captures.get(3).unwrap();
+                            let closing_hashes = captures.get(5).unwrap();
+                            message = format!(
+                                "Missing space before {} at end of closed heading",
+                                "#".repeat(closing_hashes.as_str().len())
+                            );
+                            // Highlight the position right before the closing hashes
+                            start_col = content.end() + 1;
+                            length = 1;
+                        }
+
+                        let (start_line, start_col_calc, end_line, end_col) =
+                            calculate_single_line_range(line_num + 1, start_col, length);
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message,
+                            line: start_line,
+                            column: start_col_calc,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_range,
+                                replacement: self.fix_closed_atx_heading(line),
+                            }),
+                        });
+                    }
+                }
             }
         }
 
         Ok(warnings)
+    }
+
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let mut lines = Vec::new();
+        
+        for (_line_num, line_info) in ctx.lines.iter().enumerate() {
+            let mut fixed = false;
+            
+            if let Some(heading) = &line_info.heading {
+                // Skip headings indented 4+ spaces (they're code blocks)
+                if line_info.indent >= 4 {
+                    lines.push(line_info.content.clone());
+                    continue;
+                }
+                
+                // Fix closed ATX headings without space
+                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) && 
+                   heading.has_closing_sequence &&
+                   self.is_closed_atx_heading_without_space(&line_info.content) {
+                    lines.push(self.fix_closed_atx_heading(&line_info.content));
+                    fixed = true;
+                }
+            }
+            
+            if !fixed {
+                lines.push(line_info.content.clone());
+            }
+        }
+        
+        // Reconstruct content preserving line endings
+        let mut result = lines.join("\n");
+        if ctx.content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
+        }
+        
+        Ok(result)
     }
 
     /// Get the category of this rule for selective processing
@@ -246,7 +217,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
     }
 
     fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
+        None
     }
 
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
@@ -257,16 +228,6 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
     }
 }
 
-impl DocumentStructureExtensions for MD020NoMissingSpaceClosedAtx {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        // This rule is only relevant if there are headings
-        !doc_structure.heading_lines.is_empty()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -274,23 +235,19 @@ mod tests {
     use crate::lint_context::LintContext;
 
     #[test]
-    fn test_with_document_structure() {
+    fn test_basic_functionality() {
         let rule = MD020NoMissingSpaceClosedAtx;
 
         // Test with correct spacing
         let content = "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###";
-        let structure = DocumentStructure::new(content);
-        let result = rule
-            .check_with_structure(&LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with missing spaces
         let content = "# Heading 1#\n## Heading 2 ##\n### Heading 3###";
-        let structure = DocumentStructure::new(content);
-        let result = rule
-            .check_with_structure(&LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should flag the two headings with missing spaces
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 3);

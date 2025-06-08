@@ -36,72 +36,39 @@ impl MD051LinkFragments {
         Self
     }
 
-    /// Extract headings from pre-computed DocumentStructure data (optimized)
-    fn extract_headings_from_structure(
+
+    /// Extract headings from cached LintContext information
+    fn extract_headings_from_context(
         &self,
-        content: &str,
-        structure: &DocumentStructure,
+        ctx: &crate::lint_context::LintContext,
     ) -> HashSet<String> {
         let mut headings = HashSet::new();
-
-        // Early return: if no headings at all, skip processing
-        if structure.heading_lines.is_empty() {
-            return headings;
-        }
-
-        let lines: Vec<&str> = content.lines().collect();
         let mut in_toc = false;
 
-        // Process each heading using pre-computed data from DocumentStructure
-        for &line_num in &structure.heading_lines {
-            let line_idx = line_num - 1; // Convert from 1-indexed to 0-indexed
-            if line_idx >= lines.len() {
-                continue;
-            }
-
-            let line = lines[line_idx];
-
-            // Check for TOC section
-            if TOC_SECTION_START.is_match(line) {
-                in_toc = true;
-                continue;
-            }
-
-            // If we were in TOC and hit another heading, we're out of TOC
-            if in_toc && line.trim().starts_with('#') {
-                in_toc = false;
-            }
-
-            // Skip if in TOC
-            if in_toc {
-                continue;
-            }
-
-            // Check for ATX heading
-            if let Some(cap) = ATX_HEADING_WITH_CAPTURE.captures(line) {
-                if let Some(heading_text) = cap.get(2) {
-                    let heading = heading_text.as_str().trim();
-                    // Use optimized fragment generation
-                    let fragment = self.heading_to_fragment_fast(heading);
-                    if !fragment.is_empty() {
-                        headings.insert(fragment);
-                    }
+        for line_info in &ctx.lines {
+            if let Some(heading) = &line_info.heading {
+                let line = &line_info.content;
+                
+                // Check for TOC section
+                if TOC_SECTION_START.is_match(line) {
+                    in_toc = true;
+                    continue;
                 }
-                continue;
-            }
 
-            // Check for setext heading (only check if next line exists)
-            if line_idx + 1 < lines.len() {
-                let combined = format!("{}\n{}", line, lines[line_idx + 1]);
-                if let Ok(Some(cap)) = SETEXT_HEADING_WITH_CAPTURE.captures(&combined) {
-                    if let Some(heading_text) = cap.get(1) {
-                        let heading = heading_text.as_str().trim();
-                        // Use optimized fragment generation
-                        let fragment = self.heading_to_fragment_fast(heading);
-                        if !fragment.is_empty() {
-                            headings.insert(fragment);
-                        }
-                    }
+                // If we were in TOC and hit another heading, we're out of TOC
+                if in_toc {
+                    in_toc = false;
+                }
+
+                // Skip if in TOC
+                if in_toc {
+                    continue;
+                }
+
+                // Use optimized fragment generation
+                let fragment = self.heading_to_fragment_fast(&heading.text);
+                if !fragment.is_empty() {
+                    headings.insert(fragment);
                 }
             }
         }
@@ -219,7 +186,7 @@ impl MD051LinkFragments {
             return links;
         }
 
-        // Use optimized regex to find links with fragments
+        // Use LINK_REGEX from regex_cache which is already defined for this purpose
         let iter = LINK_REGEX.captures_iter(line);
         for cap_result in iter {
             if let Ok(cap) = cap_result {
@@ -268,7 +235,7 @@ impl Rule for MD051LinkFragments {
     fn check_with_structure(
         &self,
         ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
+        _structure: &DocumentStructure,
     ) -> LintResult {
         let content = ctx.content;
 
@@ -278,11 +245,13 @@ impl Rule for MD051LinkFragments {
         }
 
         let mut warnings = Vec::new();
-        let headings = self.extract_headings_from_structure(content, structure);
+        let headings = self.extract_headings_from_context(ctx);
 
         let mut in_toc_section = false;
 
-        for (line_num, line) in content.lines().enumerate() {
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            let line = &line_info.content;
+            
             // Check if we're entering a TOC section
             if TOC_SECTION_START.is_match(line) {
                 in_toc_section = true;
@@ -300,7 +269,7 @@ impl Rule for MD051LinkFragments {
             }
 
             // Skip lines in code blocks or TOC section
-            if structure.is_in_code_block(line_num + 1) || in_toc_section {
+            if line_info.in_code_block || in_toc_section {
                 continue;
             }
 
@@ -308,11 +277,14 @@ impl Rule for MD051LinkFragments {
             let fragment_links = self.find_fragment_links_fast(line);
 
             for (start_pos, end_pos, fragment) in fragment_links {
-                // Skip if the link is inside a code span
-                if structure.is_in_code_span(line_num + 1, start_pos + 1) {
+                // Calculate the byte position of this link in the document
+                let byte_offset = line_info.byte_offset + start_pos;
+                
+                // Check if the link is inside a code span
+                if ctx.is_in_code_block_or_span(byte_offset) {
                     continue;
                 }
-
+                
                 // Check if the fragment exists in headings
                 // If no headings exist, all fragment links should warn
                 if headings.is_empty() || !headings.contains(&fragment) {
@@ -364,10 +336,12 @@ impl Rule for MD051LinkFragments {
 impl DocumentStructureExtensions for MD051LinkFragments {
     fn has_relevant_elements(
         &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
     ) -> bool {
         // This rule is only relevant if there are both headings and links
-        !doc_structure.heading_lines.is_empty() && !doc_structure.links.is_empty()
+        let has_headings = ctx.lines.iter().any(|line| line.heading.is_some());
+        let has_links = ctx.content.contains('[') && ctx.content.contains(']');
+        has_headings && has_links
     }
 }

@@ -2,7 +2,6 @@
 ///
 /// See [docs/md021.md](../../docs/md021.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::{calculate_line_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -81,114 +80,109 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        if content.is_empty() {
-            return Ok(String::new());
-        }
-        let structure = DocumentStructure::new(content);
-        let lines: Vec<&str> = content.lines().collect();
-        let mut result = String::new();
-        for (i, line) in lines.iter().enumerate() {
-            // Only process heading lines
-            let is_heading_line = structure.heading_lines.iter().any(|&ln| ln == i + 1);
-            if is_heading_line && self.is_closed_atx_heading_with_multiple_spaces(line) {
-                result.push_str(&self.fix_closed_atx_heading(line));
-            } else {
-                result.push_str(line);
-            }
-            if i < lines.len() - 1 {
-                result.push('\n');
-            }
-        }
-        // Preserve trailing newline if original had it
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
-        }
-        Ok(result)
-    }
-
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> LintResult {
-        // Early return if no headings
-        if _doc_structure.heading_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
         let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        
+        // Check all closed ATX headings from cached info
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            if let Some(heading) = &line_info.heading {
+                // Skip headings indented 4+ spaces (they're code blocks)
+                if line_info.indent >= 4 {
+                    continue;
+                }
+                
+                // Only check closed ATX headings
+                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) && heading.has_closing_sequence {
+                    let line = &line_info.content;
+                    
+                    // Check if line matches closed ATX pattern with multiple spaces
+                    if self.is_closed_atx_heading_with_multiple_spaces(line) {
+                        let captures = CLOSED_ATX_MULTIPLE_SPACE_PATTERN.captures(line).unwrap();
+                        let _indentation = captures.get(1).unwrap();
+                        let opening_hashes = captures.get(2).unwrap();
+                        let (start_spaces, end_spaces) = self.count_spaces(line);
 
-        // Process only heading lines using structure.heading_lines
-        for &line_num in &_doc_structure.heading_lines {
-            let line_idx = line_num - 1; // Convert 1-indexed to 0-indexed
+                        let message = if start_spaces > 1 && end_spaces > 1 {
+                            format!(
+                                "Multiple spaces ({} at start, {} at end) inside hashes on closed heading (with {} at start and end)",
+                                start_spaces,
+                                end_spaces,
+                                "#".repeat(opening_hashes.as_str().len())
+                            )
+                        } else if start_spaces > 1 {
+                            format!(
+                                "Multiple spaces ({}) after {} at start of closed heading",
+                                start_spaces,
+                                "#".repeat(opening_hashes.as_str().len())
+                            )
+                        } else {
+                            format!(
+                                "Multiple spaces ({}) before {} at end of closed heading",
+                                end_spaces,
+                                "#".repeat(opening_hashes.as_str().len())
+                            )
+                        };
 
-            // Skip if out of bounds
-            if line_idx >= lines.len() {
-                continue;
-            }
+                        // Replace the entire line with the fixed version
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_line_range(line_num + 1, line);
+                        let replacement = self.fix_closed_atx_heading(line);
 
-            let line = lines[line_idx];
-
-            // Check if line matches closed ATX pattern with multiple spaces
-            if self.is_closed_atx_heading_with_multiple_spaces(line) {
-                let captures = CLOSED_ATX_MULTIPLE_SPACE_PATTERN.captures(line).unwrap();
-                let _indentation = captures.get(1).unwrap();
-                let opening_hashes = captures.get(2).unwrap();
-                let (start_spaces, end_spaces) = self.count_spaces(line);
-
-                let message = if start_spaces > 1 && end_spaces > 1 {
-                    format!(
-                        "Multiple spaces ({} at start, {} at end) inside hashes on closed heading (with {} at start and end)",
-                        start_spaces,
-                        end_spaces,
-                        "#".repeat(opening_hashes.as_str().len())
-                    )
-                } else if start_spaces > 1 {
-                    format!(
-                        "Multiple spaces ({}) after {} at start of closed heading",
-                        start_spaces,
-                        "#".repeat(opening_hashes.as_str().len())
-                    )
-                } else {
-                    format!(
-                        "Multiple spaces ({}) before {} at end of closed heading",
-                        end_spaces,
-                        "#".repeat(opening_hashes.as_str().len())
-                    )
-                };
-
-                // Replace the entire line with the fixed version
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_line_range(line_num, line);
-                let replacement = self.fix_closed_atx_heading(line);
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message,
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range_with_length(start_line, 1, line.len()),
-                        replacement,
-                    }),
-                });
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message,
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range_with_length(start_line, 1, line.len()),
+                                replacement,
+                            }),
+                        });
+                    }
+                }
             }
         }
 
         Ok(warnings)
+    }
+
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let mut lines = Vec::new();
+        
+        for (_line_num, line_info) in ctx.lines.iter().enumerate() {
+            let mut fixed = false;
+            
+            if let Some(heading) = &line_info.heading {
+                // Skip headings indented 4+ spaces (they're code blocks)
+                if line_info.indent >= 4 {
+                    lines.push(line_info.content.clone());
+                    continue;
+                }
+                
+                // Fix closed ATX headings with multiple spaces
+                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) && 
+                   heading.has_closing_sequence &&
+                   self.is_closed_atx_heading_with_multiple_spaces(&line_info.content) {
+                    lines.push(self.fix_closed_atx_heading(&line_info.content));
+                    fixed = true;
+                }
+            }
+            
+            if !fixed {
+                lines.push(line_info.content.clone());
+            }
+        }
+        
+        // Reconstruct content preserving line endings
+        let mut result = lines.join("\n");
+        if ctx.content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
+        }
+        
+        Ok(result)
     }
 
     /// Get the category of this rule for selective processing
@@ -207,7 +201,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
+        None
     }
 
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
@@ -218,16 +212,6 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 }
 
-impl DocumentStructureExtensions for MD021NoMultipleSpaceClosedAtx {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> bool {
-        let content = ctx.content;
-        !content.is_empty() && content.contains('#')
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -235,23 +219,19 @@ mod tests {
     use crate::lint_context::LintContext;
 
     #[test]
-    fn test_with_document_structure() {
+    fn test_basic_functionality() {
         let rule = MD021NoMultipleSpaceClosedAtx;
 
         // Test with correct spacing
         let content = "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###";
-        let structure = DocumentStructure::new(content);
-        let result = rule
-            .check_with_structure(&LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with multiple spaces
         let content = "#  Heading 1 #\n## Heading 2 ##\n### Heading 3  ###";
-        let structure = DocumentStructure::new(content);
-        let result = rule
-            .check_with_structure(&LintContext::new(content), &structure)
-            .unwrap();
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should flag the two headings with multiple spaces
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 3);

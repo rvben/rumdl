@@ -2,7 +2,6 @@ use crate::utils::range_utils::{calculate_line_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
-use crate::utils::document_structure::DocumentStructure;
 
 /// Rule MD041: First line in file should be a top-level heading
 ///
@@ -58,34 +57,48 @@ impl Rule for MD041FirstLineHeading {
         if self.has_front_matter_title(content) {
             return Ok(warnings);
         }
-        let structure = DocumentStructure::new(content);
-        let lines: Vec<&str> = content.lines().collect();
-        let mut first_line = 0;
-        // Skip front matter
-        let mut start = 0;
-        if structure.has_front_matter {
-            if let Some((_, end)) = structure.front_matter_range {
-                start = end;
+        
+        // Find the first non-blank line after front matter using cached info
+        let mut first_content_line_num = None;
+        let mut skip_lines = 0;
+        
+        // Check for front matter
+        if ctx.lines.first().map(|l| l.content.trim()) == Some("---") {
+            // Skip front matter
+            for (idx, line_info) in ctx.lines.iter().enumerate().skip(1) {
+                if line_info.content.trim() == "---" {
+                    skip_lines = idx + 1;
+                    break;
+                }
             }
         }
-        // Skip blank lines after front matter
-        for (i, line) in lines.iter().enumerate().skip(start) {
-            if !line.trim().is_empty() {
-                first_line = i + 1; // 1-indexed
+        
+        for (line_num, line_info) in ctx.lines.iter().enumerate().skip(skip_lines) {
+            if !line_info.content.trim().is_empty() {
+                first_content_line_num = Some(line_num);
                 break;
             }
         }
-        if first_line == 0 {
+        
+        if first_content_line_num.is_none() {
             // No non-blank lines after front matter
             return Ok(warnings);
         }
-        // Check if the first non-blank, non-front-matter line is a heading of the required level
-        if structure.heading_lines.is_empty()
-            || structure.heading_lines[0] != first_line
-            || structure.heading_levels[0] != self.level
-        {
-            // Calculate precise character range for the entire first line that should be a heading
-            let first_line_content = lines.get(first_line - 1).unwrap_or(&"");
+        
+        let first_line_idx = first_content_line_num.unwrap();
+        
+        // Check if the first non-blank line is a heading of the required level
+        let first_line_info = &ctx.lines[first_line_idx];
+        let is_correct_heading = if let Some(heading) = &first_line_info.heading {
+            heading.level as usize == self.level
+        } else {
+            false
+        };
+        
+        if !is_correct_heading {
+            // Calculate precise character range for the entire first line
+            let first_line = first_line_idx + 1; // Convert to 1-indexed
+            let first_line_content = &first_line_info.content;
             let (start_line, start_col, end_line, end_col) =
                 calculate_line_range(first_line, first_line_content);
 
@@ -120,36 +133,83 @@ impl Rule for MD041FirstLineHeading {
         if content.trim().is_empty() || self.has_front_matter_title(&content) {
             return Ok(content.to_string());
         }
-        let structure = DocumentStructure::new(&content);
+        
+        // Re-create context for the potentially fixed content
+        let fixed_ctx = crate::lint_context::LintContext::new(&content);
+        
+        // Find the first non-blank line after front matter
+        let mut first_content_line_num = None;
+        let mut skip_lines = 0;
+        
+        // Check for front matter
+        if fixed_ctx.lines.first().map(|l| l.content.trim()) == Some("---") {
+            // Skip front matter
+            for (idx, line_info) in fixed_ctx.lines.iter().enumerate().skip(1) {
+                if line_info.content.trim() == "---" {
+                    skip_lines = idx + 1;
+                    break;
+                }
+            }
+        }
+        
+        for (line_num, line_info) in fixed_ctx.lines.iter().enumerate().skip(skip_lines) {
+            if !line_info.content.trim().is_empty() {
+                first_content_line_num = Some(line_num);
+                break;
+            }
+        }
+        
         let mut result = String::new();
         let lines: Vec<&str> = content.lines().collect();
-        if structure.heading_lines.is_empty() {
+        
+        // Check if we have any headings at all
+        let has_any_heading = fixed_ctx.lines.iter().any(|line| line.heading.is_some());
+        
+        if !has_any_heading {
             // Add a new title at the beginning
             result.push_str(&format!("{} Title\n\n{}", "#".repeat(self.level), content));
-        } else {
-            let first_heading_line = structure.heading_lines[0];
-            let first_heading_level = structure.heading_levels[0];
-            if first_heading_level != self.level {
-                // Fix the existing heading level
-                for (i, line) in lines.iter().enumerate() {
-                    if i + 1 == first_heading_line {
-                        result.push_str(&format!(
-                            "{} {}",
-                            "#".repeat(self.level),
-                            line.trim_start().trim_start_matches('#').trim_start()
-                        ));
-                    } else {
-                        result.push_str(line);
+        } else if let Some(first_line_idx) = first_content_line_num {
+            // Check if first content line is a heading of correct level
+            let first_line_info = &fixed_ctx.lines[first_line_idx];
+            
+            if let Some(heading) = &first_line_info.heading {
+                if heading.level as usize != self.level {
+                    // Fix the existing heading level
+                    for (i, line) in lines.iter().enumerate() {
+                        if i == first_line_idx {
+                            result.push_str(&format!(
+                                "{} {}",
+                                "#".repeat(self.level),
+                                heading.text
+                            ));
+                        } else {
+                            result.push_str(line);
+                        }
+                        if i < lines.len() - 1 {
+                            result.push('\n');
+                        }
                     }
+                } else {
+                    // No fix needed, return original
+                    return Ok(content.to_string());
+                }
+            } else {
+                // First line is not a heading, add a new title before it
+                for (i, line) in lines.iter().enumerate() {
+                    if i == first_line_idx {
+                        result.push_str(&format!("{} Title\n\n", "#".repeat(self.level)));
+                    }
+                    result.push_str(line);
                     if i < lines.len() - 1 {
                         result.push('\n');
                     }
                 }
-            } else {
-                // No fix needed, return original
-                return Ok(content.to_string());
             }
+        } else {
+            // No content after front matter
+            return Ok(content.to_string());
         }
+        
         Ok(result)
     }
 

@@ -1,7 +1,6 @@
 use toml;
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_match_range;
 use std::collections::{HashMap, HashSet};
 
@@ -30,116 +29,80 @@ impl Rule for MD024NoDuplicateHeading {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-
         // Early return for empty content
-        if content.is_empty() {
+        if ctx.lines.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Fallback path: create structure manually (should rarely be used)
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    /// Optimized check using pre-computed document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
-
-        // Early return if no headings
-        if structure.heading_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let lines: Vec<&str> = content.lines().collect();
         let mut warnings = Vec::new();
         let mut seen_headings: HashSet<String> = HashSet::new();
-        let mut seen_headings_per_level: HashMap<u32, HashSet<String>> = HashMap::new();
+        let mut seen_headings_per_level: HashMap<u8, HashSet<String>> = HashMap::new();
 
-        for (i, &line_num) in structure.heading_lines.iter().enumerate() {
-            // Skip headings in front matter
-            if structure.is_in_front_matter(line_num) {
-                continue;
-            }
-            let level = *structure.heading_levels.get(i).unwrap_or(&1) as u32;
-            let region = structure
-                .heading_regions
-                .get(i)
-                .copied()
-                .unwrap_or((line_num, line_num));
-            let line_idx = region.0 - 1; // 0-based
-            let line = lines.get(line_idx).unwrap_or(&"");
-            let _indentation = line
-                .chars()
-                .take_while(|c| c.is_whitespace())
-                .collect::<String>();
-            let text = line
-                .trim()
-                .trim_start_matches('#')
-                .trim()
-                .trim_end_matches('#')
-                .trim();
-            if text.is_empty() {
-                continue; // Ignore empty headings
-            }
-            let heading_key = text.to_string();
-
-            // Calculate precise character range for the heading text content
-            let text_start_in_line = if let Some(pos) = line.find(text) {
-                pos
-            } else {
-                // Fallback: find after hash markers
-                let trimmed = line.trim_start();
-                let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-                let after_hashes = &trimmed[hash_count..];
-                let text_start_in_trimmed = after_hashes.find(text).unwrap_or(0);
-                (line.len() - trimmed.len()) + hash_count + text_start_in_trimmed
-            };
-
-            let (start_line, start_col, end_line, end_col) =
-                calculate_match_range(line_num, line, text_start_in_line, text.len());
-
-            if self.siblings_only {
-                // TODO: Implement siblings_only logic if needed
-            } else if self.allow_different_nesting {
-                // Only flag duplicates at the same level
-                let seen = seen_headings_per_level.entry(level).or_default();
-                if seen.contains(&heading_key) {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: format!("Duplicate heading: '{}'.", text),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        severity: Severity::Warning,
-                        fix: None,
-                    });
-                } else {
-                    seen.insert(heading_key.clone());
+        // Process headings using cached heading information
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            if let Some(heading) = &line_info.heading {
+                // Skip empty headings
+                if heading.text.is_empty() {
+                    continue;
                 }
-            } else {
-                // Flag all duplicates, regardless of level
-                if seen_headings.contains(&heading_key) {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: format!("Duplicate heading: '{}'.", text),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        severity: Severity::Warning,
-                        fix: None,
-                    });
+
+                let heading_key = heading.text.clone();
+                let level = heading.level;
+
+                // Calculate precise character range for the heading text content
+                let text_start_in_line = if let Some(pos) = line_info.content.find(&heading.text) {
+                    pos
                 } else {
-                    seen_headings.insert(heading_key.clone());
+                    // Fallback: find after hash markers
+                    let trimmed = line_info.content.trim_start();
+                    let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+                    let after_hashes = &trimmed[hash_count..];
+                    let text_start_in_trimmed = after_hashes.find(&heading.text).unwrap_or(0);
+                    (line_info.content.len() - trimmed.len()) + hash_count + text_start_in_trimmed
+                };
+
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_match_range(line_num + 1, &line_info.content, text_start_in_line, heading.text.len());
+
+                if self.siblings_only {
+                    // TODO: Implement siblings_only logic if needed
+                } else if self.allow_different_nesting {
+                    // Only flag duplicates at the same level
+                    let seen = seen_headings_per_level.entry(level).or_default();
+                    if seen.contains(&heading_key) {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message: format!("Duplicate heading: '{}'.", heading.text),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
+                    } else {
+                        seen.insert(heading_key.clone());
+                    }
+                } else {
+                    // Flag all duplicates, regardless of level
+                    if seen_headings.contains(&heading_key) {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message: format!("Duplicate heading: '{}'.", heading.text),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
+                    } else {
+                        seen_headings.insert(heading_key.clone());
+                    }
                 }
             }
         }
+        
         Ok(warnings)
     }
 
@@ -148,12 +111,22 @@ impl Rule for MD024NoDuplicateHeading {
         Ok(ctx.content.to_string())
     }
 
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Heading
+    }
+
+    /// Check if this rule should be skipped
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.lines.iter().all(|line| line.heading.is_none())
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 
     fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
+        None
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -186,16 +159,5 @@ impl Rule for MD024NoDuplicateHeading {
             allow_different_nesting,
             siblings_only,
         ))
-    }
-}
-
-impl DocumentStructureExtensions for MD024NoDuplicateHeading {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        // This rule is only relevant if there are headings
-        !doc_structure.heading_lines.is_empty()
     }
 }

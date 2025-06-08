@@ -1,7 +1,6 @@
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD002FirstHeadingH1;
-use rumdl::utils::document_structure::DocumentStructure;
 
 #[test]
 fn test_custom_level() {
@@ -119,18 +118,8 @@ fn test_indented_first_heading() {
 fn test_setext_heading() {
     let rule = MD002FirstHeadingH1::default();
     let content = "Heading\n-------\n\n### Subheading";
-    let structure = DocumentStructure::new(content);
-    println!(
-        "[test_setext_heading] heading_lines: {:?}",
-        structure.heading_lines
-    );
-    println!(
-        "[test_setext_heading] heading_levels: {:?}",
-        structure.heading_levels
-    );
     let ctx = LintContext::new(content);
-    let result = rule.check_with_structure(&ctx, &structure).unwrap();
-    println!("[test_setext_heading] result: {:?}", result);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -153,18 +142,8 @@ fn test_with_front_matter() {
 fn test_setext_with_front_matter() {
     let rule = MD002FirstHeadingH1::default();
     let content = "---\ntitle: Test\n---\n\nHeading\n-------\n\n### Subheading";
-    let structure = DocumentStructure::new(content);
-    println!(
-        "[test_setext_with_front_matter] heading_lines: {:?}",
-        structure.heading_lines
-    );
-    println!(
-        "[test_setext_with_front_matter] heading_levels: {:?}",
-        structure.heading_levels
-    );
     let ctx = LintContext::new(content);
-    let result = rule.check_with_structure(&ctx, &structure).unwrap();
-    println!("[test_setext_with_front_matter] result: {:?}", result);
+    let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 5);
     let fixed = rule.fix(&ctx).unwrap();

@@ -388,7 +388,26 @@ fn test_inline_code_spans() {
     let ctx = LintContext::new(
         "# Heading One\n\n`[Example](#missing-section)` and [Invalid Link](#section-two)",
     );
+    
+    // Debug: Let's check what the LintContext contains
+    println!("=== Test 3 Debug ===");
+    println!("Content: {:?}", ctx.content);
+    println!("Line count: {}", ctx.lines.len());
+    for (i, line_info) in ctx.lines.iter().enumerate() {
+        println!("Line {}: content='{}', in_code_block={}, byte_offset={}", 
+                 i, line_info.content, line_info.in_code_block, line_info.byte_offset);
+        if let Some(heading) = &line_info.heading {
+            println!("  Has heading: level={}, text='{}'", heading.level, heading.text);
+        }
+    }
+    
     let result = rule.check(&ctx).unwrap();
+
+    // Debug output
+    println!("Test 3 - Result count: {}", result.len());
+    for (i, warning) in result.iter().enumerate() {
+        println!("Warning {}: line {}, col {}, message: {}", i, warning.line, warning.column, warning.message);
+    }
 
     // Only the real invalid link should be caught
     assert_eq!(result.len(), 1, "Only real invalid links should be caught");

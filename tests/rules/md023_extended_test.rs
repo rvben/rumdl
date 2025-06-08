@@ -248,19 +248,21 @@ fn test_multiple_indentation_levels() {
     assert!(result.is_ok());
     let warnings = result.unwrap();
 
-    // Should have warnings for all indented headings
-    assert_eq!(warnings.len(), 4);
+    // Should have warnings for all indented headings except the one with 4+ spaces (code block)
+    assert_eq!(warnings.len(), 3);
     assert_eq!(warnings[0].line, 3); // " ## Heading with 1 space"
     assert_eq!(warnings[1].line, 5); // "  ## Heading with 2 spaces"
     assert_eq!(warnings[2].line, 7); // "   ## Heading with 3 spaces"
-    assert_eq!(warnings[3].line, 9); // "    ## Heading with 4 spaces"
+    // Line 9 with 4 spaces is a code block, not a heading
 
     // Verify the fix works for different indentation levels
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
+    // The fix should have 3 unindented headings + 1 unchanged line that looks like a heading
     assert_eq!(fixed.matches("## Heading with").count(), 4);
-    assert!(!fixed.contains(" ## Heading"));
-    assert!(!fixed.contains("  ## Heading"));
-    assert!(!fixed.contains("   ## Heading"));
-    assert!(!fixed.contains("    ## Heading"));
+    // The 4-space indented line should remain unchanged (it's not detected as a heading)
+    assert!(fixed.contains("    ## Heading with 4 spaces"));
+    assert!(!fixed.contains(" ## Heading with 1"));
+    assert!(!fixed.contains("  ## Heading with 2"));
+    assert!(!fixed.contains("   ## Heading with 3"));
 }

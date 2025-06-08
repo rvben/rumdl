@@ -24,73 +24,24 @@ impl MD043RequiredHeadings {
         Self { headings }
     }
 
-    fn extract_headings(&self, content: &str, ctx: &crate::lint_context::LintContext) -> Vec<String> {
+    fn extract_headings(&self, ctx: &crate::lint_context::LintContext) -> Vec<String> {
         let mut result = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-        let mut i = 0;
-        let mut byte_pos = 0;
-
-        while i < lines.len() {
-            let line = lines[i];
-
-            // Skip content within code blocks
-            if ctx.is_in_code_block_or_span(byte_pos) {
-                byte_pos += line.len() + 1;
-                i += 1;
-                continue;
+        
+        for line_info in &ctx.lines {
+            if let Some(heading) = &line_info.heading {
+                result.push(heading.text.trim().to_string());
             }
-
-            // Check for ATX heading
-            if let Some(cap) = ATX_HEADING.captures(line) {
-                if let Some(heading_text) = cap.get(2) {
-                    result.push(heading_text.as_str().trim().to_string());
-                }
-            }
-            // Check for setext heading (requires looking at next line)
-            else if i + 1 < lines.len() && !line.trim().is_empty() {
-                let next_line = lines[i + 1];
-                if SETEXT_UNDERLINE.is_match(next_line) {
-                    result.push(line.trim().to_string());
-                    i += 1; // Skip the underline
-                }
-            }
-
-            i += 1;
-            byte_pos += line.len() + 1;
         }
-
+        
         result
     }
 
-    fn is_heading(&self, content: &str, line_index: usize, ctx: &crate::lint_context::LintContext) -> bool {
-        let lines: Vec<&str> = content.lines().collect();
-        let line = lines[line_index];
-
-        // Calculate byte position for this line
-        let mut byte_pos = 0;
-        for i in 0..line_index {
-            byte_pos += lines[i].len() + 1;
+    fn is_heading(&self, line_index: usize, ctx: &crate::lint_context::LintContext) -> bool {
+        if line_index < ctx.lines.len() {
+            ctx.lines[line_index].heading.is_some()
+        } else {
+            false
         }
-        
-        // If this line is in a code block, it's not a heading
-        if ctx.is_in_code_block_or_span(byte_pos) {
-            return false;
-        }
-
-        // Check for ATX heading
-        if ATX_HEADING.is_match(line) {
-            return true;
-        }
-
-        // Check for setext heading (requires looking at next line)
-        if line_index + 1 < lines.len() && !line.trim().is_empty() {
-            let next_line = lines[line_index + 1];
-            if SETEXT_UNDERLINE.is_match(next_line) {
-                return true;
-            }
-        }
-
-        false
     }
 }
 
@@ -104,9 +55,8 @@ impl Rule for MD043RequiredHeadings {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         let mut warnings = Vec::new();
-        let actual_headings = self.extract_headings(content, ctx);
+        let actual_headings = self.extract_headings(ctx);
 
         // If no required headings are specified, the rule is disabled
         if self.headings.is_empty() {
@@ -114,12 +64,30 @@ impl Rule for MD043RequiredHeadings {
         }
 
         if actual_headings != self.headings {
-            let lines: Vec<&str> = content.lines().collect();
-            for (i, line) in lines.iter().enumerate() {
-                if self.is_heading(content, i, ctx) {
+            // If no headings found but we have required headings, create a warning
+            if actual_headings.is_empty() && !self.headings.is_empty() {
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: 1,
+                    column: 1,
+                    end_line: 1,
+                    end_column: 2,
+                    message: format!(
+                        "Required headings not found: {:?}",
+                        self.headings
+                    ),
+                    severity: Severity::Warning,
+                    fix: None,
+                });
+                return Ok(warnings);
+            }
+            
+            // Create warnings for each heading that doesn't match
+            for (i, line_info) in ctx.lines.iter().enumerate() {
+                if self.is_heading(i, ctx) {
                     // Calculate precise character range for the entire heading
                     let (start_line, start_col, end_line, end_col) =
-                        calculate_heading_range(i + 1, line);
+                        calculate_heading_range(i + 1, &line_info.content);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
@@ -133,6 +101,24 @@ impl Rule for MD043RequiredHeadings {
                         fix: None, // Cannot automatically fix as we don't know the intended structure
                     });
                 }
+            }
+            
+            // If we have no warnings but headings don't match (could happen if we have no headings),
+            // add a warning at the beginning of the file
+            if warnings.is_empty() {
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    line: 1,
+                    column: 1,
+                    end_line: 1,
+                    end_column: 2,
+                    message: format!(
+                        "Heading structure does not match required structure. Expected: {:?}, Found: {:?}",
+                        self.headings, actual_headings
+                    ),
+                    severity: Severity::Warning,
+                    fix: None,
+                });
             }
         }
 
@@ -163,160 +149,10 @@ impl Rule for MD043RequiredHeadings {
     fn check_with_structure(
         &self,
         _ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
+        _structure: &DocumentStructure,
     ) -> LintResult {
-        let mut warnings = Vec::new();
-
-        // If no required headings are specified, the rule is disabled
-        if self.headings.is_empty() {
-            return Ok(warnings);
-        }
-
-        // Extract actual headings using document structure
-        let lines: Vec<&str> = _ctx.content.lines().collect();
-        let mut actual_headings = Vec::new();
-
-        // Detect code blocks
-        let mut in_code_block = false;
-        let mut code_fence_char = None;
-        let mut code_block_lines = Vec::new();
-
-        // First identify code block lines
-        for (idx, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-
-            // Handle code block state
-            if trimmed.len() >= 3 {
-                let first_chars: Vec<char> = trimmed.chars().take(3).collect();
-                if first_chars.iter().all(|&c| c == '`' || c == '~') {
-                    if in_code_block && Some(first_chars[0]) == code_fence_char {
-                        // End of code block
-                        in_code_block = false;
-                        code_fence_char = None;
-                    } else if !in_code_block {
-                        // Start of code block
-                        in_code_block = true;
-                        code_fence_char = Some(first_chars[0]);
-                    }
-                }
-            }
-
-            // Track lines within code blocks
-            if in_code_block {
-                code_block_lines.push(idx);
-            }
-        }
-
-        for (i, &line_num) in structure.heading_lines.iter().enumerate() {
-            // Skip headings in front matter
-            if structure.is_in_front_matter(line_num) {
-                continue;
-            }
-
-            let idx = line_num - 1; // Convert to 0-indexed
-            if idx >= lines.len() {
-                continue;
-            }
-
-            // Skip headings in code blocks
-            if code_block_lines.contains(&idx) {
-                continue;
-            }
-
-            let line = lines[idx];
-
-            // Extract heading text based on heading style
-            let heading_text = if line.trim_start().starts_with('#') {
-                // ATX heading - extract text after '#' marks
-                if let Some(cap) = ATX_HEADING.captures(line) {
-                    if let Some(heading_text) = cap.get(2) {
-                        heading_text.as_str().trim().to_string()
-                    } else {
-                        continue;
-                    }
-                } else {
-                    continue;
-                }
-            } else if i + 1 < structure.heading_lines.len()
-                && structure.heading_lines[i + 1] == line_num + 1
-                && idx + 1 < lines.len()
-                && SETEXT_UNDERLINE.is_match(lines[idx + 1])
-            {
-                // Setext heading
-                line.trim().to_string()
-            } else {
-                line.trim().to_string()
-            };
-
-            actual_headings.push(heading_text);
-        }
-
-        // If no headings found but we have required headings, create a warning
-        if actual_headings.is_empty() && !self.headings.is_empty() {
-            warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: 1,
-                column: 1,
-                end_line: 1,
-                end_column: 1 + 1,
-                message: format!(
-                    "Required headings not found: {:?
-            }",
-                    self.headings
-                ),
-                severity: Severity::Warning,
-                fix: None,
-            });
-            return Ok(warnings);
-        }
-
-        if actual_headings != self.headings {
-            for (i, line_num) in structure.heading_lines.iter().enumerate() {
-                if i < structure.heading_lines.len() && !structure.is_in_front_matter(*line_num) {
-                    // Skip headings in code blocks
-                    let idx = line_num - 1;
-                    if code_block_lines.contains(&idx) {
-                        continue;
-                    }
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: *line_num,
-                        column: 1,
-                        end_line: *line_num,
-                        end_column: 1 + 1,
-                        message: format!(
-                            "Heading structure does not match required structure. Expected: {:?
-            }, Found: {:?}",
-                            self.headings, actual_headings
-                        ),
-                        severity: Severity::Warning,
-                        fix: None,
-                    });
-                }
-            }
-
-            // If we have no warnings but headings don't match (could happen if we have no headings),
-            // add a warning at the beginning of the file
-            if warnings.is_empty() {
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: 1,
-                    column: 1,
-                    end_line: 1,
-                    end_column: 1 + 1,
-                    message: format!(
-                        "Heading structure does not match required structure. Expected: {:?
-            }, Found: {:?}",
-                        self.headings, actual_headings
-                    ),
-                    severity: Severity::Warning,
-                    fix: None,
-                });
-            }
-        }
-
-        Ok(warnings)
+        // Just use the regular check method which now uses cached headings
+        self.check(_ctx)
     }
 
     /// Get the category of this rule for selective processing
@@ -331,50 +167,9 @@ impl Rule for MD043RequiredHeadings {
             return true;
         }
 
-        // We need to properly detect headings in the content
-        let lines: Vec<&str> = ctx.content.lines().collect();
-        let mut has_heading = false;
-        let mut in_code_block = false;
-        let mut code_fence_char = None;
-
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-
-            // Handle code block state
-            if trimmed.len() >= 3 {
-                let first_chars: Vec<char> = trimmed.chars().take(3).collect();
-                if first_chars.iter().all(|&c| c == '`' || c == '~') {
-                    if in_code_block && Some(first_chars[0]) == code_fence_char {
-                        // End of code block
-                        in_code_block = false;
-                        code_fence_char = None;
-                    } else if !in_code_block {
-                        // Start of code block
-                        in_code_block = true;
-                        code_fence_char = Some(first_chars[0]);
-                    }
-                    continue;
-                }
-            }
-
-            // Skip content within code blocks
-            if in_code_block {
-                continue;
-            }
-
-            // Check for ATX headings using heading_utils
-            if crate::rules::heading_utils::is_heading(line) {
-                has_heading = true;
-                break;
-            }
-
-            // Check for setext headings (requires next line)
-            if i + 1 < lines.len() && crate::rules::heading_utils::is_setext_heading(&lines, i) {
-                has_heading = true;
-                break;
-            }
-        }
-
+        // Check if any heading exists using cached information
+        let has_heading = ctx.lines.iter().any(|line| line.heading.is_some());
+        
         !has_heading
     }
 
@@ -418,7 +213,7 @@ mod tests {
         // Test 1: Basic content with code block
         let content = "# Test Document\n\nThis is regular content.\n\n```markdown\n# This is a heading in a code block\n## Another heading in code block\n```\n\n## Real heading 2\n\nSome content.";
         let ctx = crate::lint_context::LintContext::new(content);
-        let actual_headings = rule.extract_headings(content, &ctx);
+        let actual_headings = rule.extract_headings(&ctx);
         assert_eq!(
             actual_headings,
             vec!["Test Document".to_string(), "Real heading 2".to_string()],
@@ -428,7 +223,7 @@ mod tests {
         // Test 2: Content with invalid headings
         let content = "# Test Document\n\nThis is regular content.\n\n```markdown\n# This is a heading in a code block\n## This should be ignored\n```\n\n## Not Real heading 2\n\nSome content.";
         let ctx = crate::lint_context::LintContext::new(content);
-        let actual_headings = rule.extract_headings(content, &ctx);
+        let actual_headings = rule.extract_headings(&ctx);
         assert_eq!(
             actual_headings,
             vec![

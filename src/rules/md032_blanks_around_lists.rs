@@ -108,7 +108,7 @@ impl MD032BlanksAroundLists {
     }
 
     /// Check if a blank line should be required before a list based on the previous line context
-    fn should_require_blank_line_before(&self, prev_line: &str, structure: &DocumentStructure, prev_line_num: usize) -> bool {
+    fn should_require_blank_line_before(&self, prev_line: &str, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure, prev_line_num: usize) -> bool {
         let trimmed_prev = prev_line.trim();
         
         // Always require blank lines after code blocks, front matter, etc.
@@ -117,7 +117,7 @@ impl MD032BlanksAroundLists {
         }
 
         // Allow lists after headings if configured
-        if self.allow_after_headings && self.is_heading_line(trimmed_prev) {
+        if self.allow_after_headings && self.is_heading_line_from_context(ctx, prev_line_num - 1) {
             return false;
         }
 
@@ -130,30 +130,13 @@ impl MD032BlanksAroundLists {
         true
     }
 
-    /// Check if a line is a heading
-    fn is_heading_line(&self, line: &str) -> bool {
-        // ATX headings - starts with 1-6 # characters followed by space or end of line
-        if line.starts_with('#') {
-            let mut chars = line.chars();
-            chars.next(); // Skip first #
-            
-            // Count additional # characters
-            let mut hash_count = 1;
-            while let Some(ch) = chars.next() {
-                if ch == '#' && hash_count < 6 {
-                    hash_count += 1;
-                } else {
-                    // After the # characters, we should have whitespace or end of line
-                    return ch.is_whitespace() || ch == '\0';
-                }
-            }
-            
-            // If we got here, the line is all # characters (valid heading)
-            return true;
+    /// Check if a line is a heading using cached LintContext info
+    fn is_heading_line_from_context(&self, ctx: &crate::lint_context::LintContext, line_idx: usize) -> bool {
+        if line_idx < ctx.lines.len() {
+            ctx.lines[line_idx].heading.is_some()
+        } else {
+            false
         }
-        
-        // Could add Setext heading detection here if needed
-        false
     }
 
 
@@ -361,7 +344,7 @@ impl MD032BlanksAroundLists {
 
     fn perform_checks(
         &self,
-        _ctx: &crate::lint_context::LintContext,
+        ctx: &crate::lint_context::LintContext,
         structure: &DocumentStructure,
         lines: &[&str],
         list_blocks: &[(usize, usize, String)],
@@ -385,7 +368,7 @@ impl MD032BlanksAroundLists {
 
                 // Only require blank lines for content in the same context (same blockquote level)
                 // and when the context actually requires it
-                let should_require = self.should_require_blank_line_before(prev_line_str, structure, prev_line_actual_idx_1);
+                let should_require = self.should_require_blank_line_before(prev_line_str, ctx, structure, prev_line_actual_idx_1);
                 if !is_prev_excluded && !prev_is_blank && prefixes_match && should_require {
                     // Calculate precise character range for the entire list line that needs a blank line before it
                     let (start_line, start_col, end_line, end_col) =
@@ -536,7 +519,7 @@ impl Rule for MD032BlanksAroundLists {
                     .find(lines[prev_line_actual_idx_0])
                     .map_or(String::new(), |m| m.as_str().to_string());
 
-                let should_require = self.should_require_blank_line_before(lines[prev_line_actual_idx_0], &structure, prev_line_actual_idx_1);
+                let should_require = self.should_require_blank_line_before(lines[prev_line_actual_idx_0], ctx, &structure, prev_line_actual_idx_1);
                 if !is_prev_excluded
                     && !is_blank_in_context(lines[prev_line_actual_idx_0])
                     && prev_prefix == *prefix
