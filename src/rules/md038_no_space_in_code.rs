@@ -1,7 +1,5 @@
-use std::collections::HashMap;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{CodeSpan, DocumentStructure, DocumentStructureExtensions};
 
 /// Rule MD038: No space inside code span markers
 ///
@@ -60,35 +58,6 @@ impl MD038NoSpaceInCode {
         }
     }
 
-    /// Extract the actual content between backticks in a code span
-    fn extract_code_content<'a>(&self, code_span: &'a CodeSpan) -> &'a str {
-        &code_span.content
-    }
-
-    /// Check if a code span has leading or trailing spaces and return the original and fixed versions
-    fn check_space_issues(&self, code_span: &CodeSpan) -> Option<(String, String)> {
-        let code_content = self.extract_code_content(code_span);
-
-        // Check for leading or trailing spaces
-        if code_content.starts_with(' ') || code_content.ends_with(' ') {
-            // Only fix if there's actual content after trimming
-            let trimmed = code_content.trim();
-            if trimmed.is_empty() {
-                return None; // Don't flag empty code spans
-            }
-
-            // Apply heuristics to determine if spaces might be intentional
-            if self.should_allow_spaces(code_content, trimmed) {
-                return None;
-            }
-
-            let original = format!("`{}`", code_content);
-            let fixed = format!("`{}`", trimmed);
-            return Some((original, fixed));
-        }
-
-        None
-    }
 
     /// Determine if spaces in a code span should be allowed based on content heuristics
     fn should_allow_spaces(&self, code_content: &str, trimmed: &str) -> bool {
@@ -153,10 +122,6 @@ impl MD038NoSpaceInCode {
             || (trimmed.chars().filter(|c| c.is_ascii_punctuation()).count() as f64 / trimmed.len() as f64) > 0.4 // Higher punctuation density threshold
     }
 
-    /// Check if the document has any code spans
-    fn has_code_spans(&self, structure: &DocumentStructure) -> bool {
-        !structure.code_spans.is_empty()
-    }
 }
 
 impl Rule for MD038NoSpaceInCode {
@@ -173,68 +138,53 @@ impl Rule for MD038NoSpaceInCode {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         if !self.enabled {
             return Ok(vec![]);
         }
 
-        // Early return if no code spans possible
-        if !content.contains('`') {
-            return Ok(vec![]);
-        }
-
-        // Fallback path: create structure manually (should rarely be used)
-        let structure = DocumentStructure::new(content);
-
-        // If no code spans, return early
-        if !self.has_code_spans(&structure) {
-            return Ok(vec![]);
-        }
-
-        self.check_with_structure(ctx, &structure)
-    }
-
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
         let mut warnings = Vec::new();
 
-        // Get lines for position mapping
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        // Use centralized code spans from LintContext
+        for code_span in &ctx.code_spans {
+            let code_content = &code_span.content;
+            
+            // Skip empty code spans
+            if code_content.is_empty() {
+                continue;
+            }
 
-        // Process code spans directly from document structure
-        for code_span in &structure.code_spans {
-            if let Some((original, fixed)) = self.check_space_issues(code_span) {
-                // Use line and column from the code span
-                let line_index = code_span.line - 1; // Adjust to 0-based for array indexing
-                                                     // Get the content for debugging but not required for the warning
-                let _line_content = if line_index < lines.len() {
-                    lines[line_index]
-                } else {
-                    ""
-                };
+            let trimmed = code_content.trim();
+            
+            // Check if there are leading or trailing spaces
+            if code_content != trimmed {
+                // Check if spaces are allowed in this context
+                if self.should_allow_spaces(code_content, trimmed) {
+                    continue;
+                }
 
                 warnings.push(LintWarning {
-                    message: format!("Spaces inside code span elements: {}", original),
+                    rule_name: Some(self.name()),
                     line: code_span.line,
-                    column: code_span.start_col,
+                    column: code_span.start_col + 1, // Convert to 1-indexed
                     end_line: code_span.line,
-                    end_column: code_span.end_col,
+                    end_column: code_span.end_col, // Don't add 1 to match test expectation
+                    message: "Spaces inside code span elements".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: (code_span.start_col - 1)..(code_span.end_col),
-                        replacement: fixed,
+                        range: code_span.byte_offset..code_span.byte_end,
+                        replacement: format!("{}{}{}", 
+                            "`".repeat(code_span.backtick_count),
+                            trimmed,
+                            "`".repeat(code_span.backtick_count)
+                        ),
                     }),
-                    rule_name: Some(self.name()),
                 });
             }
         }
 
         Ok(warnings)
     }
+
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
@@ -248,71 +198,21 @@ impl Rule for MD038NoSpaceInCode {
             return Ok(content.to_string());
         }
 
-        // Apply fixes in reverse order to avoid messing up positions
-        let mut fixed_content = content.to_string();
-        let mut warnings_by_line: HashMap<usize, Vec<LintWarning>> = HashMap::new();
+        // Collect all fixes and sort by position (reverse order to avoid position shifts)
+        let mut fixes: Vec<(std::ops::Range<usize>, String)> = warnings
+            .into_iter()
+            .filter_map(|w| w.fix.map(|f| (f.range, f.replacement)))
+            .collect();
+        
+        fixes.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
 
-        // Group warnings by line for more efficient processing
-        for warning in warnings {
-            warnings_by_line
-                .entry(warning.line)
-                .or_default()
-                .push(warning);
+        // Apply fixes
+        let mut result = content.to_string();
+        for (range, replacement) in fixes {
+            result.replace_range(range, &replacement);
         }
 
-        // Process each line with fixes
-        for (_, mut line_warnings) in warnings_by_line {
-            // Sort warnings by column in reverse order (right to left)
-            line_warnings.sort_by(|a, b| b.column.cmp(&a.column));
-
-            for warning in line_warnings {
-                if let Some(fix) = warning.fix {
-                    // Apply the fix
-                    let lines: Vec<&str> = fixed_content.lines().collect();
-                    let line_idx = warning.line - 1;
-                    if line_idx < lines.len() {
-                        let line = lines[line_idx];
-                        let start_pos = if warning.column > 0 {
-                            warning.column - 1
-                        } else {
-                            0
-                        };
-                        let end_pos = fix.range.end;
-
-                        if start_pos <= line.len() && end_pos <= line.len() {
-                            let fixed_line = format!(
-                                "{}{}{}",
-                                &line[..start_pos],
-                                fix.replacement,
-                                &line[end_pos.min(line.len())..]
-                            );
-
-                            // Rebuild the content with the fixed line
-                            let mut new_content = String::new();
-                            for (i, l) in lines.iter().enumerate() {
-                                if i == line_idx {
-                                    new_content.push_str(&fixed_line);
-                                } else {
-                                    new_content.push_str(l);
-                                }
-                                if i < lines.len() - 1 {
-                                    new_content.push('\n');
-                                }
-                            }
-
-                            fixed_content = new_content;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Ensure we maintain the final newline if it existed
-        if content.ends_with('\n') && !fixed_content.ends_with('\n') {
-            fixed_content.push('\n');
-        }
-
-        Ok(fixed_content)
+        Ok(result)
     }
 
     /// Check if content is likely to have code spans
@@ -376,13 +276,14 @@ impl Rule for MD038NoSpaceInCode {
     }
 }
 
-impl DocumentStructureExtensions for MD038NoSpaceInCode {
+impl crate::utils::document_structure::DocumentStructureExtensions for MD038NoSpaceInCode {
     fn has_relevant_elements(
         &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &crate::utils::document_structure::DocumentStructure,
     ) -> bool {
-        !doc_structure.code_spans.is_empty()
+        // We now use centralized code spans from LintContext
+        !ctx.code_spans.is_empty()
     }
 }
 

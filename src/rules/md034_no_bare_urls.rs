@@ -100,7 +100,7 @@ impl MD034NoBareUrls {
     pub fn check_with_structure(
         &self,
         ctx: &crate::lint_context::LintContext,
-        structure: &crate::utils::document_structure::DocumentStructure,
+        _structure: &crate::utils::document_structure::DocumentStructure,
     ) -> LintResult {
         let content = ctx.content;
 
@@ -187,18 +187,13 @@ impl MD034NoBareUrls {
                 continue;
             }
 
-            // Convert byte offset to line/column
+            // Skip if this URL is within a code block or code span
+            if ctx.is_in_code_block_or_span(url_start) {
+                continue;
+            }
+            
+            // Convert byte offset to line/column for warning
             let (line_num, col_num) = ctx.offset_to_line_col(url_start);
-
-            // Skip if this URL is within a code span
-            if structure.is_in_code_span(line_num, col_num) {
-                continue;
-            }
-
-            // Skip if this URL is within a code block
-            if structure.is_in_code_block(line_num) {
-                continue;
-            }
 
             // Skip if URL is within any excluded range (link/image dest)
             let in_any_range = merged
@@ -256,18 +251,13 @@ impl MD034NoBareUrls {
                 continue;
             }
 
-            // Convert byte offset to line/column
+            // Skip if this email is within a code block or code span
+            if ctx.is_in_code_block_or_span(email_start) {
+                continue;
+            }
+            
+            // Convert byte offset to line/column for warning
             let (line_num, col_num) = ctx.offset_to_line_col(email_start);
-
-            // Skip if this email is within a code span
-            if structure.is_in_code_span(line_num, col_num) {
-                continue;
-            }
-
-            // Skip if this email is within a code block
-            if structure.is_in_code_block(line_num) {
-                continue;
-            }
 
             // Skip if email is within any excluded range (link/image dest)
             let in_any_range = merged

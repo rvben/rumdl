@@ -34,6 +34,12 @@ lazy_static! {
     static ref REF_DEF_PATTERN: Regex = Regex::new(
         r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
     ).unwrap();
+    
+    // Code span pattern - matches backticks and captures content
+    // This handles multi-backtick code spans correctly
+    static ref CODE_SPAN_PATTERN: Regex = Regex::new(
+        r"`+"
+    ).unwrap();
 }
 
 /// Pre-computed information about a line
@@ -140,6 +146,25 @@ pub struct ReferenceDef {
     pub title: Option<String>,
 }
 
+/// Parsed code span information
+#[derive(Debug, Clone)]
+pub struct CodeSpan {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Start column (0-indexed) in the line
+    pub start_col: usize,
+    /// End column (0-indexed) in the line
+    pub end_col: usize,
+    /// Byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+    /// Number of backticks used (1, 2, 3, etc.)
+    pub backtick_count: usize,
+    /// Content inside the code span (without backticks)
+    pub content: String,
+}
+
 /// Information about a heading
 #[derive(Debug, Clone)]
 pub struct HeadingInfo {
@@ -165,11 +190,12 @@ pub struct LintContext<'a> {
     pub content: &'a str,
     pub ast: Node, // The root of the AST
     pub line_offsets: Vec<usize>,
-    pub code_blocks: Vec<(usize, usize)>, // Cached code block and code span ranges
+    pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
     pub lines: Vec<LineInfo>, // Pre-computed line information
     pub links: Vec<ParsedLink>, // Pre-parsed links
     pub images: Vec<ParsedImage>, // Pre-parsed images
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
+    pub code_spans: Vec<CodeSpan>, // Pre-parsed inline code spans
 }
 
 impl<'a> LintContext<'a> {
@@ -195,10 +221,11 @@ impl<'a> LintContext<'a> {
             // Pre-compute line information
             let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
             
-            // Parse links, images, and references
+            // Parse links, images, references, and code spans
             let links = Self::parse_links(content, &lines, &code_blocks);
             let images = Self::parse_images(content, &lines, &code_blocks);
             let reference_defs = Self::parse_reference_defs(content, &lines);
+            let code_spans = Self::parse_code_spans(content, &lines);
             
             return Self {
                 content,
@@ -209,6 +236,7 @@ impl<'a> LintContext<'a> {
                 links,
                 images,
                 reference_defs,
+                code_spans,
             };
         }
 
@@ -251,10 +279,11 @@ impl<'a> LintContext<'a> {
         // Pre-compute line information
         let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
         
-        // Parse links, images, and references
+        // Parse links, images, references, and code spans
         let links = Self::parse_links(content, &lines, &code_blocks);
         let images = Self::parse_images(content, &lines, &code_blocks);
         let reference_defs = Self::parse_reference_defs(content, &lines);
+        let code_spans = Self::parse_code_spans(content, &lines);
         
         Self {
             content,
@@ -265,6 +294,7 @@ impl<'a> LintContext<'a> {
             links,
             images,
             reference_defs,
+            code_spans,
         }
     }
 
@@ -285,7 +315,13 @@ impl<'a> LintContext<'a> {
     
     /// Check if a position is within a code block or code span
     pub fn is_in_code_block_or_span(&self, pos: usize) -> bool {
-        CodeBlockUtils::is_in_code_block_or_span(&self.code_blocks, pos)
+        // Check code blocks first
+        if CodeBlockUtils::is_in_code_block_or_span(&self.code_blocks, pos) {
+            return true;
+        }
+        
+        // Check inline code spans
+        self.code_spans.iter().any(|span| pos >= span.byte_offset && pos < span.byte_end)
     }
     
     /// Get line information by line number (1-indexed)
@@ -762,6 +798,110 @@ impl<'a> LintContext<'a> {
         }
         
         lines
+    }
+    
+    /// Parse all inline code spans in the content
+    fn parse_code_spans(content: &str, lines: &[LineInfo]) -> Vec<CodeSpan> {
+        let mut code_spans = Vec::new();
+        
+        // Quick check - if no backticks, no code spans
+        if !content.contains('`') {
+            return code_spans;
+        }
+        
+        let mut pos = 0;
+        let bytes = content.as_bytes();
+        
+        while pos < bytes.len() {
+            // Find the next backtick
+            if let Some(backtick_start) = content[pos..].find('`') {
+                let start_pos = pos + backtick_start;
+                
+                // Skip if this backtick is inside a code block
+                let mut in_code_block = false;
+                for (line_idx, line_info) in lines.iter().enumerate() {
+                    if start_pos >= line_info.byte_offset && (line_idx + 1 >= lines.len() || start_pos < lines[line_idx + 1].byte_offset) {
+                        in_code_block = line_info.in_code_block;
+                        break;
+                    }
+                }
+                
+                if in_code_block {
+                    pos = start_pos + 1;
+                    continue;
+                }
+                
+                // Count consecutive backticks
+                let mut backtick_count = 0;
+                let mut i = start_pos;
+                while i < bytes.len() && bytes[i] == b'`' {
+                    backtick_count += 1;
+                    i += 1;
+                }
+                
+                // Look for matching closing backticks
+                let search_start = start_pos + backtick_count;
+                let closing_pattern = &content[start_pos..start_pos + backtick_count];
+                
+                if let Some(rel_end) = content[search_start..].find(closing_pattern) {
+                    // Check that the closing backticks are not followed by more backticks
+                    let end_pos = search_start + rel_end;
+                    let check_pos = end_pos + backtick_count;
+                    
+                    // Make sure we have exactly the right number of backticks (not more)
+                    if check_pos >= bytes.len() || bytes[check_pos] != b'`' {
+                        // We found a valid code span
+                        let content_start = start_pos + backtick_count;
+                        let content_end = end_pos;
+                        let span_content = content[content_start..content_end].to_string();
+                        
+                        // Find which line this code span starts on
+                        let mut line_num = 1;
+                        let mut col_start = start_pos;
+                        for (idx, line_info) in lines.iter().enumerate() {
+                            if start_pos >= line_info.byte_offset {
+                                line_num = idx + 1;
+                                col_start = start_pos - line_info.byte_offset;
+                            } else {
+                                break;
+                            }
+                        }
+                        
+                        // Find end column
+                        let mut col_end = end_pos + backtick_count;
+                        for line_info in lines.iter() {
+                            if end_pos + backtick_count > line_info.byte_offset {
+                                col_end = end_pos + backtick_count - line_info.byte_offset;
+                            } else {
+                                break;
+                            }
+                        }
+                        
+                        code_spans.push(CodeSpan {
+                            line: line_num,
+                            start_col: col_start,
+                            end_col: col_end,
+                            byte_offset: start_pos,
+                            byte_end: end_pos + backtick_count,
+                            backtick_count,
+                            content: span_content,
+                        });
+                        
+                        // Continue searching after this code span
+                        pos = end_pos + backtick_count;
+                        continue;
+                    }
+                }
+                
+                // No matching closing backticks found, move past these opening backticks
+                pos = start_pos + backtick_count;
+            } else {
+                // No more backticks found
+                break;
+            }
+        }
+        
+        code_spans
     }
 }
 

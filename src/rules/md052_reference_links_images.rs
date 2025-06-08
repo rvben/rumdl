@@ -50,65 +50,6 @@ impl MD052ReferenceLinkImages {
         Self
     }
 
-    /// Detect inline code spans in a line and return their ranges
-    pub fn compute_inline_code_spans(&self, line: &str) -> Vec<(usize, usize)> {
-        if !line.contains('`') {
-            return Vec::new();
-        }
-
-        let mut spans = Vec::new();
-        let chars: Vec<char> = line.chars().collect();
-        let mut i = 0;
-
-        while i < chars.len() {
-            if chars[i] == '`' {
-                // Count consecutive backticks for opening sequence
-                let start = i;
-                let mut backtick_count = 0;
-                while i < chars.len() && chars[i] == '`' {
-                    backtick_count += 1;
-                    i += 1;
-                }
-
-                // Look for matching closing sequence
-                let mut j = i;
-                while j < chars.len() {
-                    if chars[j] == '`' {
-                        // Count consecutive backticks for potential closing sequence
-                        let mut close_count = 0;
-                        while j < chars.len() && chars[j] == '`' {
-                            close_count += 1;
-                            j += 1;
-                        }
-
-                        // If we found a matching sequence, create the span
-                        if close_count == backtick_count {
-                            spans.push((start, j));
-                            i = j; // Continue after this code span
-                            break;
-                        }
-                        // If not matching, continue looking
-                    } else {
-                        j += 1;
-                    }
-                }
-
-                // If no matching closing sequence found, treat as literal backticks
-                if j >= chars.len() {
-                    break;
-                }
-            } else {
-                i += 1;
-            }
-        }
-
-        spans
-    }
-
-    /// Check if a position is within an inline code span
-    pub fn is_in_code_span(&self, spans: &[(usize, usize)], pos: usize) -> bool {
-        spans.iter().any(|&(start, end)| pos >= start && pos < end)
-    }
 
     fn extract_references(&self, content: &str) -> HashSet<String> {
         let mut references = HashSet::new();
@@ -177,9 +118,6 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
-            // Detect inline code spans in this line
-            let inline_code_spans = self.compute_inline_code_spans(line);
-
             // Check for undefined references in reference links
             if let Ok(captures) = REF_LINK_REGEX
                 .captures_iter(line)
@@ -187,8 +125,11 @@ impl MD052ReferenceLinkImages {
             {
                 for cap in captures {
                     if let Some(full_match) = cap.get(0) {
-                        // Skip if inside inline code span
-                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
+                        // Skip if inside code span
+                        let match_byte_offset = byte_pos + full_match.start();
+                        if ctx.code_spans.iter().any(|span| 
+                            match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end
+                        ) {
                             continue;
                         }
 
@@ -223,8 +164,11 @@ impl MD052ReferenceLinkImages {
             {
                 for cap in captures {
                     if let Some(full_match) = cap.get(0) {
-                        // Skip if inside inline code span
-                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
+                        // Skip if inside code span
+                        let match_byte_offset = byte_pos + full_match.start();
+                        if ctx.code_spans.iter().any(|span| 
+                            match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end
+                        ) {
                             continue;
                         }
 
@@ -259,8 +203,11 @@ impl MD052ReferenceLinkImages {
             {
                 for cap in captures {
                     if let Some(full_match) = cap.get(0) {
-                        // Skip if inside inline code span
-                        if self.is_in_code_span(&inline_code_spans, full_match.start()) {
+                        // Skip if inside code span
+                        let match_byte_offset = byte_pos + full_match.start();
+                        if ctx.code_spans.iter().any(|span| 
+                            match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end
+                        ) {
                             continue;
                         }
 

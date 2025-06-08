@@ -153,7 +153,7 @@ impl MD053LinkImageReferenceDefinitions {
     ///
     /// This method returns a HashSet of all normalized reference IDs found in usage.
     /// It leverages DocumentStructure for efficiency.
-    fn find_usages(&self, content: &str, doc_structure: &DocumentStructure) -> HashSet<String> {
+    fn find_usages(&self, content: &str, doc_structure: &DocumentStructure, ctx: &crate::lint_context::LintContext) -> HashSet<String> {
         let lines: Vec<&str> = content.lines().collect();
         let mut usages: HashSet<String> = HashSet::new();
 
@@ -198,17 +198,13 @@ impl MD053LinkImageReferenceDefinitions {
             for caps in SHORTCUT_REFERENCE_REGEX.captures_iter(line).flatten() {
                 if let Some(full_match) = caps.get(0) {
                     if let Some(ref_id_match) = caps.get(1) {
-                        let start_col = full_match.start() + 1; // 1-indexed column
-                        let end_col = full_match.end(); // 1-indexed end column (exclusive in match)
 
-                        // Check if any part of the match is within a code span
-                        let mut in_code_span = false;
-                        for col in start_col..=end_col {
-                            if doc_structure.is_in_code_span(line_num, col) {
-                                in_code_span = true;
-                                break;
-                            }
-                        }
+                        // Check if the match is within a code span
+                        let line_start_byte = ctx.line_to_byte_offset(line_num).unwrap_or(0);
+                        let match_byte_offset = line_start_byte + full_match.start();
+                        let in_code_span = ctx.code_spans.iter().any(|span| 
+                            match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end
+                        );
 
                         if !in_code_span {
                             let ref_id = ref_id_match.as_str().trim();
@@ -302,7 +298,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
 
         // Find definitions and usages using DocumentStructure
         let definitions = self.find_definitions(content, &doc_structure);
-        let usages = self.find_usages(content, &doc_structure);
+        let usages = self.find_usages(content, &doc_structure, ctx);
 
         // Get unused references by comparing definitions and usages
         let unused_refs = self.get_unused_references(&definitions, &usages);
@@ -361,7 +357,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
 
         // Find definitions and usages using DocumentStructure
         let definitions = self.find_definitions(content, &doc_structure);
-        let usages = self.find_usages(content, &doc_structure);
+        let usages = self.find_usages(content, &doc_structure, ctx);
 
         // Get unused references by comparing definitions and usages
         let unused_refs = self.get_unused_references(&definitions, &usages);
