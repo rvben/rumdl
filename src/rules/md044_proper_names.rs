@@ -71,61 +71,67 @@ pub struct MD044ProperNames {
     code_blocks: bool,
     #[allow(dead_code)] // TODO: Implement HTML comment checking in future
     html_comments: bool,
-    // Use Arc<Mutex<>> for thread safety
-    regex_cache: Arc<Mutex<HashMap<String, Regex>>>,
+    // Cache the combined regex pattern
+    combined_regex: Arc<Mutex<Option<Regex>>>,
     // Cache for name violations by content hash
     content_cache: Arc<Mutex<HashMap<u64, Vec<WarningPosition>>>>,
 }
 
 impl MD044ProperNames {
     pub fn new(names: Vec<String>, code_blocks: bool) -> Self {
-        Self {
+        let mut instance = Self {
             names,
             code_blocks,
             html_comments: true, // Default to checking HTML comments
-            regex_cache: Arc::new(Mutex::new(HashMap::new())),
+            combined_regex: Arc::new(Mutex::new(None)),
             content_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+        
+        // Pre-compile the combined regex
+        instance.compile_combined_regex();
+        instance
+    }
+    
+    // Compile and cache the combined regex pattern
+    fn compile_combined_regex(&mut self) {
+        if let Some(pattern) = self.create_combined_pattern() {
+            match Regex::new(&pattern) {
+                Ok(regex) => {
+                    *self.combined_regex.lock().unwrap() = Some(regex);
+                }
+                Err(e) => {
+                    eprintln!("Failed to compile combined regex pattern: {}", e);
+                }
+            }
         }
     }
 
 
-    // Create a regex-safe version of the name for word boundary matches
-    fn create_safe_pattern(&self, name: &str) -> String {
-        // Create variations for case-insensitive matching and handling dots
-        let lower_name = name.to_lowercase();
-        let lower_name_no_dots = lower_name.replace('.', "");
 
-        // Build the pattern using lookarounds that explicitly exclude underscore
-        // to avoid issues with emphasis characters if \w includes _.
-        // (?<![a-zA-Z0-9]) - Negative lookbehind for an ASCII alphanumeric character
-        // (?i) - Case-insensitive flag
-        // (?:...|...) - Non-capturing group for variations
-        // (?![a-zA-Z0-9]) - Negative lookahead for an ASCII alphanumeric character
-        format!(
-            r"(?<![a-zA-Z0-9])(?i)(?:{}|{})(?![a-zA-Z0-9])",
-            fancy_regex::escape(&lower_name),
-            fancy_regex::escape(&lower_name_no_dots)
-        )
-    }
-
-    // Get compiled regex from cache or compile it
-    fn get_compiled_regex(&self, name: &str) -> Regex {
-        let pattern = self.create_safe_pattern(name);
-        let mut cache = self.regex_cache.lock().unwrap();
-
-        // Use entry API for cleaner cache logic
-        cache
-            .entry(pattern.clone())
-            .or_insert_with(|| {
-                Regex::new(&pattern).unwrap_or_else(|e| {
-                    // Provide more context on regex compilation failure
-                    panic!(
-                        "Failed to compile regex pattern '{}' for name '{}': {}",
-                        pattern, name, e
-                    )
-                })
-            })
-            .clone()
+    // Create a combined regex pattern for all proper names
+    fn create_combined_pattern(&self) -> Option<String> {
+        if self.names.is_empty() {
+            return None;
+        }
+        
+        // Create patterns for all names and their variations
+        let patterns: Vec<String> = self.names.iter().map(|name| {
+            let lower_name = name.to_lowercase();
+            let lower_name_no_dots = lower_name.replace('.', "");
+            if lower_name == lower_name_no_dots {
+                fancy_regex::escape(&lower_name).to_string()
+            } else {
+                format!("(?:{}|{})", 
+                    fancy_regex::escape(&lower_name),
+                    fancy_regex::escape(&lower_name_no_dots))
+            }
+        }).collect();
+        
+        // Combine all patterns into a single regex with capture groups
+        Some(format!(
+            r"(?<![a-zA-Z0-9])(?i)({})(?![a-zA-Z0-9])",
+            patterns.join("|")
+        ))
     }
 
     // Find all name violations in the content and return positions
@@ -159,12 +165,14 @@ impl MD044ProperNames {
 
         let mut violations = Vec::new();
 
-        // Pre-compile and prepare regex patterns before the line loop
-        let patterns: Vec<(&String, Regex)> = self
-            .names
-            .iter()
-            .map(|name| (name, self.get_compiled_regex(name)))
-            .collect();
+        // Get the cached combined regex
+        let combined_regex = {
+            let regex_lock = self.combined_regex.lock().unwrap();
+            match &*regex_lock {
+                Some(regex) => regex.clone(),
+                None => return Vec::new(),
+            }
+        };
         
         let mut byte_pos = 0;
 
@@ -195,15 +203,15 @@ impl MD044ProperNames {
                 continue;
             }
 
-            // Use the pre-compiled fancy_regex patterns
-            for (name, regex) in &patterns {
-                // Use find_iter from fancy_regex, which yields Result<Match, Error>
-                for cap_result in regex.find_iter(line) {
-                    match cap_result {
-                        Ok(cap) => {
-                            let found_name = &line[cap.start()..cap.end()];
-                            // Ensure the found name isn't the correct one (case-sensitive compare)
-                            if found_name != **name {
+            // Use the combined regex to find all matches in one pass
+            for cap_result in combined_regex.find_iter(line) {
+                match cap_result {
+                    Ok(cap) => {
+                        let found_name = &line[cap.start()..cap.end()];
+                        // Find which proper name this matches
+                        if let Some(proper_name) = self.get_proper_name_for(found_name) {
+                            // Only flag if it's not already correct
+                            if found_name != proper_name {
                                 violations.push((
                                     line_num + 1,
                                     cap.start() + 1,
@@ -211,15 +219,13 @@ impl MD044ProperNames {
                                 ));
                             }
                         }
-                        Err(e) => {
-                            // Log or handle regex execution error if necessary
-                            eprintln!(
-                                "Regex execution error on line {} for pattern matching '{}': {}",
-                                line_num + 1,
-                                name,
-                                e
-                            );
-                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Regex execution error on line {}: {}",
+                            line_num + 1,
+                            e
+                        );
                     }
                 }
             }
@@ -349,15 +355,28 @@ impl Rule for MD044ProperNames {
         self
     }
 
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert(
+            "names".to_string(),
+            toml::Value::Array(vec![]),
+        );
+        map.insert(
+            "code_blocks".to_string(),
+            toml::Value::Boolean(self.code_blocks),
+        );
+        Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
         let names = crate::config::get_rule_config_value::<Vec<String>>(config, "MD044", "names")
             .unwrap_or_default();
-        let code_blocks_excluded =
-            crate::config::get_rule_config_value::<bool>(config, "MD044", "code_blocks_excluded")
+        let code_blocks =
+            crate::config::get_rule_config_value::<bool>(config, "MD044", "code_blocks")
                 .unwrap_or(true);
-        Box::new(MD044ProperNames::new(names, code_blocks_excluded))
+        Box::new(MD044ProperNames::new(names, code_blocks))
     }
 }
