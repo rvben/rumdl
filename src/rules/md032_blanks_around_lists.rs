@@ -3,12 +3,9 @@ use crate::utils::document_structure::document_structure_from_str;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::{calculate_line_range, LineIndex};
 use lazy_static::lazy_static;
-use regex::{Captures, Regex};
-use std::collections::VecDeque;
+use regex::Regex;
 
 lazy_static! {
-    static ref LIST_ITEM_START_REGEX: Regex =
-        Regex::new(r"^([\t ]*)(?:([*+-])|(\d+)\.)(\s+|$)").unwrap();
     static ref BLOCKQUOTE_PREFIX_RE: Regex = Regex::new(r"^(\s*>)+(\s*)").unwrap();
     static ref BLANK_LINE_RE: Regex = Regex::new(r"^\s*$").unwrap();
 }
@@ -140,206 +137,124 @@ impl MD032BlanksAroundLists {
     }
 
 
-    // Updated to return blockquote prefix along with block ranges
-    fn find_md032_list_blocks(
+    // Convert centralized list blocks to the format expected by perform_checks
+    fn convert_list_blocks(
         &self,
         ctx: &crate::lint_context::LintContext,
-        lines: &[&str],
-        structure: &DocumentStructure,
     ) -> Vec<(usize, usize, String)> {
-        let mut list_blocks: Vec<(usize, usize, String)> = Vec::new();
-        let num_lines = lines.len();
-        let mut current_line_idx_0 = 0;
-
-        while current_line_idx_0 < num_lines {
-            let current_line_idx_1 = current_line_idx_0 + 1;
-            let line_str = lines[current_line_idx_0];
-
-            if structure.is_in_code_block(current_line_idx_1)
-                || structure.is_in_front_matter(current_line_idx_1)
-            {
-                // Special case: Even if a line is in a code block (e.g., tab-indented),
-                // if it looks like a list item, the user probably intended it as such.
-                // We should warn about spacing issues rather than silently ignore it.
-                // But only apply this to INDENTED code blocks, not FENCED code blocks.
-                if structure.is_in_code_block(current_line_idx_1) {
-                    // Check if this is an indented code block (starts with tab or 4+ spaces)
-                    // vs a fenced code block (enclosed in ``` or ~~~)
-                    let line_trimmed = line_str.trim_start();
-                    let leading_whitespace = &line_str[..line_str.len() - line_trimmed.len()];
-                    let is_indented_code = leading_whitespace.contains('\t') ||
-                                          leading_whitespace.chars().filter(|&c| c == ' ').count() >= 4;
-
-                    if is_indented_code {
-                        // Check if this "indented code block" line actually looks like a list item
-                        if let Some(line_info) = ctx.line_info(current_line_idx_1) {
-                            if line_info.list_item.is_some() {
-                                // Don't skip - process it as a potential list item
-                            } else {
-                                current_line_idx_0 += 1;
-                                continue;
+        let mut blocks: Vec<(usize, usize, String)> = Vec::new();
+        
+        for block in &ctx.list_blocks {
+            // For MD032, we need to check if there are code blocks that should
+            // split the list into separate segments
+            
+            // Simple approach: if there's a fenced code block between list items,
+            // split at that point
+            let mut segments: Vec<(usize, usize)> = Vec::new();
+            let mut current_start = block.start_line;
+            let mut prev_item_line = 0;
+            
+            for &item_line in &block.item_lines {
+                if prev_item_line > 0 {
+                    // Check if there's a fenced code block between prev_item_line and item_line
+                    let mut has_code_fence = false;
+                    for check_line in (prev_item_line + 1)..item_line {
+                        if check_line - 1 < ctx.lines.len() {
+                            let line = &ctx.lines[check_line - 1];
+                            if line.in_code_block && (line.content.trim().starts_with("```") || line.content.trim().starts_with("~~~")) {
+                                has_code_fence = true;
+                                break;
                             }
-                        } else {
-                            current_line_idx_0 += 1;
-                            continue;
                         }
-                    } else {
-                        // Fenced code block - always skip
-                        current_line_idx_0 += 1;
-                        continue;
                     }
-                } else {
-                    // Front matter - always skip
-                    current_line_idx_0 += 1;
-                    continue;
-                }
-            }
-
-            // Determine blockquote prefix and content *before* checking for list item
-            let blockquote_prefix = BLOCKQUOTE_PREFIX_RE
-                .find(line_str)
-                .map_or(String::new(), |m| m.as_str().to_string());
-            let line_content = line_str.trim_start_matches(&blockquote_prefix);
-
-            // Check for list item start using cached information OR regex for blockquoted content
-            let mut is_list_item = false;
-            let mut first_item_content_indent = 0;
-            
-            // First check cached info - but verify it's not a false positive (emphasis)
-            if let Some(line_info) = ctx.line_info(current_line_idx_1) {
-                if let Some(list_item_info) = &line_info.list_item {
-                    // Additional check: ensure there's space after the marker
-                    // This filters out emphasis patterns like "*text*"
-                    let marker_end = list_item_info.marker_column + list_item_info.marker.len();
-                    let has_space_after = list_item_info.content_column > marker_end;
-                    if has_space_after || line_str[marker_end..].trim().is_empty() {
-                        is_list_item = true;
-                        first_item_content_indent = list_item_info.content_column;
+                    
+                    if has_code_fence {
+                        // End current segment before this item
+                        segments.push((current_start, prev_item_line));
+                        current_start = item_line;
                     }
                 }
+                prev_item_line = item_line;
             }
             
-            // If not detected in cached info (or was filtered out) and we have a blockquote prefix, 
-            // check the content after prefix using our more accurate regex
-            if !is_list_item && (!blockquote_prefix.is_empty() || ctx.line_info(current_line_idx_1).is_none()) {
-                if let Some(captures) = LIST_ITEM_START_REGEX.captures(line_content) {
-                    is_list_item = true;
-                    first_item_content_indent = get_content_start_column(&captures).unwrap_or(0);
+            // Add the final segment
+            // For the last segment, end at the last list item (not the full block end)
+            if prev_item_line > 0 {
+                segments.push((current_start, prev_item_line));
+            }
+            
+            // Check if this list block was split by code fences
+            let has_code_fence_splits = segments.len() > 1 && {
+                // Check if any segments were created due to code fences
+                let mut found_fence = false;
+                for i in 0..segments.len()-1 {
+                    let seg_end = segments[i].1;
+                    let next_start = segments[i+1].0;
+                    // Check if there's a code fence between these segments
+                    for check_line in (seg_end + 1)..next_start {
+                        if check_line - 1 < ctx.lines.len() {
+                            let line = &ctx.lines[check_line - 1];
+                            if line.in_code_block && (line.content.trim().starts_with("```") || line.content.trim().starts_with("~~~")) {
+                                found_fence = true;
+                                break;
+                            }
+                        }
+                    }
+                    if found_fence { break; }
                 }
-            }
+                found_fence
+            };
             
-            if is_list_item {
-                    let block_start_line_1 = current_line_idx_1;
-                    let mut block_end_line_1 = current_line_idx_1;
-
-                    // blockquote_prefix is already determined for the start line
-
-                    let mut lookahead_idx_0 = current_line_idx_0 + 1;
-                    let mut potential_blank_lines = VecDeque::new();
-
-                    while lookahead_idx_0 < num_lines {
-                        let next_line_idx_1 = lookahead_idx_0 + 1;
-                        let next_line_str = lines[lookahead_idx_0];
-
-                        if structure.is_in_code_block(next_line_idx_1)
-                            || structure.is_in_front_matter(next_line_idx_1)
-                        {
-                            break;
-                        }
-
-                        // Check blockquote consistency using the prefix from the *start* line
-                        let current_line_prefix = BLOCKQUOTE_PREFIX_RE
-                            .find(next_line_str)
-                            .map_or(String::new(), |m| m.as_str().to_string());
-                        if current_line_prefix != blockquote_prefix {
-                            break;
-                        }
-
-                        // Get content of the lookahead line after the *consistent* prefix
-                        let next_line_content =
-                            next_line_str.trim_start_matches(&blockquote_prefix);
-
-                        // Check blankness on the *content* part
-                        if BLANK_LINE_RE.is_match(next_line_content) {
-                            // Check blankness *after* prefix
-                            potential_blank_lines.push_back(lookahead_idx_0);
-                            lookahead_idx_0 += 1;
-                            continue;
-                        }
-
-                        // Check continuation based on cached line info OR regex for blockquoted content
-                        let mut is_next_list_item_start = false;
-                        
-                        // First check cached info with same emphasis filtering
-                        if let Some(next_line_info) = ctx.line_info(next_line_idx_1) {
-                            if let Some(list_item_info) = &next_line_info.list_item {
-                                // Same check as above to filter out emphasis
-                                let marker_end = list_item_info.marker_column + list_item_info.marker.len();
-                                let has_space_after = list_item_info.content_column > marker_end;
-                                if has_space_after || next_line_str[marker_end..].trim().is_empty() {
-                                    is_next_list_item_start = true;
+            // Convert segments to blocks
+            for (_idx, (start, end)) in segments.iter().enumerate() {
+                // Extend the end to include any continuation lines immediately after the last item
+                let mut actual_end = *end;
+                
+                // If this list was split by code fences, don't extend any segments
+                // They should remain as individual list items for MD032 purposes
+                if !has_code_fence_splits && *end < block.end_line {
+                        for check_line in (*end + 1)..=block.end_line {
+                            if check_line - 1 < ctx.lines.len() {
+                                let line = &ctx.lines[check_line - 1];
+                                // Stop at next list item or non-continuation content
+                                if block.item_lines.contains(&check_line) || line.heading.is_some() {
+                                    break;
+                                }
+                                // Don't extend through code blocks
+                                if line.in_code_block {
+                                    break;
+                                }
+                                // Include indented continuation
+                                if line.indent >= 2 {
+                                    actual_end = check_line;
+                                }
+                                // Include lazy continuation only if it's not a separate paragraph
+                                else if check_line == *end + 1 && !line.is_blank && !line.heading.is_some() {
+                                    // Check if this looks like list continuation vs new paragraph
+                                    // Simple heuristic: if it starts with uppercase and the list item ended with punctuation,
+                                    // it's likely a new paragraph
+                                    let is_likely_new_paragraph = {
+                                        let first_char = line.content.trim().chars().next();
+                                        first_char.map_or(false, |c| c.is_uppercase())
+                                    };
+                                    
+                                    if !is_likely_new_paragraph {
+                                        actual_end = check_line;
+                                    } else {
+                                        break;
+                                    }
+                                } else if !line.is_blank {
+                                    break;
                                 }
                             }
                         }
-                        
-                        // If not detected in cached info and we have a blockquote prefix, check the content after prefix
-                        if !is_next_list_item_start && (!blockquote_prefix.is_empty() || ctx.line_info(next_line_idx_1).is_none()) {
-                            is_next_list_item_start = LIST_ITEM_START_REGEX.is_match(next_line_content);
-                        }
-                        
-                        let next_line_indent = calculate_indent(next_line_content); // Calculate indent on content only
-
-                        // A line continues the list if:
-                        // 1. It's a new list item (starts with marker)
-                        // 2. It's indented enough to be list content (>= first_item_content_indent)
-                        // 3. It's an unindented continuation that immediately follows a list item
-                        //    and starts with lowercase (indicating it's a sentence fragment)
-                        let is_unindented_continuation = !next_line_content.trim().is_empty() &&
-                                                       !next_line_content.starts_with('#') && // Not a heading
-                                                       !next_line_content.starts_with("```") && // Not a code block
-                                                       !next_line_content.starts_with("~~~") && // Not a code block
-                                                       next_line_indent == 0 && // Must be unindented
-                                                       // Must start with lowercase letter (sentence fragment)
-                                                       next_line_content.trim().chars().next().map_or(false, |c| c.is_lowercase());
-
-                        let is_continuation = is_next_list_item_start
-                            || next_line_indent >= first_item_content_indent
-                            || is_unindented_continuation;
-
-                        if is_continuation {
-                            block_end_line_1 = next_line_idx_1;
-                            potential_blank_lines.clear();
-                            lookahead_idx_0 += 1;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    list_blocks.push((block_start_line_1, block_end_line_1, blockquote_prefix)); // Store prefix
-                    current_line_idx_0 = block_end_line_1;
-            } else {
-                current_line_idx_0 += 1;
+                }
+                
+                blocks.push((*start, actual_end, block.blockquote_prefix.clone()));
             }
         }
-
-        // Merge adjacent/overlapping blocks
-        if list_blocks.is_empty() {
-            return list_blocks;
-        }
-
-        let mut merged_blocks: Vec<(usize, usize, String)> = Vec::new();
-        let mut current_block = list_blocks[0].clone(); // Clone to own the prefix string
-
-        for next_block in list_blocks.iter().skip(1) {
-            if next_block.0 <= current_block.1 + 1 && next_block.2 == current_block.2 {
-                current_block.1 = std::cmp::max(current_block.1, next_block.1);
-            } else {
-                merged_blocks.push(current_block.clone());
-                current_block = next_block.clone();
-            }
-        }
-        merged_blocks.push(current_block);
-        merged_blocks
+        
+        blocks
     }
 
     fn perform_checks(
@@ -394,8 +309,15 @@ impl MD032BlanksAroundLists {
                 let next_line_idx_0 = end_line;
                 let next_line_idx_1 = end_line + 1;
                 let next_line_str = lines[next_line_idx_0];
+                // Check if next line is excluded - in code block, front matter, or starts an indented code block
+                // Only exclude code fence lines if they're indented (part of list content)
                 let is_next_excluded = structure.is_in_code_block(next_line_idx_1)
-                    || structure.is_in_front_matter(next_line_idx_1);
+                    || structure.is_in_front_matter(next_line_idx_1)
+                    || (next_line_idx_0 < ctx.lines.len() && 
+                        ctx.lines[next_line_idx_0].in_code_block &&
+                        ctx.lines[next_line_idx_0].indent >= 2 &&
+                        (ctx.lines[next_line_idx_0].content.trim().starts_with("```") || 
+                         ctx.lines[next_line_idx_0].content.trim().starts_with("~~~")));
                 let next_prefix = BLOCKQUOTE_PREFIX_RE
                     .find(next_line_str)
                     .map_or(String::new(), |m| m.as_str().to_string());
@@ -458,7 +380,7 @@ impl Rule for MD032BlanksAroundLists {
         let lines: Vec<&str> = content.lines().collect();
         let line_index = LineIndex::new(content.to_string());
 
-        let list_blocks = self.find_md032_list_blocks(ctx, &lines, &structure);
+        let list_blocks = self.convert_list_blocks(ctx);
 
         if list_blocks.is_empty() {
             return Ok(Vec::new());
@@ -482,7 +404,7 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(Vec::new());
         }
 
-        let list_blocks = self.find_md032_list_blocks(ctx, &lines, structure);
+        let list_blocks = self.convert_list_blocks(ctx);
 
         if list_blocks.is_empty() {
             return Ok(Vec::new());
@@ -499,7 +421,7 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(String::new());
         }
 
-        let list_blocks = self.find_md032_list_blocks(ctx, &lines, &structure);
+        let list_blocks = self.convert_list_blocks(ctx);
         if list_blocks.is_empty() {
             return Ok(ctx.content.to_string());
         }
@@ -534,8 +456,15 @@ impl Rule for MD032BlanksAroundLists {
                 let after_block_line_idx_0 = end_line;
                 let after_block_line_idx_1 = end_line + 1;
                 let line_after_block_content_str = lines[after_block_line_idx_0];
+                // Check if next line is excluded - in code block, front matter, or starts an indented code block
+                // Only exclude code fence lines if they're indented (part of list content)
                 let is_line_after_excluded = structure.is_in_code_block(after_block_line_idx_1)
-                    || structure.is_in_front_matter(after_block_line_idx_1);
+                    || structure.is_in_front_matter(after_block_line_idx_1)
+                    || (after_block_line_idx_0 < ctx.lines.len() && 
+                        ctx.lines[after_block_line_idx_0].in_code_block &&
+                        ctx.lines[after_block_line_idx_0].indent >= 2 &&
+                        (ctx.lines[after_block_line_idx_0].content.trim().starts_with("```") || 
+                         ctx.lines[after_block_line_idx_0].content.trim().starts_with("~~~")));
                 let after_prefix = BLOCKQUOTE_PREFIX_RE
                     .find(line_after_block_content_str)
                     .map_or(String::new(), |m| m.as_str().to_string());
@@ -621,7 +550,7 @@ impl DocumentStructureExtensions for MD032BlanksAroundLists {
     fn has_relevant_elements(
         &self,
         ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
+        _doc_structure: &DocumentStructure,
     ) -> bool {
         let content = ctx.content;
 
@@ -639,40 +568,11 @@ impl DocumentStructureExtensions for MD032BlanksAroundLists {
             return false;
         }
 
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Use MD032's own sophisticated list detection to check for list blocks
-        let list_blocks = self.find_md032_list_blocks(ctx, &lines, doc_structure);
-
         // This rule is relevant if we found any list blocks
-        !list_blocks.is_empty()
+        !ctx.list_blocks.is_empty()
     }
 }
 
-// Helper to determine the column where content starts after the marker
-fn get_content_start_column(captures: &Captures) -> Option<usize> {
-    let indent_len = captures.get(1).map_or(0, |m| m.as_str().len());
-
-    // For unordered lists: capture group 2 has the marker (*+-)
-    // For ordered lists: capture group 3 has the number, dot is included in regex pattern
-    let marker_len = if let Some(unordered) = captures.get(2) {
-        unordered.as_str().len() // Just the marker character
-    } else if let Some(ordered) = captures.get(3) {
-        ordered.as_str().len() + 1 // Number + dot
-    } else {
-        return None; // Should not happen if regex matched
-    };
-
-    let space_after_len = captures.get(4).map_or(0, |m| m.as_str().len()); // Space after marker
-
-    Some(indent_len + marker_len + space_after_len)
-}
-
-// Calculates visual indentation, treating tabs as expanding to 4 spaces (common behavior)
-fn calculate_indent(line: &str) -> usize {
-    // Find the first non-whitespace character
-    line.find(|c: char| !c.is_whitespace()).unwrap_or(0)
-}
 
 // Checks if a line is blank, considering blockquote context
 fn is_blank_in_context(line: &str) -> bool {

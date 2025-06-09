@@ -186,6 +186,25 @@ pub struct HeadingInfo {
     pub closing_sequence: String,
 }
 
+/// Information about a list block
+#[derive(Debug, Clone)]
+pub struct ListBlock {
+    /// Line number where the list starts (1-indexed)
+    pub start_line: usize,
+    /// Line number where the list ends (1-indexed)
+    pub end_line: usize,
+    /// Whether it's ordered or unordered
+    pub is_ordered: bool,
+    /// The consistent marker for unordered lists (if any)
+    pub marker: Option<String>,
+    /// Blockquote prefix for this list (empty if not in blockquote)
+    pub blockquote_prefix: String,
+    /// Lines that are list items within this block
+    pub item_lines: Vec<usize>,
+    /// Nesting level (0 for top-level lists)
+    pub nesting_level: usize,
+}
+
 pub struct LintContext<'a> {
     pub content: &'a str,
     pub ast: Node, // The root of the AST
@@ -196,6 +215,7 @@ pub struct LintContext<'a> {
     pub images: Vec<ParsedImage>, // Pre-parsed images
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
     pub code_spans: Vec<CodeSpan>, // Pre-parsed inline code spans
+    pub list_blocks: Vec<ListBlock>, // Pre-parsed list blocks
 }
 
 impl<'a> LintContext<'a> {
@@ -221,11 +241,12 @@ impl<'a> LintContext<'a> {
             // Pre-compute line information
             let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
             
-            // Parse links, images, references, and code spans
+            // Parse links, images, references, code spans, and list blocks
             let links = Self::parse_links(content, &lines, &code_blocks);
             let images = Self::parse_images(content, &lines, &code_blocks);
             let reference_defs = Self::parse_reference_defs(content, &lines);
             let code_spans = Self::parse_code_spans(content, &lines);
+            let list_blocks = Self::parse_list_blocks(&lines);
             
             return Self {
                 content,
@@ -237,6 +258,7 @@ impl<'a> LintContext<'a> {
                 images,
                 reference_defs,
                 code_spans,
+                list_blocks,
             };
         }
 
@@ -279,11 +301,12 @@ impl<'a> LintContext<'a> {
         // Pre-compute line information
         let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
         
-        // Parse links, images, references, and code spans
+        // Parse links, images, references, code spans, and list blocks
         let links = Self::parse_links(content, &lines, &code_blocks);
         let images = Self::parse_images(content, &lines, &code_blocks);
         let reference_defs = Self::parse_reference_defs(content, &lines);
         let code_spans = Self::parse_code_spans(content, &lines);
+        let list_blocks = Self::parse_list_blocks(&lines);
         
         Self {
             content,
@@ -295,6 +318,7 @@ impl<'a> LintContext<'a> {
             images,
             reference_defs,
             code_spans,
+            list_blocks,
         }
     }
 
@@ -361,6 +385,20 @@ impl<'a> LintContext<'a> {
             .iter()
             .filter(|img| img.line == line_num)
             .collect()
+    }
+    
+    /// Check if a line is part of a list block
+    pub fn is_in_list_block(&self, line_num: usize) -> bool {
+        self.list_blocks.iter().any(|block| 
+            line_num >= block.start_line && line_num <= block.end_line
+        )
+    }
+    
+    /// Get the list block containing a specific line
+    pub fn list_block_for_line(&self, line_num: usize) -> Option<&ListBlock> {
+        self.list_blocks.iter().find(|block| 
+            line_num >= block.start_line && line_num <= block.end_line
+        )
     }
     
     /// Parse all links in the content
@@ -585,6 +623,9 @@ impl<'a> LintContext<'a> {
         let unordered_regex = regex::Regex::new(r"^(\s*)([-*+])([ \t]*)(.*)").unwrap();
         let ordered_regex = regex::Regex::new(r"^(\s*)(\d+)([.)])([ \t]*)(.*)").unwrap();
         
+        // Regex for blockquote prefix
+        let blockquote_regex = regex::Regex::new(r"^(\s*>\s*)(.*)").unwrap();
+        
         // Regex for heading detection
         let atx_heading_regex = regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap();
         let setext_underline_regex = regex::Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
@@ -592,7 +633,14 @@ impl<'a> LintContext<'a> {
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
             let indent = line.len() - line.trim_start().len();
-            let is_blank = line.trim().is_empty();
+            // For blank detection, consider blockquote context
+            let is_blank = if let Some(caps) = blockquote_regex.captures(line) {
+                // In blockquote context, check if content after prefix is blank
+                let after_prefix = caps.get(2).map_or("", |m| m.as_str());
+                after_prefix.trim().is_empty()
+            } else {
+                line.trim().is_empty()
+            };
             // Check if this line is inside a code block (not inline code span)
             // We only want to check for fenced/indented code blocks, not inline code
             let in_code_block = code_blocks.iter().any(|&(start, end)| {
@@ -608,12 +656,21 @@ impl<'a> LintContext<'a> {
             
             // Detect list items
             let list_item = if !in_code_block && !is_blank {
-                if let Some(caps) = unordered_regex.captures(line) {
+                // Strip blockquote prefix if present for list detection
+                let (line_for_list_check, blockquote_prefix_len) = if let Some(caps) = blockquote_regex.captures(line) {
+                    let prefix = caps.get(1).unwrap().as_str();
+                    let content = caps.get(2).unwrap().as_str();
+                    (content, prefix.len())
+                } else {
+                    (line.as_ref(), 0)
+                };
+                
+                if let Some(caps) = unordered_regex.captures(line_for_list_check) {
                     let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
                     let marker = caps.get(2).map_or("", |m| m.as_str());
                     let spacing = caps.get(3).map_or("", |m| m.as_str());
                     let content = caps.get(4).map_or("", |m| m.as_str());
-                    let marker_column = leading_spaces.len();
+                    let marker_column = blockquote_prefix_len + leading_spaces.len();
                     let content_column = marker_column + marker.len() + spacing.len();
                     
                     // Check if this is likely emphasis or not a list item
@@ -651,14 +708,14 @@ impl<'a> LintContext<'a> {
                             content_column,
                         })
                     }
-                } else if let Some(caps) = ordered_regex.captures(line) {
+                } else if let Some(caps) = ordered_regex.captures(line_for_list_check) {
                     let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
                     let number_str = caps.get(2).map_or("", |m| m.as_str());
                     let delimiter = caps.get(3).map_or("", |m| m.as_str());
                     let spacing = caps.get(4).map_or("", |m| m.as_str());
                     let content = caps.get(5).map_or("", |m| m.as_str());
                     let marker = format!("{}{}", number_str, delimiter);
-                    let marker_column = leading_spaces.len();
+                    let marker_column = blockquote_prefix_len + leading_spaces.len();
                     let content_column = marker_column + marker.len() + spacing.len();
                     
                     // Check if this is likely not a list item
@@ -903,6 +960,267 @@ impl<'a> LintContext<'a> {
         
         code_spans
     }
+    
+    /// Parse all list blocks in the content
+    fn parse_list_blocks(lines: &[LineInfo]) -> Vec<ListBlock> {
+        let mut list_blocks = Vec::new();
+        let mut current_block: Option<ListBlock> = None;
+        let mut last_list_item_line = 0;
+        let mut current_indent_level = 0;
+        
+        // Regex for blockquote prefix detection
+        let blockquote_re = regex::Regex::new(r"^(\s*>+\s*)").unwrap();
+        
+        for (line_idx, line_info) in lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+            
+            // Handle code blocks - they should continue the list if properly indented
+            if line_info.in_code_block {
+                if let Some(ref mut block) = current_block {
+                    // For code blocks to continue a list, they need to be indented
+                    // at least 2 spaces beyond the list marker
+                    if line_info.indent >= current_indent_level + 2 {
+                        // Code blocks at list continuation level should continue the list
+                        block.end_line = line_num;
+                        continue;
+                    }
+                }
+                // If we have a current block and hit a non-indented code block, end it
+                if let Some(block) = current_block.take() {
+                    list_blocks.push(block);
+                }
+                continue;
+            }
+            
+            // Extract blockquote prefix if any
+            let blockquote_prefix = if let Some(caps) = blockquote_re.captures(&line_info.content) {
+                caps.get(0).unwrap().as_str().to_string()
+            } else {
+                String::new()
+            };
+            
+            // Check if this line is a list item
+            if let Some(list_item) = &line_info.list_item {
+                // Calculate nesting level based on indentation
+                let item_indent = list_item.marker_column;
+                let nesting = item_indent / 2; // Assume 2-space indentation for nesting
+                
+                if let Some(ref mut block) = current_block {
+                    // Check if this continues the current block
+                    let same_type = (block.is_ordered && list_item.is_ordered) || 
+                                   (!block.is_ordered && !list_item.is_ordered);
+                    let same_context = block.blockquote_prefix == blockquote_prefix;
+                    let reasonable_distance = line_num <= last_list_item_line + 2; // Allow one blank line
+                    
+                    // For unordered lists, also check marker consistency  
+                    let marker_compatible = block.is_ordered || 
+                                          block.marker.is_none() || 
+                                          block.marker.as_ref() == Some(&list_item.marker);
+                    
+                    // Check if there's non-list content between the last item and this one
+                    let has_non_list_content = {
+                        let mut found_non_list = false;
+                        for check_line in (last_list_item_line + 1)..line_num {
+                            let check_idx = check_line - 1;
+                            if check_idx < lines.len() {
+                                let check_info = &lines[check_idx];
+                                if !check_info.is_blank && !check_info.in_code_block && check_info.list_item.is_none() {
+                                    // Found non-blank, non-list content
+                                    if check_info.indent < 2 {
+                                        // Not indented, so it's not list continuation
+                                        found_non_list = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        found_non_list
+                    };
+                    
+                    if same_type && same_context && reasonable_distance && marker_compatible && !has_non_list_content {
+                        // Extend current block
+                        block.end_line = line_num;
+                        block.item_lines.push(line_num);
+                        
+                        // Update marker consistency for unordered lists
+                        if !block.is_ordered && block.marker.is_some() {
+                            if block.marker.as_ref() != Some(&list_item.marker) {
+                                // Mixed markers, clear the marker field
+                                block.marker = None;
+                            }
+                        }
+                    } else {
+                        // End current block and start a new one
+                        list_blocks.push(block.clone());
+                        
+                        *block = ListBlock {
+                            start_line: line_num,
+                            end_line: line_num,
+                            is_ordered: list_item.is_ordered,
+                            marker: if list_item.is_ordered { None } else { Some(list_item.marker.clone()) },
+                            blockquote_prefix: blockquote_prefix.clone(),
+                            item_lines: vec![line_num],
+                            nesting_level: nesting,
+                        };
+                    }
+                } else {
+                    // Start a new block
+                    current_block = Some(ListBlock {
+                        start_line: line_num,
+                        end_line: line_num,
+                        is_ordered: list_item.is_ordered,
+                        marker: if list_item.is_ordered { None } else { Some(list_item.marker.clone()) },
+                        blockquote_prefix,
+                        item_lines: vec![line_num],
+                        nesting_level: nesting,
+                    });
+                }
+                
+                last_list_item_line = line_num;
+                current_indent_level = item_indent;
+            } else if let Some(ref mut block) = current_block {
+                // Not a list item - check if it continues the current block
+                
+                // For MD032 compatibility, we use a simple approach:
+                // - Indented lines continue the list
+                // - Blank lines followed by indented content continue the list
+                // - Everything else ends the list
+                
+                if line_info.indent >= current_indent_level + 2 {
+                    // Indented line continues the list
+                    block.end_line = line_num;
+                } else if line_info.is_blank {
+                    // Blank line - check if it's internal to the list or ending it
+                    // We only include blank lines that are followed by more list content
+                    let mut check_idx = line_idx + 1;
+                    let mut found_continuation = false;
+                    
+                    // Skip additional blank lines
+                    while check_idx < lines.len() && lines[check_idx].is_blank {
+                        check_idx += 1;
+                    }
+                    
+                    if check_idx < lines.len() {
+                        let next_line = &lines[check_idx];
+                        // Check if followed by indented content (list continuation)
+                        if !next_line.in_code_block && next_line.indent >= current_indent_level + 2 {
+                            found_continuation = true;
+                        } 
+                        // Check if followed by another list item at the same level
+                        else if !next_line.in_code_block && next_line.list_item.is_some() {
+                            if let Some(item) = &next_line.list_item {
+                                let next_blockquote_prefix = blockquote_re.find(&next_line.content)
+                                    .map_or(String::new(), |m| m.as_str().to_string());
+                                if item.marker_column == current_indent_level && 
+                                   item.is_ordered == block.is_ordered &&
+                                   block.blockquote_prefix.trim() == next_blockquote_prefix.trim() {
+                                    found_continuation = true;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if found_continuation {
+                        // Include the blank line in the block
+                        block.end_line = line_num;
+                    } else {
+                        // Blank line ends the list - don't include it
+                        list_blocks.push(block.clone());
+                        current_block = None;
+                    }
+                } else {
+                    // Check for lazy continuation - non-indented line immediately after a list item
+                    let is_lazy_continuation = last_list_item_line == line_num - 1 && 
+                                             !line_info.heading.is_some() &&
+                                             !line_info.is_blank;
+                    
+                    if is_lazy_continuation {
+                        // Additional check: if the line starts with uppercase and looks like a new sentence,
+                        // it's probably not a continuation
+                        let content_to_check = if !blockquote_prefix.is_empty() {
+                            // Strip blockquote prefix to check the actual content
+                            line_info.content.strip_prefix(&blockquote_prefix).unwrap_or(&line_info.content).trim()
+                        } else {
+                            line_info.content.trim()
+                        };
+                        
+                        let starts_with_uppercase = content_to_check.chars().next().map_or(false, |c| c.is_uppercase());
+                        
+                        // If it starts with uppercase and the previous line ended with punctuation,
+                        // it's likely a new paragraph, not a continuation
+                        if starts_with_uppercase && last_list_item_line > 0 {
+                            // This looks like a new paragraph
+                            list_blocks.push(block.clone());
+                            current_block = None;
+                        } else {
+                            // This is a lazy continuation line
+                            block.end_line = line_num;
+                        }
+                    } else {
+                        // Non-indented, non-blank line that's not a lazy continuation - end the block
+                        list_blocks.push(block.clone());
+                        current_block = None;
+                    }
+                }
+            }
+        }
+        
+        // Don't forget the last block
+        if let Some(block) = current_block {
+            list_blocks.push(block);
+        }
+        
+        // Merge adjacent blocks that should be one
+        merge_adjacent_list_blocks(&mut list_blocks);
+        
+        list_blocks
+    }
+}
+
+/// Merge adjacent list blocks that should be treated as one
+fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
+    if list_blocks.len() < 2 {
+        return;
+    }
+    
+    let mut merged = Vec::new();
+    let mut current = list_blocks[0].clone();
+    
+    for next in list_blocks.iter().skip(1) {
+        // Check if blocks should be merged
+        // For MD032 purposes, consecutive unordered lists with different markers
+        // should be treated as one list block only if truly consecutive
+        let consecutive = next.start_line == current.end_line + 1;
+        let only_blank_between = next.start_line == current.end_line + 2;
+        
+        let should_merge = 
+            next.is_ordered == current.is_ordered &&
+            next.blockquote_prefix == current.blockquote_prefix &&
+            next.nesting_level == current.nesting_level &&
+            (consecutive || (only_blank_between && current.marker == next.marker));
+        
+        if should_merge {
+            // Merge blocks
+            current.end_line = next.end_line;
+            current.item_lines.extend_from_slice(&next.item_lines);
+            
+            // Update marker consistency
+            if !current.is_ordered && current.marker.is_some() && next.marker.is_some() {
+                if current.marker != next.marker {
+                    current.marker = None; // Mixed markers
+                }
+            }
+        } else {
+            // Save current and start new
+            merged.push(current);
+            current = next.clone();
+        }
+    }
+    
+    // Don't forget the last block
+    merged.push(current);
+    
+    *list_blocks = merged;
 }
 
 /// Check if content contains patterns that cause the markdown crate to panic
