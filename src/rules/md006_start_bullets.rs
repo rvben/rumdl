@@ -25,6 +25,103 @@ lazy_static! {
 }
 
 impl MD006StartBullets {
+    /// Optimized check using centralized list blocks
+    fn check_optimized(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
+        let line_index = LineIndex::new(content.to_string());
+        let mut result = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Track which lines contain valid bullet items
+        let mut valid_bullet_lines = vec![false; lines.len()];
+        
+        // Process each unordered list block
+        for list_block in &ctx.list_blocks {
+            // Skip ordered lists
+            if list_block.is_ordered {
+                continue;
+            }
+            
+            // Check each list item in this block
+            for &item_line in &list_block.item_lines {
+                if let Some(line_info) = ctx.line_info(item_line) {
+                    if let Some(list_item) = &line_info.list_item {
+                        let line_idx = item_line - 1;
+                        let indent = list_item.marker_column;
+                        let line = &lines[line_idx];
+                        
+                        let mut is_valid = false;
+                        
+                        if indent == 0 {
+                            // Top-level items are always valid
+                            is_valid = true;
+                        } else {
+                            // Check if this is a valid nested item
+                            match Self::find_relevant_previous_bullet(&lines, line_idx) {
+                                Some((prev_idx, prev_indent)) => {
+                                    match prev_indent.cmp(&indent) {
+                                        std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
+                                            // Valid nesting or sibling if previous item was valid
+                                            is_valid = valid_bullet_lines[prev_idx];
+                                        }
+                                        std::cmp::Ordering::Greater => {
+                                            // remains invalid
+                                        }
+                                    }
+                                }
+                                None => {
+                                    // Indented item with no previous bullet remains invalid
+                                }
+                            }
+                        }
+                        
+                        valid_bullet_lines[line_idx] = is_valid;
+                        
+                        if !is_valid {
+                            // Calculate the precise range for the indentation that needs to be removed
+                            let start_col = 1;
+                            let end_col = indent + 3; // Include marker and space after it
+                            
+                            // For the fix, we need to replace the highlighted part with just the bullet marker
+                            let trimmed = line.trim_start();
+                            let bullet_part = if let Some(captures) = BULLET_PATTERN.captures(trimmed) {
+                                let marker = captures.get(2).map_or("*", |m| m.as_str());
+                                format!("{} ", marker)
+                            } else {
+                                "* ".to_string()
+                            };
+                            
+                            // Calculate the byte range for the fix
+                            let fix_range = line_index.line_col_to_byte_range_with_length(
+                                item_line,
+                                start_col,
+                                end_col - start_col,
+                            );
+                            
+                            result.push(LintWarning {
+                                line: item_line,
+                                column: start_col,
+                                end_line: item_line,
+                                end_column: end_col,
+                                message: format!(
+                                    "Consider starting bulleted lists at the beginning of the line (found {} leading spaces)",
+                                    indent
+                                ),
+                                severity: Severity::Warning,
+                                rule_name: Some(self.name()),
+                                fix: Some(Fix {
+                                    range: fix_range,
+                                    replacement: bullet_part,
+                                }),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(result)
+    }
     /// Checks if a line is a bullet list item and returns its indentation level
     fn is_bullet_list_item(line: &str) -> Option<usize> {
         if let Some(captures) = BULLET_PATTERN.captures(line) {
@@ -117,7 +214,7 @@ impl Rule for MD006StartBullets {
         let content = ctx.content;
 
         // Early returns for performance
-        if content.is_empty() {
+        if content.is_empty() || ctx.list_blocks.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -126,9 +223,8 @@ impl Rule for MD006StartBullets {
             return Ok(Vec::new());
         }
 
-        // Use the optimized document structure approach instead of expensive AST parsing
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
+        // Use centralized list blocks for better performance and consistency
+        self.check_optimized(ctx)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -311,11 +407,11 @@ impl Rule for MD006StartBullets {
 impl DocumentStructureExtensions for MD006StartBullets {
     fn has_relevant_elements(
         &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
     ) -> bool {
-        // This rule is only relevant if there are list items
-        !doc_structure.list_lines.is_empty()
+        // This rule is only relevant if there are unordered list items
+        ctx.list_blocks.iter().any(|block| !block.is_ordered)
     }
 }
 

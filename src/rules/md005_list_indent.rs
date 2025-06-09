@@ -40,6 +40,7 @@ impl MD005ListIndent {
     }
 
     /// Optimized check that combines all passes into one
+    /// TODO: Consider migrating to centralized list blocks after improving mixed list type handling
     fn check_optimized(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
 

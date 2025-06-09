@@ -60,6 +60,7 @@ impl Rule for MD007ULIndent {
         "Unordered list indentation"
     }
 
+    // TODO: Consider migrating to centralized list blocks once ElementCache is deprecated
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
 

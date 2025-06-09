@@ -51,8 +51,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::DocumentStructureExtensions;
 use crate::LintContext;
-use lazy_static::lazy_static;
-use regex::Regex;
 use toml;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,14 +67,6 @@ impl Default for UnorderedListStyle {
     }
 }
 
-lazy_static! {
-    static ref UNORDERED_LIST_REGEX: Regex = Regex::new(
-        // Match unordered list items: optional whitespace, optional blockquote prefix, marker, space, then content or end of line
-        r"^(?P<indent>\s*)(?P<blockquote>(?:>\s*)*)(?P<marker>[*+-])(?P<after>\s+)(?P<content>.*?)$"
-    ).unwrap();
-    static ref FRONT_MATTER_DELIM: Regex = Regex::new(r"^---\s*$").unwrap();
-    static ref ORDERED_LIST_REGEX: Regex = Regex::new(r"^\s*\d+[.)]").unwrap();
-}
 
 /// Rule MD004: Unordered list style
 #[derive(Clone)]
@@ -119,56 +109,68 @@ impl Rule for MD004UnorderedListStyle {
         }
 
         let mut warnings = Vec::new();
-        let mut in_front_matter = false;
         let mut first_marker: Option<char> = None;
 
-        for (_line_idx, line_info) in ctx.lines.iter().enumerate() {
-            // Skip if in code block (already computed in LineInfo)
-            if line_info.in_code_block {
+        // Use centralized list blocks for better performance and accuracy
+        for list_block in &ctx.list_blocks {
+            // Skip ordered lists
+            if list_block.is_ordered {
                 continue;
             }
 
-            // Check for front matter
-            if FRONT_MATTER_DELIM.is_match(&line_info.content) {
-                in_front_matter = !in_front_matter;
-                continue;
-            }
-            if in_front_matter {
-                continue;
-            }
+            // Check each list item in this block
+            for &item_line in &list_block.item_lines {
+                if let Some(line_info) = ctx.line_info(item_line) {
+                    if let Some(list_item) = &line_info.list_item {
+                        // Skip ordered lists (safety check)
+                        if list_item.is_ordered {
+                            continue;
+                        }
 
-            // For lines starting with blockquotes, we need to use regex
-            // because the cached list info doesn't detect list items in blockquotes
-            if line_info.content.trim_start().starts_with('>') {
-                // Skip ordered lists
-                if ORDERED_LIST_REGEX.is_match(&line_info.content) {
-                    continue;
-                }
-                
-                // Check for unordered list items using regex
-                if let Some(caps) = UNORDERED_LIST_REGEX.captures(&line_info.content) {
-                    let indent = caps
-                        .name("indent")
-                        .map(|m| m.as_str().to_string())
-                        .unwrap_or_default();
-                    let blockquote = caps
-                        .name("blockquote")
-                        .map(|m| m.as_str().to_string())
-                        .unwrap_or_default();
-                    let marker = caps
-                        .name("marker")
-                        .unwrap()
-                        .as_str()
-                        .chars()
-                        .next()
-                        .unwrap();
-                    let offset = line_info.byte_offset + indent.len() + blockquote.len();
+                        // Get the marker character
+                        let marker = list_item.marker.chars().next().unwrap();
+                        
+                        // Calculate offset for the marker position
+                        let offset = line_info.byte_offset + list_item.marker_column;
 
-                    match self.style {
-                        UnorderedListStyle::Consistent => {
-                            if let Some(first) = first_marker {
-                                // Check if current marker matches the first marker found
-                                if marker != first {
+                        match self.style {
+                            UnorderedListStyle::Consistent => {
+                                // For consistent mode, we check consistency across the entire document
+                                if let Some(first) = first_marker {
+                                    // Check if current marker matches the first marker found
+                                    if marker != first {
+                                        let (line, col) = ctx.offset_to_line_col(offset);
+                                        warnings.push(LintWarning {
+                                            line,
+                                            column: col,
+                                            end_line: line,
+                                            end_column: col + 1,
+                                            message: format!(
+                                                "List marker '{}' does not match expected style '{}'",
+                                                marker, first
+                                            ),
+                                            severity: Severity::Warning,
+                                            rule_name: Some(self.name()),
+                                            fix: Some(Fix {
+                                                range: offset..offset + 1,
+                                                replacement: first.to_string(),
+                                            }),
+                                        });
+                                    }
+                                } else {
+                                    // This is the first marker we've found - set the style
+                                    first_marker = Some(marker);
+                                }
+                            }
+                            _ => {
+                                // Handle specific style requirements (asterisk, dash, plus)
+                                let target_marker = match self.style {
+                                    UnorderedListStyle::Asterisk => '*',
+                                    UnorderedListStyle::Dash => '-',
+                                    UnorderedListStyle::Plus => '+',
+                                    _ => unreachable!(),
+                                };
+                                if marker != target_marker {
                                     let (line, col) = ctx.offset_to_line_col(offset);
                                     warnings.push(LintWarning {
                                         line,
@@ -177,118 +179,17 @@ impl Rule for MD004UnorderedListStyle {
                                         end_column: col + 1,
                                         message: format!(
                                             "List marker '{}' does not match expected style '{}'",
-                                            marker, first
+                                            marker, target_marker
                                         ),
                                         severity: Severity::Warning,
                                         rule_name: Some(self.name()),
                                         fix: Some(Fix {
                                             range: offset..offset + 1,
-                                            replacement: first.to_string(),
+                                            replacement: target_marker.to_string(),
                                         }),
                                     });
                                 }
-                            } else {
-                                // This is the first marker we've found - set the style
-                                first_marker = Some(marker);
                             }
-                        }
-                        _ => {
-                            // Handle specific style requirements (asterisk, dash, plus)
-                            let target_marker = match self.style {
-                                UnorderedListStyle::Asterisk => '*',
-                                UnorderedListStyle::Dash => '-',
-                                UnorderedListStyle::Plus => '+',
-                                _ => unreachable!(),
-                            };
-                            if marker != target_marker {
-                                let (line, col) = ctx.offset_to_line_col(offset);
-                                warnings.push(LintWarning {
-                                    line,
-                                    column: col,
-                                    end_line: line,
-                                    end_column: col + 1,
-                                    message: format!(
-                                        "List marker '{}' does not match expected style '{}'",
-                                        marker, target_marker
-                                    ),
-                                    severity: Severity::Warning,
-                                    rule_name: Some(self.name()),
-                                    fix: Some(Fix {
-                                        range: offset..offset + 1,
-                                        replacement: target_marker.to_string(),
-                                    }),
-                                });
-                            }
-                        }
-                    }
-                }
-            } else if let Some(list_item) = &line_info.list_item {
-                // Use cached information for non-blockquote lines
-                // Skip ordered lists
-                if list_item.is_ordered {
-                    continue;
-                }
-
-                // Get the marker character
-                let marker = list_item.marker.chars().next().unwrap();
-                
-                // Calculate offset for the marker position
-                let offset = line_info.byte_offset + list_item.marker_column;
-
-                match self.style {
-                    UnorderedListStyle::Consistent => {
-                        if let Some(first) = first_marker {
-                            // Check if current marker matches the first marker found
-                            if marker != first {
-                                let (line, col) = ctx.offset_to_line_col(offset);
-                                warnings.push(LintWarning {
-                                    line,
-                                    column: col,
-                                    end_line: line,
-                                    end_column: col + 1,
-                                    message: format!(
-                                        "List marker '{}' does not match expected style '{}'",
-                                        marker, first
-                                    ),
-                                    severity: Severity::Warning,
-                                    rule_name: Some(self.name()),
-                                    fix: Some(Fix {
-                                        range: offset..offset + 1,
-                                        replacement: first.to_string(),
-                                    }),
-                                });
-                            }
-                        } else {
-                            // This is the first marker we've found - set the style
-                            first_marker = Some(marker);
-                        }
-                    }
-                    _ => {
-                        // Handle specific style requirements (asterisk, dash, plus)
-                        let target_marker = match self.style {
-                            UnorderedListStyle::Asterisk => '*',
-                            UnorderedListStyle::Dash => '-',
-                            UnorderedListStyle::Plus => '+',
-                            _ => unreachable!(),
-                        };
-                        if marker != target_marker {
-                            let (line, col) = ctx.offset_to_line_col(offset);
-                            warnings.push(LintWarning {
-                                line,
-                                column: col,
-                                end_line: line,
-                                end_column: col + 1,
-                                message: format!(
-                                    "List marker '{}' does not match expected style '{}'",
-                                    marker, target_marker
-                                ),
-                                severity: Severity::Warning,
-                                rule_name: Some(self.name()),
-                                fix: Some(Fix {
-                                    range: offset..offset + 1,
-                                    replacement: target_marker.to_string(),
-                                }),
-                            });
                         }
                     }
                 }
@@ -299,98 +200,68 @@ impl Rule for MD004UnorderedListStyle {
     }
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
-        let content = &ctx.content;
-        let mut result = content.to_string();
-        let mut in_front_matter = false;
+        let mut lines: Vec<String> = ctx.content.lines().map(String::from).collect();
         let mut first_marker: Option<char> = None;
-        let mut edits = Vec::new();
 
-        // Pre-compute line positions for efficient offset calculation
-        let lines: Vec<&str> = content.lines().collect();
-        let mut line_positions = Vec::with_capacity(lines.len());
-        let mut pos = 0;
-        for line in &lines {
-            line_positions.push(pos);
-            pos += line.len() + 1; // +1 for newline
-        }
-
-        for (i, line) in lines.iter().enumerate() {
-            // Skip if in code block
-            if ctx.is_in_code_block_or_span(line_positions[i]) {
-                continue;
-            }
-
-            // Check for front matter
-            if FRONT_MATTER_DELIM.is_match(line) {
-                in_front_matter = !in_front_matter;
-                continue;
-            }
-            if in_front_matter {
-                continue;
-            }
-
+        // Use centralized list blocks
+        for list_block in &ctx.list_blocks {
             // Skip ordered lists
-            if ORDERED_LIST_REGEX.is_match(line) {
+            if list_block.is_ordered {
                 continue;
             }
 
-            // Check for unordered list items
-            if let Some(caps) = UNORDERED_LIST_REGEX.captures(line) {
-                let indent = caps
-                    .name("indent")
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_default();
-                let blockquote = caps
-                    .name("blockquote")
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_default();
-                let marker = caps
-                    .name("marker")
-                    .unwrap()
-                    .as_str()
-                    .chars()
-                    .next()
-                    .unwrap();
-                // Use pre-computed line position
-                let offset = line_positions[i] + indent.len() + blockquote.len();
+            // Process each list item in this block
+            for &item_line in &list_block.item_lines {
+                if let Some(line_info) = ctx.line_info(item_line) {
+                    if let Some(list_item) = &line_info.list_item {
+                        // Skip ordered lists (safety check)
+                        if list_item.is_ordered {
+                            continue;
+                        }
 
-                match self.style {
-                    UnorderedListStyle::Consistent => {
-                        if let Some(first) = first_marker {
-                            if marker != first {
-                                edits.push((offset, first));
+                        let line_idx = item_line - 1;
+                        if line_idx >= lines.len() {
+                            continue;
+                        }
+
+                        let line = &lines[line_idx];
+                        let marker = list_item.marker.chars().next().unwrap();
+                        
+                        // Determine the target marker
+                        let target_marker = match self.style {
+                            UnorderedListStyle::Consistent => {
+                                if let Some(first) = first_marker {
+                                    first
+                                } else {
+                                    first_marker = Some(marker);
+                                    marker
+                                }
                             }
-                        } else {
-                            first_marker = Some(marker);
-                        }
-                    }
-                    UnorderedListStyle::Asterisk => {
-                        if marker != '*' {
-                            edits.push((offset, '*'));
-                        }
-                    }
-                    UnorderedListStyle::Dash => {
-                        if marker != '-' {
-                            edits.push((offset, '-'));
-                        }
-                    }
-                    UnorderedListStyle::Plus => {
-                        if marker != '+' {
-                            edits.push((offset, '+'));
+                            UnorderedListStyle::Asterisk => '*',
+                            UnorderedListStyle::Dash => '-',
+                            UnorderedListStyle::Plus => '+',
+                        };
+
+                        // Replace the marker if needed
+                        if marker != target_marker {
+                            let marker_pos = list_item.marker_column;
+                            if marker_pos < line.len() {
+                                let mut new_line = String::new();
+                                new_line.push_str(&line[..marker_pos]);
+                                new_line.push(target_marker);
+                                new_line.push_str(&line[marker_pos + 1..]);
+                                lines[line_idx] = new_line;
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Apply edits in reverse order to maintain correct offsets
-        edits.sort_by(|a, b| b.0.cmp(&a.0));
-        for (offset, target_marker) in edits {
-            if offset < result.len() {
-                result.replace_range(offset..offset + 1, &target_marker.to_string());
-            }
+        let mut result = lines.join("\n");
+        if ctx.content.ends_with('\n') {
+            result.push('\n');
         }
-
         Ok(result)
     }
 
@@ -441,9 +312,11 @@ impl Rule for MD004UnorderedListStyle {
 impl DocumentStructureExtensions for MD004UnorderedListStyle {
     fn has_relevant_elements(
         &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &crate::utils::document_structure::DocumentStructure,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &crate::utils::document_structure::DocumentStructure,
     ) -> bool {
-        !doc_structure.list_items.is_empty()
+        // Quick check for any list markers and unordered list blocks
+        ctx.content.contains(['*', '-', '+']) && 
+        ctx.list_blocks.iter().any(|block| !block.is_ordered)
     }
 }

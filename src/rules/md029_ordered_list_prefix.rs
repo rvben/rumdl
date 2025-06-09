@@ -75,6 +75,7 @@ impl Rule for MD029OrderedListPrefix {
         "Ordered list marker value"
     }
 
+    // TODO: Consider using centralized list blocks with improved handling for code block separations
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
 
