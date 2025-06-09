@@ -96,154 +96,144 @@ impl MD052ReferenceLinkImages {
     ) -> Vec<(usize, usize, usize, String)> {
         let mut undefined = Vec::new();
         let mut reported_refs = HashMap::new();
-        let mut byte_pos = 0;
+        let mut in_code_block = false;
+        let mut code_fence_marker = String::new();
         let mut in_example_section = false;
-
-        for (line_num, line) in content.lines().enumerate() {
-
-            // Check if we're entering an example section
+        
+        // Use cached data for reference links and images
+        for link in &ctx.links {
+            if !link.is_reference {
+                continue; // Skip inline links
+            }
+            
+            if let Some(ref_id) = &link.reference_id {
+                let reference_lower = ref_id.to_lowercase();
+                
+                // Check if reference is defined
+                if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
+                    // Check if the line is in an example section or list item
+                    if let Some(line_info) = ctx.line_info(link.line) {
+                        if OUTPUT_EXAMPLE_START.is_match(&line_info.content) {
+                            in_example_section = true;
+                            continue;
+                        }
+                        
+                        if in_example_section {
+                            continue;
+                        }
+                        
+                        // Skip list items
+                        if LIST_ITEM_REGEX.is_match(&line_info.content) {
+                            continue;
+                        }
+                    }
+                    
+                    let match_len = link.byte_end - link.byte_offset;
+                    undefined.push((link.line - 1, link.start_col, match_len, ref_id.clone()));
+                    reported_refs.insert(reference_lower, true);
+                }
+            }
+        }
+        
+        // Use cached data for reference images
+        for image in &ctx.images {
+            if !image.is_reference {
+                continue; // Skip inline images
+            }
+            
+            if let Some(ref_id) = &image.reference_id {
+                let reference_lower = ref_id.to_lowercase();
+                
+                // Check if reference is defined
+                if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
+                    // Check if the line is in an example section or list item
+                    if let Some(line_info) = ctx.line_info(image.line) {
+                        if OUTPUT_EXAMPLE_START.is_match(&line_info.content) {
+                            in_example_section = true;
+                            continue;
+                        }
+                        
+                        if in_example_section {
+                            continue;
+                        }
+                        
+                        // Skip list items
+                        if LIST_ITEM_REGEX.is_match(&line_info.content) {
+                            continue;
+                        }
+                    }
+                    
+                    let match_len = image.byte_end - image.byte_offset;
+                    undefined.push((image.line - 1, image.start_col, match_len, ref_id.clone()));
+                    reported_refs.insert(reference_lower, true);
+                }
+            }
+        }
+        
+        // Handle shortcut references [text] which aren't captured in ctx.links
+        // Need to use regex for these
+        let lines: Vec<&str> = content.lines().collect();
+        in_example_section = false; // Reset for line-by-line processing
+        
+        for (line_num, line) in lines.iter().enumerate() {
+            // Handle code blocks
+            if let Some(cap) = FENCED_CODE_START.captures(line) {
+                if let Some(marker) = cap.get(0) {
+                    let marker_str = marker.as_str().to_string();
+                    if !in_code_block {
+                        in_code_block = true;
+                        code_fence_marker = marker_str;
+                    } else if line.trim().starts_with(&code_fence_marker) {
+                        in_code_block = false;
+                        code_fence_marker.clear();
+                    }
+                }
+                continue;
+            }
+            
+            if in_code_block {
+                continue;
+            }
+            
+            // Check for example sections
             if OUTPUT_EXAMPLE_START.is_match(line) {
                 in_example_section = true;
                 continue;
             }
-
-            // Check if we're exiting an example section (next heading)
-            if in_example_section && line.starts_with('#') && !OUTPUT_EXAMPLE_START.is_match(line) {
-                in_example_section = false;
-            }
-
-            // Skip lines in code blocks, example sections, or list items
-            if ctx.is_in_code_block_or_span(byte_pos) || in_example_section || LIST_ITEM_REGEX.is_match(line) {
-                byte_pos += line.len() + 1;
-                continue;
-            }
-
-            // Check for undefined references in reference links
-            if let Ok(captures) = REF_LINK_REGEX
-                .captures_iter(line)
-                .collect::<Result<Vec<_>, _>>()
-            {
-                for cap in captures {
-                    if let Some(full_match) = cap.get(0) {
-                        // Skip if inside code span
-                        let match_byte_offset = byte_pos + full_match.start();
-                        if ctx.code_spans.iter().any(|span| 
-                            match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end
-                        ) {
-                            continue;
-                        }
-
-                        let reference = if let Some(ref_match) = cap.get(2) {
-                            if ref_match.as_str().is_empty() {
-                                cap.get(1).map(|m| m.as_str().to_string())
-                            } else {
-                                Some(ref_match.as_str().to_string())
-                            }
-                        } else {
-                            cap.get(1).map(|m| m.as_str().to_string())
-                        };
-
-                        if let Some(ref_text) = reference {
-                            let reference_lower = ref_text.to_lowercase();
-                            if !references.contains(&reference_lower)
-                                && !reported_refs.contains_key(&reference_lower)
-                            {
-                                let match_len = full_match.end() - full_match.start();
-                                undefined.push((line_num, full_match.start(), match_len, ref_text));
-                                reported_refs.insert(reference_lower, true);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Check for undefined references in reference images
-            if let Ok(captures) = REF_IMAGE_REGEX
-                .captures_iter(line)
-                .collect::<Result<Vec<_>, _>>()
-            {
-                for cap in captures {
-                    if let Some(full_match) = cap.get(0) {
-                        // Skip if inside code span
-                        let match_byte_offset = byte_pos + full_match.start();
-                        if ctx.code_spans.iter().any(|span| 
-                            match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end
-                        ) {
-                            continue;
-                        }
-
-                        let reference = if let Some(ref_match) = cap.get(2) {
-                            if ref_match.as_str().is_empty() {
-                                cap.get(1).map(|m| m.as_str().to_string())
-                            } else {
-                                Some(ref_match.as_str().to_string())
-                            }
-                        } else {
-                            cap.get(1).map(|m| m.as_str().to_string())
-                        };
-
-                        if let Some(ref_text) = reference {
-                            let reference_lower = ref_text.to_lowercase();
-                            if !references.contains(&reference_lower)
-                                && !reported_refs.contains_key(&reference_lower)
-                            {
-                                let match_len = full_match.end() - full_match.start();
-                                undefined.push((line_num, full_match.start(), match_len, ref_text));
-                                reported_refs.insert(reference_lower, true);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Check for undefined shortcut references
-            if let Ok(captures) = SHORTCUT_REF_REGEX
-                .captures_iter(line)
-                .collect::<Result<Vec<_>, _>>()
-            {
-                for cap in captures {
-                    if let Some(full_match) = cap.get(0) {
-                        // Skip if inside code span
-                        let match_byte_offset = byte_pos + full_match.start();
-                        if ctx.code_spans.iter().any(|span| 
-                            match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end
-                        ) {
-                            continue;
-                        }
-
-                        // Skip if it's part of an inline link/image or a reference definition
-                        if let Ok(is_inline_link) = INLINE_LINK_REGEX.is_match(line) {
-                            if is_inline_link {
-                                continue;
-                            }
-                        }
-                        if let Ok(is_inline_image) = INLINE_IMAGE_REGEX.is_match(line) {
-                            if is_inline_image {
-                                continue;
-                            }
-                        }
-                        if REF_REGEX.is_match(line) {
-                            continue;
-                        }
-
-                        if let Some(ref_match) = cap.get(1) {
-                            let ref_text = ref_match.as_str().to_string();
-                            let reference_lower = ref_text.to_lowercase();
-                            if !references.contains(&reference_lower)
-                                && !reported_refs.contains_key(&reference_lower)
-                            {
-                                let match_len = full_match.end() - full_match.start();
-                                undefined.push((line_num, full_match.start(), match_len, ref_text));
-                                reported_refs.insert(reference_lower, true);
-                            }
-                        }
-                    }
+            
+            if in_example_section {
+                // Check if we're exiting the example section (another heading)
+                if line.starts_with('#') && !OUTPUT_EXAMPLE_START.is_match(line) {
+                    in_example_section = false;
+                } else {
+                    continue;
                 }
             }
             
-            byte_pos += line.len() + 1;
+            // Skip list items
+            if LIST_ITEM_REGEX.is_match(line) {
+                continue;
+            }
+            
+            // Check shortcut references: [reference]
+            if let Ok(captures) = SHORTCUT_REF_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
+                for cap in captures {
+                    if let Some(ref_match) = cap.get(1) {
+                        let reference = ref_match.as_str();
+                        let reference_lower = reference.to_lowercase();
+                        
+                        if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
+                            let full_match = cap.get(0).unwrap();
+                            let col = full_match.start();
+                            let match_len = full_match.end() - full_match.start();
+                            undefined.push((line_num, col, match_len, reference.to_string()));
+                            reported_refs.insert(reference_lower, true);
+                        }
+                    }
+                }
+            }
         }
-
+        
         undefined
     }
 }
@@ -262,6 +252,7 @@ impl Rule for MD052ReferenceLinkImages {
         let mut warnings = Vec::new();
         let references = self.extract_references(content);
 
+        // Use optimized detection method with cached link/image data
         for (line_num, col, match_len, reference) in
             self.find_undefined_references(content, &references, ctx)
         {
@@ -279,8 +270,7 @@ impl Rule for MD052ReferenceLinkImages {
                 end_line,
                 end_column: end_col,
                 message: format!(
-                    "Reference '{
-            }' not found",
+                    "Reference '{}' not found",
                     reference
                 ),
                 severity: Severity::Warning,

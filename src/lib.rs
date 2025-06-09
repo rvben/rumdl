@@ -16,7 +16,7 @@ pub mod python;
 pub use rules::heading_utils::{Heading, HeadingStyle};
 pub use rules::*;
 
-pub use crate::lint_context::{LintContext, LineInfo, ListItemInfo};
+pub use crate::lint_context::{LintContext, LineInfo, ListItemInfo, BareUrl};
 use crate::rule::{LintResult, Rule, RuleCategory};
 use crate::utils::document_structure::DocumentStructure;
 use std::time::Instant;

@@ -152,17 +152,16 @@ impl MD053LinkImageReferenceDefinitions {
     /// Find all link and image reference reference usages in the content.
     ///
     /// This method returns a HashSet of all normalized reference IDs found in usage.
-    /// It leverages DocumentStructure for efficiency.
+    /// It leverages cached data from LintContext for efficiency.
     fn find_usages(&self, content: &str, doc_structure: &DocumentStructure, ctx: &crate::lint_context::LintContext) -> HashSet<String> {
         let lines: Vec<&str> = content.lines().collect();
         let mut usages: HashSet<String> = HashSet::new();
 
-        // 1. Add usages from pre-parsed reference links in DocumentStructure
-        for link in &doc_structure.links {
+        // 1. Add usages from cached reference links in LintContext
+        for link in &ctx.links {
             if link.is_reference {
                 if let Some(ref_id) = &link.reference_id {
                     // Ensure the link itself is not inside a code block line
-                    // (DocumentStructure parsing should already handle code spans)
                     if !doc_structure.is_in_code_block(link.line) {
                         usages.insert(Self::unescape_reference(ref_id).to_lowercase());
                     }
@@ -170,8 +169,8 @@ impl MD053LinkImageReferenceDefinitions {
             }
         }
 
-        // 2. Add usages from pre-parsed reference images in DocumentStructure
-        for image in &doc_structure.images {
+        // 2. Add usages from cached reference images in LintContext
+        for image in &ctx.images {
             if image.is_reference {
                 if let Some(ref_id) = &image.reference_id {
                     // Ensure the image itself is not inside a code block line

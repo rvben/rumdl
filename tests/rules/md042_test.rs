@@ -288,3 +288,38 @@ Final: []()"#;
     assert_eq!(warnings[0].line, 3);  // Empty link
     assert_eq!(warnings[1].line, 15); // Final
 }
+
+#[test]
+fn test_md042_reference_links() {
+    let rule = MD042NoEmptyLinks::new();
+    
+    // Test valid reference link
+    let content = "[text][ref]\n\n[ref]: https://example.com";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty());
+    
+    // Test empty text reference link
+    let content = "[][ref]\n\n[ref]: https://example.com";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1);
+    
+    // Test reference link with missing definition
+    let content = "[text][missing]";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1); // Empty URL due to missing reference
+    
+    // Test empty text with implicit reference
+    let content = "[text][]\n\n[text]: https://example.com";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty()); // Valid implicit reference
+    
+    // Test both text and URL empty 
+    let content = "[][]";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1); // Empty text and no matching reference
+}

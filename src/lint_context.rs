@@ -17,7 +17,7 @@ lazy_static! {
             \[([^\]]*)\]      # Reference ID in group 3
         )"
     ).unwrap();
-    
+
     // Image pattern (similar to links but with ! prefix)
     // Use (?s) flag to make . match newlines
     static ref IMAGE_PATTERN: Regex = Regex::new(
@@ -29,16 +29,31 @@ lazy_static! {
             \[([^\]]*)\]      # Reference ID in group 3
         )"
     ).unwrap();
-    
+
     // Reference definition pattern
     static ref REF_DEF_PATTERN: Regex = Regex::new(
         r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
     ).unwrap();
-    
+
     // Code span pattern - matches backticks and captures content
     // This handles multi-backtick code spans correctly
     static ref CODE_SPAN_PATTERN: Regex = Regex::new(
         r"`+"
+    ).unwrap();
+
+    // Pattern for bare URLs
+    static ref BARE_URL_PATTERN: Regex = Regex::new(
+        r#"(https?|ftp)://[^\s<>\[\]()\\'"`]+(?:\.[^\s<>\[\]()\\'"`]+)*(?::\d+)?(?:/[^\s<>\[\]()\\'"`]*)?(?:\?[^\s<>\[\]()\\'"`]*)?(?:#[^\s<>\[\]()\\'"`]*)?"#
+    ).unwrap();
+
+    // Pattern for email addresses
+    static ref BARE_EMAIL_PATTERN: Regex = Regex::new(
+        r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+    ).unwrap();
+
+    // Pattern for angle bracket links (to exclude from bare URL detection)
+    static ref ANGLE_BRACKET_PATTERN: Regex = Regex::new(
+        r"<((?:https?|ftp)://[^>]+|[^@\s]+@[^@\s]+\.[^@\s>]+)>"
     ).unwrap();
 }
 
@@ -59,6 +74,8 @@ pub struct LineInfo {
     pub list_item: Option<ListItemInfo>,
     /// Heading information if this line is a heading
     pub heading: Option<HeadingInfo>,
+    /// Blockquote information if this line is a blockquote
+    pub blockquote: Option<BlockquoteInfo>,
 }
 
 /// Information about a list item
@@ -186,6 +203,46 @@ pub struct HeadingInfo {
     pub closing_sequence: String,
 }
 
+/// Information about a blockquote line
+#[derive(Debug, Clone)]
+pub struct BlockquoteInfo {
+    /// Nesting level (1 for >, 2 for >>, etc.)
+    pub nesting_level: usize,
+    /// The indentation before the blockquote marker
+    pub indent: String,
+    /// Column where the first > starts (0-based)
+    pub marker_column: usize,
+    /// The blockquote prefix (e.g., "> ", ">> ", etc.)
+    pub prefix: String,
+    /// Content after the blockquote marker(s)
+    pub content: String,
+    /// Whether the line has no space after the marker
+    pub has_no_space_after_marker: bool,
+    /// Whether the line has multiple spaces after the marker
+    pub has_multiple_spaces_after_marker: bool,
+    /// Whether this is an empty blockquote line needing MD028 fix
+    pub needs_md028_fix: bool,
+}
+
+/// Information about a bare URL or email
+#[derive(Debug, Clone)]
+pub struct BareUrl {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Start column (0-indexed) in the line
+    pub start_col: usize,
+    /// End column (0-indexed) in the line
+    pub end_col: usize,
+    /// Byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+    /// The URL or email text
+    pub text: String,
+    /// Whether this is an email (true) or URL (false)
+    pub is_email: bool,
+}
+
 /// Information about a list block
 #[derive(Debug, Clone)]
 pub struct ListBlock {
@@ -216,6 +273,7 @@ pub struct LintContext<'a> {
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
     pub code_spans: Vec<CodeSpan>, // Pre-parsed inline code spans
     pub list_blocks: Vec<ListBlock>, // Pre-parsed list blocks
+    pub bare_urls: Vec<BareUrl>, // Pre-parsed bare URLs and emails
 }
 
 impl<'a> LintContext<'a> {
@@ -234,20 +292,21 @@ impl<'a> LintContext<'a> {
                     line_offsets.push(i + 1);
                 }
             }
-            
+
             // Detect code blocks once and cache them
             let code_blocks = CodeBlockUtils::detect_code_blocks(content);
-            
+
             // Pre-compute line information
             let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
-            
+
             // Parse links, images, references, code spans, and list blocks
             let links = Self::parse_links(content, &lines, &code_blocks);
             let images = Self::parse_images(content, &lines, &code_blocks);
             let reference_defs = Self::parse_reference_defs(content, &lines);
             let code_spans = Self::parse_code_spans(content, &lines);
             let list_blocks = Self::parse_list_blocks(&lines);
-            
+            let bare_urls = Self::parse_bare_urls(content, &lines, &code_blocks, &links, &images, &reference_defs);
+
             return Self {
                 content,
                 ast,
@@ -259,6 +318,7 @@ impl<'a> LintContext<'a> {
                 reference_defs,
                 code_spans,
                 list_blocks,
+                bare_urls,
             };
         }
 
@@ -294,20 +354,21 @@ impl<'a> LintContext<'a> {
                 line_offsets.push(i + 1);
             }
         }
-        
+
         // Detect code blocks once and cache them
         let code_blocks = CodeBlockUtils::detect_code_blocks(content);
-        
+
         // Pre-compute line information
         let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
-        
+
         // Parse links, images, references, code spans, and list blocks
         let links = Self::parse_links(content, &lines, &code_blocks);
         let images = Self::parse_images(content, &lines, &code_blocks);
         let reference_defs = Self::parse_reference_defs(content, &lines);
         let code_spans = Self::parse_code_spans(content, &lines);
         let list_blocks = Self::parse_list_blocks(&lines);
-        
+        let bare_urls = Self::parse_bare_urls(content, &lines, &code_blocks, &links, &images, &reference_defs);
+
         Self {
             content,
             ast,
@@ -319,6 +380,7 @@ impl<'a> LintContext<'a> {
             reference_defs,
             code_spans,
             list_blocks,
+            bare_urls,
         }
     }
 
@@ -336,18 +398,18 @@ impl<'a> LintContext<'a> {
             }
         }
     }
-    
+
     /// Check if a position is within a code block or code span
     pub fn is_in_code_block_or_span(&self, pos: usize) -> bool {
         // Check code blocks first
         if CodeBlockUtils::is_in_code_block_or_span(&self.code_blocks, pos) {
             return true;
         }
-        
+
         // Check inline code spans
         self.code_spans.iter().any(|span| pos >= span.byte_offset && pos < span.byte_end)
     }
-    
+
     /// Get line information by line number (1-indexed)
     pub fn line_info(&self, line_num: usize) -> Option<&LineInfo> {
         if line_num > 0 {
@@ -356,12 +418,12 @@ impl<'a> LintContext<'a> {
             None
         }
     }
-    
+
     /// Get byte offset for a line number (1-indexed)
     pub fn line_to_byte_offset(&self, line_num: usize) -> Option<usize> {
         self.line_info(line_num).map(|info| info.byte_offset)
     }
-    
+
     /// Get URL for a reference link/image by its ID
     pub fn get_reference_url(&self, ref_id: &str) -> Option<&str> {
         let normalized_id = ref_id.to_lowercase();
@@ -370,7 +432,7 @@ impl<'a> LintContext<'a> {
             .find(|def| def.id == normalized_id)
             .map(|def| def.url.as_str())
     }
-    
+
     /// Get links on a specific line
     pub fn links_on_line(&self, line_num: usize) -> Vec<&ParsedLink> {
         self.links
@@ -378,7 +440,7 @@ impl<'a> LintContext<'a> {
             .filter(|link| link.line == line_num)
             .collect()
     }
-    
+
     /// Get images on a specific line
     pub fn images_on_line(&self, line_num: usize) -> Vec<&ParsedImage> {
         self.images
@@ -386,41 +448,41 @@ impl<'a> LintContext<'a> {
             .filter(|img| img.line == line_num)
             .collect()
     }
-    
+
     /// Check if a line is part of a list block
     pub fn is_in_list_block(&self, line_num: usize) -> bool {
-        self.list_blocks.iter().any(|block| 
+        self.list_blocks.iter().any(|block|
             line_num >= block.start_line && line_num <= block.end_line
         )
     }
-    
+
     /// Get the list block containing a specific line
     pub fn list_block_for_line(&self, line_num: usize) -> Option<&ListBlock> {
-        self.list_blocks.iter().find(|block| 
+        self.list_blocks.iter().find(|block|
             line_num >= block.start_line && line_num <= block.end_line
         )
     }
-    
+
     /// Parse all links in the content
     fn parse_links(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<ParsedLink> {
         let mut links = Vec::new();
-        
+
         // Parse links across the entire content, not line by line
         for cap in LINK_PATTERN.captures_iter(content) {
             let full_match = cap.get(0).unwrap();
             let match_start = full_match.start();
             let match_end = full_match.end();
-            
+
             // Skip if this is actually an image (preceded by !)
             if match_start > 0 && content.as_bytes().get(match_start - 1) == Some(&b'!') {
                 continue;
             }
-            
+
             // Skip if in code block or span
             if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
                 continue;
             }
-            
+
             // Find which line this link starts on
             let mut line_num = 1;
             let mut col_start = match_start;
@@ -432,7 +494,7 @@ impl<'a> LintContext<'a> {
                     break;
                 }
             }
-            
+
             // Find which line this link ends on (and calculate column on that line)
             let mut end_line_num = 1;
             let mut col_end = match_end;
@@ -444,7 +506,7 @@ impl<'a> LintContext<'a> {
                     break;
                 }
             }
-            
+
             // For single-line links, use the same approach as before
             if line_num == end_line_num {
                 // col_end is already correct
@@ -452,9 +514,9 @@ impl<'a> LintContext<'a> {
                 // For multi-line links, col_end represents the column on the ending line
                 // which is what we want
             }
-            
+
             let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
-            
+
             if let Some(inline_url) = cap.get(2) {
                 // Inline link
                 links.push(ParsedLink {
@@ -476,7 +538,7 @@ impl<'a> LintContext<'a> {
                 } else {
                     ref_id_str.to_lowercase()
                 };
-                
+
                 links.push(ParsedLink {
                     line: line_num,
                     start_col: col_start,
@@ -490,25 +552,25 @@ impl<'a> LintContext<'a> {
                 });
             }
         }
-        
+
         links
     }
-    
+
     /// Parse all images in the content
     fn parse_images(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<ParsedImage> {
         let mut images = Vec::new();
-        
+
         // Parse images across the entire content, not line by line
         for cap in IMAGE_PATTERN.captures_iter(content) {
             let full_match = cap.get(0).unwrap();
             let match_start = full_match.start();
             let match_end = full_match.end();
-            
+
             // Skip if in code block or span
             if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
                 continue;
             }
-            
+
             // Find which line this image starts on
             let mut line_num = 1;
             let mut col_start = match_start;
@@ -520,7 +582,7 @@ impl<'a> LintContext<'a> {
                     break;
                 }
             }
-            
+
             // Find which line this image ends on (and calculate column on that line)
             let mut end_line_num = 1;
             let mut col_end = match_end;
@@ -532,7 +594,7 @@ impl<'a> LintContext<'a> {
                     break;
                 }
             }
-            
+
             // For single-line images, use the same approach as before
             if line_num == end_line_num {
                 // col_end is already correct
@@ -540,9 +602,9 @@ impl<'a> LintContext<'a> {
                 // For multi-line images, col_end represents the column on the ending line
                 // which is what we want
             }
-            
+
             let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
-            
+
             if let Some(inline_url) = cap.get(2) {
                 // Inline image
                 images.push(ParsedImage {
@@ -564,7 +626,7 @@ impl<'a> LintContext<'a> {
                 } else {
                     ref_id_str.to_lowercase()
                 };
-                
+
                 images.push(ParsedImage {
                     line: line_num,
                     start_col: col_start,
@@ -578,30 +640,30 @@ impl<'a> LintContext<'a> {
                 });
             }
         }
-        
+
         images
     }
-    
+
     /// Parse reference definitions
     fn parse_reference_defs(_content: &str, lines: &[LineInfo]) -> Vec<ReferenceDef> {
         let mut refs = Vec::new();
-        
+
         for (line_idx, line_info) in lines.iter().enumerate() {
             // Skip lines in code blocks
             if line_info.in_code_block {
                 continue;
             }
-            
+
             let line = &line_info.content;
             let line_num = line_idx + 1;
-            
+
             if let Some(cap) = REF_DEF_PATTERN.captures(line) {
                 let id = cap.get(1).unwrap().as_str().to_lowercase();
                 let url = cap.get(2).unwrap().as_str().to_string();
                 let title = cap.get(3)
                     .or_else(|| cap.get(4))
                     .map(|m| m.as_str().to_string());
-                
+
                 refs.push(ReferenceDef {
                     line: line_num,
                     id,
@@ -610,26 +672,29 @@ impl<'a> LintContext<'a> {
                 });
             }
         }
-        
+
         refs
     }
-    
+
     /// Pre-compute line information
     fn compute_line_info(content: &str, line_offsets: &[usize], code_blocks: &[(usize, usize)]) -> Vec<LineInfo> {
         let mut lines = Vec::new();
         let content_lines: Vec<&str> = content.lines().collect();
-        
+
         // Regex for list detection - allow any whitespace including no space (to catch malformed lists)
         let unordered_regex = regex::Regex::new(r"^(\s*)([-*+])([ \t]*)(.*)").unwrap();
         let ordered_regex = regex::Regex::new(r"^(\s*)(\d+)([.)])([ \t]*)(.*)").unwrap();
-        
+
         // Regex for blockquote prefix
         let blockquote_regex = regex::Regex::new(r"^(\s*>\s*)(.*)").unwrap();
-        
+
         // Regex for heading detection
         let atx_heading_regex = regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap();
         let setext_underline_regex = regex::Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
-        
+
+        // Regex for blockquote detection
+        let blockquote_regex_full = regex::Regex::new(r"^(\s*)(>+)(\s*)(.*)$").unwrap();
+
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
             let indent = line.len() - line.trim_start().len();
@@ -650,10 +715,10 @@ impl<'a> LintContext<'a> {
                 let is_multiline = block_content.contains('\n');
                 let is_fenced = block_content.starts_with("```") || block_content.starts_with("~~~");
                 let is_indented = !is_fenced && block_content.lines().all(|l| l.starts_with("    ") || l.starts_with("\t") || l.trim().is_empty());
-                
+
                 byte_offset >= start && byte_offset < end && (is_multiline || is_fenced || is_indented)
             });
-            
+
             // Detect list items
             let list_item = if !in_code_block && !is_blank {
                 // Strip blockquote prefix if present for list detection
@@ -664,7 +729,7 @@ impl<'a> LintContext<'a> {
                 } else {
                     (line.as_ref(), 0)
                 };
-                
+
                 if let Some(caps) = unordered_regex.captures(line_for_list_check) {
                     let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
                     let marker = caps.get(2).map_or("", |m| m.as_str());
@@ -672,7 +737,7 @@ impl<'a> LintContext<'a> {
                     let content = caps.get(4).map_or("", |m| m.as_str());
                     let marker_column = blockquote_prefix_len + leading_spaces.len();
                     let content_column = marker_column + marker.len() + spacing.len();
-                    
+
                     // Check if this is likely emphasis or not a list item
                     if spacing.is_empty() {
                         // No space after marker - check if it's likely emphasis or just text
@@ -717,7 +782,7 @@ impl<'a> LintContext<'a> {
                     let marker = format!("{}{}", number_str, delimiter);
                     let marker_column = blockquote_prefix_len + leading_spaces.len();
                     let content_column = marker_column + marker.len() + spacing.len();
-                    
+
                     // Check if this is likely not a list item
                     if spacing.is_empty() && content.len() > 0 && content.chars().next().unwrap().is_alphabetic() {
                         // No space after marker and starts with alphabetic, likely not intended as list
@@ -738,7 +803,7 @@ impl<'a> LintContext<'a> {
             } else {
                 None
             };
-            
+
             lines.push(LineInfo {
                 content: line.to_string(),
                 byte_offset,
@@ -747,9 +812,10 @@ impl<'a> LintContext<'a> {
                 in_code_block,
                 list_item,
                 heading: None, // Will be populated in second pass for Setext headings
+                blockquote: None, // Will be populated after line creation
             });
         }
-        
+
         // Detect front matter boundaries
         let mut in_front_matter = false;
         let mut front_matter_end = 0;
@@ -762,30 +828,67 @@ impl<'a> LintContext<'a> {
                 }
             }
         }
-        
-        // Second pass: detect headings (including Setext which needs look-ahead)
+
+        // Second pass: detect headings (including Setext which needs look-ahead) and blockquotes
         for i in 0..content_lines.len() {
-            if lines[i].in_code_block || lines[i].is_blank {
+            if lines[i].in_code_block {
                 continue;
             }
-            
+
             // Skip lines in front matter
             if in_front_matter && i <= front_matter_end {
                 continue;
             }
-            
+
             let line = content_lines[i];
-            
+
+            // Check for blockquotes (even on blank lines within blockquotes)
+            if let Some(caps) = blockquote_regex_full.captures(line) {
+                let indent_str = caps.get(1).map_or("", |m| m.as_str());
+                let markers = caps.get(2).map_or("", |m| m.as_str());
+                let spaces_after = caps.get(3).map_or("", |m| m.as_str());
+                let content = caps.get(4).map_or("", |m| m.as_str());
+
+                let nesting_level = markers.chars().filter(|&c| c == '>').count();
+                let marker_column = indent_str.len();
+
+                // Build the prefix (indentation + markers + space)
+                let prefix = format!("{}{}{}", indent_str, markers, spaces_after);
+
+                // Check for various blockquote issues
+                let has_no_space = spaces_after.is_empty() && !content.is_empty();
+                let has_multiple_spaces = spaces_after.len() > 1;
+
+                // Check if needs MD028 fix (empty blockquote without proper spacing)
+                let needs_md028_fix = content.trim().is_empty() && spaces_after.is_empty();
+
+                lines[i].blockquote = Some(BlockquoteInfo {
+                    nesting_level,
+                    indent: indent_str.to_string(),
+                    marker_column,
+                    prefix,
+                    content: content.to_string(),
+                    has_no_space_after_marker: has_no_space,
+                    has_multiple_spaces_after_marker: has_multiple_spaces,
+                    needs_md028_fix,
+                });
+            }
+
+            // Skip heading detection for blank lines
+            if lines[i].is_blank {
+                continue;
+            }
+
             // Check for ATX headings
             if let Some(caps) = atx_heading_regex.captures(line) {
                 let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
                 let hashes = caps.get(2).map_or("", |m| m.as_str());
                 let spaces_after = caps.get(3).map_or("", |m| m.as_str());
                 let rest = caps.get(4).map_or("", |m| m.as_str());
-                
+
                 let level = hashes.len() as u8;
                 let marker_column = leading_spaces.len();
-                
+
                 // Check for closing sequence
                 let (text, has_closing, closing_seq) = {
                     // Find the start of a potential closing sequence
@@ -796,11 +899,11 @@ impl<'a> LintContext<'a> {
                         while start_of_hashes > 0 && trimmed_rest.chars().nth(start_of_hashes - 1) == Some('#') {
                             start_of_hashes -= 1;
                         }
-                        
+
                         // Check if this is a valid closing sequence (all hashes to end of line)
                         let potential_closing = &trimmed_rest[start_of_hashes..];
                         let is_all_hashes = potential_closing.chars().all(|c| c == '#');
-                        
+
                         if is_all_hashes {
                             // This is a closing sequence, regardless of spacing
                             let closing_hashes = potential_closing.to_string();
@@ -813,9 +916,9 @@ impl<'a> LintContext<'a> {
                         (rest.to_string(), false, String::new())
                     }
                 };
-                
+
                 let content_column = marker_column + hashes.len() + spaces_after.len();
-                
+
                 lines[i].heading = Some(HeadingInfo {
                     level,
                     style: HeadingStyle::ATX,
@@ -835,11 +938,11 @@ impl<'a> LintContext<'a> {
                     if in_front_matter && i + 1 <= front_matter_end {
                         continue;
                     }
-                    
+
                     let underline = next_line.trim();
                     let level = if underline.starts_with('=') { 1 } else { 2 };
                     let style = if level == 1 { HeadingStyle::Setext1 } else { HeadingStyle::Setext2 };
-                    
+
                     lines[i].heading = Some(HeadingInfo {
                         level,
                         style,
@@ -853,27 +956,27 @@ impl<'a> LintContext<'a> {
                 }
             }
         }
-        
+
         lines
     }
-    
+
     /// Parse all inline code spans in the content
     fn parse_code_spans(content: &str, lines: &[LineInfo]) -> Vec<CodeSpan> {
         let mut code_spans = Vec::new();
-        
+
         // Quick check - if no backticks, no code spans
         if !content.contains('`') {
             return code_spans;
         }
-        
+
         let mut pos = 0;
         let bytes = content.as_bytes();
-        
+
         while pos < bytes.len() {
             // Find the next backtick
             if let Some(backtick_start) = content[pos..].find('`') {
                 let start_pos = pos + backtick_start;
-                
+
                 // Skip if this backtick is inside a code block
                 let mut in_code_block = false;
                 for (line_idx, line_info) in lines.iter().enumerate() {
@@ -882,12 +985,12 @@ impl<'a> LintContext<'a> {
                         break;
                     }
                 }
-                
+
                 if in_code_block {
                     pos = start_pos + 1;
                     continue;
                 }
-                
+
                 // Count consecutive backticks
                 let mut backtick_count = 0;
                 let mut i = start_pos;
@@ -895,23 +998,23 @@ impl<'a> LintContext<'a> {
                     backtick_count += 1;
                     i += 1;
                 }
-                
+
                 // Look for matching closing backticks
                 let search_start = start_pos + backtick_count;
                 let closing_pattern = &content[start_pos..start_pos + backtick_count];
-                
+
                 if let Some(rel_end) = content[search_start..].find(closing_pattern) {
                     // Check that the closing backticks are not followed by more backticks
                     let end_pos = search_start + rel_end;
                     let check_pos = end_pos + backtick_count;
-                    
+
                     // Make sure we have exactly the right number of backticks (not more)
                     if check_pos >= bytes.len() || bytes[check_pos] != b'`' {
                         // We found a valid code span
                         let content_start = start_pos + backtick_count;
                         let content_end = end_pos;
                         let span_content = content[content_start..content_end].to_string();
-                        
+
                         // Find which line this code span starts on
                         let mut line_num = 1;
                         let mut col_start = start_pos;
@@ -923,7 +1026,7 @@ impl<'a> LintContext<'a> {
                                 break;
                             }
                         }
-                        
+
                         // Find end column
                         let mut col_end = end_pos + backtick_count;
                         for line_info in lines.iter() {
@@ -933,7 +1036,7 @@ impl<'a> LintContext<'a> {
                                 break;
                             }
                         }
-                        
+
                         code_spans.push(CodeSpan {
                             line: line_num,
                             start_col: col_start,
@@ -943,13 +1046,13 @@ impl<'a> LintContext<'a> {
                             backtick_count,
                             content: span_content,
                         });
-                        
+
                         // Continue searching after this code span
                         pos = end_pos + backtick_count;
                         continue;
                     }
                 }
-                
+
                 // No matching closing backticks found, move past these opening backticks
                 pos = start_pos + backtick_count;
             } else {
@@ -957,23 +1060,23 @@ impl<'a> LintContext<'a> {
                 break;
             }
         }
-        
+
         code_spans
     }
-    
+
     /// Parse all list blocks in the content
     fn parse_list_blocks(lines: &[LineInfo]) -> Vec<ListBlock> {
         let mut list_blocks = Vec::new();
         let mut current_block: Option<ListBlock> = None;
         let mut last_list_item_line = 0;
         let mut current_indent_level = 0;
-        
+
         // Regex for blockquote prefix detection
         let blockquote_re = regex::Regex::new(r"^(\s*>+\s*)").unwrap();
-        
+
         for (line_idx, line_info) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
-            
+
             // Handle code blocks - they should continue the list if properly indented
             if line_info.in_code_block {
                 if let Some(ref mut block) = current_block {
@@ -991,32 +1094,32 @@ impl<'a> LintContext<'a> {
                 }
                 continue;
             }
-            
+
             // Extract blockquote prefix if any
             let blockquote_prefix = if let Some(caps) = blockquote_re.captures(&line_info.content) {
                 caps.get(0).unwrap().as_str().to_string()
             } else {
                 String::new()
             };
-            
+
             // Check if this line is a list item
             if let Some(list_item) = &line_info.list_item {
                 // Calculate nesting level based on indentation
                 let item_indent = list_item.marker_column;
                 let nesting = item_indent / 2; // Assume 2-space indentation for nesting
-                
+
                 if let Some(ref mut block) = current_block {
                     // Check if this continues the current block
-                    let same_type = (block.is_ordered && list_item.is_ordered) || 
+                    let same_type = (block.is_ordered && list_item.is_ordered) ||
                                    (!block.is_ordered && !list_item.is_ordered);
                     let same_context = block.blockquote_prefix == blockquote_prefix;
                     let reasonable_distance = line_num <= last_list_item_line + 2; // Allow one blank line
-                    
-                    // For unordered lists, also check marker consistency  
-                    let marker_compatible = block.is_ordered || 
-                                          block.marker.is_none() || 
+
+                    // For unordered lists, also check marker consistency
+                    let marker_compatible = block.is_ordered ||
+                                          block.marker.is_none() ||
                                           block.marker.as_ref() == Some(&list_item.marker);
-                    
+
                     // Check if there's non-list content between the last item and this one
                     let has_non_list_content = {
                         let mut found_non_list = false;
@@ -1036,12 +1139,12 @@ impl<'a> LintContext<'a> {
                         }
                         found_non_list
                     };
-                    
+
                     if same_type && same_context && reasonable_distance && marker_compatible && !has_non_list_content {
                         // Extend current block
                         block.end_line = line_num;
                         block.item_lines.push(line_num);
-                        
+
                         // Update marker consistency for unordered lists
                         if !block.is_ordered && block.marker.is_some() {
                             if block.marker.as_ref() != Some(&list_item.marker) {
@@ -1052,7 +1155,7 @@ impl<'a> LintContext<'a> {
                     } else {
                         // End current block and start a new one
                         list_blocks.push(block.clone());
-                        
+
                         *block = ListBlock {
                             start_line: line_num,
                             end_line: line_num,
@@ -1075,17 +1178,17 @@ impl<'a> LintContext<'a> {
                         nesting_level: nesting,
                     });
                 }
-                
+
                 last_list_item_line = line_num;
                 current_indent_level = item_indent;
             } else if let Some(ref mut block) = current_block {
                 // Not a list item - check if it continues the current block
-                
+
                 // For MD032 compatibility, we use a simple approach:
                 // - Indented lines continue the list
                 // - Blank lines followed by indented content continue the list
                 // - Everything else ends the list
-                
+
                 if line_info.indent >= current_indent_level + 2 {
                     // Indented line continues the list
                     block.end_line = line_num;
@@ -1094,24 +1197,24 @@ impl<'a> LintContext<'a> {
                     // We only include blank lines that are followed by more list content
                     let mut check_idx = line_idx + 1;
                     let mut found_continuation = false;
-                    
+
                     // Skip additional blank lines
                     while check_idx < lines.len() && lines[check_idx].is_blank {
                         check_idx += 1;
                     }
-                    
+
                     if check_idx < lines.len() {
                         let next_line = &lines[check_idx];
                         // Check if followed by indented content (list continuation)
                         if !next_line.in_code_block && next_line.indent >= current_indent_level + 2 {
                             found_continuation = true;
-                        } 
+                        }
                         // Check if followed by another list item at the same level
                         else if !next_line.in_code_block && next_line.list_item.is_some() {
                             if let Some(item) = &next_line.list_item {
                                 let next_blockquote_prefix = blockquote_re.find(&next_line.content)
                                     .map_or(String::new(), |m| m.as_str().to_string());
-                                if item.marker_column == current_indent_level && 
+                                if item.marker_column == current_indent_level &&
                                    item.is_ordered == block.is_ordered &&
                                    block.blockquote_prefix.trim() == next_blockquote_prefix.trim() {
                                     found_continuation = true;
@@ -1119,7 +1222,7 @@ impl<'a> LintContext<'a> {
                             }
                         }
                     }
-                    
+
                     if found_continuation {
                         // Include the blank line in the block
                         block.end_line = line_num;
@@ -1130,10 +1233,10 @@ impl<'a> LintContext<'a> {
                     }
                 } else {
                     // Check for lazy continuation - non-indented line immediately after a list item
-                    let is_lazy_continuation = last_list_item_line == line_num - 1 && 
+                    let is_lazy_continuation = last_list_item_line == line_num - 1 &&
                                              !line_info.heading.is_some() &&
                                              !line_info.is_blank;
-                    
+
                     if is_lazy_continuation {
                         // Additional check: if the line starts with uppercase and looks like a new sentence,
                         // it's probably not a continuation
@@ -1143,9 +1246,9 @@ impl<'a> LintContext<'a> {
                         } else {
                             line_info.content.trim()
                         };
-                        
+
                         let starts_with_uppercase = content_to_check.chars().next().map_or(false, |c| c.is_uppercase());
-                        
+
                         // If it starts with uppercase and the previous line ended with punctuation,
                         // it's likely a new paragraph, not a continuation
                         if starts_with_uppercase && last_list_item_line > 0 {
@@ -1164,16 +1267,228 @@ impl<'a> LintContext<'a> {
                 }
             }
         }
-        
+
         // Don't forget the last block
         if let Some(block) = current_block {
             list_blocks.push(block);
         }
-        
+
         // Merge adjacent blocks that should be one
         merge_adjacent_list_blocks(&mut list_blocks);
-        
+
         list_blocks
+    }
+
+    /// Parse all bare URLs and emails in the content
+    fn parse_bare_urls(
+        content: &str,
+        lines: &[LineInfo],
+        code_blocks: &[(usize, usize)],
+        links: &[ParsedLink],
+        images: &[ParsedImage],
+        reference_defs: &[ReferenceDef],
+    ) -> Vec<BareUrl> {
+        let mut bare_urls = Vec::new();
+
+        // Quick check - if no URLs or emails, return empty
+        if !content.contains("http://") && !content.contains("https://") &&
+           !content.contains("ftp://") && !content.contains('@') {
+            return bare_urls;
+        }
+
+        // Build exclusion ranges from links, images, and angle bracket links
+        let mut excluded_ranges: Vec<(usize, usize)> = Vec::new();
+
+        // Exclude link URLs
+        for link in links {
+            if !link.url.is_empty() {
+                excluded_ranges.push((link.byte_offset, link.byte_end));
+            }
+        }
+
+        // Exclude image URLs
+        for image in images {
+            if !image.url.is_empty() {
+                excluded_ranges.push((image.byte_offset, image.byte_end));
+            }
+        }
+
+        // Exclude angle bracket links <url> or <email>
+        for angle_match in ANGLE_BRACKET_PATTERN.find_iter(content) {
+            excluded_ranges.push((angle_match.start(), angle_match.end()));
+        }
+
+        // Sort and merge overlapping ranges
+        excluded_ranges.sort_by_key(|r| r.0);
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (start, end) in excluded_ranges {
+            if let Some((_, last_end)) = merged.last_mut() {
+                if *last_end >= start {
+                    *last_end = (*last_end).max(end);
+                    continue;
+                }
+            }
+            merged.push((start, end));
+        }
+
+        // Find bare URLs
+        for url_match in BARE_URL_PATTERN.find_iter(content) {
+            let url_start = url_match.start();
+            let mut url_end = url_match.end();
+
+            // Skip if in code block or code span
+            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, url_start) {
+                continue;
+            }
+
+            // Skip if within any excluded range (link/image)
+            let in_any_range = merged.iter()
+                .any(|(start, end)| url_start >= *start && url_end <= *end);
+            if in_any_range {
+                continue;
+            }
+
+            // Check if it's in a reference definition line
+            let mut is_ref_def = false;
+            for ref_def in reference_defs {
+                if let Some(line_info) = lines.get(ref_def.line - 1) {
+                    let line_start = line_info.byte_offset;
+                    let line_end = if ref_def.line < lines.len() {
+                        lines[ref_def.line].byte_offset
+                    } else {
+                        content.len()
+                    };
+                    if url_start >= line_start && url_start < line_end {
+                        is_ref_def = true;
+                        break;
+                    }
+                }
+            }
+            if is_ref_def {
+                continue;
+            }
+
+            // Trim trailing punctuation
+            let raw_url = &content[url_start..url_end];
+            let trailing_punct = ['.', ',', ';', ':', '!', '?'];
+            while url_end > url_start {
+                if let Some(last_char) = raw_url.chars().last() {
+                    if trailing_punct.contains(&last_char) {
+                        url_end -= last_char.len_utf8();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Manual boundary check
+            let before = if url_start == 0 {
+                None
+            } else {
+                content.get(url_start - 1..url_start)
+            };
+            let after = content.get(url_end..url_end + 1);
+            let is_valid_boundary = before.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_"
+            }) && after.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_"
+            });
+            if !is_valid_boundary {
+                continue;
+            }
+
+            // Find which line this URL is on
+            let mut line_num = 1;
+            let mut col_start = url_start;
+            for (idx, line_info) in lines.iter().enumerate() {
+                if url_start >= line_info.byte_offset {
+                    line_num = idx + 1;
+                    col_start = url_start - line_info.byte_offset;
+                } else {
+                    break;
+                }
+            }
+
+            // Calculate end column
+            let mut col_end = col_start + (url_end - url_start);
+            if let Some(line_info) = lines.get(line_num - 1) {
+                // For single-line URLs
+                col_end = url_end - line_info.byte_offset;
+            }
+
+            bare_urls.push(BareUrl {
+                line: line_num,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: url_start,
+                byte_end: url_end,
+                text: content[url_start..url_end].to_string(),
+                is_email: false,
+            });
+        }
+
+        // Find bare emails
+        for email_match in BARE_EMAIL_PATTERN.find_iter(content) {
+            let email_start = email_match.start();
+            let email_end = email_match.end();
+
+            // Skip if in code block or code span
+            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, email_start) {
+                continue;
+            }
+
+            // Skip if within any excluded range (link/image)
+            let in_any_range = merged.iter()
+                .any(|(start, end)| email_start >= *start && email_end <= *end);
+            if in_any_range {
+                continue;
+            }
+
+            // Manual boundary check
+            let before = if email_start == 0 {
+                None
+            } else {
+                content.get(email_start - 1..email_start)
+            };
+            let after = content.get(email_end..email_end + 1);
+            let is_valid_boundary = before.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
+            }) && after.map_or(true, |c| {
+                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
+            });
+            if !is_valid_boundary {
+                continue;
+            }
+
+            // Find which line this email is on
+            let mut line_num = 1;
+            let mut col_start = email_start;
+            for (idx, line_info) in lines.iter().enumerate() {
+                if email_start >= line_info.byte_offset {
+                    line_num = idx + 1;
+                    col_start = email_start - line_info.byte_offset;
+                } else {
+                    break;
+                }
+            }
+
+            // Calculate end column
+            let col_end = email_end - lines[line_num - 1].byte_offset;
+
+            bare_urls.push(BareUrl {
+                line: line_num,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: email_start,
+                byte_end: email_end,
+                text: content[email_start..email_end].to_string(),
+                is_email: true,
+            });
+        }
+
+        bare_urls
     }
 }
 
@@ -1182,28 +1497,28 @@ fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
     if list_blocks.len() < 2 {
         return;
     }
-    
+
     let mut merged = Vec::new();
     let mut current = list_blocks[0].clone();
-    
+
     for next in list_blocks.iter().skip(1) {
         // Check if blocks should be merged
         // For MD032 purposes, consecutive unordered lists with different markers
         // should be treated as one list block only if truly consecutive
         let consecutive = next.start_line == current.end_line + 1;
         let only_blank_between = next.start_line == current.end_line + 2;
-        
-        let should_merge = 
+
+        let should_merge =
             next.is_ordered == current.is_ordered &&
             next.blockquote_prefix == current.blockquote_prefix &&
             next.nesting_level == current.nesting_level &&
             (consecutive || (only_blank_between && current.marker == next.marker));
-        
+
         if should_merge {
             // Merge blocks
             current.end_line = next.end_line;
             current.item_lines.extend_from_slice(&next.item_lines);
-            
+
             // Update marker consistency
             if !current.is_ordered && current.marker.is_some() && next.marker.is_some() {
                 if current.marker != next.marker {
@@ -1216,10 +1531,10 @@ fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
             current = next.clone();
         }
     }
-    
+
     // Don't forget the last block
     merged.push(current);
-    
+
     *list_blocks = merged;
 }
 
@@ -1310,10 +1625,10 @@ mod tests {
     fn test_line_info() {
         let content = "# Title\n    indented\n\ncode:\n```rust\nfn main() {}\n```";
         let ctx = LintContext::new(content);
-        
+
         // Test line info
         assert_eq!(ctx.lines.len(), 7);
-        
+
         // Line 1: "# Title"
         let line1 = &ctx.lines[0];
         assert_eq!(line1.content, "# Title");
@@ -1322,19 +1637,19 @@ mod tests {
         assert!(!line1.is_blank);
         assert!(!line1.in_code_block);
         assert!(line1.list_item.is_none());
-        
+
         // Line 2: "    indented"
         let line2 = &ctx.lines[1];
         assert_eq!(line2.content, "    indented");
         assert_eq!(line2.byte_offset, 8);
         assert_eq!(line2.indent, 4);
         assert!(!line2.is_blank);
-        
+
         // Line 3: "" (blank)
         let line3 = &ctx.lines[2];
         assert_eq!(line3.content, "");
         assert!(line3.is_blank);
-        
+
         // Test helper methods
         assert_eq!(ctx.line_to_byte_offset(1), Some(0));
         assert_eq!(ctx.line_to_byte_offset(2), Some(8));
@@ -1346,7 +1661,7 @@ mod tests {
     fn test_list_item_detection() {
         let content = "- Unordered item\n  * Nested item\n1. Ordered item\n   2) Nested ordered\n\nNot a list";
         let ctx = LintContext::new(content);
-        
+
         // Line 1: "- Unordered item"
         let line1 = &ctx.lines[0];
         assert!(line1.list_item.is_some());
@@ -1355,14 +1670,14 @@ mod tests {
         assert!(!list1.is_ordered);
         assert_eq!(list1.marker_column, 0);
         assert_eq!(list1.content_column, 2);
-        
+
         // Line 2: "  * Nested item"
         let line2 = &ctx.lines[1];
         assert!(line2.list_item.is_some());
         let list2 = line2.list_item.as_ref().unwrap();
         assert_eq!(list2.marker, "*");
         assert_eq!(list2.marker_column, 2);
-        
+
         // Line 3: "1. Ordered item"
         let line3 = &ctx.lines[2];
         assert!(line3.list_item.is_some());
@@ -1370,7 +1685,7 @@ mod tests {
         assert_eq!(list3.marker, "1.");
         assert!(list3.is_ordered);
         assert_eq!(list3.number, Some(1));
-        
+
         // Line 6: "Not a list"
         let line6 = &ctx.lines[5];
         assert!(line6.list_item.is_none());

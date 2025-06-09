@@ -2,7 +2,6 @@
 ///
 /// See [docs/md028.md](../../docs/md028.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rules::blockquote_utils::BlockquoteUtils;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::{calculate_line_range, LineIndex};
 
@@ -50,9 +49,43 @@ impl Rule for MD028NoBlanksBlockquote {
             return Ok(Vec::new());
         }
 
-        // Always use the structure-based check since it's more reliable
-        let structure = DocumentStructure::new(ctx.content);
-        self.check_with_structure(ctx, &structure)
+        let line_index = LineIndex::new(ctx.content.to_string());
+        let mut warnings = Vec::new();
+
+        // Process all lines using cached blockquote information
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+            
+            // Skip lines in code blocks
+            if line_info.in_code_block {
+                continue;
+            }
+
+            // Check if this is a blockquote that needs MD028 fix
+            if let Some(blockquote) = &line_info.blockquote {
+                if blockquote.needs_md028_fix {
+                    // Calculate precise character range for the entire empty blockquote line
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_line_range(line_num, &line_info.content);
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        message: "Empty blockquote line should contain '>' marker".to_string(),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range_with_length(line_num, 1, line_info.content.len()),
+                            replacement: Self::get_replacement(&blockquote.indent, blockquote.nesting_level),
+                        }),
+                    });
+                }
+            }
+        }
+
+        Ok(warnings)
     }
 
     /// Optimized check using document structure
@@ -61,54 +94,26 @@ impl Rule for MD028NoBlanksBlockquote {
         ctx: &crate::lint_context::LintContext,
         _structure: &DocumentStructure,
     ) -> LintResult {
-        let line_index = LineIndex::new(ctx.content.to_string());
-        let mut warnings = Vec::new();
-        let lines: Vec<&str> = ctx.content.lines().collect();
-
-        // Process all lines to find empty blockquote lines
-        for (line_idx, line) in lines.iter().enumerate() {
-            let line_num = line_idx + 1;
-
-            if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::needs_md028_fix(line) {
-                let level = BlockquoteUtils::get_nesting_level(line);
-                let indent = BlockquoteUtils::extract_indentation(line);
-
-                // Calculate precise character range for the entire empty blockquote line
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_line_range(line_num, line);
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: "Empty blockquote line should contain '>' marker".to_string(),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range_with_length(line_num, 1, line.len()),
-                        replacement: Self::get_replacement(&indent, level),
-                    }),
-                });
-            }
-        }
-
-        Ok(warnings)
+        // Just delegate to the main check method since it now uses cached data
+        self.check(ctx)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let lines: Vec<&str> = ctx.content.lines().collect();
-        let mut result = Vec::with_capacity(lines.len());
-        for line in lines.iter() {
-            if BlockquoteUtils::is_blockquote(line) && BlockquoteUtils::needs_md028_fix(line) {
-                let level = BlockquoteUtils::get_nesting_level(line);
-                let indent = BlockquoteUtils::extract_indentation(line);
-                let replacement = Self::get_replacement(&indent, level);
-                result.push(replacement);
+        let mut result = Vec::with_capacity(ctx.lines.len());
+        
+        for line_info in &ctx.lines {
+            if let Some(blockquote) = &line_info.blockquote {
+                if blockquote.needs_md028_fix {
+                    let replacement = Self::get_replacement(&blockquote.indent, blockquote.nesting_level);
+                    result.push(replacement);
+                } else {
+                    result.push(line_info.content.clone());
+                }
             } else {
-                result.push(line.to_string());
+                result.push(line_info.content.clone());
             }
         }
+        
         Ok(result.join("\n")
             + if ctx.content.ends_with('\n') {
                 "\n"

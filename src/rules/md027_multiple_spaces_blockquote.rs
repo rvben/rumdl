@@ -1,7 +1,6 @@
 use crate::utils::range_utils::{calculate_match_range, LineIndex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::blockquote_utils::BlockquoteUtils;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -42,34 +41,29 @@ impl Rule for MD027MultipleSpacesBlockquote {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
-
         let mut warnings = Vec::new();
 
-        let lines: Vec<&str> = content.lines().collect();
-
-        for (i, &line) in lines.iter().enumerate() {
-            let mut line_processed = false;
-
-            // Part 1: Check existing functionality - valid blockquotes with multiple spaces
-            if BlockquoteUtils::is_blockquote(line)
-                && BlockquoteUtils::has_multiple_spaces_after_marker(line)
-            {
-                // Find the extra spaces after the > marker
-                if let Some(captures) = BLOCKQUOTE_MULTIPLE_SPACES.captures(line) {
-                    let indentation = captures.get(1).map_or("", |m| m.as_str());
-                    let extra_spaces = captures.get(2).map_or("", |m| m.as_str());
-
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+            
+            // Skip lines in code blocks
+            if line_info.in_code_block {
+                continue;
+            }
+            
+            // Check if this line is a blockquote using cached info
+            if let Some(blockquote) = &line_info.blockquote {
+                // Part 1: Check for multiple spaces after the blockquote marker
+                if blockquote.has_multiple_spaces_after_marker {
                     // Calculate the position of the extra spaces
-                    let marker_pos = indentation.len(); // Position of '>'
-                    let extra_spaces_start = marker_pos + 1; // Position after '>'
-                    let extra_spaces_len = extra_spaces.len() - 1; // All spaces except the first one (which is correct)
+                    let extra_spaces_start = blockquote.marker_column + blockquote.nesting_level + 1; // Position after all '>' markers + 1 for the first space
+                    let spaces_in_prefix = blockquote.prefix.chars().skip(blockquote.indent.len() + blockquote.nesting_level).take_while(|&c| c == ' ').count();
+                    let extra_spaces_len = spaces_in_prefix - 1; // All spaces except the first one
 
                     let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                        i + 1,
-                        line,
-                        extra_spaces_start + 1, // Skip the first space (which is correct)
+                        line_num,
+                        &line_info.content,
+                        extra_spaces_start,
                         extra_spaces_len,
                     );
 
@@ -83,24 +77,22 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: {
-                                let start_byte = _line_index.line_col_to_byte_range(i + 1, start_col).start;
-                                let end_byte = _line_index.line_col_to_byte_range(i + 1, end_col).start;
+                                let line_index = LineIndex::new(ctx.content.to_string());
+                                let start_byte = line_index.line_col_to_byte_range(line_num, start_col).start;
+                                let end_byte = line_index.line_col_to_byte_range(line_num, end_col).start;
                                 start_byte..end_byte
                             },
                             replacement: "".to_string(), // Remove the extra spaces
                         }),
                     });
-                    line_processed = true;
                 }
-            }
-
-            // Part 2: Check for malformed blockquote attempts (only if not already processed)
-            if !line_processed {
-                let malformed_attempts = self.detect_malformed_blockquote_attempts(line);
+            } else {
+                // Part 2: Check for malformed blockquote attempts on non-blockquote lines
+                let malformed_attempts = self.detect_malformed_blockquote_attempts(&line_info.content);
                 for (start, len, fixed_line, description) in malformed_attempts {
                     let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                        i + 1,
-                        line,
+                        line_num,
+                        &line_info.content,
                         start,
                         len,
                     );
@@ -114,7 +106,10 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         message: format!("Malformed quote: {}", description),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, 1),
+                            range: {
+                                let line_index = LineIndex::new(ctx.content.to_string());
+                                line_index.line_col_to_byte_range(line_num, 1)
+                            },
                             replacement: fixed_line,
                         }),
                     });
@@ -126,35 +121,38 @@ impl Rule for MD027MultipleSpacesBlockquote {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let mut result = Vec::with_capacity(ctx.lines.len());
 
-        let lines: Vec<&str> = content.lines().collect();
-
-        let mut result = Vec::with_capacity(lines.len());
-
-        for line in lines {
-            // Part 1: Fix existing functionality - valid blockquotes with multiple spaces
-            if BlockquoteUtils::is_blockquote(line)
-                && BlockquoteUtils::has_multiple_spaces_after_marker(line)
-            {
-                result.push(BlockquoteUtils::fix_blockquote_spacing(line));
-            }
-            // Part 2: Fix malformed blockquote attempts
-            else {
-                let malformed_attempts = self.detect_malformed_blockquote_attempts(line);
+        for line_info in &ctx.lines {
+            if let Some(blockquote) = &line_info.blockquote {
+                // Fix blockquotes with multiple spaces after the marker
+                if blockquote.has_multiple_spaces_after_marker {
+                    // Rebuild the line with exactly one space after the markers
+                    let fixed_line = format!(
+                        "{}{} {}",
+                        blockquote.indent,
+                        ">".repeat(blockquote.nesting_level),
+                        blockquote.content
+                    );
+                    result.push(fixed_line);
+                } else {
+                    result.push(line_info.content.clone());
+                }
+            } else {
+                // Check for malformed blockquote attempts
+                let malformed_attempts = self.detect_malformed_blockquote_attempts(&line_info.content);
                 if !malformed_attempts.is_empty() {
                     // Use the first fix (there should only be one per line)
                     let (_, _, fixed_line, _) = &malformed_attempts[0];
                     result.push(fixed_line.clone());
                 } else {
-                    result.push(line.to_string());
+                    result.push(line_info.content.clone());
                 }
             }
         }
 
         // Preserve trailing newline if original content had one
-        Ok(result.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
+        Ok(result.join("\n") + if ctx.content.ends_with('\n') { "\n" } else { "" })
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -246,7 +244,9 @@ impl MD027MultipleSpacesBlockquote {
         }
 
         // 4. Fixed version should actually be a valid blockquote
-        if !BlockquoteUtils::is_blockquote(fixed) {
+        // Check if it starts with optional whitespace followed by >
+        let blockquote_pattern = regex::Regex::new(r"^\s*>").unwrap();
+        if !blockquote_pattern.is_match(fixed) {
             return false;
         }
 

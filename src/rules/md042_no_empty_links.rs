@@ -1,8 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
-use fancy_regex::Regex;
-use lazy_static::lazy_static;
 
 /// Rule MD042: No empty links
 ///
@@ -38,19 +36,40 @@ impl Rule for MD042NoEmptyLinks {
 
         // Use centralized link parsing from LintContext
         for link in &ctx.links {
+            // For reference links, resolve the URL
+            let effective_url = if link.is_reference {
+                if let Some(ref_id) = &link.reference_id {
+                    ctx.get_reference_url(ref_id).unwrap_or("").to_string()
+                } else {
+                    String::new()
+                }
+            } else {
+                link.url.clone()
+            };
+            
             // Check for empty links
-            if link.text.trim().is_empty() || link.url.trim().is_empty() {
-                let replacement = if link.text.trim().is_empty() && link.url.trim().is_empty() {
+            if link.text.trim().is_empty() || effective_url.trim().is_empty() {
+                let replacement = if link.text.trim().is_empty() && effective_url.trim().is_empty() {
                     "[Link text](https://example.com)".to_string()
                 } else if link.text.trim().is_empty() {
-                    format!("[Link text]({})", link.url)
+                    if link.is_reference {
+                        format!("[Link text]{}", &ctx.content[link.byte_offset + 1..link.byte_end])
+                    } else {
+                        format!("[Link text]({})", effective_url)
+                    }
                 } else {
-                    format!("[{}](https://example.com)", link.text)
+                    if link.is_reference {
+                        // Keep the reference format
+                        let ref_part = &ctx.content[link.byte_offset + link.text.len() + 2..link.byte_end];
+                        format!("[{}]{}", link.text, ref_part)
+                    } else {
+                        format!("[{}](https://example.com)", link.text)
+                    }
                 };
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
-                    message: format!("Empty link found: [{}]({})", link.text, link.url),
+                    message: format!("Empty link found: [{}]({})", link.text, effective_url),
                     line: link.line,
                     column: link.start_col + 1, // Convert to 1-indexed
                     end_line: link.line,
@@ -125,34 +144,20 @@ impl Rule for MD042NoEmptyLinks {
             return Ok(content.to_string());
         }
 
+        // Collect all fixes with their ranges
+        let mut fixes: Vec<(std::ops::Range<usize>, String)> = warnings
+            .iter()
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.clone(), f.replacement.clone())))
+            .collect();
+
+        // Sort fixes by position (descending) to apply from end to start
+        fixes.sort_by(|a, b| b.0.start.cmp(&a.0.start));
+
         let mut result = content.to_string();
-
-        lazy_static! {
-            static ref EMPTY_LINK_REGEX: Regex =
-                Regex::new(r"(?<!\!)\[([^\]]*)\]\(([^\)]*)\)").unwrap();
-        }
-
-        // Apply fixes by replacing each empty link with the appropriate replacement
-        for warning in &warnings {
-            if let Some(fix) = &warning.fix {
-                // Find the specific link that matches this warning
-                for cap_result in EMPTY_LINK_REGEX.captures_iter(&result) {
-                    let cap = match cap_result {
-                        Ok(cap) => cap,
-                        Err(_) => continue,
-                    };
-
-                    let full_match = cap.get(0).unwrap();
-                    let text = cap.get(1).map_or("", |m| m.as_str());
-                    let url = cap.get(2).map_or("", |m| m.as_str());
-
-                    // Check if this is an empty link that needs fixing
-                    if text.trim().is_empty() || url.trim().is_empty() {
-                        result = result.replacen(full_match.as_str(), &fix.replacement, 1);
-                        break; // Only replace one at a time to avoid issues
-                    }
-                }
-            }
+        
+        // Apply fixes from end to start to maintain correct positions
+        for (range, replacement) in fixes {
+            result.replace_range(range, &replacement);
         }
 
         Ok(result)
