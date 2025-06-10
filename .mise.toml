@@ -1,0 +1,96 @@
+# mise configuration for rumdl development environment
+# This file manages development tools and their versions
+
+[env]
+# Environment variables for the project
+RUST_BACKTRACE = "1"
+
+[tools]
+# Rust toolchain - matches rust-version in Cargo.toml
+rust = "1.87.0"
+
+# Python for maturin/python bindings
+python = "3.12"
+
+# Development tools installed via cargo
+"cargo:cargo-nextest" = "latest"
+"cargo:cargo-watch" = "latest"
+"cargo:maturin" = "latest"
+"cargo:cargo-binstall" = "latest"
+
+# Zig for cross-compilation (used by maturin)
+zig = "0.13"
+
+# Optional: Additional useful Rust development tools
+# Uncomment to enable
+# "cargo:cargo-edit" = "latest"     # For cargo add/rm/upgrade commands
+# "cargo:cargo-outdated" = "latest" # Check for outdated dependencies
+# "cargo:cargo-audit" = "latest"    # Security audit dependencies
+# "cargo:cargo-deny" = "latest"     # Lint dependencies
+
+# Note: Python packages like maturin, cffi, and twine are installed
+# separately. maturin is already installed via cargo above.
+
+[settings]
+# Use cargo-binstall when available for faster installations
+cargo_binstall = true
+
+# Experimental features
+experimental = true
+
+# Configure rust/cargo homes if you want isolation from system rust
+# rust_cache_dir = "./.mise/rust"
+# cargo_home = "./.mise/cargo"
+
+[tasks.setup]
+description = "Set up the complete development environment"
+run = """
+echo "Setting up rumdl development environment..."
+echo "Installing Rust toolchain and tools..."
+mise install
+echo "Development environment setup complete!"
+echo ""
+echo "Installed tools:"
+mise list
+"""
+
+[tasks.verify]
+description = "Verify all tools are installed correctly"
+run = """
+echo "Verifying development environment..."
+echo "Rust version: $(rustc --version)"
+echo "Cargo version: $(cargo --version)"
+echo "Python version: $(python --version)"
+echo "cargo-nextest version: $(cargo nextest --version)"
+echo "maturin version: $(maturin --version)"
+echo ""
+echo "Running quick test to verify setup..."
+make test-quick
+"""
+
+[tasks.ci]
+description = "Run CI checks"
+run = """
+echo "Running CI checks..."
+make fmt
+make lint
+make test-quick
+"""
+
+# CI environment variables (set these in CI workflow)
+# Example for GitHub Actions:
+# env:
+#   RUST_BACKTRACE: "full"
+#   CARGO_INCREMENTAL: "0"
+#   CARGO_NET_RETRY: "10"
+#   RUSTFLAGS: "-D warnings"
+
+# Platform-specific tool versions (optional)
+# [tools.linux]
+# rust = "1.87.0"
+# 
+# [tools.macos]
+# rust = "1.87.0"
+# 
+# [tools.windows]
+# rust = "1.87.0"
