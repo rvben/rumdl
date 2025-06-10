@@ -1,0 +1,46 @@
+# Nextest configuration
+# https://nexte.st/book/configuration
+
+[profile.default]
+# Detect flaky tests and retry them
+retries = { backoff = "exponential", count = 2, delay = "1s", max-delay = "10s" }
+
+# Run tests with 2x the number of CPUs
+test-threads = "num-cpus"
+
+# Fail fast on first failure in CI
+fail-fast = false
+
+# Show failed tests immediately
+failure-output = "immediate"
+
+# Show successful tests at the end
+success-output = "final"
+
+# Status output level
+status-level = "pass"
+
+[profile.ci]
+
+# More conservative in CI
+test-threads = "num-cpus"
+
+# Always show all output in CI
+failure-output = "immediate"
+success-output = "immediate"
+status-level = "all"
+
+# No retries in CI to catch flaky tests
+retries = 0
+
+# Quick profile for development
+[profile.quick]
+
+# Skip slow tests
+default-filter = 'not test(/memory/) and not test(/stress/) and not test(/large/)'
+
+# Even more parallel execution locally
+test-threads = "num-cpus"
+
+# Less verbose output
+status-level = "fail"

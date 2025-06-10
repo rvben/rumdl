@@ -1,4 +1,38 @@
-.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install
+.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify
+
+# Development environment setup
+setup-mise:
+	@echo "Checking if mise is installed..."
+	@command -v mise >/dev/null 2>&1 || { \
+		echo "mise is not installed. Installing mise..."; \
+		curl https://mise.run | sh; \
+		echo 'eval "$$(~/.local/bin/mise activate bash)"' >> ~/.bashrc; \
+		echo 'eval "$$(~/.local/bin/mise activate zsh)"' >> ~/.zshrc; \
+		echo ""; \
+		echo "mise installed! Please run:"; \
+		echo "  source ~/.bashrc  # or source ~/.zshrc"; \
+		echo "Then run 'make dev-setup' to continue"; \
+		exit 1; \
+	}
+	@echo "mise is installed at: $$(which mise)"
+
+dev-setup: setup-mise
+	@echo "Installing development environment with mise..."
+	mise install
+	@echo ""
+	@echo "Development environment setup complete!"
+	@echo "Run 'make dev-verify' to verify the installation"
+
+dev-verify:
+	@echo "Verifying development environment..."
+	@echo "===================="
+	@echo "Rust version: $$(rustc --version)"
+	@echo "Cargo version: $$(cargo --version)"
+	@echo "Python version: $$(python --version)"
+	@echo "cargo-nextest: $$(cargo nextest --version 2>/dev/null || echo 'not installed')"
+	@echo "maturin: $$(maturin --version 2>/dev/null || echo 'not installed')"
+	@echo "cargo-binstall: $$(cargo binstall --version 2>/dev/null || echo 'not installed')"
+	@echo "===================="
 
 build:
 	cargo build --release
@@ -6,8 +40,14 @@ build:
 test:
 	cargo test
 
+test-nextest:
+	cargo nextest run
+
 test-quick:
-	cargo test -- --skip test_lsp_memory_usage_over_time --skip test_lsp_memory_stress_with_large_files --skip test_lsp_concurrent_document_handling --skip test_memory_usage_with_large_content
+	cargo nextest run --profile quick
+
+test-ci:
+	cargo nextest run --profile ci
 
 clean:
 	cargo clean

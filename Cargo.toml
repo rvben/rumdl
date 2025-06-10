@@ -2,6 +2,7 @@
 name = "rumdl"
 version = "0.0.84"
 edition = "2021"
+rust-version = "1.87.0"
 description = "A fast Markdown linter written in Rust (Ru(st) MarkDown Linter)"
 authors = ["Ruben J. Jongejan <ruben.jongejan@gmail.com>"]
 license = "MIT"
