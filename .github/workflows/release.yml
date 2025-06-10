@@ -232,9 +232,21 @@ jobs:
           python -m pip install twine
           find artifacts -type f -name "*.whl" -o -name "*.tar.gz" | xargs python -m twine upload
 
+      - name: Extract release notes
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          if [ -f scripts/extract-changelog.sh ] && [ -f CHANGELOG.md ]; then
+            chmod +x scripts/extract-changelog.sh
+            ./scripts/extract-changelog.sh "$VERSION" > release-notes.md || echo "No changelog entry found for $VERSION" > release-notes.md
+          else
+            echo "No changelog found" > release-notes.md
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          body_path: release-notes.md
           files: |
             artifacts/rumdl-x86_64-unknown-linux-gnu/rumdl-x86_64-unknown-linux-gnu
             artifacts/rumdl-aarch64-unknown-linux-gnu/rumdl-aarch64-unknown-linux-gnu

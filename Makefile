@@ -23,7 +23,6 @@ lint:
 check:
 	cargo check --all-targets --all-features
 
-
 doc:
 	cargo doc --no-deps
 
@@ -62,6 +61,18 @@ update-readme-version:
 	@rm -f README.md.bak
 	@echo "README.md updated to rev $(NEW_TAG)"
 
+update-changelog:
+	@echo "Updating CHANGELOG.md for $(NEW_TAG)..."
+	@if [ -f CHANGELOG.md ]; then \
+		DATE=$$(date +%Y-%m-%d); \
+		perl -i.bak -pe 's/## \[Unreleased\]/## [Unreleased]\n\n## [$(VERSION_NO_V)] - '"$$DATE"'/' CHANGELOG.md; \
+		perl -i.bak -0777 -pe 's/(\[Unreleased\]: .*\/compare\/)v[0-9]+\.[0-9]+\.[0-9]+(\.\.\.HEAD)/$$1$(NEW_TAG)$$2\n[$(VERSION_NO_V)]: https:\/\/github.com\/rvben\/rumdl\/compare\/$(CURRENT)...$(NEW_TAG)/' CHANGELOG.md; \
+		rm -f CHANGELOG.md.bak; \
+		echo "CHANGELOG.md updated for version $(NEW_TAG)"; \
+	else \
+		echo "Warning: CHANGELOG.md not found"; \
+	fi
+
 version-major:
 	@echo "Creating new major version tag..."
 	$(eval CURRENT := $(shell git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0))
@@ -72,7 +83,8 @@ version-major:
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-readme-version NEW_TAG=$(NEW_TAG)
-	@git add Cargo.toml Cargo.lock README.md
+	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
+	@git add Cargo.toml Cargo.lock README.md CHANGELOG.md
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
@@ -88,7 +100,8 @@ version-minor:
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-readme-version NEW_TAG=$(NEW_TAG)
-	@git add Cargo.toml Cargo.lock README.md
+	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
+	@git add Cargo.toml Cargo.lock README.md CHANGELOG.md
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
@@ -105,7 +118,8 @@ version-patch:
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-readme-version NEW_TAG=$(NEW_TAG)
-	@git add Cargo.toml Cargo.lock README.md
+	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
+	@git add Cargo.toml Cargo.lock README.md CHANGELOG.md
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
