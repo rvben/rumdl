@@ -4,9 +4,13 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::calculate_excess_range;
+use crate::rule_config_serde::RuleConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
+
+mod md013_config;
+use md013_config::MD013Config;
 
 lazy_static! {
     static ref URL_PATTERN: Regex = Regex::new(r"^https?://\S+$").unwrap();
@@ -26,21 +30,13 @@ lazy_static! {
 
 #[derive(Clone)]
 pub struct MD013LineLength {
-    pub line_length: usize,
-    pub code_blocks: bool,
-    pub tables: bool,
-    pub headings: bool,
-    pub strict: bool,
+    config: MD013Config,
 }
 
 impl Default for MD013LineLength {
     fn default() -> Self {
         Self {
-            line_length: 80,
-            code_blocks: true,
-            tables: true,
-            headings: true,
-            strict: false,
+            config: MD013Config::default(),
         }
     }
 }
@@ -54,12 +50,18 @@ impl MD013LineLength {
         strict: bool,
     ) -> Self {
         Self {
-            line_length,
-            code_blocks,
-            tables,
-            headings,
-            strict,
+            config: MD013Config {
+                line_length,
+                code_blocks,
+                tables,
+                headings,
+                strict,
+            },
         }
+    }
+    
+    pub fn from_config_struct(config: MD013Config) -> Self {
+        Self { config }
     }
 
     fn is_in_table(lines: &[&str], current_line: usize) -> bool {
@@ -89,7 +91,7 @@ impl MD013LineLength {
         current_line: usize,
         structure: &DocumentStructure,
     ) -> bool {
-        if self.strict {
+        if self.config.strict {
             return false;
         }
 
@@ -163,7 +165,7 @@ impl Rule for MD013LineLength {
         let lines: Vec<&str> = content.lines().collect();
 
         // Early return if no lines could possibly exceed the limit
-        if lines.iter().all(|line| line.len() <= self.line_length) {
+        if lines.iter().all(|line| line.len() <= self.config.line_length) {
             return Ok(Vec::new());
         }
 
@@ -175,7 +177,7 @@ impl Rule for MD013LineLength {
             structure.heading_lines.iter().cloned().collect();
 
         // Pre-compute table lines for efficiency instead of calling is_in_table for each line
-        let table_lines_set: std::collections::HashSet<usize> = if self.tables {
+        let table_lines_set: std::collections::HashSet<usize> = if self.config.tables {
             let mut table_lines = std::collections::HashSet::new();
             let mut in_table = false;
             for (i, line) in lines.iter().enumerate() {
@@ -199,21 +201,21 @@ impl Rule for MD013LineLength {
             let effective_length = line.chars().count();
 
             // Skip short lines immediately
-            if effective_length <= self.line_length {
+            if effective_length <= self.config.line_length {
                 continue;
             }
 
             // Skip various block types efficiently
-            if !self.strict {
+            if !self.config.strict {
                 // Skip setext heading underlines
                 if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
                     continue;
                 }
 
                 // Skip block elements according to config flags (optimized checks)
-                if (self.headings && heading_lines_set.contains(&line_number))
-                    || (!self.code_blocks && structure.is_in_code_block(line_number))
-                    || (self.tables && table_lines_set.contains(&line_number))
+                if (self.config.headings && heading_lines_set.contains(&line_number))
+                    || (!self.config.code_blocks && structure.is_in_code_block(line_number))
+                    || (self.config.tables && table_lines_set.contains(&line_number))
                     || structure.is_in_blockquote(line_number)
                     || structure.is_in_html_block(line_number)
                 {
@@ -230,7 +232,7 @@ impl Rule for MD013LineLength {
             let fix = if !self.should_skip_line_for_fix(line, line_num, structure) {
                 // First try trimming trailing whitespace
                 let trimmed = line.trim_end();
-                if trimmed.len() <= self.line_length && trimmed != *line {
+                if trimmed.len() <= self.config.line_length && trimmed != *line {
                     let line_start = line_index.line_col_to_byte_range(line_number, 1).start;
                     let line_end = if line_number < lines.len() {
                         line_index.line_col_to_byte_range(line_number + 1, 1).start - 1
@@ -251,18 +253,18 @@ impl Rule for MD013LineLength {
             let message = if let Some(ref _fix_obj) = fix {
                 format!(
                     "Line length {} exceeds {} characters (can trim whitespace)",
-                    effective_length, self.line_length
+                    effective_length, self.config.line_length
                 )
             } else {
                 format!(
                     "Line length {} exceeds {} characters",
-                    effective_length, self.line_length
+                    effective_length, self.config.line_length
                 )
             };
 
             // Calculate precise character range for the excess portion
             let (start_line, start_col, end_line, end_col) =
-                calculate_excess_range(line_number, line, self.line_length);
+                calculate_excess_range(line_number, line, self.config.line_length);
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
@@ -322,51 +324,31 @@ impl Rule for MD013LineLength {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "line_length".to_string(),
-            toml::Value::Integer(self.line_length as i64),
-        );
-        map.insert(
-            "code_blocks".to_string(),
-            toml::Value::Boolean(self.code_blocks),
-        );
-        map.insert("tables".to_string(), toml::Value::Boolean(self.tables));
-        map.insert("headings".to_string(), toml::Value::Boolean(self.headings));
-        map.insert("strict".to_string(), toml::Value::Boolean(self.strict));
-
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let default_config = MD013Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD013Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        // get_rule_config_value now automatically tries both underscore and kebab-case variants
-        let line_length =
-            crate::config::get_rule_config_value::<usize>(config, "MD013", "line_length")
-                .unwrap_or(config.global.line_length as usize);
-
-        let code_blocks =
-            crate::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks")
-                .unwrap_or(true);
-
-        let tables = crate::config::get_rule_config_value::<bool>(config, "MD013", "tables")
-            .unwrap_or(false);
-
-        let headings = crate::config::get_rule_config_value::<bool>(config, "MD013", "headings")
-            .unwrap_or(true);
-
-        let strict = crate::config::get_rule_config_value::<bool>(config, "MD013", "strict")
-            .unwrap_or(false);
-
-        Box::new(MD013LineLength::new(
-            line_length,
-            code_blocks,
-            tables,
-            headings,
-            strict,
-        ))
+        let mut rule_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
+        // Special handling for line_length from global config
+        if rule_config.line_length == 80 { // default value
+            rule_config.line_length = config.global.line_length as usize;
+        }
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

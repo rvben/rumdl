@@ -3,17 +3,26 @@ use crate::rules::code_fence_utils::CodeFenceStyle;
 use crate::utils::range_utils::{calculate_match_range, LineIndex};
 use toml;
 
+mod md048_config;
+use md048_config::MD048Config;
+
 /// Rule MD048: Code fence style
 ///
 /// See [docs/md048.md](../../docs/md048.md) for full documentation, configuration, and examples.
 #[derive(Clone)]
 pub struct MD048CodeFenceStyle {
-    style: CodeFenceStyle,
+    config: MD048Config,
 }
 
 impl MD048CodeFenceStyle {
     pub fn new(style: CodeFenceStyle) -> Self {
-        Self { style }
+        Self {
+            config: MD048Config { style },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD048Config) -> Self {
+        Self { config }
     }
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<CodeFenceStyle> {
@@ -53,11 +62,11 @@ impl Rule for MD048CodeFenceStyle {
 
         let mut warnings = Vec::new();
 
-        let target_style = match self.style {
+        let target_style = match self.config.style {
             CodeFenceStyle::Consistent => self
                 .detect_style(ctx)
                 .unwrap_or(CodeFenceStyle::Backtick),
-            _ => self.style,
+            _ => self.config.style,
         };
         
         // Track if we're inside a code block
@@ -190,11 +199,11 @@ impl Rule for MD048CodeFenceStyle {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
 
-        let target_style = match self.style {
+        let target_style = match self.config.style {
             CodeFenceStyle::Consistent => self
                 .detect_style(ctx)
                 .unwrap_or(CodeFenceStyle::Backtick),
-            _ => self.style,
+            _ => self.config.style,
         };
 
         let mut result = String::new();
@@ -281,26 +290,18 @@ impl Rule for MD048CodeFenceStyle {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "style".to_string(),
-            toml::Value::String(self.style.to_string()),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let style = crate::config::get_rule_config_value::<String>(config, "MD048", "style")
-            .unwrap_or_else(|| "consistent".to_string());
-        let style = match style.as_str() {
-            "backtick" => CodeFenceStyle::Backtick,
-            "tilde" => CodeFenceStyle::Tilde,
-            "consistent" => CodeFenceStyle::Consistent,
-            _ => CodeFenceStyle::Consistent,
-        };
-        Box::new(MD048CodeFenceStyle::new(style))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD048Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }

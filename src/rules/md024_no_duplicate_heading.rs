@@ -2,20 +2,37 @@ use toml;
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_match_range;
+use crate::rule_config_serde::RuleConfig;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Debug, Default)]
+mod md024_config;
+use md024_config::MD024Config;
+
+#[derive(Clone, Debug)]
 pub struct MD024NoDuplicateHeading {
-    pub allow_different_nesting: bool,
-    pub siblings_only: bool,
+    config: MD024Config,
+}
+
+impl Default for MD024NoDuplicateHeading {
+    fn default() -> Self {
+        Self {
+            config: MD024Config::default(),
+        }
+    }
 }
 
 impl MD024NoDuplicateHeading {
     pub fn new(allow_different_nesting: bool, siblings_only: bool) -> Self {
         Self {
-            allow_different_nesting,
-            siblings_only,
+            config: MD024Config {
+                allow_different_nesting,
+                siblings_only,
+            },
         }
+    }
+    
+    pub fn from_config_struct(config: MD024Config) -> Self {
+        Self { config }
     }
 }
 
@@ -64,9 +81,9 @@ impl Rule for MD024NoDuplicateHeading {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_match_range(line_num + 1, &line_info.content, text_start_in_line, heading.text.len());
 
-                if self.siblings_only {
+                if self.config.siblings_only {
                     // TODO: Implement siblings_only logic if needed
-                } else if self.allow_different_nesting {
+                } else if self.config.allow_different_nesting {
                     // Only flag duplicates at the same level
                     let seen = seen_headings_per_level.entry(level).or_default();
                     if seen.contains(&heading_key) {
@@ -130,34 +147,26 @@ impl Rule for MD024NoDuplicateHeading {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "allow_different_nesting".to_string(),
-            toml::Value::Boolean(self.allow_different_nesting),
-        );
-        map.insert(
-            "siblings_only".to_string(),
-            toml::Value::Boolean(self.siblings_only),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let default_config = MD024Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD024Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let allow_different_nesting = crate::config::get_rule_config_value::<bool>(
-            config,
-            "MD024",
-            "allow_different_nesting",
-        )
-        .unwrap_or(false);
-        let siblings_only =
-            crate::config::get_rule_config_value::<bool>(config, "MD024", "siblings_only")
-                .unwrap_or(false);
-        Box::new(MD024NoDuplicateHeading::new(
-            allow_different_nesting,
-            siblings_only,
-        ))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD024Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }

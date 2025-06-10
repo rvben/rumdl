@@ -5,9 +5,13 @@
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::{calculate_match_range, LineIndex};
+use crate::rule_config_serde::RuleConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
+
+mod md014_config;
+use md014_config::MD014Config;
 
 lazy_static! {
     static ref COMMAND_PATTERN: Regex = Regex::new(r"^\s*[$>]\s+\S+").unwrap();
@@ -18,12 +22,14 @@ lazy_static! {
 
 #[derive(Clone)]
 pub struct MD014CommandsShowOutput {
-    pub show_output: bool,
+    config: MD014Config,
 }
 
 impl Default for MD014CommandsShowOutput {
     fn default() -> Self {
-        Self { show_output: true }
+        Self {
+            config: MD014Config::default(),
+        }
     }
 }
 
@@ -33,7 +39,13 @@ impl MD014CommandsShowOutput {
     }
 
     pub fn with_show_output(show_output: bool) -> Self {
-        Self { show_output }
+        Self {
+            config: MD014Config { show_output },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD014Config) -> Self {
+        Self { config }
     }
 
     fn is_command_line(&self, line: &str) -> bool {
@@ -65,7 +77,7 @@ impl MD014CommandsShowOutput {
     }
 
     fn is_command_without_output(&self, block: &[&str], lang: &str) -> bool {
-        if !self.show_output || !self.is_shell_language(lang) {
+        if !self.config.show_output || !self.is_shell_language(lang) {
             return false;
         }
 
@@ -284,21 +296,26 @@ impl Rule for MD014CommandsShowOutput {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "show_output".to_string(),
-            toml::Value::Boolean(self.show_output),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let default_config = MD014Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD014Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let show_output =
-            crate::config::get_rule_config_value::<bool>(config, "MD014", "show_output")
-                .unwrap_or(true);
-        Box::new(MD014CommandsShowOutput::with_show_output(show_output))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD014Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }

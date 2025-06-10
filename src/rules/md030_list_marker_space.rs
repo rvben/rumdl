@@ -7,23 +7,21 @@ use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::list_utils::ListType;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::calculate_match_range;
+use crate::rule_config_serde::RuleConfig;
 use toml;
+
+mod md030_config;
+use md030_config::MD030Config;
 
 #[derive(Clone)]
 pub struct MD030ListMarkerSpace {
-    ul_single: usize,
-    ul_multi: usize,
-    ol_single: usize,
-    ol_multi: usize,
+    config: MD030Config,
 }
 
 impl Default for MD030ListMarkerSpace {
     fn default() -> Self {
         Self {
-            ul_single: 1,
-            ul_multi: 1,
-            ol_single: 1,
-            ol_multi: 1,
+            config: MD030Config::default(),
         }
     }
 }
@@ -31,19 +29,25 @@ impl Default for MD030ListMarkerSpace {
 impl MD030ListMarkerSpace {
     pub fn new(ul_single: usize, ul_multi: usize, ol_single: usize, ol_multi: usize) -> Self {
         Self {
-            ul_single,
-            ul_multi,
-            ol_single,
-            ol_multi,
+            config: MD030Config {
+                ul_single,
+                ul_multi,
+                ol_single,
+                ol_multi,
+            },
         }
+    }
+    
+    pub fn from_config_struct(config: MD030Config) -> Self {
+        Self { config }
     }
 
     pub fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
         match (list_type, is_multi) {
-            (ListType::Unordered, false) => self.ul_single,
-            (ListType::Unordered, true) => self.ul_multi,
-            (ListType::Ordered, false) => self.ol_single,
-            (ListType::Ordered, true) => self.ol_multi,
+            (ListType::Unordered, false) => self.config.ul_single,
+            (ListType::Unordered, true) => self.config.ul_multi,
+            (ListType::Ordered, false) => self.config.ol_single,
+            (ListType::Ordered, true) => self.config.ol_multi,
         }
     }
 }
@@ -183,44 +187,24 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "ul-single".to_string(),
-            toml::Value::Integer(self.ul_single as i64),
-        );
-        map.insert(
-            "ul-multi".to_string(),
-            toml::Value::Integer(self.ul_multi as i64),
-        );
-        map.insert(
-            "ol-single".to_string(),
-            toml::Value::Integer(self.ol_single as i64),
-        );
-        map.insert(
-            "ol-multi".to_string(),
-            toml::Value::Integer(self.ol_multi as i64),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let default_config = MD030Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD030Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
-        fn get_key(
-            config: &crate::config::Config,
-            rule: &str,
-            dash: &str,
-            underscore: &str,
-        ) -> usize {
-            crate::config::get_rule_config_value::<usize>(config, rule, dash)
-                .or_else(|| crate::config::get_rule_config_value::<usize>(config, rule, underscore))
-                .unwrap_or(1)
-        }
-        let ul_single = get_key(config, "MD030", "ul-single", "ul_single");
-        let ul_multi = get_key(config, "MD030", "ul-multi", "ul_multi");
-        let ol_single = get_key(config, "MD030", "ol-single", "ol_single");
-        let ol_multi = get_key(config, "MD030", "ol-multi", "ol_multi");
-        Box::new(MD030ListMarkerSpace::new(
-            ul_single, ul_multi, ol_single, ol_multi,
-        ))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD030Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 
     fn fix(
@@ -296,7 +280,7 @@ impl MD030ListMarkerSpace {
                     let content = after_marker.trim_start();
                     if !content.is_empty() {
                         // Use the configured number of spaces for unordered lists
-                        let spaces = " ".repeat(self.ul_single);
+                        let spaces = " ".repeat(self.config.ul_single);
                         return Some(format!("{}{}{}{}", indent, marker, spaces, content));
                     }
                 }
@@ -317,7 +301,7 @@ impl MD030ListMarkerSpace {
                     let content = after_dot.trim_start();
                     if !content.is_empty() {
                         // Use the configured number of spaces for ordered lists
-                        let spaces = " ".repeat(self.ol_single);
+                        let spaces = " ".repeat(self.config.ol_single);
                         return Some(format!("{}{}.{}{}", indent, before_dot, spaces, content));
                     }
                 }

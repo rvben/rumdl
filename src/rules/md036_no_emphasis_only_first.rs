@@ -8,6 +8,10 @@ use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::{calculate_emphasis_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
+use toml;
+
+mod md036_config;
+use md036_config::MD036Config;
 
 lazy_static! {
     // Optimize regex patterns with compilation once at startup
@@ -27,15 +31,26 @@ lazy_static! {
 /// Rule MD036: Emphasis used instead of a heading
 #[derive(Clone)]
 pub struct MD036NoEmphasisAsHeading {
-    /// Punctuation characters to remove from the end of headings when converting from emphasis
-    /// Default: ".,;:!?" - removes common trailing punctuation
-    /// Set to empty string to preserve all punctuation
-    punctuation: String,
+    config: MD036Config,
+}
+
+impl Default for MD036NoEmphasisAsHeading {
+    fn default() -> Self {
+        Self {
+            config: MD036Config::default(),
+        }
+    }
 }
 
 impl MD036NoEmphasisAsHeading {
     pub fn new(punctuation: String) -> Self {
-        Self { punctuation }
+        Self {
+            config: MD036Config { punctuation },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD036Config) -> Self {
+        Self { config }
     }
 
     fn is_entire_line_emphasized(
@@ -129,10 +144,10 @@ impl MD036NoEmphasisAsHeading {
     fn get_heading_for_emphasis(&self, level: usize, text: &str) -> String {
         let prefix = "#".repeat(level);
         // Remove trailing punctuation based on configuration
-        let text = if self.punctuation.is_empty() {
+        let text = if self.config.punctuation.is_empty() {
             text.trim()
         } else {
-            let chars_to_remove: Vec<char> = self.punctuation.chars().collect();
+            let chars_to_remove: Vec<char> = self.config.punctuation.chars().collect();
             text.trim().trim_end_matches(&chars_to_remove[..])
         };
 
@@ -280,7 +295,7 @@ impl Rule for MD036NoEmphasisAsHeading {
         let mut map = toml::map::Map::new();
         map.insert(
             "punctuation".to_string(),
-            toml::Value::String(self.punctuation.clone()),
+            toml::Value::String(self.config.punctuation.clone()),
         );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }

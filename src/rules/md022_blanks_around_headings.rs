@@ -3,7 +3,11 @@
 /// See [docs/md022.md](../../docs/md022.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::{calculate_heading_range};
+use crate::rule_config_serde::RuleConfig;
 use toml;
+
+mod md022_config;
+use md022_config::MD022Config;
 
 ///
 /// This rule enforces consistent spacing around headings to improve document readability
@@ -78,20 +82,13 @@ use toml;
 ///
 #[derive(Clone)]
 pub struct MD022BlanksAroundHeadings {
-    /// Required number of blank lines before heading
-    pub lines_above: usize,
-    /// Required number of blank lines after heading
-    pub lines_below: usize,
-    /// Whether the first heading can be at the start of the document
-    pub allowed_at_start: bool,
+    config: MD022Config,
 }
 
 impl Default for MD022BlanksAroundHeadings {
     fn default() -> Self {
         Self {
-            lines_above: 1,
-            lines_below: 1,
-            allowed_at_start: true,
+            config: MD022Config::default(),
         }
     }
 }
@@ -101,19 +98,23 @@ impl MD022BlanksAroundHeadings {
     /// lines_above = 1, lines_below = 1
     pub fn new() -> Self {
         Self {
-            lines_above: 1,
-            lines_below: 1,
-            allowed_at_start: true,
+            config: MD022Config::default(),
         }
     }
 
     /// Create with custom numbers of blank lines
     pub fn with_values(lines_above: usize, lines_below: usize) -> Self {
         Self {
-            lines_above,
-            lines_below,
-            allowed_at_start: true,
+            config: MD022Config {
+                lines_above,
+                lines_below,
+                allowed_at_start: true,
+            },
         }
+    }
+    
+    pub fn from_config_struct(config: MD022Config) -> Self {
+        Self { config }
     }
 
 
@@ -173,10 +174,10 @@ impl MD022BlanksAroundHeadings {
                 }
 
                 // Determine how many blank lines we need above
-                let needed_blanks_above = if is_first_heading && self.allowed_at_start {
+                let needed_blanks_above = if is_first_heading && self.config.allowed_at_start {
                     0
                 } else {
-                    self.lines_above
+                    self.config.lines_above
                 };
 
                 // Add missing blank lines above if needed
@@ -222,7 +223,7 @@ impl MD022BlanksAroundHeadings {
                     };
 
                     // Add missing blank lines below if needed
-                    let needed_blanks_below = if next_is_special { 0 } else { self.lines_below };
+                    let needed_blanks_below = if next_is_special { 0 } else { self.config.lines_below };
                     if blank_lines_below < needed_blanks_below {
                         for _ in 0..(needed_blanks_below - blank_lines_below) {
                             result.push(String::new());
@@ -255,7 +256,7 @@ impl MD022BlanksAroundHeadings {
                     };
 
                     // Add missing blank lines below if needed
-                    let needed_blanks_below = if next_is_special { 0 } else { self.lines_below };
+                    let needed_blanks_below = if next_is_special { 0 } else { self.config.lines_below };
                     if blank_lines_below < needed_blanks_below {
                         for _ in 0..(needed_blanks_below - blank_lines_below) {
                             result.push(String::new());
@@ -336,7 +337,7 @@ impl Rule for MD022BlanksAroundHeadings {
             });
 
             // Count blank lines above
-            let blank_lines_above = if line_num > 0 && (!is_first_heading || !self.allowed_at_start) {
+            let blank_lines_above = if line_num > 0 && (!is_first_heading || !self.config.allowed_at_start) {
                 let mut count = 0;
                 for j in (0..line_num).rev() {
                     if ctx.lines[j].is_blank {
@@ -347,12 +348,12 @@ impl Rule for MD022BlanksAroundHeadings {
                 }
                 count
             } else {
-                self.lines_above // Consider it as having enough blanks if it's the first heading
+                self.config.lines_above // Consider it as having enough blanks if it's the first heading
             };
 
             // Check if we need blank lines above
-            if line_num > 0 && blank_lines_above < self.lines_above && (!is_first_heading || !self.allowed_at_start) {
-                let needed_blanks = self.lines_above - blank_lines_above;
+            if line_num > 0 && blank_lines_above < self.config.lines_above && (!is_first_heading || !self.config.allowed_at_start) {
+                let needed_blanks = self.config.lines_above - blank_lines_above;
                 heading_violations.push((line_num, "above", needed_blanks));
             }
 
@@ -392,8 +393,8 @@ impl Rule for MD022BlanksAroundHeadings {
                     // Count blank lines below
                     let blank_lines_below = next_non_blank_idx - effective_last_line - 1;
 
-                    if blank_lines_below < self.lines_below {
-                        let needed_blanks = self.lines_below - blank_lines_below;
+                    if blank_lines_below < self.config.lines_below {
+                        let needed_blanks = self.config.lines_below - blank_lines_below;
                         heading_violations.push((line_num, "below", needed_blanks));
                     }
                 }
@@ -413,8 +414,8 @@ impl Rule for MD022BlanksAroundHeadings {
                 "above" => (
                     format!(
                         "Expected {} blank {} above heading",
-                        self.lines_above,
-                        if self.lines_above == 1 { "line" } else { "lines" }
+                        self.config.lines_above,
+                        if self.config.lines_above == 1 { "line" } else { "lines" }
                     ),
                     heading_line // Insert before the heading line
                 ),
@@ -431,8 +432,8 @@ impl Rule for MD022BlanksAroundHeadings {
                     (
                         format!(
                             "Expected {} blank {} below heading",
-                            self.lines_below,
-                            if self.lines_below == 1 { "line" } else { "lines" }
+                            self.config.lines_below,
+                            if self.config.lines_below == 1 { "line" } else { "lines" }
                         ),
                         insert_after
                     )
@@ -511,33 +512,27 @@ impl Rule for MD022BlanksAroundHeadings {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "lines_above".to_string(),
-            toml::Value::Integer(self.lines_above as i64),
-        );
-        map.insert(
-            "lines_below".to_string(),
-            toml::Value::Integer(self.lines_below as i64),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let default_config = MD022Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD022Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let lines_above =
-            crate::config::get_rule_config_value::<usize>(config, "MD022", "lines_above")
-                .unwrap_or(1);
-        let lines_below =
-            crate::config::get_rule_config_value::<usize>(config, "MD022", "lines_below")
-                .unwrap_or(1);
-        Box::new(MD022BlanksAroundHeadings {
-            lines_above,
-            lines_below,
-            allowed_at_start: true,
-        })
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD022Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

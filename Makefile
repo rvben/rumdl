@@ -6,6 +6,9 @@ build:
 test:
 	cargo test
 
+test-quick:
+	cargo test -- --skip test_lsp_memory_usage_over_time --skip test_lsp_memory_stress_with_large_files --skip test_lsp_concurrent_document_handling --skip test_memory_usage_with_large_content
+
 clean:
 	cargo clean
 

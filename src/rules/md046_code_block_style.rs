@@ -6,6 +6,9 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
 
+mod md046_config;
+use md046_config::MD046Config;
+
 lazy_static! {
     static ref LIST_MARKER: Regex = Regex::new(r"^[\s]*[-+*][\s]+|^[\s]*\d+\.[\s]+").unwrap();
 }
@@ -17,12 +20,18 @@ lazy_static! {
 /// This rule is triggered when code blocks do not use a consistent style (either fenced or indented).
 #[derive(Clone)]
 pub struct MD046CodeBlockStyle {
-    style: CodeBlockStyle,
+    config: MD046Config,
 }
 
 impl MD046CodeBlockStyle {
     pub fn new(style: CodeBlockStyle) -> Self {
-        Self { style }
+        Self {
+            config: MD046Config { style },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD046Config) -> Self {
+        Self { config }
     }
 
     fn is_fenced_code_block_start(&self, line: &str) -> bool {
@@ -479,11 +488,11 @@ impl Rule for MD046CodeBlockStyle {
         let lines: Vec<&str> = content.lines().collect();
 
         // Determine target style
-        let target_style = match self.style {
+        let target_style = match self.config.style {
             CodeBlockStyle::Consistent => {
                 self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced)
             }
-            _ => self.style,
+            _ => self.config.style,
         };
 
         let mut result = String::with_capacity(content.len());
@@ -666,7 +675,7 @@ impl Rule for MD046CodeBlockStyle {
 
         // Fast path: If all blocks are fenced and target style is fenced (or consistent), return empty
         if all_fenced
-            && (self.style == CodeBlockStyle::Fenced || self.style == CodeBlockStyle::Consistent)
+            && (self.config.style == CodeBlockStyle::Fenced || self.config.style == CodeBlockStyle::Consistent)
         {
             return Ok(Vec::new());
         }
@@ -675,7 +684,7 @@ impl Rule for MD046CodeBlockStyle {
         let mut warnings = Vec::new();
 
         // Determine the target style from the detected style in the document
-        let target_style = match self.style {
+        let target_style = match self.config.style {
             CodeBlockStyle::Consistent => {
                 // For consistent style, use the same logic as the check method to ensure compatibility
                 let mut first_fenced_line = usize::MAX;
@@ -711,7 +720,7 @@ impl Rule for MD046CodeBlockStyle {
                     CodeBlockStyle::Fenced
                 }
             }
-            _ => self.style,
+            _ => self.config.style,
         };
 
         // Keep track of code blocks we've processed to avoid duplicate warnings
@@ -853,27 +862,19 @@ impl Rule for MD046CodeBlockStyle {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "style".to_string(),
-            toml::Value::String(self.style.to_string()),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let style = crate::config::get_rule_config_value::<String>(config, "MD046", "style")
-            .unwrap_or_else(|| "consistent".to_string());
-        let style = match style.as_str() {
-            "fenced" => CodeBlockStyle::Fenced,
-            "indented" => CodeBlockStyle::Indented,
-            "consistent" => CodeBlockStyle::Consistent,
-            _ => CodeBlockStyle::Consistent,
-        };
-        Box::new(MD046CodeBlockStyle::new(style))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD046Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

@@ -7,6 +7,10 @@ pub mod parallel;
 pub mod performance;
 pub mod profiling;
 pub mod rule;
+#[macro_use]
+pub mod rule_config;
+#[macro_use]
+pub mod rule_config_serde;
 pub mod rules;
 pub mod utils;
 

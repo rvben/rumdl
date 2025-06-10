@@ -2,7 +2,11 @@ use crate::rule::Rule;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::range_utils::calculate_heading_range;
+use crate::rule_config_serde::RuleConfig;
 use toml;
+
+mod md002_config;
+use md002_config::MD002Config;
 
 /// Rule MD002: First heading should be a top-level heading
 ///
@@ -80,18 +84,26 @@ use toml;
 ///
 #[derive(Debug, Clone)]
 pub struct MD002FirstHeadingH1 {
-    level: u32,
+    config: MD002Config,
 }
 
 impl Default for MD002FirstHeadingH1 {
     fn default() -> Self {
-        Self { level: 1 }
+        Self {
+            config: MD002Config::default(),
+        }
     }
 }
 
 impl MD002FirstHeadingH1 {
     pub fn new(level: u32) -> Self {
-        Self { level }
+        Self {
+            config: MD002Config { level },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD002Config) -> Self {
+        Self { config }
     }
 
 }
@@ -119,17 +131,17 @@ impl Rule for MD002FirstHeadingH1 {
             });
 
         if let Some((line_num, line_info, heading)) = first_heading {
-            if heading.level != self.level as u8 {
+            if heading.level != self.config.level as u8 {
                 let message = format!(
                     "First heading should be level {}, found level {}",
-                    self.level, heading.level
+                    self.config.level, heading.level
                 );
 
                 // Calculate the fix
                 let fix = {
                     let replacement = crate::rules::heading_utils::HeadingUtils::convert_heading_style(
                         &heading.text, 
-                        self.level, 
+                        self.config.level, 
                         match heading.style {
                             crate::lint_context::HeadingStyle::ATX => {
                                 if heading.has_closing_sequence {
@@ -182,7 +194,7 @@ impl Rule for MD002FirstHeadingH1 {
             });
 
         if let Some((line_num, line_info, heading)) = first_heading {
-            if heading.level == self.level as u8 {
+            if heading.level == self.config.level as u8 {
                 return Ok(content.to_string());
             }
 
@@ -198,7 +210,7 @@ impl Rule for MD002FirstHeadingH1 {
                     
                     match heading.style {
                         crate::lint_context::HeadingStyle::ATX => {
-                            let hashes = "#".repeat(self.level as usize);
+                            let hashes = "#".repeat(self.config.level as usize);
                             if heading.has_closing_sequence {
                                 // Preserve closed ATX: # Heading #
                                 fixed_lines.push(format!("{}{} {} {}", indent, hashes, heading_text, hashes));
@@ -214,7 +226,7 @@ impl Rule for MD002FirstHeadingH1 {
                             i += 1;
                             if i < lines.len() {
                                 // Replace the underline
-                                let underline = if self.level == 1 { "=======" } else { "-------" };
+                                let underline = if self.config.level == 1 { "=======" } else { "-------" };
                                 fixed_lines.push(underline.to_string());
                                 i += 1;
                             }
@@ -255,18 +267,27 @@ impl Rule for MD002FirstHeadingH1 {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert("level".to_string(), toml::Value::Integer(self.level as i64));
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let default_config = MD002Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD002Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let level =
-            crate::config::get_rule_config_value::<u32>(config, "MD002", "level").unwrap_or(1);
-        Box::new(MD002FirstHeadingH1::new(level))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD002Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

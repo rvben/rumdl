@@ -7,6 +7,9 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+mod md044_config;
+use md044_config::MD044Config;
+
 lazy_static! {}
 
 type WarningPosition = (usize, usize, String); // (line, column, found_name)
@@ -67,8 +70,7 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 ///
 #[derive(Clone)]
 pub struct MD044ProperNames {
-    names: Vec<String>,
-    code_blocks: bool,
+    config: MD044Config,
     #[allow(dead_code)] // TODO: Implement HTML comment checking in future
     html_comments: bool,
     // Cache the combined regex pattern
@@ -79,15 +81,26 @@ pub struct MD044ProperNames {
 
 impl MD044ProperNames {
     pub fn new(names: Vec<String>, code_blocks: bool) -> Self {
+        let config = MD044Config { names, code_blocks };
         let mut instance = Self {
-            names,
-            code_blocks,
+            config,
             html_comments: true, // Default to checking HTML comments
             combined_regex: Arc::new(Mutex::new(None)),
             content_cache: Arc::new(Mutex::new(HashMap::new())),
         };
         
         // Pre-compile the combined regex
+        instance.compile_combined_regex();
+        instance
+    }
+    
+    pub fn from_config_struct(config: MD044Config) -> Self {
+        let mut instance = Self {
+            config,
+            html_comments: true,
+            combined_regex: Arc::new(Mutex::new(None)),
+            content_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
         instance.compile_combined_regex();
         instance
     }
@@ -110,12 +123,12 @@ impl MD044ProperNames {
 
     // Create a combined regex pattern for all proper names
     fn create_combined_pattern(&self) -> Option<String> {
-        if self.names.is_empty() {
+        if self.config.names.is_empty() {
             return None;
         }
         
         // Create patterns for all names and their variations
-        let patterns: Vec<String> = self.names.iter().map(|name| {
+        let patterns: Vec<String> = self.config.names.iter().map(|name| {
             let lower_name = name.to_lowercase();
             let lower_name_no_dots = lower_name.replace('.', "");
             if lower_name == lower_name_no_dots {
@@ -137,13 +150,13 @@ impl MD044ProperNames {
     // Find all name violations in the content and return positions
     fn find_name_violations(&self, content: &str, ctx: &crate::lint_context::LintContext) -> Vec<WarningPosition> {
         // Early return: if no names configured or content is empty
-        if self.names.is_empty() || content.is_empty() {
+        if self.config.names.is_empty() || content.is_empty() {
             return Vec::new();
         }
 
         // Early return: quick check if any of the configured names might be in content
         let content_lower = content.to_lowercase();
-        let has_potential_matches = self.names.iter().any(|name| {
+        let has_potential_matches = self.config.names.iter().any(|name| {
             let name_lower = name.to_lowercase();
             content_lower.contains(&name_lower)
                 || content_lower.contains(&name_lower.replace('.', ""))
@@ -185,14 +198,14 @@ impl MD044ProperNames {
             }
             
             // Skip if in code block
-            if self.code_blocks && ctx.is_in_code_block_or_span(byte_pos) {
+            if self.config.code_blocks && ctx.is_in_code_block_or_span(byte_pos) {
                 byte_pos += line.len() + 1;
                 continue;
             }
 
             // Early return: skip lines that don't contain any potential matches
             let line_lower = line.to_lowercase();
-            let has_line_matches = self.names.iter().any(|name| {
+            let has_line_matches = self.config.names.iter().any(|name| {
                 let name_lower = name.to_lowercase();
                 line_lower.contains(&name_lower)
                     || line_lower.contains(&name_lower.replace('.', ""))
@@ -244,7 +257,7 @@ impl MD044ProperNames {
     // Get the proper name that should be used for a found name
     fn get_proper_name_for(&self, found_name: &str) -> Option<String> {
         // Iterate through the configured proper names
-        for name in &self.names {
+        for name in &self.config.names {
             // Perform a case-insensitive comparison between the found name
             // and the configured proper name (and its dotless variation).
             let lower_name = name.to_lowercase();
@@ -272,7 +285,7 @@ impl Rule for MD044ProperNames {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        if content.is_empty() || self.names.is_empty() {
+        if content.is_empty() || self.config.names.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -308,7 +321,7 @@ impl Rule for MD044ProperNames {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        if content.is_empty() || self.names.is_empty() {
+        if content.is_empty() || self.config.names.is_empty() {
             return Ok(content.to_string());
         }
 
@@ -356,27 +369,18 @@ impl Rule for MD044ProperNames {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "names".to_string(),
-            toml::Value::Array(vec![]),
-        );
-        map.insert(
-            "code_blocks".to_string(),
-            toml::Value::Boolean(self.code_blocks),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let names = crate::config::get_rule_config_value::<Vec<String>>(config, "MD044", "names")
-            .unwrap_or_default();
-        let code_blocks =
-            crate::config::get_rule_config_value::<bool>(config, "MD044", "code_blocks")
-                .unwrap_or(true);
-        Box::new(MD044ProperNames::new(names, code_blocks))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD044Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }

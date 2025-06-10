@@ -6,10 +6,13 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::range_utils::calculate_heading_range;
+use crate::rule_config_serde::RuleConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::str::FromStr;
 use toml;
+
+mod md003_config;
+use md003_config::MD003Config;
 
 lazy_static! {
     static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
@@ -20,27 +23,33 @@ lazy_static! {
 /// Rule MD003: Heading style
 #[derive(Clone)]
 pub struct MD003HeadingStyle {
-    style: HeadingStyle,
+    config: MD003Config,
 }
 
 impl Default for MD003HeadingStyle {
     fn default() -> Self {
         Self {
-            style: HeadingStyle::Consistent,
+            config: MD003Config::default(),
         }
     }
 }
 
 impl MD003HeadingStyle {
     pub fn new(style: HeadingStyle) -> Self {
-        Self { style }
+        Self {
+            config: MD003Config { style },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD003Config) -> Self {
+        Self { config }
     }
 
 
     /// Check if we should use consistent mode (detect first style)
     fn is_consistent_mode(&self) -> bool {
         // Check for the Consistent variant explicitly
-        self.style == HeadingStyle::Consistent
+        self.config.style == HeadingStyle::Consistent
     }
 
     /// Gets the target heading style based on configuration and document content
@@ -49,7 +58,7 @@ impl MD003HeadingStyle {
         ctx: &crate::lint_context::LintContext,
     ) -> HeadingStyle {
         if !self.is_consistent_mode() {
-            return self.style;
+            return self.config.style;
         }
 
         // Find the first heading from cached info
@@ -241,22 +250,27 @@ impl Rule for MD003HeadingStyle {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "style".to_string(),
-            toml::Value::String(self.style.to_string()),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let default_config = MD003Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD003Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let style = crate::config::get_rule_config_value::<String>(config, "MD003", "style")
-            .and_then(|s| HeadingStyle::from_str(&s).ok())
-            .unwrap_or(HeadingStyle::Consistent);
-        Box::new(MD003HeadingStyle::new(style))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD003Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

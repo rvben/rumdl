@@ -7,6 +7,9 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
 
+mod md025_config;
+use md025_config::MD025Config;
+
 lazy_static! {
     // Pattern for quick check if content has any headings at all
     static ref HEADING_CHECK: Regex = Regex::new(r"(?m)^(?:\s*)#").unwrap();
@@ -22,21 +25,13 @@ lazy_static! {
 
 #[derive(Clone)]
 pub struct MD025SingleTitle {
-    level: usize,
-    front_matter_title: String,
-    /// Allow multiple H1s if they appear to be document sections (appendices, references, etc.)
-    allow_document_sections: bool,
-    /// Allow multiple H1s if separated by horizontal rules
-    allow_with_separators: bool,
+    config: MD025Config,
 }
 
 impl Default for MD025SingleTitle {
     fn default() -> Self {
         Self {
-            level: 1,
-            front_matter_title: "title".to_string(),
-            allow_document_sections: true, // More lenient by default
-            allow_with_separators: true,
+            config: MD025Config::default(),
         }
     }
 }
@@ -44,25 +39,33 @@ impl Default for MD025SingleTitle {
 impl MD025SingleTitle {
     pub fn new(level: usize, front_matter_title: &str) -> Self {
         Self {
-            level,
-            front_matter_title: front_matter_title.to_string(),
-            allow_document_sections: true,
-            allow_with_separators: true,
+            config: MD025Config {
+                level,
+                front_matter_title: front_matter_title.to_string(),
+                allow_document_sections: true,
+                allow_with_separators: true,
+            }
         }
     }
 
     pub fn strict() -> Self {
         Self {
-            level: 1,
-            front_matter_title: "title".to_string(),
-            allow_document_sections: false,
-            allow_with_separators: false,
+            config: MD025Config {
+                level: 1,
+                front_matter_title: "title".to_string(),
+                allow_document_sections: false,
+                allow_with_separators: false,
+            }
         }
+    }
+    
+    pub fn from_config_struct(config: MD025Config) -> Self {
+        Self { config }
     }
 
     /// Check if a heading text suggests it's a legitimate document section
     fn is_document_section_heading(&self, heading_text: &str) -> bool {
-        if !self.allow_document_sections {
+        if !self.config.allow_document_sections {
             return false;
         }
 
@@ -129,7 +132,7 @@ impl MD025SingleTitle {
 
     /// Check if headings are separated by horizontal rules
     fn has_separator_before_heading(&self, ctx: &crate::lint_context::LintContext, heading_line: usize) -> bool {
-        if !self.allow_with_separators || heading_line == 0 {
+        if !self.config.allow_with_separators || heading_line == 0 {
             return false;
         }
 
@@ -180,7 +183,7 @@ impl Rule for MD025SingleTitle {
 
         // Check for front matter title if configured
         let mut _found_title_in_front_matter = false;
-        if !self.front_matter_title.is_empty() {
+        if !self.config.front_matter_title.is_empty() {
             // Detect front matter manually
             let content_lines: Vec<&str> = ctx.content.lines().collect();
             if content_lines.first().map(|l| l.trim()) == Some("---") {
@@ -193,7 +196,7 @@ impl Rule for MD025SingleTitle {
                         // Check if it contains a title field
                         _found_title_in_front_matter = front_matter_content.lines().any(|line| {
                             line.trim()
-                                .starts_with(&format!("{}:", self.front_matter_title))
+                                .starts_with(&format!("{}:", self.config.front_matter_title))
                         });
                         break;
                     }
@@ -205,7 +208,7 @@ impl Rule for MD025SingleTitle {
         let mut target_level_headings = Vec::new();
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
-                if heading.level as usize == self.level {
+                if heading.level as usize == self.config.level {
                     // Ignore if indented 4+ spaces (code block)
                     if line_info.indent >= 4 {
                         continue;
@@ -259,7 +262,7 @@ impl Rule for MD025SingleTitle {
                         rule_name: Some(self.name()),
                         message: format!(
                             "Multiple top-level headings (level {}) in the same document",
-                            self.level
+                            self.config.level
                         ),
                         line: start_line,
                         column: start_col,
@@ -272,9 +275,9 @@ impl Rule for MD025SingleTitle {
                                 let leading_spaces = line_content.len() - line_content.trim_start().len();
                                 let indentation = " ".repeat(leading_spaces);
                                 if heading_text.is_empty() {
-                                    format!("{}{}", indentation, "#".repeat(self.level + 1))
+                                    format!("{}{}", indentation, "#".repeat(self.config.level + 1))
                                 } else {
-                                    format!("{}{} {}", indentation, "#".repeat(self.level + 1), heading_text)
+                                    format!("{}{} {}", indentation, "#".repeat(self.config.level + 1), heading_text)
                                 }
                             },
                         }),
@@ -298,7 +301,7 @@ impl Rule for MD025SingleTitle {
             }
             
             if let Some(heading) = &line_info.heading {
-                if heading.level as usize == self.level {
+                if heading.level as usize == self.config.level {
                     if !found_first {
                         found_first = true;
                         // Keep the first heading as-is
@@ -339,7 +342,7 @@ impl Rule for MD025SingleTitle {
                                 }
                                 crate::lint_context::HeadingStyle::Setext1 => {
                                     // When demoting from level 1 to 2, use Setext2
-                                    if self.level == 1 {
+                                    if self.config.level == 1 {
                                         crate::rules::heading_utils::HeadingStyle::Setext2
                                     } else {
                                         // For higher levels, use ATX
@@ -356,22 +359,22 @@ impl Rule for MD025SingleTitle {
                                 // For empty headings, manually construct the replacement
                                 match style {
                                     crate::rules::heading_utils::HeadingStyle::Atx => {
-                                        "#".repeat(self.level + 1)
+                                        "#".repeat(self.config.level + 1)
                                     }
                                     crate::rules::heading_utils::HeadingStyle::AtxClosed => {
-                                        format!("{} {}", "#".repeat(self.level + 1), "#".repeat(self.level + 1))
+                                        format!("{} {}", "#".repeat(self.config.level + 1), "#".repeat(self.config.level + 1))
                                     }
                                     crate::rules::heading_utils::HeadingStyle::Setext1 | 
                                     crate::rules::heading_utils::HeadingStyle::Setext2 |
                                     crate::rules::heading_utils::HeadingStyle::Consistent => {
                                         // For empty Setext or Consistent, use ATX style
-                                        "#".repeat(self.level + 1)
+                                        "#".repeat(self.config.level + 1)
                                     }
                                 }
                             } else {
                                 crate::rules::heading_utils::HeadingUtils::convert_heading_style(
                                     &heading.text,
-                                    (self.level + 1) as u32,
+                                    (self.config.level + 1) as u32,
                                     style,
                                 )
                             };
@@ -437,45 +440,19 @@ impl Rule for MD025SingleTitle {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert("level".to_string(), toml::Value::Integer(self.level as i64));
-        map.insert(
-            "front_matter_title".to_string(),
-            toml::Value::String(self.front_matter_title.clone()),
-        );
-        map.insert(
-            "allow_document_sections".to_string(),
-            toml::Value::Boolean(self.allow_document_sections),
-        );
-        map.insert(
-            "allow_with_separators".to_string(),
-            toml::Value::Boolean(self.allow_with_separators),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let level =
-            crate::config::get_rule_config_value::<u32>(config, "MD025", "level").unwrap_or(1);
-        let front_matter_title =
-            crate::config::get_rule_config_value::<String>(config, "MD025", "front_matter_title")
-                .unwrap_or_else(|| "title".to_string());
-        let allow_document_sections =
-            crate::config::get_rule_config_value::<bool>(config, "MD025", "allow_document_sections")
-                .unwrap_or(true); // Default to true for better UX
-        let allow_with_separators =
-            crate::config::get_rule_config_value::<bool>(config, "MD025", "allow_with_separators")
-                .unwrap_or(true);
-
-        Box::new(MD025SingleTitle {
-            level: level as usize,
-            front_matter_title,
-            allow_document_sections,
-            allow_with_separators,
-        })
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD025Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 
@@ -566,7 +543,7 @@ mod tests {
     #[test]
     fn test_bounds_checking_bug() {
         // Test case that could trigger bounds error in fix generation
-        // When col + self.level exceeds line_content.len()
+        // When col + self.config.level exceeds line_content.len()
         let rule = MD025SingleTitle::default();
 
         // Create content with very short second heading
@@ -585,11 +562,11 @@ mod tests {
     #[test]
     fn test_bounds_checking_edge_case() {
         // Test case that specifically targets the bounds checking fix
-        // Create a heading where col + self.level would exceed line length
+        // Create a heading where col + self.config.level would exceed line length
         let rule = MD025SingleTitle::default();
 
         // Create content where the second heading is just "#" (length 1)
-        // col will be 0, self.level is 1, so col + self.level = 1
+        // col will be 0, self.config.level is 1, so col + self.config.level = 1
         // This should not exceed bounds for "#" but tests the edge case
         let content = "# First Title\n#";
         let ctx = crate::lint_context::LintContext::new(content);

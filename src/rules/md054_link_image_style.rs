@@ -9,7 +9,9 @@ use crate::utils::range_utils::calculate_match_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use toml;
+
+mod md054_config;
+use md054_config::MD054Config;
 
 lazy_static! {
     // Updated regex patterns that work with Unicode characters
@@ -77,28 +79,11 @@ pub enum LinkImageStyle {
     Full,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct MD054LinkImageStyle {
-    pub autolink: bool,
-    pub collapsed: bool,
-    pub full: bool,
-    pub inline: bool,
-    pub shortcut: bool,
-    pub url_inline: bool,
+    config: MD054Config,
 }
 
-impl Default for MD054LinkImageStyle {
-    fn default() -> Self {
-        Self {
-            autolink: true,
-            collapsed: true,
-            full: true,
-            inline: true,
-            shortcut: true,
-            url_inline: true,
-        }
-    }
-}
 
 impl MD054LinkImageStyle {
     pub fn new(
@@ -110,24 +95,30 @@ impl MD054LinkImageStyle {
         url_inline: bool,
     ) -> Self {
         Self {
-            autolink,
-            collapsed,
-            full,
-            inline,
-            shortcut,
-            url_inline,
+            config: MD054Config {
+                autolink,
+                collapsed,
+                full,
+                inline,
+                shortcut,
+                url_inline,
+            },
         }
+    }
+    
+    pub fn from_config_struct(config: MD054Config) -> Self {
+        Self { config }
     }
 
     /// Check if a style is allowed based on configuration
     fn is_style_allowed(&self, style: &str) -> bool {
         match style {
-            "autolink" => self.autolink,
-            "collapsed" => self.collapsed,
-            "full" => self.full,
-            "inline" => self.inline,
-            "shortcut" => self.shortcut,
-            "url_inline" => self.url_inline,
+            "autolink" => self.config.autolink,
+            "collapsed" => self.config.collapsed,
+            "full" => self.config.full,
+            "inline" => self.config.inline,
+            "shortcut" => self.config.shortcut,
+            "url_inline" => self.config.url_inline,
             _ => false,
         }
     }
@@ -195,7 +186,7 @@ impl Rule for MD054LinkImageStyle {
                     let match_start_char = line[..match_start_byte].chars().count();
                     let match_end_char = line[..match_end_byte].chars().count();
 
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.full
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.config.full
                     {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) =
@@ -226,7 +217,7 @@ impl Rule for MD054LinkImageStyle {
                     let match_end_char = line[..match_end_byte].chars().count();
 
                     if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
-                        && !self.collapsed
+                        && !self.config.collapsed
                     {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) =
@@ -298,7 +289,7 @@ impl Rule for MD054LinkImageStyle {
                     let match_end_char = line[..match_end_byte].chars().count();
 
                     if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
-                        && !self.autolink
+                        && !self.config.autolink
                     {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) =
@@ -337,7 +328,7 @@ impl Rule for MD054LinkImageStyle {
                     }
 
                     if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
-                        && !self.shortcut
+                        && !self.config.shortcut
                     {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) =
@@ -378,42 +369,18 @@ impl Rule for MD054LinkImageStyle {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert("autolink".to_string(), toml::Value::Boolean(self.autolink));
-        map.insert(
-            "collapsed".to_string(),
-            toml::Value::Boolean(self.collapsed),
-        );
-        map.insert("full".to_string(), toml::Value::Boolean(self.full));
-        map.insert("inline".to_string(), toml::Value::Boolean(self.inline));
-        map.insert("shortcut".to_string(), toml::Value::Boolean(self.shortcut));
-        map.insert(
-            "url_inline".to_string(),
-            toml::Value::Boolean(self.url_inline),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        // Read all style booleans from config, defaulting to true if not set
-        let autolink = crate::config::get_rule_config_value::<bool>(config, "MD054", "autolink")
-            .unwrap_or(true);
-        let collapsed = crate::config::get_rule_config_value::<bool>(config, "MD054", "collapsed")
-            .unwrap_or(true);
-        let full =
-            crate::config::get_rule_config_value::<bool>(config, "MD054", "full").unwrap_or(true);
-        let inline =
-            crate::config::get_rule_config_value::<bool>(config, "MD054", "inline").unwrap_or(true);
-        let shortcut = crate::config::get_rule_config_value::<bool>(config, "MD054", "shortcut")
-            .unwrap_or(true);
-        let url_inline =
-            crate::config::get_rule_config_value::<bool>(config, "MD054", "url_inline")
-                .unwrap_or(true);
-        Box::new(MD054LinkImageStyle::new(
-            autolink, collapsed, full, inline, shortcut, url_inline,
-        ))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD054Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }

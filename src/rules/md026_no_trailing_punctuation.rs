@@ -9,6 +9,9 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::RwLock;
 
+mod md026_config;
+use md026_config::MD026Config;
+
 lazy_static! {
     // Optimized single regex for all ATX heading types (normal, closed, indented 1-3 spaces)
     static ref ATX_HEADING_UNIFIED: Regex = Regex::new(r"^( {0,3})(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap();
@@ -23,13 +26,13 @@ lazy_static! {
 /// Rule MD026: Trailing punctuation in heading
 #[derive(Clone)]
 pub struct MD026NoTrailingPunctuation {
-    punctuation: String,
+    config: MD026Config,
 }
 
 impl Default for MD026NoTrailingPunctuation {
     fn default() -> Self {
         Self {
-            punctuation: ".,;".to_string(),  // More restrictive by default - exclude : ! ?
+            config: MD026Config::default(),
         }
     }
 }
@@ -37,8 +40,14 @@ impl Default for MD026NoTrailingPunctuation {
 impl MD026NoTrailingPunctuation {
     pub fn new(punctuation: Option<String>) -> Self {
         Self {
-            punctuation: punctuation.unwrap_or_else(|| ".,;".to_string()),  // More restrictive by default
+            config: MD026Config {
+                punctuation: punctuation.unwrap_or_else(|| ".,;".to_string()),  // More restrictive by default
+            }
         }
+    }
+    
+    pub fn from_config_struct(config: MD026Config) -> Self {
+        Self { config }
     }
 
     #[inline]
@@ -46,18 +55,18 @@ impl MD026NoTrailingPunctuation {
         // Check cache first
         {
             let cache = PUNCTUATION_REGEX_CACHE.read().unwrap();
-            if let Some(cached_regex) = cache.get(&self.punctuation) {
+            if let Some(cached_regex) = cache.get(&self.config.punctuation) {
                 return Ok(cached_regex.clone());
             }
         }
 
         // Compile and cache the regex
-        let pattern = format!(r"([{}]+)$", regex::escape(&self.punctuation));
+        let pattern = format!(r"([{}]+)$", regex::escape(&self.config.punctuation));
         let regex = Regex::new(&pattern)?;
 
         {
             let mut cache = PUNCTUATION_REGEX_CACHE.write().unwrap();
-            cache.insert(self.punctuation.clone(), regex.clone());
+            cache.insert(self.config.punctuation.clone(), regex.clone());
         }
 
         Ok(regex)
@@ -69,7 +78,7 @@ impl MD026NoTrailingPunctuation {
         
         // Only apply lenient rules for the default punctuation setting
         // When users specify custom punctuation, they want strict behavior
-        if self.punctuation == ".,;" {
+        if self.config.punctuation == ".,;" {
             // Check for common legitimate punctuation patterns before applying the rule
             if self.is_legitimate_punctuation(trimmed) {
                 return false;
@@ -232,13 +241,13 @@ impl Rule for MD026NoTrailingPunctuation {
 
         // Quick check for any punctuation we care about
         // For custom punctuation, we need to check differently
-        if self.punctuation == ".,;" {
+        if self.config.punctuation == ".,;" {
             if !QUICK_PUNCTUATION_CHECK.is_match(content) {
                 return Ok(Vec::new());
             }
         } else {
             // For custom punctuation, check if any of those characters exist
-            let has_custom_punctuation = self.punctuation.chars().any(|c| content.contains(c));
+            let has_custom_punctuation = self.config.punctuation.chars().any(|c| content.contains(c));
             if !has_custom_punctuation {
                 return Ok(Vec::new());
             }
@@ -323,13 +332,13 @@ impl Rule for MD026NoTrailingPunctuation {
 
         // Quick check for punctuation
         // For custom punctuation, we need to check differently
-        if self.punctuation == ".,;" {
+        if self.config.punctuation == ".,;" {
             if !QUICK_PUNCTUATION_CHECK.is_match(content) {
                 return Ok(content.to_string());
             }
         } else {
             // For custom punctuation, check if any of those characters exist
-            let has_custom_punctuation = self.punctuation.chars().any(|c| content.contains(c));
+            let has_custom_punctuation = self.config.punctuation.chars().any(|c| content.contains(c));
             if !has_custom_punctuation {
                 return Ok(content.to_string());
             }
@@ -385,22 +394,19 @@ impl Rule for MD026NoTrailingPunctuation {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "punctuation".to_string(),
-            toml::Value::String(self.punctuation.clone()),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let punctuation =
-            crate::config::get_rule_config_value::<String>(config, "MD026", "punctuation")
-                .unwrap_or_else(|| ".,;".to_string());  // More restrictive default
-        Box::new(MD026NoTrailingPunctuation::new(Some(punctuation)))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD026Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

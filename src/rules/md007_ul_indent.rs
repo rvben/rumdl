@@ -4,24 +4,36 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::element_cache::{ElementCache, ListMarkerType};
+use crate::rule_config_serde::RuleConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
 
+mod md007_config;
+use md007_config::MD007Config;
+
 #[derive(Debug, Clone)]
 pub struct MD007ULIndent {
-    pub indent: usize,
+    config: MD007Config,
 }
 
 impl Default for MD007ULIndent {
     fn default() -> Self {
-        Self { indent: 2 }
+        Self {
+            config: MD007Config::default(),
+        }
     }
 }
 
 impl MD007ULIndent {
     pub fn new(indent: usize) -> Self {
-        Self { indent }
+        Self {
+            config: MD007Config { indent },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD007Config) -> Self {
+        Self { config }
     }
 
     #[allow(dead_code)]
@@ -87,7 +99,7 @@ impl Rule for MD007ULIndent {
                 item.marker_type,
                 ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus
             ) {
-                let expected_indent = item.nesting_level * self.indent;
+                let expected_indent = item.nesting_level * self.config.indent;
                 if item.indentation != expected_indent {
                     // Generate fix for this list item
                     let fix = {
@@ -175,7 +187,7 @@ impl Rule for MD007ULIndent {
                 item.marker_type,
                 ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus
             ) {
-                let expected_indent = item.nesting_level * self.indent;
+                let expected_indent = item.nesting_level * self.config.indent;
                 if item.indentation != expected_indent {
                     // Generate fix for this list item
                     let fix = {
@@ -284,21 +296,27 @@ impl Rule for MD007ULIndent {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "indent".to_string(),
-            toml::Value::Integer(self.indent as i64),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let default_config = MD007Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD007Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let indent =
-            crate::config::get_rule_config_value::<usize>(config, "MD007", "indent").unwrap_or(2);
-        Box::new(MD007ULIndent::new(indent))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD007Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

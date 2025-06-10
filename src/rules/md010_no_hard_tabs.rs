@@ -2,11 +2,13 @@
 ///
 /// See [docs/md010.md](../../docs/md010.md) for full documentation, configuration, and examples.
 use crate::utils::range_utils::{calculate_match_range, LineIndex};
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::RuleConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
-use toml;
+
+mod md010_config;
+use md010_config::MD010Config;
 
 lazy_static! {
     // Pattern to detect HTML comments (start and end tags separately)
@@ -17,15 +19,13 @@ lazy_static! {
 /// Rule MD010: Hard tabs
 #[derive(Clone)]
 pub struct MD010NoHardTabs {
-    pub spaces_per_tab: usize,
-    pub code_blocks: bool,
+    config: MD010Config,
 }
 
 impl Default for MD010NoHardTabs {
     fn default() -> Self {
         Self {
-            spaces_per_tab: 4,
-            code_blocks: true,
+            config: MD010Config::default(),
         }
     }
 }
@@ -33,9 +33,12 @@ impl Default for MD010NoHardTabs {
 impl MD010NoHardTabs {
     pub fn new(spaces_per_tab: usize, code_blocks: bool) -> Self {
         Self {
-            spaces_per_tab,
-            code_blocks,
+            config: MD010Config { spaces_per_tab, code_blocks },
         }
+    }
+    
+    pub fn from_config_struct(config: MD010Config) -> Self {
+        Self { config }
     }
 
 
@@ -143,7 +146,7 @@ impl Rule for MD010NoHardTabs {
             }
 
             // Skip if in code block and code_blocks is false
-            if !self.code_blocks {
+            if !self.config.code_blocks {
                 // Use pre-computed line info
                 if let Some(line_info) = ctx.line_info(line_num + 1) {
                     if line_info.in_code_block {
@@ -179,13 +182,13 @@ impl Rule for MD010NoHardTabs {
                     if tab_count == 1 {
                         format!(
                             "Found leading tab, use {} spaces instead",
-                            self.spaces_per_tab
+                            self.config.spaces_per_tab
                         )
                     } else {
                         format!(
                             "Found {} leading tabs, use {} spaces instead",
                             tab_count,
-                            tab_count * self.spaces_per_tab
+                            tab_count * self.config.spaces_per_tab
                         )
                     }
                 } else if tab_count == 1 {
@@ -207,7 +210,7 @@ impl Rule for MD010NoHardTabs {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: _line_index.line_col_to_byte_range_with_length(line_num + 1, start_pos + 1, tab_count),
-                        replacement: " ".repeat(tab_count * self.spaces_per_tab),
+                        replacement: " ".repeat(tab_count * self.config.spaces_per_tab),
                     }),
                 });
             }
@@ -238,12 +241,12 @@ impl Rule for MD010NoHardTabs {
             if html_comment_lines[i] {
                 // Preserve HTML comments as they are
                 result.push_str(line);
-            } else if !self.code_blocks && ctx.is_in_code_block_or_span(line_positions[i]) {
+            } else if !self.config.code_blocks && ctx.is_in_code_block_or_span(line_positions[i]) {
                 // Preserve code blocks when code_blocks is false
                 result.push_str(line);
             } else {
                 // Replace tabs with spaces
-                result.push_str(&line.replace('\t', &" ".repeat(self.spaces_per_tab)));
+                result.push_str(&line.replace('\t', &" ".repeat(self.config.spaces_per_tab)));
             }
             
             // Add newline if not the last line without a newline
@@ -264,19 +267,26 @@ impl Rule for MD010NoHardTabs {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        Some(("MD010".to_string(), toml::Value::Table(toml::Table::new())))
+        let default_config = MD010Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD010Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let spaces_per_tab =
-            crate::config::get_rule_config_value::<usize>(config, "MD010", "spaces_per_tab")
-                .unwrap_or(4);
-        let code_blocks =
-            crate::config::get_rule_config_value::<bool>(config, "MD010", "code_blocks")
-                .unwrap_or(true);
-        Box::new(MD010NoHardTabs::new(spaces_per_tab, code_blocks))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD010Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }

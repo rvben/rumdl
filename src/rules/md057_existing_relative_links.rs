@@ -12,7 +12,9 @@ use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use toml;
+
+mod md057_config;
+use md057_config::MD057Config;
 
 // Thread-safe cache for file existence checks to avoid redundant filesystem operations
 lazy_static! {
@@ -65,22 +67,14 @@ lazy_static! {
 }
 
 /// Rule MD057: Existing relative links should point to valid files or directories.
-#[derive(Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct MD057ExistingRelativeLinks {
     /// Base directory for resolving relative links
     base_path: Arc<Mutex<Option<PathBuf>>>,
-    /// Skip checking media files
-    skip_media_files: bool,
+    /// Configuration
+    config: MD057Config,
 }
 
-impl Default for MD057ExistingRelativeLinks {
-    fn default() -> Self {
-        Self {
-            base_path: Arc::new(Mutex::new(None)),
-            skip_media_files: true,
-        }
-    }
-}
 
 impl MD057ExistingRelativeLinks {
     /// Create a new instance with default settings
@@ -103,8 +97,15 @@ impl MD057ExistingRelativeLinks {
 
     /// Configure whether to skip checking media files
     pub fn with_skip_media_files(mut self, skip_media_files: bool) -> Self {
-        self.skip_media_files = skip_media_files;
+        self.config.skip_media_files = skip_media_files;
         self
+    }
+    
+    pub fn from_config_struct(config: MD057Config) -> Self {
+        Self {
+            base_path: Arc::new(Mutex::new(None)),
+            config,
+        }
     }
 
     /// Check if a URL is external (optimized version)
@@ -152,7 +153,7 @@ impl MD057ExistingRelativeLinks {
     /// Determine if we should skip checking this media file
     #[inline]
     fn should_skip_media_file(&self, url: &str) -> bool {
-        self.skip_media_files && self.is_media_file(url)
+        self.config.skip_media_files && self.is_media_file(url)
     }
 
     /// Resolve a relative link against the base path
@@ -389,22 +390,19 @@ impl Rule for MD057ExistingRelativeLinks {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert("skip_media_files".to_string(), toml::Value::Boolean(true));
-        Some(("MD057".to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let skip_media_files =
-            crate::config::get_rule_config_value::<bool>(config, "MD057", "skip_media_files")
-                .unwrap_or(true);
-        Box::new(MD057ExistingRelativeLinks {
-            base_path: Arc::new(Mutex::new(None)),
-            skip_media_files,
-        })
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD057Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

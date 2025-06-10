@@ -1,9 +1,12 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::{calculate_trailing_range, LineIndex};
 use crate::utils::regex_cache::get_cached_regex;
+use crate::rule_config_serde::RuleConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
-use toml;
+
+mod md009_config;
+use md009_config::MD009Config;
 
 lazy_static! {
     // Optimized regex patterns for fix operations
@@ -12,22 +15,26 @@ lazy_static! {
 
 #[derive(Debug, Clone)]
 pub struct MD009TrailingSpaces {
-    pub br_spaces: usize,
-    pub strict: bool,
+    config: MD009Config,
 }
 
 impl Default for MD009TrailingSpaces {
     fn default() -> Self {
         Self {
-            br_spaces: 2,
-            strict: false,
+            config: MD009Config::default(),
         }
     }
 }
 
 impl MD009TrailingSpaces {
     pub fn new(br_spaces: usize, strict: bool) -> Self {
-        Self { br_spaces, strict }
+        Self {
+            config: MD009Config { br_spaces, strict },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD009Config) -> Self {
+        Self { config }
     }
 
 
@@ -99,7 +106,7 @@ impl Rule for MD009TrailingSpaces {
             }
 
             // Handle code blocks if not in strict mode
-            if !self.strict {
+            if !self.config.strict {
                 // Use pre-computed line info
                 if let Some(line_info) = ctx.line_info(line_num + 1) {
                     if line_info.in_code_block {
@@ -112,7 +119,7 @@ impl Rule for MD009TrailingSpaces {
             // Special handling: if the content ends with a newline, the last line from .lines() 
             // is not really the "last line" in terms of trailing spaces rules
             let is_truly_last_line = line_num == lines.len() - 1 && !content.ends_with('\n');
-            if !self.strict && !is_truly_last_line && trailing_spaces == self.br_spaces {
+            if !self.config.strict && !is_truly_last_line && trailing_spaces == self.config.br_spaces {
                 continue;
             }
 
@@ -158,8 +165,8 @@ impl Rule for MD009TrailingSpaces {
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: _line_index.line_col_to_byte_range_with_length(line_num + 1, trimmed.len() + 1, trailing_spaces),
-                    replacement: if !self.strict && !is_truly_last_line && trailing_spaces >= 1 {
-                        " ".repeat(self.br_spaces)
+                    replacement: if !self.config.strict && !is_truly_last_line && trailing_spaces >= 1 {
+                        " ".repeat(self.config.br_spaces)
                     } else {
                         String::new()
                     },
@@ -174,7 +181,7 @@ impl Rule for MD009TrailingSpaces {
         let content = ctx.content;
 
         // For simple cases (strict mode), use fast regex approach
-        if self.strict {
+        if self.config.strict {
             // In strict mode, remove ALL trailing spaces everywhere
             return Ok(TRAILING_SPACES_REGEX.replace_all(content, "").to_string());
         }
@@ -219,10 +226,10 @@ impl Rule for MD009TrailingSpaces {
             // Handle lines with trailing spaces
             let trailing_spaces = Self::count_trailing_spaces(line);
             let is_truly_last_line = i == lines.len() - 1 && !content.ends_with('\n');
-            if !self.strict && !is_truly_last_line && trailing_spaces >= 1 {
+            if !self.config.strict && !is_truly_last_line && trailing_spaces >= 1 {
                 // This is a line break (intentional trailing spaces)
                 result.push_str(trimmed);
-                result.push_str(&" ".repeat(self.br_spaces));
+                result.push_str(&" ".repeat(self.config.br_spaces));
             } else {
                 // Normal line, just use trimmed content
                 result.push_str(trimmed);
@@ -247,28 +254,26 @@ impl Rule for MD009TrailingSpaces {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "br_spaces".to_string(),
-            toml::Value::Integer(self.br_spaces as i64),
-        );
-        map.insert("strict".to_string(), toml::Value::Boolean(self.strict));
-
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let default_config = MD009Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD009Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        // get_rule_config_value now automatically tries both underscore and kebab-case variants
-        let br_spaces =
-            crate::config::get_rule_config_value::<u32>(config, "MD009", "br_spaces").unwrap_or(2);
-
-        let strict = crate::config::get_rule_config_value::<bool>(config, "MD009", "strict")
-            .unwrap_or(false);
-
-        let br_spaces_usize = br_spaces as usize;
-        Box::new(MD009TrailingSpaces::new(br_spaces_usize, strict))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD009Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }

@@ -10,6 +10,9 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
 
+mod md035_config;
+use md035_config::MD035Config;
+
 lazy_static! {
     static ref HR_DASH: Regex = Regex::new(r"^\-{3,}\s*$").unwrap();
     static ref HR_ASTERISK: Regex = Regex::new(r"^\*{3,}\s*$").unwrap();
@@ -22,20 +25,26 @@ lazy_static! {
 /// Represents the style for horizontal rules
 #[derive(Clone)]
 pub struct MD035HRStyle {
-    style: String,
+    config: MD035Config,
 }
 
 impl Default for MD035HRStyle {
     fn default() -> Self {
         Self {
-            style: "---".to_string(),
+            config: MD035Config::default(),
         }
     }
 }
 
 impl MD035HRStyle {
     pub fn new(style: String) -> Self {
-        Self { style }
+        Self {
+            config: MD035Config { style },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD035Config) -> Self {
+        Self { config }
     }
 
     /// Determines if a line is a horizontal rule
@@ -113,10 +122,10 @@ impl Rule for MD035HRStyle {
         let lines: Vec<&str> = content.lines().collect();
 
         // Use the configured style or find the most prevalent HR style
-        let expected_style = if self.style.is_empty() || self.style == "consistent" {
+        let expected_style = if self.config.style.is_empty() || self.config.style == "consistent" {
             Self::most_prevalent_hr_style(&lines).unwrap_or_else(|| "---".to_string())
         } else {
-            self.style.clone()
+            self.config.style.clone()
         };
 
         for (i, line) in lines.iter().enumerate() {
@@ -167,10 +176,10 @@ impl Rule for MD035HRStyle {
         let lines: Vec<&str> = content.lines().collect();
 
         // Use the configured style or find the most prevalent HR style
-        let expected_style = if self.style.is_empty() || self.style == "consistent" {
+        let expected_style = if self.config.style.is_empty() || self.config.style == "consistent" {
             Self::most_prevalent_hr_style(&lines).unwrap_or_else(|| "---".to_string())
         } else {
-            self.style.clone()
+            self.config.style.clone()
         };
 
         for (i, line) in lines.iter().enumerate() {
@@ -198,7 +207,7 @@ impl Rule for MD035HRStyle {
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(self.style.clone()));
+        map.insert("style".to_string(), toml::Value::String(self.config.style.clone()));
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 

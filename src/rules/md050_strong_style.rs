@@ -5,6 +5,9 @@ use crate::rules::strong_style::StrongStyle;
 use lazy_static::lazy_static;
 use regex::Regex;
 
+mod md050_config;
+use md050_config::MD050Config;
+
 lazy_static! {
     static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"__[^_\\]+__").unwrap();
     static ref ASTERISK_PATTERN: Regex = Regex::new(r"\*\*[^*\\]+\*\*").unwrap();
@@ -15,14 +18,20 @@ lazy_static! {
 /// See [docs/md050.md](../../docs/md050.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when strong markers (** or __) are used in an inconsistent way.
-#[derive(Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct MD050StrongStyle {
-    style: StrongStyle,
+    config: MD050Config,
 }
 
 impl MD050StrongStyle {
     pub fn new(style: StrongStyle) -> Self {
-        Self { style }
+        Self {
+            config: MD050Config { style },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD050Config) -> Self {
+        Self { config }
     }
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
@@ -94,9 +103,9 @@ impl Rule for MD050StrongStyle {
 
         let mut warnings = Vec::new();
 
-        let target_style = match self.style {
+        let target_style = match self.config.style {
             StrongStyle::Consistent => self.detect_style(ctx).unwrap_or(StrongStyle::Asterisk),
-            _ => self.style,
+            _ => self.config.style,
         };
 
         let strong_regex = match target_style {
@@ -164,9 +173,9 @@ impl Rule for MD050StrongStyle {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
 
-        let target_style = match self.style {
+        let target_style = match self.config.style {
             StrongStyle::Consistent => self.detect_style(ctx).unwrap_or(StrongStyle::Asterisk),
-            _ => self.style,
+            _ => self.config.style,
         };
 
         let strong_regex = match target_style {
@@ -205,26 +214,18 @@ impl Rule for MD050StrongStyle {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "style".to_string(),
-            toml::Value::String(self.style.to_string()),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let style = crate::config::get_rule_config_value::<String>(config, "MD050", "style")
-            .unwrap_or_else(|| "consistent".to_string());
-        let style = match style.as_str() {
-            "asterisk" => StrongStyle::Asterisk,
-            "underscore" => StrongStyle::Underscore,
-            "consistent" => StrongStyle::Consistent,
-            _ => StrongStyle::Consistent,
-        };
-        Box::new(MD050StrongStyle::new(style))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD050Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }

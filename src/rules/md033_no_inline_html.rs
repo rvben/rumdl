@@ -11,6 +11,9 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
 
+mod md033_config;
+use md033_config::MD033Config;
+
 lazy_static! {
     // HTML/Markdown comment pattern (specific to MD033)
     static ref HTML_COMMENT_PATTERN: Regex = Regex::new(r"<!--.*?-->").unwrap();
@@ -18,27 +21,34 @@ lazy_static! {
 
 #[derive(Clone)]
 pub struct MD033NoInlineHtml {
+    config: MD033Config,
     allowed: HashSet<String>,
 }
 
 impl Default for MD033NoInlineHtml {
     fn default() -> Self {
-        Self::new()
+        let config = MD033Config::default();
+        let allowed = config.allowed_set();
+        Self { config, allowed }
     }
 }
 
 impl MD033NoInlineHtml {
     pub fn new() -> Self {
-        Self {
-            allowed: HashSet::new(),
-        }
+        Self::default()
     }
 
     pub fn with_allowed(allowed_vec: Vec<String>) -> Self {
-        // Store allowed tags in lowercase for case-insensitive matching
-        Self {
-            allowed: allowed_vec.into_iter().map(|s| s.to_lowercase()).collect(),
-        }
+        let config = MD033Config {
+            allowed: allowed_vec.clone(),
+        };
+        let allowed = config.allowed_set();
+        Self { config, allowed }
+    }
+    
+    pub fn from_config_struct(config: MD033Config) -> Self {
+        let allowed = config.allowed_set();
+        Self { config, allowed }
     }
 
     // Efficient check for allowed tags using HashSet (case-insensitive)
@@ -381,30 +391,19 @@ impl Rule for MD033NoInlineHtml {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let allowed_vec: Vec<toml::Value> = self
-            .allowed
-            .iter()
-            .cloned()
-            .map(toml::Value::String)
-            .collect();
-        let mut map = toml::map::Map::new();
-        map.insert("allowed".to_string(), toml::Value::Array(allowed_vec));
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let allowed_vec = crate::config::get_rule_config_value::<Vec<String>>(
-            config,
-            "MD033",
-            "allowed_elements",
-        )
-        .unwrap_or_default();
-        // Convert Vec to HashSet for the struct field
-        let allowed: HashSet<String> = allowed_vec.into_iter().map(|s| s.to_lowercase()).collect();
-        Box::new(MD033NoInlineHtml { allowed })
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD033Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

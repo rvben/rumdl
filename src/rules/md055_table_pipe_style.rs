@@ -1,7 +1,9 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::{calculate_line_range, LineIndex};
 use crate::utils::table_utils::TableUtils;
-use toml;
+
+mod md055_config;
+use md055_config::MD055Config;
 
 /// Rule MD055: Table pipe style
 ///
@@ -75,22 +77,21 @@ use toml;
 /// - Optimized string manipulation for pipe character handling
 ///
 /// Enforces consistent use of leading and trailing pipe characters in tables
-#[derive(Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct MD055TablePipeStyle {
-    pub style: String,
+    config: MD055Config,
 }
 
-impl Default for MD055TablePipeStyle {
-    fn default() -> Self {
-        Self {
-            style: "consistent".to_string(),
-        }
-    }
-}
 
 impl MD055TablePipeStyle {
     pub fn new(style: String) -> Self {
-        Self { style }
+        Self {
+            config: MD055Config { style },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD055Config) -> Self {
+        Self { config }
     }
 
     /// Fix a table row to match the target style
@@ -188,12 +189,12 @@ impl Rule for MD055TablePipeStyle {
         let lines: Vec<&str> = content.lines().collect();
 
         // Get the configured style explicitly and validate it
-        let configured_style = match self.style.as_str() {
+        let configured_style = match self.config.style.as_str() {
             "leading_and_trailing"
             | "no_leading_or_trailing"
             | "leading_only"
             | "trailing_only"
-            | "consistent" => self.style.as_str(),
+            | "consistent" => self.config.style.as_str(),
             _ => {
                 // Invalid style provided, default to "leading_and_trailing"
                 "leading_and_trailing"
@@ -289,12 +290,12 @@ impl Rule for MD055TablePipeStyle {
         let lines: Vec<&str> = content.lines().collect();
 
         // Use the configured style but validate it first
-        let configured_style = match self.style.as_str() {
+        let configured_style = match self.config.style.as_str() {
             "leading_and_trailing"
             | "no_leading_or_trailing"
             | "leading_only"
             | "trailing_only"
-            | "consistent" => self.style.as_str(),
+            | "consistent" => self.config.style.as_str(),
             _ => {
                 // Invalid style provided, default to "leading_and_trailing"
                 "leading_and_trailing"
@@ -359,30 +360,19 @@ impl Rule for MD055TablePipeStyle {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(self.style.clone()));
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let style = crate::config::get_rule_config_value::<String>(config, "MD055", "style")
-            .unwrap_or_else(|| "consistent".to_string());
-        let valid_styles = [
-            "consistent",
-            "leading_and_trailing",
-            "no_leading_or_trailing",
-            "leading_only",
-            "trailing_only",
-        ];
-        let style = if valid_styles.contains(&style.as_str()) {
-            style
-        } else {
-            "consistent".to_string() // Default to consistent if invalid
-        };
-        Box::new(MD055TablePipeStyle::new(style))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD055Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

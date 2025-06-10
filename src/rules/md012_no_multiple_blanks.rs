@@ -2,6 +2,10 @@ use crate::utils::range_utils::{calculate_line_range, LineIndex};
 use toml;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule_config_serde::RuleConfig;
+
+mod md012_config;
+use md012_config::MD012Config;
 
 /// Rule MD012: No multiple consecutive blank lines
 ///
@@ -9,18 +13,26 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 #[derive(Debug, Clone)]
 pub struct MD012NoMultipleBlanks {
-    pub maximum: usize,
+    config: MD012Config,
 }
 
 impl Default for MD012NoMultipleBlanks {
     fn default() -> Self {
-        Self { maximum: 1 }
+        Self {
+            config: MD012Config::default(),
+        }
     }
 }
 
 impl MD012NoMultipleBlanks {
     pub fn new(maximum: usize) -> Self {
-        Self { maximum }
+        Self {
+            config: MD012Config { maximum },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD012Config) -> Self {
+        Self { config }
     }
 
     #[cfg(test)]
@@ -194,7 +206,7 @@ impl Rule for MD012NoMultipleBlanks {
                 }
                 blank_count += 1;
             } else {
-                if blank_count > self.maximum {
+                if blank_count > self.config.maximum {
                     // Generate warnings for each excess blank line to match markdownlint behavior
                     let location = if blank_start == 0 {
                         "at start of file"
@@ -203,7 +215,7 @@ impl Rule for MD012NoMultipleBlanks {
                     };
 
                     // Report warnings starting from the (maximum+1)th blank line
-                    for i in self.maximum..blank_count {
+                    for i in self.config.maximum..blank_count {
                         let excess_line = blank_start + i + 1; // +1 for 1-indexed lines
                         let excess_line_content = lines.get(blank_start + i).unwrap_or(&"");
 
@@ -216,7 +228,7 @@ impl Rule for MD012NoMultipleBlanks {
                             severity: Severity::Warning,
                             message: format!(
                                 "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
-                                location, self.maximum, blank_count
+                                location, self.config.maximum, blank_count
                             ),
                             line: start_line,
                             column: start_col,
@@ -239,9 +251,9 @@ impl Rule for MD012NoMultipleBlanks {
         }
 
         // Check for trailing blank lines
-        if blank_count > self.maximum {
+        if blank_count > self.config.maximum {
             let location = "at end of file";
-            for i in self.maximum..blank_count {
+            for i in self.config.maximum..blank_count {
                 let excess_line = blank_start + i + 1;
                 let excess_line_content = lines.get(blank_start + i).unwrap_or(&"");
 
@@ -254,7 +266,7 @@ impl Rule for MD012NoMultipleBlanks {
                     severity: Severity::Warning,
                     message: format!(
                         "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
-                        location, self.maximum, blank_count
+                        location, self.config.maximum, blank_count
                     ),
                     line: start_line,
                     column: start_col,
@@ -297,7 +309,7 @@ impl Rule for MD012NoMultipleBlanks {
             if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
                 // Handle accumulated blank lines before code block
                 if !in_code_block {
-                    let allowed_blanks = blank_count.min(self.maximum);
+                    let allowed_blanks = blank_count.min(self.config.maximum);
                     if allowed_blanks > 0 {
                         result.extend(vec![""; allowed_blanks]);
                     }
@@ -338,7 +350,7 @@ impl Rule for MD012NoMultipleBlanks {
                 blank_count += 1;
             } else {
                 // Add allowed blank lines before content
-                let allowed_blanks = blank_count.min(self.maximum);
+                let allowed_blanks = blank_count.min(self.config.maximum);
                 if allowed_blanks > 0 {
                     result.extend(vec![""; allowed_blanks]);
                 }
@@ -349,7 +361,7 @@ impl Rule for MD012NoMultipleBlanks {
 
         // Handle trailing blank lines
         if !in_code_block {
-            let allowed_blanks = blank_count.min(self.maximum);
+            let allowed_blanks = blank_count.min(self.config.maximum);
             if allowed_blanks > 0 {
                 result.extend(vec![""; allowed_blanks]);
             }
@@ -370,21 +382,27 @@ impl Rule for MD012NoMultipleBlanks {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "maximum".to_string(),
-            toml::Value::Integer(self.maximum as i64),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let default_config = MD012Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD012Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let maximum =
-            crate::config::get_rule_config_value::<usize>(config, "MD012", "maximum").unwrap_or(1);
-        Box::new(MD012NoMultipleBlanks::new(maximum))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD012Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

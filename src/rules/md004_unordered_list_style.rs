@@ -53,6 +53,9 @@ use crate::utils::document_structure::DocumentStructureExtensions;
 use crate::LintContext;
 use toml;
 
+mod md004_config;
+use md004_config::MD004Config;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnorderedListStyle {
     Asterisk,   // "*"
@@ -71,16 +74,29 @@ impl Default for UnorderedListStyle {
 /// Rule MD004: Unordered list style
 #[derive(Clone)]
 pub struct MD004UnorderedListStyle {
-    pub style: UnorderedListStyle,
-    pub after_marker: usize,
+    config: MD004Config,
+}
+
+impl Default for MD004UnorderedListStyle {
+    fn default() -> Self {
+        Self {
+            config: MD004Config::default(),
+        }
+    }
 }
 
 impl MD004UnorderedListStyle {
     pub fn new(style: UnorderedListStyle) -> Self {
         Self {
-            style,
-            after_marker: 1,
+            config: MD004Config {
+                style,
+                after_marker: 1,
+            },
         }
+    }
+    
+    pub fn from_config_struct(config: MD004Config) -> Self {
+        Self { config }
     }
 }
 
@@ -133,7 +149,7 @@ impl Rule for MD004UnorderedListStyle {
                         // Calculate offset for the marker position
                         let offset = line_info.byte_offset + list_item.marker_column;
 
-                        match self.style {
+                        match self.config.style {
                             UnorderedListStyle::Consistent => {
                                 // For consistent mode, we check consistency across the entire document
                                 if let Some(first) = first_marker {
@@ -164,7 +180,7 @@ impl Rule for MD004UnorderedListStyle {
                             }
                             _ => {
                                 // Handle specific style requirements (asterisk, dash, plus)
-                                let target_marker = match self.style {
+                                let target_marker = match self.config.style {
                                     UnorderedListStyle::Asterisk => '*',
                                     UnorderedListStyle::Dash => '-',
                                     UnorderedListStyle::Plus => '+',
@@ -228,7 +244,7 @@ impl Rule for MD004UnorderedListStyle {
                         let marker = list_item.marker.chars().next().unwrap();
                         
                         // Determine the target marker
-                        let target_marker = match self.style {
+                        let target_marker = match self.config.style {
                             UnorderedListStyle::Consistent => {
                                 if let Some(first) = first_marker {
                                     first
@@ -283,7 +299,7 @@ impl Rule for MD004UnorderedListStyle {
         let mut map = toml::map::Map::new();
         map.insert(
             "style".to_string(),
-            toml::Value::String(match self.style {
+            toml::Value::String(match self.config.style {
                 UnorderedListStyle::Asterisk => "asterisk".to_string(),
                 UnorderedListStyle::Dash => "dash".to_string(),
                 UnorderedListStyle::Plus => "plus".to_string(),

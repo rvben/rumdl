@@ -4,6 +4,9 @@ use crate::rules::emphasis_style::EmphasisStyle;
 use crate::utils::range_utils::calculate_match_range;
 use markdown::mdast::{Emphasis, Node};
 
+mod md049_config;
+use md049_config::MD049Config;
+
 /// Rule MD049: Emphasis style
 ///
 /// See [docs/md049.md](../../docs/md049.md) for full documentation, configuration, and examples.
@@ -15,13 +18,19 @@ use markdown::mdast::{Emphasis, Node};
 /// This rule is focused on regular emphasis, not strong emphasis.
 #[derive(Debug, Default, Clone)]
 pub struct MD049EmphasisStyle {
-    style: EmphasisStyle,
+    config: MD049Config,
 }
 
 impl MD049EmphasisStyle {
     /// Create a new instance of MD049EmphasisStyle
     pub fn new(style: EmphasisStyle) -> Self {
-        MD049EmphasisStyle { style }
+        MD049EmphasisStyle {
+            config: MD049Config { style },
+        }
+    }
+    
+    pub fn from_config_struct(config: MD049Config) -> Self {
+        Self { config }
     }
 
     // Recursively walk AST and collect all valid emphasis nodes with marker info
@@ -75,7 +84,7 @@ impl Rule for MD049EmphasisStyle {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = vec![];
         let ast = &ctx.ast;
-        match self.style {
+        match self.config.style {
             EmphasisStyle::Consistent => {
                 // Collect all emphasis nodes from the entire document
                 let mut emphasis_nodes = vec![];
@@ -147,7 +156,7 @@ impl Rule for MD049EmphasisStyle {
             EmphasisStyle::Asterisk | EmphasisStyle::Underscore => {
                 let mut emphasis_nodes = vec![];
                 Self::collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
-                let (wrong_marker, correct_marker) = match self.style {
+                let (wrong_marker, correct_marker) = match self.config.style {
                     EmphasisStyle::Asterisk => ('_', '*'),
                     EmphasisStyle::Underscore => ('*', '_'),
                     EmphasisStyle::Consistent => unreachable!(),
@@ -247,27 +256,19 @@ impl Rule for MD049EmphasisStyle {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "style".to_string(),
-            toml::Value::String(self.style.to_string()),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let style = crate::config::get_rule_config_value::<String>(config, "MD049", "style")
-            .unwrap_or_else(|| "consistent".to_string());
-        let style = match style.as_str() {
-            "asterisk" => EmphasisStyle::Asterisk,
-            "underscore" => EmphasisStyle::Underscore,
-            "consistent" => EmphasisStyle::Consistent,
-            _ => EmphasisStyle::Consistent,
-        };
-        Box::new(MD049EmphasisStyle::new(style))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD049Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 
