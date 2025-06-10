@@ -10,7 +10,10 @@ RUST_BACKTRACE = "1"
 rust = "1.87.0"
 
 # Python for maturin/python bindings
-python = "3.12"
+python = { version = "3.12", virtualenv = ".venv" }
+
+# Python packages
+"pipx:twine" = "latest"  # For PyPI uploads
 
 # Development tools installed via cargo
 "cargo:cargo-nextest" = "latest"

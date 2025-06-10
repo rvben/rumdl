@@ -34,6 +34,29 @@ dev-verify:
 	@echo "cargo-binstall: $$(cargo binstall --version 2>/dev/null || echo 'not installed')"
 	@echo "===================="
 
+# CI-specific setup (uses mise if available, falls back to direct installation)
+ci-setup:
+	@if command -v mise >/dev/null 2>&1; then \
+		echo "Using mise for CI setup..."; \
+		mise install; \
+	else \
+		echo "mise not found, using direct installation..."; \
+		if ! command -v cargo-nextest >/dev/null 2>&1; then \
+			echo "Installing cargo-nextest..."; \
+			curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C $${CARGO_HOME:-~/.cargo}/bin; \
+		fi; \
+		if ! command -v cargo-binstall >/dev/null 2>&1; then \
+			echo "Installing cargo-binstall..."; \
+			curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash; \
+		fi; \
+	fi
+
+# Install mise in CI environment
+ci-install-mise:
+	@echo "Installing mise for CI..."
+	@curl https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+	@echo "mise installed at: $$(which mise)"
+
 build:
 	cargo build --release
 

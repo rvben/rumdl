@@ -4,6 +4,24 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual trigger for testing and recovery scenarios
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode (skip actual publishing)'
+        required: false
+        default: true
+        type: boolean
+      skip_crates_io:
+        description: 'Skip publishing to crates.io (if already published)'
+        required: false
+        default: false
+        type: boolean
+      skip_pypi:
+        description: 'Skip publishing to PyPI (if already published)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -90,9 +108,20 @@ jobs:
       - uses: jdx/mise-action@v2
 
       - name: Publish to crates.io
+        if: ${{ inputs.dry_run != true && inputs.skip_crates_io != true }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish --locked
+      
+      - name: Test crates.io publish (dry run)
+        if: ${{ inputs.dry_run == true && inputs.skip_crates_io != true }}
+        run: |
+          echo "DRY RUN: Would publish to crates.io"
+          cargo publish --dry-run --locked
+      
+      - name: Skip crates.io publishing
+        if: ${{ inputs.skip_crates_io == true }}
+        run: echo "⏭️ Skipping crates.io publishing as requested"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -100,11 +129,25 @@ jobs:
           path: artifacts
 
       - name: Publish to PyPI
+        if: ${{ inputs.dry_run != true && inputs.skip_pypi != true }}
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: |
-          find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" \) | xargs python -m twine upload
+          find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" \) | xargs twine upload
+      
+      - name: Test PyPI upload (dry run)
+        if: ${{ inputs.dry_run == true && inputs.skip_pypi != true }}
+        run: |
+          echo "DRY RUN: Would upload to PyPI:"
+          find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" \) | sort
+          echo ""
+          echo "Checking packages:"
+          find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" \) | xargs twine check
+      
+      - name: Skip PyPI publishing
+        if: ${{ inputs.skip_pypi == true }}
+        run: echo "⏭️ Skipping PyPI publishing as requested"
 
       - name: Extract release notes
         run: |
@@ -118,15 +161,24 @@ jobs:
           fi
 
       - name: Create Release
+        if: ${{ inputs.dry_run != true }}
         uses: softprops/action-gh-release@v1
         with:
           body_path: release-notes.md
           files: artifacts/rumdl-*/rumdl-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Test Release Creation (dry run)
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "DRY RUN: Would create release with:"
+          echo "- Release notes from: release-notes.md"
+          echo "- Artifacts:"
+          find artifacts -name "rumdl-*" -type f | sort
 
       - name: Notify rumdl-pre-commit
-        if: success()
+        if: ${{ success() && inputs.dry_run != true }}
         env:
           GITHUB_TOKEN: ${{ secrets.PRECOMMIT_DISPATCH_TOKEN }}
         run: |
@@ -135,3 +187,15 @@ jobs:
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             https://api.github.com/repos/rvben/rumdl-pre-commit/dispatches \
             -d '{"event_type": "pypi_release"}'
+      
+      - name: Dry Run Summary
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "## 🧪 Dry Run Complete!"
+          echo ""
+          echo "The release pipeline executed successfully in dry-run mode."
+          echo "All artifacts were built but nothing was published."
+          echo ""
+          echo "To do an actual release:"
+          echo "1. Uncheck 'Dry run mode' when running manually, OR"
+          echo "2. Create and push a version tag (e.g., v0.0.85)"
