@@ -6,7 +6,7 @@
 RUST_BACKTRACE = "1"
 
 [tools]
-# Rust toolchain - matches rust-version in Cargo.toml
+# Rust toolchain - version matches rust-toolchain.toml
 rust = "1.87.0"
 
 # Python for maturin/python bindings

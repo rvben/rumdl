@@ -1,4 +1,4 @@
-name: Release (Simplified with mise)
+name: Release
 
 on:
   push:
@@ -112,13 +112,13 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish --locked
-      
+
       - name: Test crates.io publish (dry run)
         if: ${{ inputs.dry_run == true && inputs.skip_crates_io != true }}
         run: |
           echo "DRY RUN: Would publish to crates.io"
           cargo publish --dry-run --locked
-      
+
       - name: Skip crates.io publishing
         if: ${{ inputs.skip_crates_io == true }}
         run: echo "⏭️ Skipping crates.io publishing as requested"
@@ -135,7 +135,7 @@ jobs:
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: |
           find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" \) | xargs twine upload
-      
+
       - name: Test PyPI upload (dry run)
         if: ${{ inputs.dry_run == true && inputs.skip_pypi != true }}
         run: |
@@ -144,7 +144,7 @@ jobs:
           echo ""
           echo "Checking packages:"
           find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" \) | xargs twine check
-      
+
       - name: Skip PyPI publishing
         if: ${{ inputs.skip_pypi == true }}
         run: echo "⏭️ Skipping PyPI publishing as requested"
@@ -168,7 +168,7 @@ jobs:
           files: artifacts/rumdl-*/rumdl-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Test Release Creation (dry run)
         if: ${{ inputs.dry_run == true }}
         run: |
@@ -187,7 +187,7 @@ jobs:
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             https://api.github.com/repos/rvben/rumdl-pre-commit/dispatches \
             -d '{"event_type": "pypi_release"}'
-      
+
       - name: Dry Run Summary
         if: ${{ inputs.dry_run == true }}
         run: |
