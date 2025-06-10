@@ -10,10 +10,10 @@ RUST_BACKTRACE = "1"
 rust = "1.87.0"
 
 # Python for maturin/python bindings
-python = { version = "3.12", virtualenv = ".venv" }
+python = "3.12"
 
-# Python packages
-"pipx:twine" = "latest"  # For PyPI uploads
+# UV - Fast Python package and tool manager
+uv = "latest"
 
 # Development tools installed via cargo
 "cargo:cargo-nextest" = "latest"
@@ -41,6 +41,9 @@ cargo_binstall = true
 # Experimental features
 experimental = true
 
+# Enable idiomatic version files (like rust-toolchain.toml)
+idiomatic_version_file_enable_tools = ["rust"]
+
 # Configure rust/cargo homes if you want isolation from system rust
 # rust_cache_dir = "./.mise/rust"
 # cargo_home = "./.mise/cargo"
@@ -51,10 +54,15 @@ run = """
 echo "Setting up rumdl development environment..."
 echo "Installing Rust toolchain and tools..."
 mise install
+echo "Installing Python tools with uv..."
+uv tool install twine
 echo "Development environment setup complete!"
 echo ""
 echo "Installed tools:"
 mise list
+echo ""
+echo "Python tools:"
+uv tool list
 """
 
 [tasks.verify]
@@ -91,9 +99,9 @@ make test-quick
 # Platform-specific tool versions (optional)
 # [tools.linux]
 # rust = "1.87.0"
-# 
+#
 # [tools.macos]
 # rust = "1.87.0"
-# 
+#
 # [tools.windows]
 # rust = "1.87.0"
