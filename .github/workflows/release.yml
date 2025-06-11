@@ -209,6 +209,26 @@ jobs:
             https://api.github.com/repos/rvben/rumdl-pre-commit/dispatches \
             -d '{"event_type": "pypi_release"}'
 
+      - name: Notify rumdl-vscode
+        if: ${{ success() && inputs.dry_run != true }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.VSCODE_DISPATCH_TOKEN }}
+        run: |
+          # Extract version from tag
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          
+          # Wait for GitHub release to be fully available
+          echo "Waiting for GitHub release to be available..."
+          sleep 30
+          
+          # Send dispatch with version info
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            https://api.github.com/repos/rvben/rumdl-vscode/dispatches \
+            -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
+
       - name: Dry Run Summary
         if: ${{ inputs.dry_run == true }}
         run: |

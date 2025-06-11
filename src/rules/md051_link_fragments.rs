@@ -19,8 +19,8 @@ lazy_static! {
 ///
 /// See [docs/md051.md](../../docs/md051.md) for full documentation, configuration, and examples.
 ///
-/// This rule is triggered when a link anchor (the part after #) doesn't exist in the document.
-/// This only applies to internal document links, not to external URLs.
+/// This rule is triggered when a link anchor (the part after #) doesn't exist in the current document.
+/// This only applies to internal document links (like #heading), not to external URLs or cross-file links (like file.md#heading).
 #[derive(Clone)]
 pub struct MD051LinkFragments;
 
@@ -48,7 +48,7 @@ impl MD051LinkFragments {
         for line_info in &ctx.lines {
             if let Some(heading) = &line_info.heading {
                 let line = &line_info.content;
-                
+
                 // Check for TOC section
                 if TOC_SECTION_START.is_match(line) {
                     in_toc = true;
@@ -134,7 +134,7 @@ impl MD051LinkFragments {
         if !QUICK_MARKDOWN_CHECK.is_match(text) {
             return text.to_string();
         }
-        
+
         // Use single regex to capture all markdown formatting at once
         let result = MARKDOWN_STRIP.replace_all(text, |caps: &regex::Captures| {
             // Return the captured content (group 1-7 for different formatting types)
@@ -152,6 +152,69 @@ impl MD051LinkFragments {
         } else {
             result.to_string()
         }
+    }
+
+        /// Check if a path has a file extension indicating it's a file reference
+    fn has_file_extension(path: &str) -> bool {
+        // First, strip query parameters and other URL components
+        // Split on ? to remove query parameters, and on & to handle other URL components
+        let clean_path = path.split('?').next().unwrap_or(path)
+                            .split('&').next().unwrap_or(path);
+
+        // Common file extensions that indicate cross-file references
+        let file_extensions = [
+            // Markdown and documentation formats
+            ".md", ".markdown", ".mdown", ".mkdn", ".mdx", ".md2", ".mdtext",
+            ".rst", ".txt", ".adoc", ".asciidoc", ".org",
+
+            // Web formats
+            ".html", ".htm", ".xhtml", ".xml", ".svg",
+
+            // Data and config formats
+            ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+
+            // Office documents
+            ".pdf", ".doc", ".docx", ".odt", ".rtf",
+
+            // Programming and script files (often contain documentation)
+            ".py", ".js", ".ts", ".rs", ".go", ".java", ".cpp", ".c", ".h",
+            ".sh", ".bash", ".zsh", ".fish", ".ps1", ".bat", ".cmd",
+
+            // Other common file types that might have fragments
+            ".tex", ".bib", ".csv", ".tsv", ".log"
+        ];
+
+        // Case-insensitive extension matching
+        let path_lower = clean_path.to_lowercase();
+        for ext in &file_extensions {
+            if path_lower.ends_with(ext) {
+                return true;
+            }
+        }
+
+                        // Also check for any extension pattern (dot followed by 2-10 alphanumeric characters)
+        // This catches extensions not in our known list like .backup, .tmp, .orig, etc.
+        if let Some(last_dot) = path_lower.rfind('.') {
+            // Special case: if path starts with a dot, it might be a hidden file
+            // Only treat it as having an extension if there's a second dot
+            if path_lower.starts_with('.') {
+                // For hidden files like .gitignore, .bashrc, we need a second dot to be a file extension
+                // e.g., .config.json has extension .json, but .gitignore has no extension
+                if last_dot == 0 {
+                    // Only one dot at the beginning - not a file extension
+                    return false;
+                }
+            }
+
+            let potential_ext = &path_lower[last_dot + 1..];
+            // Valid extension: 2-10 characters, alphanumeric (allows for longer extensions like .backup)
+            if potential_ext.len() >= 2 && potential_ext.len() <= 10 &&
+               potential_ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Fast external URL detection with optimized patterns
@@ -193,7 +256,7 @@ impl Rule for MD051LinkFragments {
     }
 
     fn description(&self) -> &'static str {
-        "Link anchors (# references) should exist"
+        "Link anchors (# references) should exist in the current document"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -224,10 +287,10 @@ impl Rule for MD051LinkFragments {
 
         // Extract headings once for the entire document
         let headings = self.extract_headings_from_context(ctx);
-        
+
         // If no headings, no need to check TOC sections
         let has_headings = !headings.is_empty();
-        
+
         let mut warnings = Vec::new();
         let mut in_toc_section = false;
 
@@ -244,28 +307,35 @@ impl Rule for MD051LinkFragments {
             } else {
                 &link.url
             };
-            
+
             // Skip if external URL
             if self.is_external_url_fast(url) {
                 continue;
             }
-            
+
             // Check if URL has a fragment
             if let Some(hash_pos) = url.find('#') {
                 let fragment = &url[hash_pos + 1..].to_lowercase();
-                
+
                 // Skip empty fragments
                 if fragment.is_empty() {
                     continue;
                 }
-                
+
+                // Skip cross-file fragment links - only validate fragments in same document
+                // If URL contains a file path (has file extension like .md, .rst, .html, etc.), it's a cross-file link
+                let path_before_hash = &url[..hash_pos];
+                if Self::has_file_extension(path_before_hash) {
+                    continue;
+                }
+
                 // Check if in TOC section
                 if in_toc_section {
                     continue;
                 }
-                
+
                 let line_info = &ctx.lines[link.line - 1];
-                
+
                 // Check if we're entering a TOC section
                 if has_headings && TOC_SECTION_START.is_match(&line_info.content) {
                     in_toc_section = true;
@@ -276,7 +346,7 @@ impl Rule for MD051LinkFragments {
                 if in_toc_section && line_info.content.starts_with('#') && !TOC_SECTION_START.is_match(&line_info.content) {
                     in_toc_section = false;
                 }
-                
+
                 // Check if the fragment exists in headings
                 if !has_headings || !headings.contains(fragment) {
                     warnings.push(LintWarning {

@@ -388,19 +388,19 @@ fn test_inline_code_spans() {
     let ctx = LintContext::new(
         "# Heading One\n\n`[Example](#missing-section)` and [Invalid Link](#section-two)",
     );
-    
+
     // Debug: Let's check what the LintContext contains
     println!("=== Test 3 Debug ===");
     println!("Content: {:?}", ctx.content);
     println!("Line count: {}", ctx.lines.len());
     for (i, line_info) in ctx.lines.iter().enumerate() {
-        println!("Line {}: content='{}', in_code_block={}, byte_offset={}", 
+        println!("Line {}: content='{}', in_code_block={}, byte_offset={}",
                  i, line_info.content, line_info.in_code_block, line_info.byte_offset);
         if let Some(heading) = &line_info.heading {
             println!("  Has heading: level={}, text='{}'", heading.level, heading.text);
         }
     }
-    
+
     let result = rule.check(&ctx).unwrap();
 
     // Debug output
@@ -579,3 +579,550 @@ fn test_md051_ampersand_variations() {
 
 // All MD051 tests are now complete and use integration testing approach
 // rather than relying on debug methods that expose internal implementation
+
+#[test]
+fn test_cross_file_fragment_links() {
+    // Test that cross-file fragment links are not validated by MD051
+    // This addresses the bug where [bug](ISSUE_POLICY.md#bug-reports) was incorrectly flagged
+
+    let content = r#"
+# Main Heading
+
+## Internal Section
+
+This document has some internal links:
+- [Valid internal link](#main-heading)
+- [Another valid internal link](#internal-section)
+- [Invalid internal link](#missing-section)
+
+And some cross-file links that should be ignored by MD051:
+- [Link to other file](README.md#installation)
+- [Bug reports](ISSUE_POLICY.md#bug-reports)
+- [Triage process](ISSUE_TRIAGE.rst#triage-section)
+- [External file fragment](../docs/config.md#settings)
+- [YAML config](config.yml#database)
+- [JSON settings](app.json#server-config)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only have one warning for the missing internal fragment
+    assert_eq!(result.len(), 1, "Expected exactly 1 warning for missing internal fragment");
+
+    // Verify it's the correct warning
+    assert!(
+        result[0].message.contains("missing-section"),
+        "Warning should be about the missing internal section, got: {}",
+        result[0].message
+    );
+
+    // Verify that cross-file links are not flagged
+    for warning in &result {
+        assert!(
+            !warning.message.contains("installation") &&
+            !warning.message.contains("bug-reports") &&
+            !warning.message.contains("triage-section") &&
+            !warning.message.contains("settings"),
+            "Cross-file fragment should not be flagged: {}",
+            warning.message
+        );
+    }
+}
+
+#[test]
+fn test_fragment_only_vs_cross_file_links() {
+    // Test to distinguish between fragment-only links (#section) and cross-file links (file.md#section)
+
+    let content = r#"
+# Existing Heading
+
+## Another Section
+
+Test various link types:
+- [Fragment only - valid](#existing-heading)
+- [Fragment only - invalid](#nonexistent-heading)
+- [Cross-file with fragment](other.md#some-section)
+- [Cross-file no fragment](other.md)
+- [Fragment only - valid 2](#another-section)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the invalid fragment-only link
+    assert_eq!(result.len(), 1, "Expected exactly 1 warning for invalid fragment-only link");
+
+    assert!(
+        result[0].message.contains("nonexistent-heading"),
+        "Warning should be about the nonexistent heading, got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_file_extension_edge_cases() {
+    // Test various file extension cases that should be treated as cross-file links
+    let content = r#"
+# Main Heading
+
+## Test Section
+
+Cross-file links with various extensions (should be ignored by MD051):
+- [Case insensitive](README.MD#section)
+- [Upper case extension](file.HTML#heading)
+- [Mixed case](doc.Rst#title)
+- [Markdown variants](guide.markdown#intro)
+- [Markdown short](notes.mkdn#summary)
+- [Markdown extended](README.mdx#component)
+- [Text file](data.txt#line)
+- [XML file](config.xml#database)
+- [YAML file](settings.yaml#server)
+- [YAML short](app.yml#config)
+- [JSON file](package.json#scripts)
+- [PDF document](manual.pdf#chapter)
+- [Word document](report.docx#results)
+- [HTML page](index.htm#navbar)
+- [Programming file](script.py#function)
+- [Config file](settings.toml#section)
+- [Generic extension](file.abc#section)
+
+Fragment-only links (should be validated):
+- [Valid fragment](#main-heading)
+- [Another valid](#test-section)
+- [Invalid fragment](#missing-section)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the invalid fragment-only link
+    assert_eq!(result.len(), 1, "Expected exactly 1 warning for invalid fragment-only link");
+    assert!(
+        result[0].message.contains("missing-section"),
+        "Warning should be about missing-section, got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_complex_url_patterns() {
+    // Test complex URL patterns that might confuse the parser
+    let content = r#"
+# Main Heading
+
+## Documentation
+
+Cross-file links (should be ignored):
+- [Query params](file.md?version=1.0#section)
+- [Relative path](../docs/readme.md#installation)
+- [Deep relative](../../other/file.md#content)
+- [Current dir](./local.md#section)
+- [Encoded spaces](file%20name.md#section)
+- [Complex path](path/to/deep/file.md#heading)
+- [Windows style](folder\file.md#section)
+- [Double hash](file.md#section#subsection)
+- [Empty fragment](file.md#)
+- [Archive file](data.tar.gz#section)
+- [Backup file](config.ini.backup#settings)
+
+Ambiguous paths (treated as fragment-only links and validated):
+- [No extension with dot](.gitignore#rules)
+- [Hidden no extension](.hidden#section)
+- [No extension](somefile#section)
+
+Fragment-only tests:
+- [Valid](#main-heading)
+- [Invalid](#nonexistent)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should flag the invalid fragment-only link plus the ambiguous paths without extensions
+    assert_eq!(result.len(), 4, "Expected 4 warnings: 1 invalid fragment + 3 ambiguous paths");
+
+    // Check that we get warnings for the ambiguous paths and invalid fragment
+    let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
+    let contains_rules = warning_messages.iter().any(|msg| msg.contains("rules"));
+    let contains_section = warning_messages.iter().any(|msg| msg.contains("section"));
+    let contains_nonexistent = warning_messages.iter().any(|msg| msg.contains("nonexistent"));
+
+    assert!(contains_rules, "Should warn about #rules fragment");
+    assert!(contains_section, "Should warn about #section fragment");
+    assert!(contains_nonexistent, "Should warn about #nonexistent fragment");
+}
+
+#[test]
+fn test_edge_case_file_extensions() {
+    // Test edge cases with file extensions
+    let content = r#"
+# Valid Heading
+
+Cross-file links (should be ignored):
+- [Multiple dots](file.name.ext#section)
+- [Just extension](.md#section)
+- [URL with port](http://example.com:8080/file.md#section)
+- [Network path](//server/file.md#section)
+- [Absolute path](/absolute/file.md#section)
+
+Ambiguous paths without clear extensions (treated as fragment-only):
+- [No extension](somefile#section)
+- [Dot but no extension](file.#section)
+- [Hidden file](.hidden#section)
+- [Trailing dot](file.#section)
+
+Fragment-only (should be validated):
+- [Valid fragment](#valid-heading)
+- [Invalid fragment](#invalid-heading)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should flag ambiguous paths without extensions plus the invalid fragment
+    assert_eq!(result.len(), 5, "Expected 5 warnings: 4 ambiguous paths + 1 invalid fragment");
+
+    // Verify we get warnings for the expected fragments
+    let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
+    let contains_section = warning_messages.iter().filter(|msg| msg.contains("section")).count();
+    let contains_invalid = warning_messages.iter().any(|msg| msg.contains("invalid-heading"));
+
+    assert_eq!(contains_section, 4, "Should have 4 warnings about #section fragment");
+    assert!(contains_invalid, "Should warn about #invalid-heading fragment");
+}
+
+#[test]
+fn test_malformed_and_boundary_cases() {
+    // Test malformed links and boundary cases
+    let content = r#"
+# Test Heading
+
+Boundary cases:
+- [Empty URL]()
+- [Just hash](#)
+- [Hash no content](file.md#)
+- [Multiple hashes](file.md##double)
+- [Fragment with symbols](file.md#section-with-symbols!)
+- [Very long filename](very-long-filename-that-exceeds-normal-length.md#section)
+
+Reference links:
+[ref1]: other.md#section
+[ref2]: #test-heading
+[ref3]: missing.md#section
+
+- [Reference to cross-file][ref1]
+- [Reference to valid fragment][ref2]
+- [Reference to another cross-file][ref3]
+
+Fragment validation:
+- [Valid](#test-heading)
+- [Invalid](#missing)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the invalid fragment-only link
+    assert_eq!(result.len(), 1, "Expected 1 warning for invalid fragment");
+    assert!(
+        result[0].message.contains("missing"),
+        "Warning should be about missing fragment, got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_performance_stress_case() {
+    // Test performance with many links
+    let mut content = String::from("# Main\n\n## Section\n\n");
+
+    // Add many cross-file links (should be ignored)
+    for i in 0..100 {
+        content.push_str(&format!("- [Link {}](file{}.md#section)\n", i, i));
+    }
+
+    // Add some fragment-only links
+    content.push_str("- [Valid](#main)\n");
+    content.push_str("- [Valid 2](#section)\n");
+    content.push_str("- [Invalid](#missing)\n");
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(&content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the one invalid fragment
+    assert_eq!(result.len(), 1, "Expected 1 warning even with many cross-file links");
+    assert!(
+        result[0].message.contains("missing"),
+        "Warning should be about missing fragment, got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_unicode_and_special_characters() {
+    // Test Unicode characters in filenames and fragments
+    let content = r#"
+# Test Heading
+
+## Café & Restaurant
+
+Cross-file links with Unicode/special chars (should be ignored):
+- [Unicode filename](文档.md#section)
+- [Spaces in filename](my file.md#section)
+- [Numbers in extension](file.md2#section)
+- [Mixed case extension](FILE.Md#section)
+
+Ambiguous paths (treated as fragment-only):
+- [Special chars no extension](file@name#section)
+- [Unicode no extension](文档#section)
+- [Spaces no extension](my file#section)
+
+Fragment tests:
+- [Valid unicode](#café-restaurant)
+- [Valid heading](#test-heading)
+- [Invalid](#missing-heading)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+        // Should flag ambiguous paths + invalid fragments = 5 warnings
+    // 3 ambiguous paths (#section) + 1 invalid unicode fragment + 1 missing fragment
+    assert_eq!(result.len(), 5, "Expected 5 warnings: 3 ambiguous paths + 2 invalid fragments");
+
+    let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
+    let contains_section = warning_messages.iter().filter(|msg| msg.contains("section")).count();
+    let contains_missing = warning_messages.iter().any(|msg| msg.contains("missing-heading"));
+    let contains_cafe = warning_messages.iter().any(|msg| msg.contains("café-restaurant"));
+
+    assert_eq!(contains_section, 3, "Should have 3 warnings about #section fragment");
+    assert!(contains_missing, "Should warn about #missing-heading fragment");
+    assert!(contains_cafe, "Should warn about #café-restaurant fragment (doesn't match heading)");
+}
+
+#[test]
+fn test_edge_case_regressions() {
+    // Test specific edge cases that could cause regressions
+    let content = r#"
+# Documentation
+
+## Setup Guide
+
+Links without fragments (should be ignored):
+- [No extension no hash](filename)
+- [Extension no hash](file.md)
+
+Cross-file links (should be ignored):
+- [Extension and hash](file.md#section)
+- [Multiple dots in name](config.local.json#settings)
+- [Extension in path](path/file.ext/sub.md#section)
+- [Query with fragment](file.md?v=1#section)
+- [Anchor with query](file.md#section?param=value)
+- [Multiple extensions](archive.tar.gz#section)
+- [Case sensitive](FILE.MD#section)
+- [Generic extension](data.abc#section)
+
+Paths with potential extensions (treated as cross-file links):
+- [Dot in middle](my.file#section)
+- [Custom extension](data.custom#section)
+
+Fragment-only validation tests:
+- [Hash only](#setup-guide)
+- [Valid](#documentation)
+- [Valid 2](#setup-guide)
+- [Invalid](#nonexistent)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+        // Should flag only 1 invalid fragment - ambiguous paths are now treated as cross-file links
+    // because they have valid-looking extensions ("file" and "custom")
+    assert_eq!(result.len(), 1, "Expected 1 warning: 1 invalid fragment");
+
+    let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
+    let contains_nonexistent = warning_messages.iter().any(|msg| msg.contains("nonexistent"));
+
+    assert!(contains_nonexistent, "Should warn about #nonexistent fragment");
+}
+
+#[test]
+fn test_url_protocol_edge_cases() {
+    // Test URLs with protocols that should be treated as cross-file links
+    let content = r#"
+# Main Heading
+
+## Setup
+
+Protocol-based URLs (should be ignored as external links):
+- [HTTP URL](http://example.com/page.html#section)
+- [HTTPS URL](https://example.com/docs.md#heading)
+- [FTP URL](ftp://server.com/file.txt#anchor)
+- [File protocol](file:///path/to/doc.md#section)
+- [Mailto with fragment](mailto:user@example.com#subject)
+
+Fragment-only tests:
+- [Valid](#main-heading)
+- [Invalid](#missing)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the invalid fragment
+    assert_eq!(result.len(), 1, "Expected 1 warning for invalid fragment");
+    assert!(
+        result[0].message.contains("missing"),
+        "Warning should be about missing fragment, got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_fragment_normalization_edge_cases() {
+    // Test various fragment formats and their normalization
+    let content = r#"
+# Test Heading
+
+## Special Characters & Symbols
+
+## Code `inline` Example
+
+## Multiple   Spaces
+
+Fragment tests with normalization:
+- [Valid basic](#test-heading)
+- [Valid special](#special-characters--symbols)
+- [Valid code](#code-inline-example)
+- [Valid spaces](#multiple-spaces)
+- [Valid case insensitive](#Test-Heading)
+- [Invalid symbols](#special-characters-&-symbols)
+- [Invalid spacing](#multiple   spaces)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+        // Should flag the invalid fragment variations (case-insensitive matching is correct)
+    assert_eq!(result.len(), 2, "Expected 2 warnings for invalid fragment variations");
+
+    let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
+    let contains_symbols = warning_messages.iter().any(|msg| msg.contains("special-characters-&-symbols"));
+    let contains_spacing = warning_messages.iter().any(|msg| msg.contains("multiple   spaces"));
+
+    assert!(contains_symbols, "Should warn about symbol fragment");
+    assert!(contains_spacing, "Should warn about spacing fragment");
+}
+
+#[test]
+fn test_edge_case_file_paths() {
+    // Test edge cases in file path detection
+    let content = r#"
+# Main Heading
+
+Cross-file links with tricky paths (should be ignored):
+- [Relative current](./README.md#section)
+- [Relative parent](../docs/guide.md#intro)
+- [Deep relative](../../other/project/file.md#content)
+- [Absolute path](/usr/local/docs/manual.md#chapter)
+- [Windows path](C:\Users\docs\readme.md#section)
+- [Network path](\\server\share\file.md#section)
+- [URL with port](http://localhost:8080/docs.md#api)
+
+Fragment-only (should be validated):
+- [Valid](#main-heading)
+- [Invalid](#nonexistent)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the invalid fragment
+    assert_eq!(result.len(), 1, "Expected 1 warning for invalid fragment");
+    assert!(
+        result[0].message.contains("nonexistent"),
+        "Warning should be about nonexistent fragment, got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_malformed_link_edge_cases() {
+    // Test malformed links and edge cases in link parsing
+    let content = r#"
+# Valid Heading
+
+## Test Section
+
+Malformed and edge case links:
+- [Empty fragment](file.md#)
+- [Just hash](#)
+- [Multiple hashes](file.md#section#subsection)
+- [Hash in middle](file.md#section?param=value)
+- [No closing bracket](file.md#section
+- [Valid file](document.pdf#page)
+- [Valid fragment](#valid-heading)
+- [Invalid fragment](#missing-heading)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should flag the invalid fragment and potentially malformed links
+    // (depends on how the parser handles malformed syntax)
+    assert!(result.len() >= 1, "Expected at least 1 warning for invalid fragment");
+
+    let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
+    let contains_missing = warning_messages.iter().any(|msg| msg.contains("missing-heading"));
+
+    assert!(contains_missing, "Should warn about missing-heading fragment");
+}
+
+#[test]
+fn test_performance_with_many_links() {
+    // Test performance with a large number of links
+    let mut content = String::from("# Main Heading\n\n## Section One\n\n");
+
+    // Add many cross-file links (should be ignored)
+    for i in 0..100 {
+        content.push_str(&format!("- [Link {}](file{}.md#section)\n", i, i));
+    }
+
+    // Add some fragment-only links
+    content.push_str("- [Valid](#main-heading)\n");
+    content.push_str("- [Valid 2](#section-one)\n");
+    content.push_str("- [Invalid](#nonexistent)\n");
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(&content);
+
+    let start = std::time::Instant::now();
+    let result = rule.check(&ctx).unwrap();
+    let duration = start.elapsed();
+
+    // Should only flag the invalid fragment
+    assert_eq!(result.len(), 1, "Expected 1 warning for invalid fragment");
+    assert!(
+        result[0].message.contains("nonexistent"),
+        "Warning should be about nonexistent fragment"
+    );
+
+    // Performance should be reasonable (less than 100ms for 100+ links)
+    assert!(duration.as_millis() < 100, "Performance test failed: took {}ms", duration.as_millis());
+
+    println!("MD051 performance test: {}ms for {} links", duration.as_millis(), ctx.links.len());
+}
