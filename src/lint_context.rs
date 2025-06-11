@@ -1,4 +1,3 @@
-use log::warn;
 use markdown::{mdast::Node, to_mdast, ParseOptions};
 use std::panic;
 use crate::utils::code_block_utils::CodeBlockUtils;
@@ -280,7 +279,7 @@ impl<'a> LintContext<'a> {
     pub fn new(content: &'a str) -> Self {
         // Check for problematic patterns that cause the markdown crate to panic
         if content_has_problematic_lists(content) {
-            warn!("Detected problematic list patterns in LintContext, skipping AST parsing");
+            log::debug!("Detected problematic list patterns in LintContext, skipping AST parsing");
             let ast = Node::Root(markdown::mdast::Root {
                 children: vec![],
                 position: None,
@@ -332,7 +331,7 @@ impl<'a> LintContext<'a> {
             }
             Ok(Err(err)) => {
                 // Parsing failed with an error
-                warn!("Failed to parse markdown AST: {:?}", err);
+                log::debug!("Failed to parse markdown AST: {:?}", err);
                 Node::Root(markdown::mdast::Root {
                     children: vec![],
                     position: None,
@@ -340,7 +339,7 @@ impl<'a> LintContext<'a> {
             }
             Err(_) => {
                 // Parsing panicked
-                warn!("Markdown AST parsing panicked, falling back to empty AST");
+                log::debug!("Markdown AST parsing panicked, falling back to empty AST");
                 Node::Root(markdown::mdast::Root {
                     children: vec![],
                     position: None,

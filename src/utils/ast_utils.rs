@@ -6,7 +6,6 @@
 
 use crate::rule::MarkdownAst;
 use lazy_static::lazy_static;
-use log::warn;
 use std::collections::HashMap;
 use std::panic;
 use std::sync::{Arc, Mutex};
@@ -98,7 +97,7 @@ pub fn clear_ast_cache() {
 pub fn parse_markdown_ast(content: &str) -> MarkdownAst {
     // Check for problematic patterns that cause the markdown crate to panic
     if content_has_problematic_lists(content) {
-        warn!("Detected problematic list patterns, skipping AST parsing");
+        log::debug!("Detected problematic list patterns, skipping AST parsing");
         return MarkdownAst::Root(markdown::mdast::Root {
             children: vec![],
             position: None,
@@ -115,7 +114,7 @@ pub fn parse_markdown_ast(content: &str) -> MarkdownAst {
         }
         Ok(Err(err)) => {
             // Parsing failed with an error
-            warn!("Failed to parse markdown AST in ast_utils: {:?}", err);
+            log::debug!("Failed to parse markdown AST in ast_utils: {:?}", err);
             MarkdownAst::Root(markdown::mdast::Root {
                 children: vec![],
                 position: None,
@@ -123,7 +122,7 @@ pub fn parse_markdown_ast(content: &str) -> MarkdownAst {
         }
         Err(_) => {
             // Parsing panicked
-            warn!("Markdown AST parsing panicked in ast_utils, falling back to empty AST");
+            log::debug!("Markdown AST parsing panicked in ast_utils, falling back to empty AST");
             MarkdownAst::Root(markdown::mdast::Root {
                 children: vec![],
                 position: None,
