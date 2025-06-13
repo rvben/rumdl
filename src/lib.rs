@@ -1,5 +1,6 @@
 pub mod config;
 pub mod init;
+pub mod inline_config;
 pub mod lint_context;
 pub mod lsp;
 pub mod markdownlint_config;
@@ -131,6 +132,9 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
         return Ok(warnings);
     }
 
+    // Parse inline configuration comments once
+    let inline_config = crate::inline_config::InlineConfig::from_content(content);
+
     // Analyze content characteristics for rule filtering
     let characteristics = ContentCharacteristics::analyze(content);
 
@@ -186,14 +190,13 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
 
         match result {
             Ok(rule_warnings) => {
-                // Filter out warnings for rules disabled via comments
+                // Filter out warnings for rules disabled via inline comments
                 let filtered_warnings: Vec<_> = rule_warnings
                     .into_iter()
                     .filter(|warning| {
-                        !crate::rule::is_rule_disabled_at_line(
-                            content,
+                        !inline_config.is_rule_disabled(
                             rule.name(),
-                            warning.line.saturating_sub(1), // Convert to 0-based line index
+                            warning.line, // Already 1-indexed
                         )
                     })
                     .collect();

@@ -53,7 +53,38 @@ fn load_config_with_cli_error_handling(
     config_path: Option<&str>,
     no_config: bool,
 ) -> rumdl_config::SourcedConfig {
-    match rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config) {
+    load_config_with_cli_error_handling_with_dir(config_path, no_config, None)
+}
+
+fn load_config_with_cli_error_handling_with_dir(
+    config_path: Option<&str>,
+    no_config: bool,
+    discovery_dir: Option<&std::path::Path>,
+) -> rumdl_config::SourcedConfig {
+    let result = if let Some(dir) = discovery_dir {
+        // Temporarily change working directory for config discovery
+        let original_dir = std::env::current_dir().ok();
+        
+        // Change to the discovery directory if it exists
+        if dir.is_dir() {
+            let _ = std::env::set_current_dir(dir);
+        } else if let Some(parent) = dir.parent() {
+            let _ = std::env::set_current_dir(parent);
+        }
+        
+        let config_result = rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config);
+        
+        // Restore original directory
+        if let Some(orig) = original_dir {
+            let _ = std::env::set_current_dir(orig);
+        }
+        
+        config_result
+    } else {
+        rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config)
+    };
+    
+    match result {
         Ok(config) => config,
         Err(e) => {
             eprintln!("{}: {}", "Config error".red().bold(), e);
@@ -413,6 +444,11 @@ fn find_markdown_files(
     } else {
         config.global.exclude.clone()
     };
+    
+    // Debug: Log exclude patterns
+    if args.verbose {
+        eprintln!("Exclude patterns: {:?}", final_exclude_patterns);
+    }
     // --- End Pattern Determination ---
 
     // Apply overrides using the determined patterns
@@ -467,6 +503,9 @@ fn find_markdown_files(
     walk_builder.parents(use_gitignore); // Enable/disable parent ignores
     walk_builder.hidden(true); // Keep hidden files ignored unconditionally
     walk_builder.require_git(false); // Process git ignores even if no repo detected
+    
+    // Add support for .markdownlintignore file
+    walk_builder.add_custom_ignore_filename(".markdownlintignore");
 
     // --- Execute Walk ---
 
@@ -1576,8 +1615,27 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs) {
 }
 
 fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool) {
+    // 1. Determine the directory for config discovery
+    // Only use the path's directory for discovery if it's an absolute path
+    // This ensures we discover config from the project root when running relative commands
+    let discovery_dir = if !args.paths.is_empty() {
+        let path = std::path::Path::new(&args.paths[0]);
+        if path.is_absolute() {
+            if path.is_dir() {
+                Some(path)
+            } else {
+                path.parent()
+            }
+        } else {
+            // For relative paths, use current directory for discovery
+            None
+        }
+    } else {
+        None
+    };
+    
     // 1. Load sourced config (for provenance and validation)
-    let sourced = load_config_with_cli_error_handling(global_config_path, no_config);
+    let sourced = load_config_with_cli_error_handling_with_dir(global_config_path, no_config, discovery_dir);
 
     // 2. Validate config (unknown keys/rules/options)
     let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
