@@ -216,6 +216,15 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Install the rumdl VS Code extension
+    Vscode {
+        /// Force reinstall even if already installed
+        #[arg(long)]
+        force: bool,
+        /// Show installation status without installing
+        #[arg(long)]
+        status: bool,
+    },
     /// Show version information
     Version,
 }
@@ -1492,6 +1501,16 @@ build-backend = \"setuptools.build_meta\"
                             eprintln!("{}: Failed to write to '{}': {}", "Error".red().bold(), output_path, e);
                             std::process::exit(1);
                         }
+                    }
+                }
+            }
+            Some(Commands::Vscode { force, status }) => {
+                // Handle VS Code extension installation
+                match rumdl::vscode::handle_vscode_command(*force, *status) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        eprintln!("{}: {}", "Error".red().bold(), e);
+                        std::process::exit(1);
                     }
                 }
             }

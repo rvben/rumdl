@@ -8,6 +8,7 @@ pub mod parallel;
 pub mod performance;
 pub mod profiling;
 pub mod rule;
+pub mod vscode;
 #[macro_use]
 pub mod rule_config;
 #[macro_use]

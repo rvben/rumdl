@@ -28,6 +28,7 @@
     - [Using Cargo (Rust)](#using-cargo-rust)
     - [Using pip (Python)](#using-pip-python)
     - [Download binary](#download-binary)
+    - [VS Code Extension](#vs-code-extension)
   - [Usage](#usage)
   - [Pre-commit Integration](#pre-commit-integration)
   - [Rules](#rules)
@@ -106,6 +107,30 @@ curl -LsSf https://github.com/rvben/rumdl/releases/latest/download/rumdl-linux-x
 Invoke-WebRequest -Uri "https://github.com/rvben/rumdl/releases/latest/download/rumdl-windows-x86_64.zip" -OutFile "rumdl.zip"
 Expand-Archive -Path "rumdl.zip" -DestinationPath "$env:USERPROFILE\.rumdl"
 ```
+
+### VS Code Extension
+
+For the best development experience, install the rumdl VS Code extension directly from the command line:
+
+```bash
+# Install the VS Code extension
+rumdl vscode
+
+# Check if the extension is installed
+rumdl vscode --status
+
+# Force reinstall the extension
+rumdl vscode --force
+```
+
+The extension provides:
+- 🔍 Real-time linting as you type
+- 💡 Quick fixes for common issues
+- 🎨 Code formatting on save
+- 📋 Hover tooltips with rule documentation
+- ⚡ Lightning-fast performance with zero lag
+
+The CLI will automatically detect VS Code, Cursor, or Windsurf and install the appropriate extension. See the [VS Code extension documentation](https://github.com/rvben/rumdl/blob/main/docs/vscode-extension.md) for more details.
 
 ## Usage
 
@@ -272,6 +297,14 @@ Start the Language Server Protocol server for editor integration
 - `--port <PORT>`: TCP port to listen on (for debugging)
 - `--stdio`: Use stdio for communication (default)
 - `-v, --verbose`: Enable verbose logging
+
+#### `vscode [OPTIONS]`
+
+Install the rumdl VS Code extension
+
+**Options:**
+- `--force`: Force reinstall even if already installed
+- `--status`: Show installation status without installing
 
 #### `version`
 
