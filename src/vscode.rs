@@ -14,16 +14,49 @@ impl VsCodeExtension {
         Ok(Self { code_command })
     }
 
+    /// Create a VsCodeExtension with a specific command
+    pub fn with_command(command: &str) -> Result<Self, String> {
+        if Self::command_exists(command) {
+            Ok(Self {
+                code_command: command.to_string(),
+            })
+        } else {
+            Err(format!("Command '{}' not found or not working", command))
+        }
+    }
+
+    /// Check if a command exists and works
+    fn command_exists(cmd: &str) -> bool {
+        Command::new("which").arg(cmd).output().is_ok()
+            && Command::new(cmd)
+                .arg("--version")
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+    }
+
     fn find_code_command() -> Result<String, String> {
+        // First, check if we're in an integrated terminal
+        if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
+            let preferred_cmd = match term_program.to_lowercase().as_str() {
+                "vscode" => "code",
+                "cursor" => "cursor",
+                "windsurf" => "windsurf",
+                _ => "",
+            };
+
+            // Verify the preferred command exists and works
+            if !preferred_cmd.is_empty() && Self::command_exists(preferred_cmd) {
+                return Ok(preferred_cmd.to_string());
+            }
+        }
+
+        // Fallback to finding the first available command
         let commands = ["code", "cursor", "windsurf"];
         
         for cmd in &commands {
-            if Command::new("which").arg(cmd).output().is_ok() {
-                if let Ok(output) = Command::new(cmd).arg("--version").output() {
-                    if output.status.success() {
-                        return Ok(cmd.to_string());
-                    }
-                }
+            if Self::command_exists(cmd) {
+                return Ok(cmd.to_string());
             }
         }
         
@@ -31,6 +64,52 @@ impl VsCodeExtension {
             "VS Code (or compatible editor) not found. Please ensure one of the following commands is available: {}",
             commands.join(", ")
         ))
+    }
+
+    /// Find all available VS Code-compatible editors
+    pub fn find_all_editors() -> Vec<(&'static str, &'static str)> {
+        let editors = [
+            ("code", "VS Code"),
+            ("cursor", "Cursor"),
+            ("windsurf", "Windsurf"),
+        ];
+        
+        editors
+            .into_iter()
+            .filter(|(cmd, _)| Self::command_exists(cmd))
+            .collect()
+    }
+
+    /// Get the current editor from TERM_PROGRAM if available
+    pub fn current_editor_from_env() -> Option<(&'static str, &'static str)> {
+        if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
+            match term_program.to_lowercase().as_str() {
+                "vscode" => {
+                    if Self::command_exists("code") {
+                        Some(("code", "VS Code"))
+                    } else {
+                        None
+                    }
+                }
+                "cursor" => {
+                    if Self::command_exists("cursor") {
+                        Some(("cursor", "Cursor"))
+                    } else {
+                        None
+                    }
+                }
+                "windsurf" => {
+                    if Self::command_exists("windsurf") {
+                        Some(("windsurf", "Windsurf"))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
     }
 
     pub fn install(&self, force: bool) -> Result<(), String> {

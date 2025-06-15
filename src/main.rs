@@ -830,6 +830,118 @@ fn format_toml_value(val: &toml::Value) -> String {
     }
 }
 
+/// Offer to install the VS Code extension during init
+fn offer_vscode_extension_install() {
+    use rumdl::vscode::VsCodeExtension;
+    
+    // Check if we're in an integrated terminal
+    if let Some((cmd, editor_name)) = VsCodeExtension::current_editor_from_env() {
+        println!("\nDetected you're using {}.", editor_name.green());
+        println!("Would you like to install the rumdl extension? [Y/n]");
+        print!("> ");
+        io::stdout().flush().unwrap();
+        
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer).unwrap();
+        
+        if answer.trim().is_empty() || answer.trim().eq_ignore_ascii_case("y") {
+            match VsCodeExtension::with_command(cmd) {
+                Ok(vscode) => {
+                    if let Err(e) = vscode.install(false) {
+                        eprintln!("{}: {}", "Error".red().bold(), e);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{}: {}", "Error".red().bold(), e);
+                }
+            }
+        }
+    } else {
+        // Check for available editors
+        let available_editors = VsCodeExtension::find_all_editors();
+        
+        match available_editors.len() {
+            0 => {
+                // No editors found, skip silently
+            }
+            1 => {
+                // Single editor found
+                let (cmd, editor_name) = available_editors[0];
+                println!("\n{} detected.", editor_name.green());
+                println!("Would you like to install the rumdl extension for real-time linting? [y/N]");
+                print!("> ");
+                io::stdout().flush().unwrap();
+                
+                let mut answer = String::new();
+                io::stdin().read_line(&mut answer).unwrap();
+                
+                if answer.trim().eq_ignore_ascii_case("y") {
+                    match VsCodeExtension::with_command(cmd) {
+                        Ok(vscode) => {
+                            if let Err(e) = vscode.install(false) {
+                                eprintln!("{}: {}", "Error".red().bold(), e);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("{}: {}", "Error".red().bold(), e);
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Multiple editors found
+                println!("\nMultiple VS Code-compatible editors found:");
+                for (i, (_, editor_name)) in available_editors.iter().enumerate() {
+                    println!("  {}. {}", i + 1, editor_name);
+                }
+                println!("\nInstall the rumdl extension? [1-{}/a=all/n=none]:", available_editors.len());
+                print!("> ");
+                io::stdout().flush().unwrap();
+                
+                let mut answer = String::new();
+                io::stdin().read_line(&mut answer).unwrap();
+                let answer = answer.trim().to_lowercase();
+                
+                if answer == "a" || answer == "all" {
+                    // Install in all editors
+                    for (cmd, editor_name) in &available_editors {
+                        println!("\nInstalling for {}...", editor_name);
+                        match VsCodeExtension::with_command(cmd) {
+                            Ok(vscode) => {
+                                if let Err(e) = vscode.install(false) {
+                                    eprintln!("{}: {}", "Error".red().bold(), e);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("{}: {}", "Error".red().bold(), e);
+                            }
+                        }
+                    }
+                } else if let Ok(num) = answer.parse::<usize>() {
+                    if num > 0 && num <= available_editors.len() {
+                        let (cmd, editor_name) = available_editors[num - 1];
+                        println!("\nInstalling for {}...", editor_name);
+                        match VsCodeExtension::with_command(cmd) {
+                            Ok(vscode) => {
+                                if let Err(e) = vscode.install(false) {
+                                    eprintln!("{}: {}", "Error".red().bold(), e);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("{}: {}", "Error".red().bold(), e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    println!("\nSetup complete! You can now:");
+    println!("  • Run {} to lint your Markdown files", "rumdl check .".cyan());
+    println!("  • Open your editor to see real-time linting");
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
@@ -926,6 +1038,9 @@ build-backend = \"setuptools.build_meta\"
                 match rumdl_config::create_default_config(".rumdl.toml") {
                     Ok(_) => {
                         println!("Created default configuration file: .rumdl.toml");
+                        
+                        // Offer to install VS Code extension
+                        offer_vscode_extension_install();
                     }
                     Err(e) => {
                         eprintln!(
