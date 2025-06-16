@@ -65,8 +65,8 @@ jobs:
             # Use zig for cross-compilation to Linux ARM64
             maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
           elif [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
-            # Use manylinux2014 for better compatibility on x86_64 Linux
-            maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014
+            # Use manylinux2014 with zig for better compatibility on x86_64 Linux
+            maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
           else
             # Native compilation or standard cross-compilation
             maturin build --release --target ${{ matrix.target }}
