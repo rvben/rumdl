@@ -53,6 +53,16 @@ jobs:
       - uses: jdx/mise-action@v2
         with:
           experimental: true
+          install: true
+      
+      # Ensure all mise tools are installed (including zig for Linux)
+      - name: Install mise tools
+        run: mise install --yes
+      
+      # Verify zig installation on Linux only
+      - name: Verify zig installation
+        if: matrix.os == 'ubuntu-latest'
+        run: mise exec zig -- zig version || echo "Zig verification failed"
 
       # Install rust target for cross-compilation
       - name: Install Rust target
@@ -63,13 +73,13 @@ jobs:
         run: |
           if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
             # Use zig for cross-compilation to Linux ARM64
-            maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
+            mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
           elif [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
             # Use manylinux2014 with zig for better compatibility on x86_64 Linux
-            maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
+            mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
           else
             # Native compilation or standard cross-compilation
-            maturin build --release --target ${{ matrix.target }}
+            mise exec -- maturin build --release --target ${{ matrix.target }}
           fi
         shell: bash
 
@@ -79,7 +89,7 @@ jobs:
           if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
             # Use cargo-zigbuild for cross-compilation to Linux ARM64
             cargo install cargo-zigbuild --locked
-            cargo zigbuild --release --target ${{ matrix.target }}
+            mise exec -- cargo zigbuild --release --target ${{ matrix.target }}
           else
             # Native compilation or standard cross-compilation
             cargo build --release --target ${{ matrix.target }}
@@ -116,7 +126,11 @@ jobs:
       - uses: jdx/mise-action@v2
         with:
           experimental: true
-      - run: maturin sdist
+          install: true
+      - name: Install mise tools
+        run: mise install --yes
+      - name: Build source distribution
+        run: mise exec -- maturin sdist
       - uses: actions/upload-artifact@v4
         with:
           path: target/wheels/*.tar.gz
