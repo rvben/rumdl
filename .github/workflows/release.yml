@@ -54,15 +54,15 @@ jobs:
         with:
           experimental: true
           install: true
-      
-      # Ensure all mise tools are installed (including zig for Linux)
-      - name: Install mise tools
-        run: mise install --yes
-      
-      # Verify zig installation on Linux only
-      - name: Verify zig installation
+
+      # Setup CI environment
+      - name: Setup CI environment
+        run: make ci-setup
+
+      # Verify CI environment (Linux only needs zig)
+      - name: Verify CI environment
         if: matrix.os == 'ubuntu-latest'
-        run: mise exec zig -- zig version || echo "Zig verification failed"
+        run: make ci-verify
 
       # Install rust target for cross-compilation
       - name: Install Rust target
@@ -70,31 +70,15 @@ jobs:
 
       # Build wheel
       - name: Build wheel
-        run: |
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-            # Use zig for cross-compilation to Linux ARM64
-            mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
-          elif [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
-            # Use manylinux2014 with zig for better compatibility on x86_64 Linux
-            mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
-          else
-            # Native compilation or standard cross-compilation
-            mise exec -- maturin build --release --target ${{ matrix.target }}
-          fi
-        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: make release-wheel
 
       # Build binary
       - name: Build binary
-        run: |
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-            # Use cargo-zigbuild for cross-compilation to Linux ARM64
-            cargo install cargo-zigbuild --locked
-            mise exec -- cargo zigbuild --release --target ${{ matrix.target }}
-          else
-            # Native compilation or standard cross-compilation
-            cargo build --release --target ${{ matrix.target }}
-          fi
-        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: make release-binary
 
       # Rename binary
       - name: Prepare artifacts
@@ -127,10 +111,10 @@ jobs:
         with:
           experimental: true
           install: true
-      - name: Install mise tools
-        run: mise install --yes
+      - name: Setup CI environment
+        run: make ci-setup
       - name: Build source distribution
-        run: mise exec -- maturin sdist
+        run: make build-sdist
       - uses: actions/upload-artifact@v4
         with:
           path: target/wheels/*.tar.gz
@@ -234,11 +218,11 @@ jobs:
           # Extract version from tag
           TAG_NAME=${GITHUB_REF#refs/tags/}
           VERSION=${TAG_NAME#v}
-          
+
           # Wait for GitHub release to be fully available
           echo "Waiting for GitHub release to be available..."
           sleep 30
-          
+
           # Send dispatch with version info
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
