@@ -635,6 +635,19 @@ impl SourcedConfig {
                 .and_then(|o| o.file.clone()),
         );
 
+        // Merge output_format if present
+        if let Some(output_format_fragment) = fragment.global.output_format {
+            if let Some(ref mut output_format) = self.global.output_format {
+                output_format.merge_override(
+                    output_format_fragment.value,
+                    output_format_fragment.source,
+                    output_format_fragment.overrides.first().and_then(|o| o.file.clone()),
+                );
+            } else {
+                self.global.output_format = Some(output_format_fragment);
+            }
+        }
+
         // Merge rule configs
         for (rule_name, rule_fragment) in fragment.rules {
             let norm_rule_name = rule_name.to_ascii_uppercase(); // Normalize to uppercase for case-insensitivity
