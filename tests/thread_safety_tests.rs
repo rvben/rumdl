@@ -1,10 +1,10 @@
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+use rumdl::config::Config;
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::*;
-use rumdl::config::Config;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 #[test]
 fn test_concurrent_rule_execution() {
@@ -56,9 +56,11 @@ More content.
     // All threads should produce the same number of warnings
     let first_result = results[0].1;
     for (thread_id, warning_count) in results.iter() {
-        assert_eq!(*warning_count, first_result,
+        assert_eq!(
+            *warning_count, first_result,
             "Thread {} produced different warning count: {} vs {}",
-            thread_id, warning_count, first_result);
+            thread_id, warning_count, first_result
+        );
     }
 
     assert!(results.len() == 10, "Expected 10 thread results");
@@ -167,9 +169,11 @@ fn test_concurrent_configuration_access() {
     // All threads should get the same number of rules
     let first_result = results[0].1;
     for (thread_id, rule_count) in results.iter() {
-        assert_eq!(*rule_count, first_result,
+        assert_eq!(
+            *rule_count, first_result,
             "Thread {} got different rule count: {} vs {}",
-            thread_id, rule_count, first_result);
+            thread_id, rule_count, first_result
+        );
     }
 }
 
@@ -266,14 +270,14 @@ Text with *bad emphasis * here.
                     let warnings = rule.check(&ctx_clone).unwrap();
                     let mut results = results_clone.lock().unwrap();
                     results.push((i, "check".to_string(), warnings.len()));
-                },
+                }
                 1 => {
                     // Fix operation
                     let rule = MD026NoTrailingPunctuation::default();
                     let fixed = rule.fix(&ctx_clone);
                     let mut results = results_clone.lock().unwrap();
                     results.push((i, "fix".to_string(), if fixed.is_ok() { 1 } else { 0 }));
-                },
+                }
                 2 => {
                     // Multiple rule check
                     let rule1 = MD040FencedCodeLanguage::default();
@@ -282,7 +286,7 @@ Text with *bad emphasis * here.
                     let warnings2 = rule2.check(&ctx_clone).unwrap();
                     let mut results = results_clone.lock().unwrap();
                     results.push((i, "multi".to_string(), warnings1.len() + warnings2.len()));
-                },
+                }
                 _ => {
                     // Configuration access
                     let config = Config::default();
@@ -392,7 +396,7 @@ Content for section 10.
 
                         let mut count = success_count_clone.lock().unwrap();
                         *count += 1;
-                    },
+                    }
                     Err(_) => panic!("Rule check failed in thread {}", i),
                 }
 

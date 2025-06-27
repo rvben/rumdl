@@ -6,10 +6,10 @@
 
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
-use rumdl::rules::*;
 use rumdl::rules::code_block_utils::CodeBlockStyle;
 use rumdl::rules::code_fence_utils::CodeFenceStyle;
 use rumdl::rules::strong_style::StrongStyle;
+use rumdl::rules::*;
 
 /// Simulates how VS Code extension applies a fix by:
 /// 1. Getting the warning range from the rule
@@ -71,55 +71,127 @@ fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String>
 /// Helper function to create test cases for each rule
 fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn Rule>)> {
     match rule_name {
-        "MD001" => Some(("# H1\n### H3 (should be H2)", Box::new(MD001HeadingIncrement::default()))),
+        "MD001" => Some((
+            "# H1\n### H3 (should be H2)",
+            Box::new(MD001HeadingIncrement::default()),
+        )),
         "MD002" => Some(("## H2 (should start with H1)", Box::new(MD002FirstHeadingH1::default()))),
         "MD003" => Some(("# ATX\nSetext\n======", Box::new(MD003HeadingStyle::default()))),
-        "MD004" => Some(("* Item 1\n- Item 2", Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)))),
-        "MD005" => Some(("* Item 1\n   * Item with 3 spaces (should be 2)", Box::new(MD005ListIndent::default()))),
-        "MD006" => Some(("  * Indented list item that should trigger MD006", Box::new(MD006StartBullets))),
+        "MD004" => Some((
+            "* Item 1\n- Item 2",
+            Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
+        )),
+        "MD005" => Some((
+            "* Item 1\n   * Item with 3 spaces (should be 2)",
+            Box::new(MD005ListIndent::default()),
+        )),
+        "MD006" => Some((
+            "  * Indented list item that should trigger MD006",
+            Box::new(MD006StartBullets),
+        )),
         "MD007" => Some(("- Item 1\n   - Wrong indent", Box::new(MD007ULIndent::default()))),
         "MD009" => Some(("Line with trailing spaces   ", Box::new(MD009TrailingSpaces::default()))),
         "MD010" => Some(("Line with\ttab", Box::new(MD010NoHardTabs::default()))),
-        "MD011" => Some(("(http://example.com)[Example]", Box::new(MD011NoReversedLinks::default()))),
-        "MD012" => Some(("Content\n\n\n\nToo many blanks", Box::new(MD012NoMultipleBlanks::default()))),
-        "MD013" => Some(("This is a very long line that exceeds the maximum line length limit and should trigger MD013", Box::new(MD013LineLength::default()))),
+        "MD011" => Some((
+            "(http://example.com)[Example]",
+            Box::new(MD011NoReversedLinks::default()),
+        )),
+        "MD012" => Some((
+            "Content\n\n\n\nToo many blanks",
+            Box::new(MD012NoMultipleBlanks::default()),
+        )),
+        "MD013" => Some((
+            "This is a very long line that exceeds the maximum line length limit and should trigger MD013",
+            Box::new(MD013LineLength::default()),
+        )),
         "MD014" => Some(("```bash\n$ command\n```", Box::new(MD014CommandsShowOutput::default()))),
         "MD018" => Some(("#Missing space", Box::new(MD018NoMissingSpaceAtx::default()))),
         "MD019" => Some(("##  Multiple spaces", Box::new(MD019NoMultipleSpaceAtx::new()))),
-        "MD020" => Some(("##No space in closed##", Box::new(MD020NoMissingSpaceClosedAtx::default()))),
-        "MD021" => Some(("##  Multiple  spaces  ##", Box::new(MD021NoMultipleSpaceClosedAtx::default()))),
-        "MD022" => Some(("Text\n# Heading\nMore text", Box::new(MD022BlanksAroundHeadings::default()))),
+        "MD020" => Some((
+            "##No space in closed##",
+            Box::new(MD020NoMissingSpaceClosedAtx::default()),
+        )),
+        "MD021" => Some((
+            "##  Multiple  spaces  ##",
+            Box::new(MD021NoMultipleSpaceClosedAtx::default()),
+        )),
+        "MD022" => Some((
+            "Text\n# Heading\nMore text",
+            Box::new(MD022BlanksAroundHeadings::default()),
+        )),
         "MD023" => Some(("  # Indented heading", Box::new(MD023HeadingStartLeft))),
         "MD024" => Some(("# Duplicate\n# Duplicate", Box::new(MD024NoDuplicateHeading::default()))),
         "MD025" => Some(("# First\n# Second H1", Box::new(MD025SingleTitle::default()))),
         "MD026" => Some(("# Heading!", Box::new(MD026NoTrailingPunctuation::default()))),
-        "MD027" => Some((">  Multiple spaces in blockquote", Box::new(MD027MultipleSpacesBlockquote))),
+        "MD027" => Some((
+            ">  Multiple spaces in blockquote",
+            Box::new(MD027MultipleSpacesBlockquote),
+        )),
         "MD028" => Some(("> Quote\n>\n> More quote", Box::new(MD028NoBlanksBlockquote::default()))),
-        "MD029" => Some(("1. First\n3. Third", Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)))),
-        "MD030" => Some(("1.  Multiple spaces after marker", Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1)))),
-        "MD031" => Some(("Text\n```\ncode\n```\nText", Box::new(MD031BlanksAroundFences::default()))),
+        "MD029" => Some((
+            "1. First\n3. Third",
+            Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)),
+        )),
+        "MD030" => Some((
+            "1.  Multiple spaces after marker",
+            Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1)),
+        )),
+        "MD031" => Some((
+            "Text\n```\ncode\n```\nText",
+            Box::new(MD031BlanksAroundFences::default()),
+        )),
         "MD032" => Some(("Text\n* List item\nText", Box::new(MD032BlanksAroundLists::default()))),
         "MD033" => Some(("Text with <div>HTML</div>", Box::new(MD033NoInlineHtml::default()))),
         "MD034" => Some(("Visit https://example.com", Box::new(MD034NoBareUrls::default()))),
         "MD035" => Some(("Text\n***\nText", Box::new(MD035HRStyle::default()))),
-        "MD036" => Some(("**Bold text as heading**", Box::new(MD036NoEmphasisAsHeading::new("!?.,:;".to_string())))),
-        "MD037" => Some(("Text with * spaces around * emphasis", Box::new(MD037NoSpaceInEmphasis::default()))),
+        "MD036" => Some((
+            "**Bold text as heading**",
+            Box::new(MD036NoEmphasisAsHeading::new("!?.,:;".to_string())),
+        )),
+        "MD037" => Some((
+            "Text with * spaces around * emphasis",
+            Box::new(MD037NoSpaceInEmphasis::default()),
+        )),
         "MD038" => Some(("`code `", Box::new(MD038NoSpaceInCode::default()))),
         "MD039" => Some(("[link text ]( url )", Box::new(MD039NoSpaceInLinks::default()))),
-        "MD040" => Some(("```\ncode without language\n```", Box::new(MD040FencedCodeLanguage::default()))),
+        "MD040" => Some((
+            "```\ncode without language\n```",
+            Box::new(MD040FencedCodeLanguage::default()),
+        )),
         "MD041" => Some(("Not a heading", Box::new(MD041FirstLineHeading::default()))),
         "MD042" => Some(("[]()", Box::new(MD042NoEmptyLinks::default()))),
-        "MD043" => Some(("# Wrong heading", Box::new(MD043RequiredHeadings::new(vec!["Introduction".to_string()])))),
-        "MD044" => Some(("javascript instead of JavaScript", Box::new(MD044ProperNames::new(vec!["JavaScript".to_string()], false)))),
+        "MD043" => Some((
+            "# Wrong heading",
+            Box::new(MD043RequiredHeadings::new(vec!["Introduction".to_string()])),
+        )),
+        "MD044" => Some((
+            "javascript instead of JavaScript",
+            Box::new(MD044ProperNames::new(vec!["JavaScript".to_string()], false)),
+        )),
         "MD045" => Some(("![](image.png)", Box::new(MD045NoAltText::default()))),
-        "MD046" => Some(("    indented code", Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Fenced)))),
-        "MD047" => Some(("File without trailing newline", Box::new(MD047SingleTrailingNewline::default()))),
-        "MD048" => Some(("~~~\ncode\n~~~", Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Tilde)))),
+        "MD046" => Some((
+            "    indented code",
+            Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Fenced)),
+        )),
+        "MD047" => Some((
+            "File without trailing newline",
+            Box::new(MD047SingleTrailingNewline::default()),
+        )),
+        "MD048" => Some((
+            "~~~\ncode\n~~~",
+            Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Tilde)),
+        )),
         "MD049" => Some(("Text _emphasis_ text", Box::new(MD049EmphasisStyle::default()))),
-        "MD050" => Some(("Text __strong__ text", Box::new(MD050StrongStyle::new(StrongStyle::Underscore)))),
+        "MD050" => Some((
+            "Text __strong__ text",
+            Box::new(MD050StrongStyle::new(StrongStyle::Underscore)),
+        )),
         "MD051" => Some(("[link](#nonexistent)", Box::new(MD051LinkFragments::default()))),
         "MD052" => Some(("[ref link][ref]", Box::new(MD052ReferenceLinkImages::default()))),
-        "MD053" => Some(("[ref]: https://example.com", Box::new(MD053LinkImageReferenceDefinitions::default()))),
+        "MD053" => Some((
+            "[ref]: https://example.com",
+            Box::new(MD053LinkImageReferenceDefinitions::default()),
+        )),
         "MD054" => Some(("![image](url)", Box::new(MD054LinkImageStyle::default()))),
         "MD055" => Some(("|col1|col2|\n|--|--|\n|a|b|", Box::new(MD055TablePipeStyle::default()))),
         "MD056" => Some(("|col1|col2|\n|--|--|\n|a|", Box::new(MD056TableColumnCount::default()))),
@@ -167,7 +239,10 @@ mod tests {
 
         // Should remove indentation, not duplicate the heading
         assert_eq!(result, "# Indented Heading");
-        assert!(!result.contains("# # "), "Should not contain duplicated heading markers");
+        assert!(
+            !result.contains("# # "),
+            "Should not contain duplicated heading markers"
+        );
     }
 
     #[test]
@@ -200,7 +275,11 @@ mod tests {
             // Ensure no duplication of hash symbols
             let hash_count = input.chars().take_while(|&c| c == '#').count();
             let result_hash_count = result.chars().take_while(|&c| c == '#').count();
-            assert_eq!(hash_count, result_hash_count, "Hash count should remain the same for: {}", input);
+            assert_eq!(
+                hash_count, result_hash_count,
+                "Hash count should remain the same for: {}",
+                input
+            );
         }
     }
 
@@ -208,11 +287,7 @@ mod tests {
     fn test_md023_various_indentations() {
         let rule = MD023HeadingStartLeft;
 
-        let test_cases = vec![
-            ("  # H1", "# H1"),
-            ("    ## H2", "## H2"),
-            ("\t### H3", "### H3"),
-        ];
+        let test_cases = vec![("  # H1", "# H1"), ("    ## H2", "## H2"), ("\t### H3", "### H3")];
 
         for (input, expected) in test_cases {
             let result = simulate_vscode_fix(input, &rule).unwrap();
@@ -233,10 +308,16 @@ mod tests {
             assert!(!fixed.contains("  * *"), "Should not contain duplicated content");
             // The fix should start with a bullet marker and not have the original indentation
             assert!(fixed.starts_with("*"), "Should start with bullet marker");
-            assert!(!fixed.starts_with("  *"), "Should not start with indented bullet marker");
+            assert!(
+                !fixed.starts_with("  *"),
+                "Should not start with indented bullet marker"
+            );
             // Expected: "* Indented list item that should trigger MD006"
             // But we'll be lenient about exact spacing as long as there's no duplication
-            assert!(fixed.contains("Indented list item that should trigger MD006"), "Should contain the original content");
+            assert!(
+                fixed.contains("Indented list item that should trigger MD006"),
+                "Should contain the original content"
+            );
         } else {
             panic!("Expected MD006 to provide a fix");
         }
@@ -254,7 +335,10 @@ mod tests {
             assert!(!fixed.contains("* *"), "Should not contain duplicated list markers");
             assert!(!fixed.contains("   * *"), "Should not contain duplicated content");
             // The fix should correct the indentation to 2 spaces
-            assert!(fixed.contains("  * Item with 3 spaces"), "Should fix indentation to 2 spaces");
+            assert!(
+                fixed.contains("  * Item with 3 spaces"),
+                "Should fix indentation to 2 spaces"
+            );
         } else {
             panic!("Expected MD005 to provide a fix");
         }
@@ -269,10 +353,16 @@ mod tests {
 
         // If MD027 has a fix, it should not duplicate content
         if let Ok(fixed) = result {
-            assert!(!fixed.contains("> >"), "Should not contain duplicated blockquote markers");
+            assert!(
+                !fixed.contains("> >"),
+                "Should not contain duplicated blockquote markers"
+            );
             assert!(!fixed.contains(">>"), "Should not contain merged blockquote markers");
             // The fix should correct to single space
-            assert!(fixed.contains("> Multiple spaces"), "Should fix to single space after marker");
+            assert!(
+                fixed.contains("> Multiple spaces"),
+                "Should fix to single space after marker"
+            );
         } else {
             panic!("Expected MD027 to provide a fix");
         }
@@ -327,7 +417,10 @@ mod tests {
 
         // If MD046 has a fix, it should not duplicate content
         if let Ok(fixed) = result {
-            assert!(!fixed.contains("    indented"), "Should not contain original indented code");
+            assert!(
+                !fixed.contains("    indented"),
+                "Should not contain original indented code"
+            );
             assert!(fixed.contains("```"), "Should contain fenced code block marker");
             assert!(fixed.contains("indented code"), "Should contain the code content");
         }
@@ -338,13 +431,11 @@ mod tests {
     #[test]
     fn test_all_rules_vscode_fix_no_duplication() {
         let rules_to_test = vec![
-            "MD001", "MD002", "MD003", "MD004", "MD005", "MD006", "MD007", "MD009", "MD010",
-            "MD011", "MD012", "MD013", "MD014", "MD018", "MD019", "MD020", "MD021",
-            "MD022", "MD023", "MD024", "MD025", "MD026", "MD027", "MD028", "MD029",
-            "MD030", "MD031", "MD032", "MD033", "MD034", "MD035", "MD036", "MD037",
-            "MD038", "MD039", "MD040", "MD041", "MD042", "MD043", "MD044", "MD045",
-            "MD046", "MD047", "MD048", "MD049", "MD050", "MD051", "MD052", "MD053",
-            "MD054", "MD055", "MD056", "MD057", "MD058",
+            "MD001", "MD002", "MD003", "MD004", "MD005", "MD006", "MD007", "MD009", "MD010", "MD011", "MD012", "MD013",
+            "MD014", "MD018", "MD019", "MD020", "MD021", "MD022", "MD023", "MD024", "MD025", "MD026", "MD027", "MD028",
+            "MD029", "MD030", "MD031", "MD032", "MD033", "MD034", "MD035", "MD036", "MD037", "MD038", "MD039", "MD040",
+            "MD041", "MD042", "MD043", "MD044", "MD045", "MD046", "MD047", "MD048", "MD049", "MD050", "MD051", "MD052",
+            "MD053", "MD054", "MD055", "MD056", "MD057", "MD058",
         ];
 
         let mut tested_rules = 0;
@@ -360,30 +451,32 @@ mod tests {
                         rules_with_fixes += 1;
 
                         // Generic checks that apply to all rules
-                        let original_non_whitespace: String = test_content.chars().filter(|c| !c.is_whitespace()).collect();
-                        let fixed_non_whitespace: String = fixed_content.chars().filter(|c| !c.is_whitespace()).collect();
+                        let original_non_whitespace: String =
+                            test_content.chars().filter(|c| !c.is_whitespace()).collect();
+                        let fixed_non_whitespace: String =
+                            fixed_content.chars().filter(|c| !c.is_whitespace()).collect();
 
                         // Check for obvious content duplication patterns (the actual bugs we're looking for)
-                        let has_obvious_duplication =
-                            fixed_content.contains("# # ") ||
-                            fixed_content.contains("## ## ") ||
-                            fixed_content.contains("### ### ") ||
-                            fixed_content.contains("* *") ||
-                            fixed_content.contains("- -") ||
-                            fixed_content.contains("+ +") ||
-                            fixed_content.contains("> >") ||
-                            fixed_content.contains("1. 1.") ||
-                            fixed_content.contains("2. 2.");
+                        let has_obvious_duplication = fixed_content.contains("# # ")
+                            || fixed_content.contains("## ## ")
+                            || fixed_content.contains("### ### ")
+                            || fixed_content.contains("* *")
+                            || fixed_content.contains("- -")
+                            || fixed_content.contains("+ +")
+                            || fixed_content.contains("> >")
+                            || fixed_content.contains("1. 1.")
+                            || fixed_content.contains("2. 2.");
 
                         // For rules that provide complete replacements (like MD042), check for actual duplication patterns
                         // rather than just size increase
-                        let has_size_based_duplication = if rule_name == "MD042" || rule_name == "MD043" || rule_name == "MD044" {
-                            // These rules legitimately provide complete replacements, so skip size-based check
-                            false
-                        } else {
-                            // For other rules, a 3x size increase likely indicates duplication
-                            fixed_non_whitespace.len() > original_non_whitespace.len() * 3
-                        };
+                        let has_size_based_duplication =
+                            if rule_name == "MD042" || rule_name == "MD043" || rule_name == "MD044" {
+                                // These rules legitimately provide complete replacements, so skip size-based check
+                                false
+                            } else {
+                                // For other rules, a 3x size increase likely indicates duplication
+                                fixed_non_whitespace.len() > original_non_whitespace.len() * 3
+                            };
 
                         if has_obvious_duplication || has_size_based_duplication {
                             panic!("Rule {} has content duplication in VS Code extension fix!\nOriginal: {:?}\nFixed: {:?}",
@@ -410,6 +503,9 @@ mod tests {
 
         // We expect at least some rules to have fixes and all of them to pass the duplication test
         assert!(rules_with_fixes > 0, "Expected at least some rules to have fixes");
-        assert_eq!(passed_tests, rules_with_fixes, "All rules with fixes should pass the duplication test");
+        assert_eq!(
+            passed_tests, rules_with_fixes,
+            "All rules with fixes should pass the duplication test"
+        );
     }
 }

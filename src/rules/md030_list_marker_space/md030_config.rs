@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for MD030 (Spaces after list markers)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -8,15 +8,15 @@ pub struct MD030Config {
     /// Spaces for single-line unordered list items (default: 1)
     #[serde(default = "default_spaces")]
     pub ul_single: usize,
-    
+
     /// Spaces for multi-line unordered list items (default: 1)
     #[serde(default = "default_spaces")]
     pub ul_multi: usize,
-    
+
     /// Spaces for single-line ordered list items (default: 1)
     #[serde(default = "default_spaces")]
     pub ol_single: usize,
-    
+
     /// Spaces for multi-line ordered list items (default: 1)
     #[serde(default = "default_spaces")]
     pub ol_multi: usize,

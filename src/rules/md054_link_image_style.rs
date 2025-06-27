@@ -84,16 +84,8 @@ pub struct MD054LinkImageStyle {
     config: MD054Config,
 }
 
-
 impl MD054LinkImageStyle {
-    pub fn new(
-        autolink: bool,
-        collapsed: bool,
-        full: bool,
-        inline: bool,
-        shortcut: bool,
-        url_inline: bool,
-    ) -> Self {
+    pub fn new(autolink: bool, collapsed: bool, full: bool, inline: bool, shortcut: bool, url_inline: bool) -> Self {
         Self {
             config: MD054Config {
                 autolink,
@@ -105,7 +97,7 @@ impl MD054LinkImageStyle {
             },
         }
     }
-    
+
     pub fn from_config_struct(config: MD054Config) -> Self {
         Self { config }
     }
@@ -171,10 +163,7 @@ impl Rule for MD054LinkImageStyle {
             let line_chars: Vec<char> = line.chars().collect();
 
             while idx < line_chars.len() {
-                let byte_idx = line_chars[..idx]
-                    .iter()
-                    .map(|c| c.len_utf8())
-                    .sum::<usize>();
+                let byte_idx = line_chars[..idx].iter().map(|c| c.len_utf8()).sum::<usize>();
                 let slice = &line[byte_idx..];
 
                 // Strict priority: full -> collapsed -> inline/url_inline -> autolink -> shortcut
@@ -186,8 +175,7 @@ impl Rule for MD054LinkImageStyle {
                     let match_start_char = line[..match_start_byte].chars().count();
                     let match_end_char = line[..match_end_byte].chars().count();
 
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.config.full
-                    {
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.config.full {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) =
                             calculate_match_range(line_num + 1, line, match_start_char, match_len);
@@ -198,8 +186,7 @@ impl Rule for MD054LinkImageStyle {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: "Link/image style 'full' is not consistent with document"
-                                .to_string(),
+                            message: "Link/image style 'full' is not consistent with document".to_string(),
                             severity: Severity::Warning,
                             fix: None,
                         });
@@ -216,9 +203,7 @@ impl Rule for MD054LinkImageStyle {
                     let match_start_char = line[..match_start_byte].chars().count();
                     let match_end_char = line[..match_end_byte].chars().count();
 
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
-                        && !self.config.collapsed
-                    {
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.config.collapsed {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) =
                             calculate_match_range(line_num + 1, line, match_start_char, match_len);
@@ -229,8 +214,7 @@ impl Rule for MD054LinkImageStyle {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: "Link/image style 'collapsed' is not consistent with document"
-                                .to_string(),
+                            message: "Link/image style 'collapsed' is not consistent with document".to_string(),
                             severity: Severity::Warning,
                             fix: None,
                         });
@@ -254,12 +238,8 @@ impl Rule for MD054LinkImageStyle {
 
                         if !self.is_style_allowed(style) {
                             let match_len = match_end_char - match_start_char;
-                            let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                                line_num + 1,
-                                line,
-                                match_start_char,
-                                match_len,
-                            );
+                            let (start_line, start_col, end_line, end_col) =
+                                calculate_match_range(line_num + 1, line, match_start_char, match_len);
 
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name()),
@@ -267,10 +247,7 @@ impl Rule for MD054LinkImageStyle {
                                 column: start_col,
                                 end_line,
                                 end_column: end_col,
-                                message: format!(
-                                    "Link/image style '{}' is not consistent with document",
-                                    style
-                                ),
+                                message: format!("Link/image style '{}' is not consistent with document", style),
                                 severity: Severity::Warning,
                                 fix: None,
                             });
@@ -288,9 +265,7 @@ impl Rule for MD054LinkImageStyle {
                     let match_start_char = line[..match_start_byte].chars().count();
                     let match_end_char = line[..match_end_byte].chars().count();
 
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
-                        && !self.config.autolink
-                    {
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.config.autolink {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) =
                             calculate_match_range(line_num + 1, line, match_start_char, match_len);
@@ -301,8 +276,7 @@ impl Rule for MD054LinkImageStyle {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: "Link/image style 'autolink' is not consistent with document"
-                                .to_string(),
+                            message: "Link/image style 'autolink' is not consistent with document".to_string(),
                             severity: Severity::Warning,
                             fix: None,
                         });
@@ -321,15 +295,12 @@ impl Rule for MD054LinkImageStyle {
                     let after = &line[match_end_byte..];
 
                     // Only match as shortcut if not followed by '[', '[]', or ']['
-                    if after.starts_with('[') || after.starts_with("[]") || after.starts_with("][")
-                    {
+                    if after.starts_with('[') || after.starts_with("[]") || after.starts_with("][") {
                         idx += 1;
                         continue;
                     }
 
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1)
-                        && !self.config.shortcut
-                    {
+                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.config.shortcut {
                         let match_len = match_end_char - match_start_char;
                         let (start_line, start_col, end_line, end_col) =
                             calculate_match_range(line_num + 1, line, match_start_char, match_len);
@@ -340,8 +311,7 @@ impl Rule for MD054LinkImageStyle {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: "Link/image style 'shortcut' is not consistent with document"
-                                .to_string(),
+                            message: "Link/image style 'shortcut' is not consistent with document".to_string(),
                             severity: Severity::Warning,
                             fix: None,
                         });

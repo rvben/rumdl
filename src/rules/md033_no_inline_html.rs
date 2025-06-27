@@ -45,7 +45,7 @@ impl MD033NoInlineHtml {
         let allowed = config.allowed_set();
         Self { config, allowed }
     }
-    
+
     pub fn from_config_struct(config: MD033Config) -> Self {
         let allowed = config.allowed_set();
         Self { config, allowed }
@@ -139,9 +139,7 @@ impl MD033NoInlineHtml {
         let content = tag.trim_start_matches('<').trim_end_matches('>');
         // Simple email pattern: contains @ and has reasonable structure
         content.contains('@')
-            && content
-                .chars()
-                .all(|c| c.is_alphanumeric() || "@.-_+".contains(c))
+            && content.chars().all(|c| c.is_alphanumeric() || "@.-_+".contains(c))
             && content.split('@').count() == 2
             && content.split('@').all(|part| !part.is_empty())
     }
@@ -159,12 +157,7 @@ impl MD033NoInlineHtml {
     }
 
     /// Find HTML tags that span multiple lines
-    fn find_multiline_html_tags(
-        &self,
-        content: &str,
-        structure: &DocumentStructure,
-        warnings: &mut Vec<LintWarning>,
-    ) {
+    fn find_multiline_html_tags(&self, content: &str, structure: &DocumentStructure, warnings: &mut Vec<LintWarning>) {
         // Early return: if content has no incomplete tags at line ends, skip processing
         if !content.contains('<') || !content.lines().any(|line| line.trim_end().ends_with('<')) {
             return;
@@ -230,18 +223,16 @@ impl MD033NoInlineHtml {
                             && HTML_TAG_FINDER.is_match(final_tag)
                         {
                             // Check for duplicates (avoid flagging the same position twice)
-                            let already_warned = warnings
-                                .iter()
-                                .any(|w| w.line == line_num && w.column == start_column);
+                            let already_warned =
+                                warnings.iter().any(|w| w.line == line_num && w.column == start_column);
 
                             if !already_warned {
-                                let (start_line, start_col, end_line, end_col) =
-                                    calculate_html_tag_range(
-                                        line_num,
-                                        line,
-                                        incomplete_match.start(),
-                                        incomplete_match.len(),
-                                    );
+                                let (start_line, start_col, end_line, end_col) = calculate_html_tag_range(
+                                    line_num,
+                                    line,
+                                    incomplete_match.start(),
+                                    incomplete_match.len(),
+                                );
                                 warnings.push(LintWarning {
                                     rule_name: Some(self.name()),
                                     line: start_line,

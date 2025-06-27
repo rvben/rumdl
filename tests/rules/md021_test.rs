@@ -35,8 +35,7 @@ fn test_mixed_closed_atx_headings() {
 #[test]
 fn test_code_block() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
-    let content =
-        "```markdown\n#  Not a heading  #\n##   Also not a heading   ##\n```\n# Real Heading #";
+    let content = "```markdown\n#  Not a heading  #\n##   Also not a heading   ##\n```\n# Real Heading #";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -82,7 +81,10 @@ fn test_heading_with_multiple_hashes() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].message, "Multiple spaces (2 at start, 2 at end) inside hashes on closed heading (with ###### at start and end)");
+    assert_eq!(
+        result[0].message,
+        "Multiple spaces (2 at start, 2 at end) inside hashes on closed heading (with ###### at start and end)"
+    );
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "###### Heading 6 ######");
 }

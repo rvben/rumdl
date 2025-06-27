@@ -37,18 +37,9 @@ fn test_pyproject_toml_init_command() {
 
     // Check file contents
     let content = fs::read_to_string(pyproject_path).unwrap();
-    assert!(
-        content.contains("[tool.rumdl]"),
-        "Missing [tool.rumdl] section"
-    );
-    assert!(
-        content.contains("line-length = 100"),
-        "Missing line-length setting"
-    );
-    assert!(
-        content.contains("[build-system]"),
-        "Missing build-system section"
-    );
+    assert!(content.contains("[tool.rumdl]"), "Missing [tool.rumdl] section");
+    assert!(content.contains("line-length = 100"), "Missing line-length setting");
+    assert!(content.contains("[build-system]"), "Missing build-system section");
 }
 
 #[test]
@@ -94,18 +85,9 @@ build-backend = "setuptools.build_meta"
 
     // Check file contents
     let content = fs::read_to_string(pyproject_path).unwrap();
-    assert!(
-        content.contains("[tool.rumdl]"),
-        "Missing [tool.rumdl] section"
-    );
-    assert!(
-        content.contains("line-length = 100"),
-        "Missing line-length setting"
-    );
-    assert!(
-        content.contains("[build-system]"),
-        "Missing build-system section"
-    );
+    assert!(content.contains("[tool.rumdl]"), "Missing [tool.rumdl] section");
+    assert!(content.contains("line-length = 100"), "Missing line-length setting");
+    assert!(content.contains("[build-system]"), "Missing build-system section");
 }
 
 #[test]
@@ -118,17 +100,14 @@ fn test_pyproject_toml_config_loading() {
     fs::write(
         &test_file,
         "# Test File\n\nThis line is 85 characters long which exceeds the default limit of 80 characters.\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     // First run without config (should detect line length issue with default 80 chars)
-    let (success, stdout, _stderr) =
-        run_rumdl_command(&[test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
+    let (success, stdout, _stderr) = run_rumdl_command(&[test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
 
     assert!(!success, "Command should fail with line length issues");
-    assert!(
-        stdout.contains("MD013"),
-        "MD013 rule warning not found in stdout"
-    );
+    assert!(stdout.contains("MD013"), "MD013 rule warning not found in stdout");
 
     // Create pyproject.toml with custom line length of 100
     fs::write(
@@ -144,8 +123,7 @@ line-length = 100
     .unwrap();
 
     // Run again with the config (should not detect line length issue now)
-    let (success, stdout, stderr) =
-        run_rumdl_command(&[test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
+    let (success, stdout, stderr) = run_rumdl_command(&[test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
 
     // Print output for debugging
     println!("STDOUT (pyproject_toml_config_loading):\n{}", stdout);
@@ -154,14 +132,8 @@ line-length = 100
     assert!(success, "Command should succeed with custom line length");
     // Only fail if an actual MD013 warning line is present (not just in enabled rules)
     let md013_warning_present = stdout.lines().any(|line| line.contains(": MD013 "));
-    assert!(
-        !md013_warning_present,
-        "MD013 rule warning should not be present"
-    );
-    assert!(
-        stdout.contains("No issues found"),
-        "Expected 'No issues found' message"
-    );
+    assert!(!md013_warning_present, "MD013 rule warning should not be present");
+    assert!(stdout.contains("No issues found"), "Expected 'No issues found' message");
 }
 
 #[test]
@@ -194,7 +166,8 @@ line-length = 100
     .unwrap();
 
     // Create test file with long line
-    let test_file_content = "# Test File\n\nThis line is 85 characters long which exceeds the default limit of 80 characters.\n";
+    let test_file_content =
+        "# Test File\n\nThis line is 85 characters long which exceeds the default limit of 80 characters.\n";
 
     let snake_test_file = snake_case_dir.path().join("test.md");
     fs::write(&snake_test_file, test_file_content).unwrap();
@@ -203,34 +176,24 @@ line-length = 100
     fs::write(&kebab_test_file, test_file_content).unwrap();
 
     // Test snake_case config
-    let (snake_success, snake_stdout, snake_stderr) = run_rumdl_command(
-        &[snake_test_file.to_str().unwrap(), "--verbose"],
-        snake_case_dir.path(),
-    );
+    let (snake_success, snake_stdout, snake_stderr) =
+        run_rumdl_command(&[snake_test_file.to_str().unwrap(), "--verbose"], snake_case_dir.path());
 
     // Print output for debugging
     println!("STDOUT (snake_case):\n{}", snake_stdout);
     println!("STDERR (snake_case):\n{}", snake_stderr);
 
     // Test kebab-case config
-    let (kebab_success, kebab_stdout, kebab_stderr) = run_rumdl_command(
-        &[kebab_test_file.to_str().unwrap(), "--verbose"],
-        kebab_case_dir.path(),
-    );
+    let (kebab_success, kebab_stdout, kebab_stderr) =
+        run_rumdl_command(&[kebab_test_file.to_str().unwrap(), "--verbose"], kebab_case_dir.path());
 
     // Print output for debugging
     println!("STDOUT (kebab_case):\n{}", kebab_stdout);
     println!("STDERR (kebab_case):\n{}", kebab_stderr);
 
     // Both should succeed with custom line length
-    assert!(
-        snake_success,
-        "Command should succeed with snake_case config"
-    );
-    assert!(
-        kebab_success,
-        "Command should succeed with kebab-case config"
-    );
+    assert!(snake_success, "Command should succeed with snake_case config");
+    assert!(kebab_success, "Command should succeed with kebab-case config");
 
     // Both should NOT emit MD013 warning, since the config disables it for the test file
     let snake_md013_warning_present = snake_stdout.lines().any(|line| line.contains(": MD013 "));
@@ -315,24 +278,14 @@ This line is much longer at 130 characters, which exceeds all three limits: 60 c
     );
 
     // Run without explicit config (.rumdl.toml should take precedence over pyproject.toml)
-    let (default_success, default_stdout, _) =
-        run_rumdl_command(&[test_file.to_str().unwrap()], temp_dir.path());
+    let (default_success, default_stdout, _) = run_rumdl_command(&[test_file.to_str().unwrap()], temp_dir.path());
 
     // Both should fail but with different patterns
-    assert!(
-        !explicit_success,
-        "Command should fail with explicit config"
-    );
-    assert!(
-        !default_success,
-        "Command should fail with default config search"
-    );
+    assert!(!explicit_success, "Command should fail with explicit config");
+    assert!(!default_success, "Command should fail with default config search");
 
     // Only line > 120 chars should fail with explicit config
-    assert!(
-        explicit_stdout.contains("MD013"),
-        "MD013 warning should be present"
-    );
+    assert!(explicit_stdout.contains("MD013"), "MD013 warning should be present");
     assert_eq!(
         explicit_stdout.matches("MD013").count(),
         1,
@@ -340,10 +293,7 @@ This line is much longer at 130 characters, which exceeds all three limits: 60 c
     );
 
     // Both lines > 60 chars should fail with .rumdl.toml (which takes precedence over pyproject.toml)
-    assert!(
-        default_stdout.contains("MD013"),
-        "MD013 warning should be present"
-    );
+    assert!(default_stdout.contains("MD013"), "MD013 warning should be present");
     assert!(
         default_stdout.matches("MD013").count() >= 3,
         "Should have multiple MD013 warnings with .rumdl.toml config"

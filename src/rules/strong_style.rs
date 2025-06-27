@@ -27,8 +27,7 @@ impl fmt::Display for StrongStyle {
 /// Get regex pattern for finding strong emphasis markers
 pub fn get_strong_pattern() -> &'static FancyRegex {
     lazy_static! {
-        static ref STRONG_REGEX: FancyRegex =
-            FancyRegex::new(r"(\*\*|__)(?!\s)(?:(?!\1).)+?(?<!\s)(\1)").unwrap();
+        static ref STRONG_REGEX: FancyRegex = FancyRegex::new(r"(\*\*|__)(?!\s)(?:(?!\1).)+?(?<!\s)(\1)").unwrap();
     }
     &STRONG_REGEX
 }

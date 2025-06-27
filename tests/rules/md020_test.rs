@@ -20,10 +20,7 @@ fn test_invalid_closed_atx_headings() {
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
     assert_eq!(result[0].column, 11);
-    assert_eq!(
-        result[0].message,
-        "Missing space before # at end of closed heading"
-    );
+    assert_eq!(result[0].message, "Missing space before # at end of closed heading");
 }
 
 #[test]
@@ -109,10 +106,7 @@ fn test_indented_closed_atx_headings() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "  # Heading 1 #\n    ## Heading 2##\n      ### Heading 3###"
-    );
+    assert_eq!(fixed, "  # Heading 1 #\n    ## Heading 2##\n      ### Heading 3###");
 }
 
 #[test]

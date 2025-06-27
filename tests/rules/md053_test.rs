@@ -34,7 +34,8 @@ fn test_shortcut_reference() {
 #[test]
 fn test_multiple_unused_references() {
     let rule = MD053LinkImageReferenceDefinitions::new();
-    let content = "[link1][id1]\n\n[id1]: http://example.com/1\n[id2]: http://example.com/2\n[id3]: http://example.com/3";
+    let content =
+        "[link1][id1]\n\n[id1]: http://example.com/1\n[id2]: http://example.com/2\n[id3]: http://example.com/3";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
@@ -88,10 +89,7 @@ fn test_mixed_used_unused_references() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "[link][used]\nSome text\n\n[used]: http://example.com/used"
-    );
+    assert_eq!(fixed, "[link][used]\nSome text\n\n[used]: http://example.com/used");
 }
 
 #[test]
@@ -115,8 +113,7 @@ fn test_unused_reference_definition() {
 #[test]
 fn test_multiple_references() {
     let rule = MD053LinkImageReferenceDefinitions::new();
-    let content =
-        "[ref1]: https://example1.com\n[ref2]: https://example2.com\n[ref1] and [ref2] are links";
+    let content = "[ref1]: https://example1.com\n[ref2]: https://example2.com\n[ref1] and [ref2] are links";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());

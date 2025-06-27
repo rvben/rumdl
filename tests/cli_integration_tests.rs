@@ -21,11 +21,7 @@ fn setup_test_files() -> tempfile::TempDir {
     fs::write(base_path.join("docs/doc1.md"), "# Doc 1\n").unwrap();
     fs::write(base_path.join("docs/temp/temp.md"), "# Temp\n").unwrap();
     fs::write(base_path.join("src/test.md"), "# Source\n").unwrap();
-    fs::write(
-        base_path.join("subfolder/README.md"),
-        "# Subfolder README\n",
-    )
-    .unwrap();
+    fs::write(base_path.join("subfolder/README.md"), "# Subfolder README\n").unwrap();
 
     // Print the created files for debugging
     println!("Created test files:");
@@ -103,14 +99,8 @@ fn test_cli_include_exclude() {
 
     // Test combined include and exclude via CLI - include *.md in docs, exclude temp
     println!("--- Running CLI Include/Exclude Test ---");
-    let (success_comb, stdout_comb, _) = run_cmd(&[
-        ".",
-        "--include",
-        "docs/*.md",
-        "--exclude",
-        "docs/temp",
-        "--verbose",
-    ]);
+    let (success_comb, stdout_comb, _) =
+        run_cmd(&[".", "--include", "docs/*.md", "--exclude", "docs/temp", "--verbose"]);
     assert!(success_comb, "CLI Include/Exclude Test failed");
     let norm_stdout_comb = normalize(&stdout_comb);
     assert!(
@@ -304,10 +294,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(base_path.join("docs/doc1.md"), "# Doc 1\n")?;
     fs::write(base_path.join("docs/temp/temp.md"), "# Temp\n")?;
     fs::write(base_path.join("src/test.md"), "# Source\n")?;
-    fs::write(
-        base_path.join("subfolder/README.md"),
-        "# Subfolder README\n",
-    )?;
+    fs::write(base_path.join("subfolder/README.md"), "# Subfolder README\n")?;
 
     // Print the created files for debugging
     println!("Created test files:");
@@ -480,13 +467,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Test Case 6: Specific Exclude Overrides Broader Include ---
     println!("--- Running Test Case 6: Specific Exclude Overrides Broader Include ---");
-    let (success6, stdout6, stderr6) = run_cmd(&[
-        ".",
-        "--include",
-        "subfolder/*.md",
-        "--exclude",
-        "subfolder/README.md",
-    ]); // Pass only the args slice
+    let (success6, stdout6, stderr6) =
+        run_cmd(&[".", "--include", "subfolder/*.md", "--exclude", "subfolder/README.md"]); // Pass only the args slice
     println!("Test Case 6 Stdout:\n{}", stdout6);
     println!("Test Case 6 Stderr:{}", stderr6);
     assert!(success6, "Case 6: Command failed"); // Use success6
@@ -559,8 +541,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Test Case 10: Include multiple patterns ---
     println!("--- Running Test Case 10: Include multiple patterns ---");
-    let (success10, stdout10, stderr10) =
-        run_cmd(&[".", "--include", "README.md,src/*", "--verbose"]);
+    let (success10, stdout10, stderr10) = run_cmd(&[".", "--include", "README.md,src/*", "--verbose"]);
     println!("Test Case 10 Stdout:\n{}", stdout10);
     println!("Test Case 10 Stderr:{}\n", stderr10);
     assert!(success10, "Test Case 10 failed");
@@ -818,9 +799,7 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
         .current_dir(dir_path);
     cmd1.assert()
         .success()
-        .stdout(predicates::str::contains(
-            "No markdown files found to check.",
-        ))
+        .stdout(predicates::str::contains("No markdown files found to check."))
         .stdout(predicates::str::contains("Processing file:").not());
 
     // Test 2: Excluding all .md files when only .md files exist
@@ -832,9 +811,7 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
         .current_dir(dir_path);
     cmd2.assert()
         .success()
-        .stdout(predicates::str::contains(
-            "No markdown files found to check.",
-        ))
+        .stdout(predicates::str::contains("No markdown files found to check."))
         .stdout(predicates::str::contains("Processing file:").not());
 
     // Test 3: Excluding both markdown types
@@ -847,9 +824,7 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
         .current_dir(dir_path);
     cmd3.assert()
         .success()
-        .stdout(predicates::str::contains(
-            "No markdown files found to check.",
-        ))
+        .stdout(predicates::str::contains("No markdown files found to check."))
         .stdout(predicates::str::contains("Processing file:").not());
 
     Ok(())
@@ -913,14 +888,8 @@ fn test_rule_command_lists_all_rules() {
         .output()
         .expect("Failed to execute 'rumdl rule'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(
-        output.status.success(),
-        "'rumdl rule' did not exit successfully"
-    );
-    assert!(
-        stdout.contains("Available rules:"),
-        "Output missing 'Available rules:'"
-    );
+    assert!(output.status.success(), "'rumdl rule' did not exit successfully");
+    assert!(stdout.contains("Available rules:"), "Output missing 'Available rules:'");
     assert!(stdout.contains("MD013"), "Output missing rule MD013");
 }
 
@@ -932,15 +901,9 @@ fn test_rule_command_shows_specific_rule() {
         .output()
         .expect("Failed to execute 'rumdl rule MD013'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(
-        output.status.success(),
-        "'rumdl rule MD013' did not exit successfully"
-    );
+    assert!(output.status.success(), "'rumdl rule MD013' did not exit successfully");
     assert!(stdout.contains("MD013"), "Output missing rule name MD013");
-    assert!(
-        stdout.contains("Description"),
-        "Output missing 'Description'"
-    );
+    assert!(stdout.contains("Description"), "Output missing 'Description'");
 }
 
 #[test]
@@ -951,14 +914,8 @@ fn test_config_command_lists_options() {
         .output()
         .expect("Failed to execute 'rumdl config'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(
-        output.status.success(),
-        "'rumdl config' did not exit successfully"
-    );
-    assert!(
-        stdout.contains("[global]"),
-        "Output missing [global] section"
-    );
+    assert!(output.status.success(), "'rumdl config' did not exit successfully");
+    assert!(stdout.contains("[global]"), "Output missing [global] section");
     assert!(
         stdout.contains("enable =") || stdout.contains("disable =") || stdout.contains("exclude ="),
         "Output missing expected config keys"
@@ -973,14 +930,8 @@ fn test_version_command_prints_version() {
         .output()
         .expect("Failed to execute 'rumdl version'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(
-        output.status.success(),
-        "'rumdl version' did not exit successfully"
-    );
-    assert!(
-        stdout.contains("rumdl"),
-        "Output missing 'rumdl' in version output"
-    );
+    assert!(output.status.success(), "'rumdl version' did not exit successfully");
+    assert!(stdout.contains("rumdl"), "Output missing 'rumdl' in version output");
     assert!(stdout.contains("."), "Output missing version number");
 }
 
@@ -1015,11 +966,7 @@ line_length = 123
 
     // Test global.exclude
     let (success, stdout, stderr) = run_cmd(&["config", "get", "global.exclude"]);
-    assert!(
-        success,
-        "config get global.exclude should succeed, stderr: {}",
-        stderr
-    );
+    assert!(success, "config get global.exclude should succeed, stderr: {}", stderr);
     assert!(
         stdout.contains("global.exclude = [\"docs/temp\", \"node_modules\"] [from .rumdl.toml]"),
         "Unexpected output: {}. Stderr: {}",
@@ -1105,10 +1052,7 @@ exclude = ["docs/temp"]
         "Output should contain provenance annotation [from default]"
     );
     // Should not mention .rumdl.toml
-    assert!(
-        !stdout.contains(".rumdl.toml"),
-        "Output should not mention .rumdl.toml"
-    );
+    assert!(!stdout.contains(".rumdl.toml"), "Output should not mention .rumdl.toml");
     // Should contain a known default (e.g., enable = [])
     assert!(
         stdout.contains("enable = ["),
@@ -1161,10 +1105,7 @@ exclude = ["docs/temp"]
         "Output should NOT contain provenance annotation [from default] in TOML output"
     );
     // Should not mention .rumdl.toml
-    assert!(
-        !stdout.contains(".rumdl.toml"),
-        "Output should not mention .rumdl.toml"
-    );
+    assert!(!stdout.contains(".rumdl.toml"), "Output should not mention .rumdl.toml");
     // Should contain a known default (e.g., enable = [])
     assert!(
         stdout.contains("enable = ["),

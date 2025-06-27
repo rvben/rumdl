@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for MD014 (Commands in code blocks should show output)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

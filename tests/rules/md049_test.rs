@@ -112,10 +112,7 @@ fn test_urls_with_underscores() {
         "URLs with underscores should not be flagged as emphasis"
     );
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed, content,
-        "URLs with underscores should not be modified"
-    );
+    assert_eq!(fixed, content, "URLs with underscores should not be modified");
 
     // Test complex content with URLs and real emphasis
     let content = "Check out this _emphasis_ and visit [our site](https://example.com/docs/user_guide/page_name)";
@@ -140,15 +137,10 @@ fn test_urls_with_underscores() {
         "URL should remain unchanged"
     );
     assert!(
-        fixed.contains(
-            "https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html"
-        ),
+        fixed.contains("https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html"),
         "Complex URL should remain unchanged"
     );
-    assert!(
-        fixed.contains("*check*"),
-        "Emphasis should be converted to asterisks"
-    );
+    assert!(fixed.contains("*check*"), "Emphasis should be converted to asterisks");
 }
 
 #[test]
@@ -273,10 +265,7 @@ fn test_environment_variables() {
         fixed.contains("`CI_PROJECT_ID`"),
         "Environment variable should not be modified"
     );
-    assert!(
-        fixed.contains("*note*"),
-        "Emphasis should be converted to asterisks"
-    );
+    assert!(fixed.contains("*note*"), "Emphasis should be converted to asterisks");
 }
 
 #[test]
@@ -284,7 +273,8 @@ fn test_nested_code_and_emphasis() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
 
     // Test complex nesting
-    let content = "1. First step with _emphasis_\n   ```bash\n   echo \"some _code_\"\n   ```\n2. Second step with _emphasis_";
+    let content =
+        "1. First step with _emphasis_\n   ```bash\n   echo \"some _code_\"\n   ```\n2. Second step with _emphasis_";
     let ctx = rumdl::lint_context::LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
@@ -304,8 +294,7 @@ fn test_nested_code_and_emphasis() {
     );
 
     // Test with indented code and emphasis
-    let content =
-        "1. First step with _emphasis_\n    ```\n    some _code_\n    ```\n   And _more_ text";
+    let content = "1. First step with _emphasis_\n    ```\n    some _code_\n    ```\n   And _more_ text";
     let ctx = rumdl::lint_context::LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should detect two emphasis to fix");
@@ -319,8 +308,5 @@ fn test_nested_code_and_emphasis() {
         fixed.contains("some _code_"),
         "Code block content should not be modified"
     );
-    assert!(
-        fixed.contains("And *more* text"),
-        "Second emphasis should be fixed"
-    );
+    assert!(fixed.contains("And *more* text"), "Second emphasis should be fixed");
 }

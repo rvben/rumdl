@@ -88,10 +88,7 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD022 - Headings should be surrounded by blank lines
         if i % 35 == 0 {
-            content.push_str(&format!(
-                "Text before heading\n# Heading {}\nText after heading\n\n",
-                i
-            ));
+            content.push_str(&format!("Text before heading\n# Heading {}\nText after heading\n\n", i));
         }
 
         // MD023 - Headings must start at beginning of line
@@ -116,10 +113,7 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD031 - Fenced code blocks should be surrounded by blank lines
         if i % 50 == 0 {
-            content.push_str(&format!(
-                "Text before\n```\ncode {}\n```\nText after\n\n",
-                i
-            ));
+            content.push_str(&format!("Text before\n```\ncode {}\n```\nText after\n\n", i));
         }
 
         // MD032 - Lists should be surrounded by blank lines
@@ -169,10 +163,7 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD044 - Proper names
         if i % 11 == 0 {
-            content.push_str(&format!(
-                "Text mentioning javascript and github number {}\n",
-                i
-            ));
+            content.push_str(&format!("Text mentioning javascript and github number {}\n", i));
         }
 
         // MD045 - Images should have alternate text

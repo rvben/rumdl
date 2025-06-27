@@ -4,6 +4,7 @@ pub mod inline_config;
 pub mod lint_context;
 pub mod lsp;
 pub mod markdownlint_config;
+pub mod output;
 pub mod parallel;
 pub mod performance;
 pub mod profiling;
@@ -22,7 +23,7 @@ pub mod python;
 pub use rules::heading_utils::{Heading, HeadingStyle};
 pub use rules::*;
 
-pub use crate::lint_context::{LintContext, LineInfo, ListItemInfo, BareUrl};
+pub use crate::lint_context::{BareUrl, LineInfo, LintContext, ListItemInfo};
 use crate::rule::{LintResult, Rule, RuleCategory};
 use crate::utils::document_structure::DocumentStructure;
 use std::time::Instant;
@@ -43,9 +44,7 @@ struct ContentCharacteristics {
 
 impl ContentCharacteristics {
     fn analyze(content: &str) -> Self {
-        let mut chars = Self {
-            ..Default::default()
-        };
+        let mut chars = Self { ..Default::default() };
 
         // Quick single-pass analysis
         let mut has_atx_heading = false;
@@ -58,25 +57,23 @@ impl ContentCharacteristics {
             if !has_atx_heading && trimmed.starts_with('#') {
                 has_atx_heading = true;
             }
-            if !has_setext_heading
-                && (trimmed.chars().all(|c| c == '=' || c == '-') && trimmed.len() > 1)
-            {
+            if !has_setext_heading && (trimmed.chars().all(|c| c == '=' || c == '-') && trimmed.len() > 1) {
                 has_setext_heading = true;
             }
 
             // Quick character-based detection (more efficient than regex)
-            if !chars.has_lists
-                && (line.contains("* ") || line.contains("- ") || line.contains("+ "))
-            {
+            if !chars.has_lists && (line.contains("* ") || line.contains("- ") || line.contains("+ ")) {
                 chars.has_lists = true;
             }
-            if !chars.has_lists
-                && line.chars().next().map_or(false, |c| c.is_ascii_digit())
-                && line.contains(". ")
-            {
+            if !chars.has_lists && line.chars().next().map_or(false, |c| c.is_ascii_digit()) && line.contains(". ") {
                 chars.has_lists = true;
             }
-            if !chars.has_links && (line.contains('[') || line.contains("http://") || line.contains("https://") || line.contains("ftp://")) {
+            if !chars.has_links
+                && (line.contains('[')
+                    || line.contains("http://")
+                    || line.contains("https://")
+                    || line.contains("ftp://"))
+            {
                 chars.has_links = true;
             }
             if !chars.has_images && line.contains("![") {
@@ -153,10 +150,7 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
     let structure = DocumentStructure::new(content);
 
     // Parse AST once for rules that can benefit from it
-    let ast_rules_count = applicable_rules
-        .iter()
-        .filter(|rule| rule.uses_ast())
-        .count();
+    let ast_rules_count = applicable_rules.iter().filter(|rule| rule.uses_ast()).count();
     let ast = if ast_rules_count > 0 {
         Some(crate::utils::ast_utils::get_cached_ast(content))
     } else {
@@ -312,8 +306,7 @@ pub fn get_cache_performance_report() -> String {
         report.push_str(&format!("  Total usage: {}\n", total_usage));
 
         if total_usage > ast_stats.len() as u64 {
-            let cache_hit_rate =
-                ((total_usage - ast_stats.len() as u64) as f64 / total_usage as f64) * 100.0;
+            let cache_hit_rate = ((total_usage - ast_stats.len() as u64) as f64 / total_usage as f64) * 100.0;
             report.push_str(&format!("  Cache hit rate: {:.1}%\n", cache_hit_rate));
         }
     }

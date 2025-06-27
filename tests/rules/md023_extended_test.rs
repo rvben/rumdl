@@ -253,7 +253,7 @@ fn test_multiple_indentation_levels() {
     assert_eq!(warnings[0].line, 3); // " ## Heading with 1 space"
     assert_eq!(warnings[1].line, 5); // "  ## Heading with 2 spaces"
     assert_eq!(warnings[2].line, 7); // "   ## Heading with 3 spaces"
-    // Line 9 with 4 spaces is a code block, not a heading
+                                     // Line 9 with 4 spaces is a code block, not a heading
 
     // Verify the fix works for different indentation levels
     let ctx = LintContext::new(content);

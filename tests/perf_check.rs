@@ -1,7 +1,5 @@
 use rumdl::lint_context::LintContext;
-use rumdl::{
-    rule::Rule, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD053LinkImageReferenceDefinitions,
-};
+use rumdl::{rule::Rule, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD053LinkImageReferenceDefinitions};
 use std::time::Instant;
 
 #[test]
@@ -9,10 +7,7 @@ fn test_optimized_rules_performance() {
     // Generate a large markdown content with HTML and emphasis
     let mut content = String::with_capacity(100_000);
     for i in 0..1000 {
-        content.push_str(&format!(
-            "Line {} with <span>HTML</span> and *emphasis*\n",
-            i
-        ));
+        content.push_str(&format!("Line {} with <span>HTML</span> and *emphasis*\n", i));
     }
 
     // Add reference definitions
@@ -81,10 +76,7 @@ fn test_optimized_rules_performance() {
         ref_warnings_cached.len(),
         "Cached and non-cached runs should return the same number of warnings"
     );
-    assert!(
-        ref_warnings.len() <= 100,
-        "Should find at most 100 unused references"
-    );
+    assert!(ref_warnings.len() <= 100, "Should find at most 100 unused references");
     assert!(
         ref_cached_duration < ref_duration,
         "Cached run should be faster than initial run"
@@ -94,9 +86,5 @@ fn test_optimized_rules_performance() {
         2000,
         "Should detect HTML tags (1000 <span> + 1000 </span> = 2000 total)"
     );
-    assert_eq!(
-        emphasis_warnings.len(),
-        0,
-        "Should not have detected emphasis issues"
-    );
+    assert_eq!(emphasis_warnings.len(), 0, "Should not have detected emphasis issues");
 }

@@ -60,8 +60,7 @@ fn test_complex_urls() {
 #[test]
 fn test_mixed_content() {
     let rule = MD045NoAltText::new();
-    let content =
-        "# Images\n\nSome text here\n\n![Alt text](image1.png)\n\nMore text\n\n![](image2.png)";
+    let content = "# Images\n\nSome text here\n\n![Alt text](image1.png)\n\nMore text\n\n![](image2.png)";
     let ctx = rumdl::lint_context::LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -90,10 +89,16 @@ fn test_placeholder_clarity() {
     let ctx = rumdl::lint_context::LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should detect both images with missing alt text");
-    
+
     let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("TODO: Add image description"), "Fixed content should include TODO reminder");
-    assert_eq!(fixed, "![TODO: Add image description](screenshot.png)\n![TODO: Add image description](diagram.svg)");
+    assert!(
+        fixed.contains("TODO: Add image description"),
+        "Fixed content should include TODO reminder"
+    );
+    assert_eq!(
+        fixed,
+        "![TODO: Add image description](screenshot.png)\n![TODO: Add image description](diagram.svg)"
+    );
 }
 
 #[test]
@@ -117,22 +122,22 @@ Another actual image:
 
 And in inline code: `![](inline.png)` should also be ignored.
 "#;
-    
+
     let ctx = rumdl::lint_context::LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should only detect the two actual images outside code blocks
     assert_eq!(result.len(), 2, "Should only detect images outside code blocks");
     assert_eq!(result[0].line, 4); // actual-image.png
     assert_eq!(result[1].line, 15); // another-image.png
-    
+
     // Test the fix
     let fixed = rule.fix(&ctx).unwrap();
-    
+
     // Should fix only the images outside code blocks
     assert!(fixed.contains("![TODO: Add image description](actual-image.png)"));
     assert!(fixed.contains("![TODO: Add image description](another-image.png)"));
-    
+
     // Should NOT fix images inside code blocks
     assert!(fixed.contains("```markdown\n![](example1.png)"));
     assert!(fixed.contains("![ ](example2.png)"));

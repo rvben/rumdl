@@ -48,16 +48,16 @@ mod vscode_tests {
     fn test_current_editor_from_env() {
         // Save current TERM_PROGRAM if any
         let original = std::env::var("TERM_PROGRAM").ok();
-        
+
         // Test with VS Code
         std::env::set_var("TERM_PROGRAM", "vscode");
         let _result = VsCodeExtension::current_editor_from_env();
         // Result depends on whether VS Code is actually installed
-        
+
         // Test with unknown terminal
         std::env::set_var("TERM_PROGRAM", "unknown");
         assert!(VsCodeExtension::current_editor_from_env().is_none());
-        
+
         // Restore original
         match original {
             Some(val) => std::env::set_var("TERM_PROGRAM", val),
@@ -75,7 +75,7 @@ mod vscode_tests {
                 assert!(e.contains("not found") || e.contains("not working"));
             }
         }
-        
+
         // Test with a command that definitely doesn't exist
         match VsCodeExtension::with_command("this_command_does_not_exist") {
             Ok(_) => panic!("Should not succeed with non-existent command"),

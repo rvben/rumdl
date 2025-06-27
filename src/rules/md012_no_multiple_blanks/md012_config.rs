@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for MD012 (No multiple consecutive blank lines)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

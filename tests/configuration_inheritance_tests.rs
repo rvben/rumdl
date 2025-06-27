@@ -1,7 +1,7 @@
 use rumdl::config::{Config, SourcedConfig};
 use rumdl::lint_context::LintContext;
-use tempfile::tempdir;
 use std::fs;
+use tempfile::tempdir;
 
 #[test]
 fn test_basic_config_inheritance() {
@@ -23,11 +23,10 @@ lines_below = 1
     fs::write(project_path.join("rumdl.toml"), config_content).unwrap();
 
     // Load the configuration
-    let config: Config = SourcedConfig::load_with_discovery(
-        Some(project_path.join("rumdl.toml").to_str().unwrap()),
-        None,
-        false
-    ).unwrap().into();
+    let config: Config =
+        SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
+            .unwrap()
+            .into();
 
     // Test that rules are properly enabled/disabled
     assert!(config.global.enable.contains(&"MD022".to_string()));
@@ -58,11 +57,10 @@ enable = ["MD001", "MD003", "MD022"]
 "#;
     fs::write(project_path.join("rumdl.toml"), enable_config).unwrap();
 
-    let config: Config = SourcedConfig::load_with_discovery(
-        Some(project_path.join("rumdl.toml").to_str().unwrap()),
-        None,
-        false
-    ).unwrap().into();
+    let config: Config =
+        SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
+            .unwrap()
+            .into();
 
     assert!(config.global.enable.contains(&"MD001".to_string()));
     assert!(config.global.enable.contains(&"MD003".to_string()));
@@ -75,11 +73,10 @@ disable = ["MD013", "MD033"]
 "#;
     fs::write(project_path.join("rumdl.toml"), disable_config).unwrap();
 
-    let config: Config = SourcedConfig::load_with_discovery(
-        Some(project_path.join("rumdl.toml").to_str().unwrap()),
-        None,
-        false
-    ).unwrap().into();
+    let config: Config =
+        SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
+            .unwrap()
+            .into();
 
     assert!(config.global.disable.contains(&"MD013".to_string()));
     assert!(config.global.disable.contains(&"MD033".to_string()));
@@ -92,11 +89,10 @@ disable = ["MD013"]
 "#;
     fs::write(project_path.join("rumdl.toml"), mixed_config).unwrap();
 
-    let config: Config = SourcedConfig::load_with_discovery(
-        Some(project_path.join("rumdl.toml").to_str().unwrap()),
-        None,
-        false
-    ).unwrap().into();
+    let config: Config =
+        SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
+            .unwrap()
+            .into();
 
     assert!(config.global.enable.contains(&"MD001".to_string()));
     assert!(config.global.enable.contains(&"MD022".to_string()));
@@ -131,11 +127,10 @@ punctuation = "!?"
 "#;
     fs::write(project_path.join("rumdl.toml"), config_content).unwrap();
 
-    let config: Config = SourcedConfig::load_with_discovery(
-        Some(project_path.join("rumdl.toml").to_str().unwrap()),
-        None,
-        false
-    ).unwrap().into();
+    let config: Config =
+        SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
+            .unwrap()
+            .into();
 
     // Test MD013 parameters
     let line_length = rumdl::config::get_rule_config_value::<i32>(&config, "MD013", "line_length");
@@ -174,11 +169,8 @@ enable = ["MD022"]  # Missing closing bracket
 "#;
     fs::write(project_path.join("rumdl.toml"), invalid_toml).unwrap();
 
-    let result = SourcedConfig::load_with_discovery(
-        Some(project_path.join("rumdl.toml").to_str().unwrap()),
-        None,
-        false
-    );
+    let result =
+        SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false);
 
     // Should either fail gracefully or fall back to defaults
     match result {
@@ -193,11 +185,10 @@ enable = ["MD022", "MD999", "INVALID_RULE"]
 "#;
     fs::write(project_path.join("rumdl.toml"), unknown_rules).unwrap();
 
-    let config: Config = SourcedConfig::load_with_discovery(
-        Some(project_path.join("rumdl.toml").to_str().unwrap()),
-        None,
-        false
-    ).unwrap().into();
+    let config: Config =
+        SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
+            .unwrap()
+            .into();
 
     // Valid rules should still work
     assert!(config.global.enable.contains(&"MD022".to_string()));
@@ -247,11 +238,10 @@ lines_below = 2
     let start_time = std::time::Instant::now();
 
     for _ in 0..100 {
-        let _config: Config = SourcedConfig::load_with_discovery(
-            Some(project_path.join("rumdl.toml").to_str().unwrap()),
-            None,
-            false
-        ).unwrap().into();
+        let _config: Config =
+            SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
+                .unwrap()
+                .into();
     }
 
     let elapsed = start_time.elapsed();
@@ -278,11 +268,10 @@ disable = ["MD025"]
 "#;
     fs::write(project_path.join("rumdl.toml"), config_content).unwrap();
 
-    let config: Config = SourcedConfig::load_with_discovery(
-        Some(project_path.join("rumdl.toml").to_str().unwrap()),
-        None,
-        false
-    ).unwrap().into();
+    let config: Config =
+        SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
+            .unwrap()
+            .into();
 
     // Get all available rules
     let all_rules = rumdl::rules::all_rules(&config);
@@ -294,9 +283,7 @@ disable = ["MD025"]
     println!("Filtered rules count: {}", filtered_rules.len());
 
     // Test that filtering works
-    let enabled_rule_names: Vec<String> = filtered_rules.iter()
-        .map(|rule| rule.name().to_string())
-        .collect();
+    let enabled_rule_names: Vec<String> = filtered_rules.iter().map(|rule| rule.name().to_string()).collect();
 
     // Should include enabled rules
     if config.global.enable.contains(&"MD022".to_string()) {

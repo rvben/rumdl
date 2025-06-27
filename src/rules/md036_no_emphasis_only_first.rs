@@ -48,7 +48,7 @@ impl MD036NoEmphasisAsHeading {
             config: MD036Config { punctuation },
         }
     }
-    
+
     pub fn from_config_struct(config: MD036Config) -> Self {
         Self { config }
     }
@@ -91,12 +91,7 @@ impl MD036NoEmphasisAsHeading {
             let full_match = caps.get(0).unwrap();
             let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
             let end_pos = start_pos + full_match.len();
-            return Some((
-                1,
-                caps.get(1).unwrap().as_str().to_string(),
-                start_pos,
-                end_pos,
-            ));
+            return Some((1, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
         }
 
         // Check for _emphasis_ pattern (entire line)
@@ -104,12 +99,7 @@ impl MD036NoEmphasisAsHeading {
             let full_match = caps.get(0).unwrap();
             let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
             let end_pos = start_pos + full_match.len();
-            return Some((
-                1,
-                caps.get(1).unwrap().as_str().to_string(),
-                start_pos,
-                end_pos,
-            ));
+            return Some((1, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
         }
 
         // Check for **strong** pattern (entire line)
@@ -117,12 +107,7 @@ impl MD036NoEmphasisAsHeading {
             let full_match = caps.get(0).unwrap();
             let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
             let end_pos = start_pos + full_match.len();
-            return Some((
-                2,
-                caps.get(1).unwrap().as_str().to_string(),
-                start_pos,
-                end_pos,
-            ));
+            return Some((2, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
         }
 
         // Check for __strong__ pattern (entire line)
@@ -130,12 +115,7 @@ impl MD036NoEmphasisAsHeading {
             let full_match = caps.get(0).unwrap();
             let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
             let end_pos = start_pos + full_match.len();
-            return Some((
-                2,
-                caps.get(1).unwrap().as_str().to_string(),
-                start_pos,
-                end_pos,
-            ));
+            return Some((2, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
         }
 
         None
@@ -229,9 +209,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                 continue;
             }
 
-            if let Some((level, text, start_pos, end_pos)) =
-                Self::is_entire_line_emphasized(line, doc_structure, i)
-            {
+            if let Some((level, text, start_pos, end_pos)) = Self::is_entire_line_emphasized(line, doc_structure, i) {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_emphasis_range(i + 1, line, start_pos, end_pos);
 
@@ -268,8 +246,7 @@ impl Rule for MD036NoEmphasisAsHeading {
 
         for i in 0..lines.len() {
             let line = lines[i];
-            if let Some((level, text, _start_pos, _end_pos)) =
-                Self::is_entire_line_emphasized(line, &doc_structure, i)
+            if let Some((level, text, _start_pos, _end_pos)) = Self::is_entire_line_emphasized(line, &doc_structure, i)
             {
                 result.push_str(&self.get_heading_for_emphasis(level, &text));
             } else {
@@ -304,9 +281,8 @@ impl Rule for MD036NoEmphasisAsHeading {
     where
         Self: Sized,
     {
-        let punctuation =
-            crate::config::get_rule_config_value::<String>(config, "MD036", "punctuation")
-                .unwrap_or_else(|| ".,;:!?".to_string());
+        let punctuation = crate::config::get_rule_config_value::<String>(config, "MD036", "punctuation")
+            .unwrap_or_else(|| ".,;:!?".to_string());
 
         Box::new(MD036NoEmphasisAsHeading::new(punctuation))
     }

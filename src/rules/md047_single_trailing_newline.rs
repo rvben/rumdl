@@ -50,16 +50,16 @@ impl Rule for MD047SingleTrailingNewline {
                 } else {
                     let line_num = last_content_lines.len();
                     let line_content = last_content_lines.last().unwrap_or(&"");
-                    (
-                        line_num,
-                        line_content.len() + 1,
-                        line_num,
-                        line_content.len() + 2,
-                    )
+                    (line_num, line_content.len() + 1, line_num, line_content.len() + 2)
                 }
             } else {
                 // For missing newline, highlight the end of the last line
-                (last_line_num, last_line_content.len() + 1, last_line_num, last_line_content.len() + 1)
+                (
+                    last_line_num,
+                    last_line_content.len() + 1,
+                    last_line_num,
+                    last_line_content.len() + 1,
+                )
             };
 
             warnings.push(LintWarning {

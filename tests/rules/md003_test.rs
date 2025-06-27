@@ -137,10 +137,7 @@ fn test_fix_mixed_setext_atx() {
     let content = "Heading 1\n=========\n\n## Heading 2\n### Heading 3";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        result,
-        "Heading 1\n=========\n\nHeading 2\n---------\n### Heading 3"
-    );
+    assert_eq!(result, "Heading 1\n=========\n\nHeading 2\n---------\n### Heading 3");
 }
 
 #[test]

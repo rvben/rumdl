@@ -88,12 +88,12 @@ impl MD044ProperNames {
             combined_regex: Arc::new(Mutex::new(None)),
             content_cache: Arc::new(Mutex::new(HashMap::new())),
         };
-        
+
         // Pre-compile the combined regex
         instance.compile_combined_regex();
         instance
     }
-    
+
     pub fn from_config_struct(config: MD044Config) -> Self {
         let mut instance = Self {
             config,
@@ -104,7 +104,7 @@ impl MD044ProperNames {
         instance.compile_combined_regex();
         instance
     }
-    
+
     // Compile and cache the combined regex pattern
     fn compile_combined_regex(&mut self) {
         if let Some(pattern) = self.create_combined_pattern() {
@@ -119,32 +119,34 @@ impl MD044ProperNames {
         }
     }
 
-
-
     // Create a combined regex pattern for all proper names
     fn create_combined_pattern(&self) -> Option<String> {
         if self.config.names.is_empty() {
             return None;
         }
-        
+
         // Create patterns for all names and their variations
-        let patterns: Vec<String> = self.config.names.iter().map(|name| {
-            let lower_name = name.to_lowercase();
-            let lower_name_no_dots = lower_name.replace('.', "");
-            if lower_name == lower_name_no_dots {
-                fancy_regex::escape(&lower_name).to_string()
-            } else {
-                format!("(?:{}|{})", 
-                    fancy_regex::escape(&lower_name),
-                    fancy_regex::escape(&lower_name_no_dots))
-            }
-        }).collect();
-        
+        let patterns: Vec<String> = self
+            .config
+            .names
+            .iter()
+            .map(|name| {
+                let lower_name = name.to_lowercase();
+                let lower_name_no_dots = lower_name.replace('.', "");
+                if lower_name == lower_name_no_dots {
+                    fancy_regex::escape(&lower_name).to_string()
+                } else {
+                    format!(
+                        "(?:{}|{})",
+                        fancy_regex::escape(&lower_name),
+                        fancy_regex::escape(&lower_name_no_dots)
+                    )
+                }
+            })
+            .collect();
+
         // Combine all patterns into a single regex with capture groups
-        Some(format!(
-            r"(?<![a-zA-Z0-9])(?i)({})(?![a-zA-Z0-9])",
-            patterns.join("|")
-        ))
+        Some(format!(r"(?<![a-zA-Z0-9])(?i)({})(?![a-zA-Z0-9])", patterns.join("|")))
     }
 
     // Find all name violations in the content and return positions
@@ -158,8 +160,7 @@ impl MD044ProperNames {
         let content_lower = content.to_lowercase();
         let has_potential_matches = self.config.names.iter().any(|name| {
             let name_lower = name.to_lowercase();
-            content_lower.contains(&name_lower)
-                || content_lower.contains(&name_lower.replace('.', ""))
+            content_lower.contains(&name_lower) || content_lower.contains(&name_lower.replace('.', ""))
         });
 
         if !has_potential_matches {
@@ -186,7 +187,7 @@ impl MD044ProperNames {
                 None => return Vec::new(),
             }
         };
-        
+
         let mut byte_pos = 0;
 
         for (line_num, line) in content.lines().enumerate() {
@@ -196,7 +197,7 @@ impl MD044ProperNames {
                 byte_pos += line.len() + 1;
                 continue;
             }
-            
+
             // Skip if in code block
             if self.config.code_blocks && ctx.is_in_code_block_or_span(byte_pos) {
                 byte_pos += line.len() + 1;
@@ -207,8 +208,7 @@ impl MD044ProperNames {
             let line_lower = line.to_lowercase();
             let has_line_matches = self.config.names.iter().any(|name| {
                 let name_lower = name.to_lowercase();
-                line_lower.contains(&name_lower)
-                    || line_lower.contains(&name_lower.replace('.', ""))
+                line_lower.contains(&name_lower) || line_lower.contains(&name_lower.replace('.', ""))
             });
 
             if !has_line_matches {
@@ -225,32 +225,21 @@ impl MD044ProperNames {
                         if let Some(proper_name) = self.get_proper_name_for(found_name) {
                             // Only flag if it's not already correct
                             if found_name != proper_name {
-                                violations.push((
-                                    line_num + 1,
-                                    cap.start() + 1,
-                                    found_name.to_string(),
-                                ));
+                                violations.push((line_num + 1, cap.start() + 1, found_name.to_string()));
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!(
-                            "Regex execution error on line {}: {}",
-                            line_num + 1,
-                            e
-                        );
+                        eprintln!("Regex execution error on line {}: {}", line_num + 1, e);
                     }
                 }
             }
-            
+
             byte_pos += line.len() + 1;
         }
 
         // Store in cache
-        self.content_cache
-            .lock()
-            .unwrap()
-            .insert(hash, violations.clone());
+        self.content_cache.lock().unwrap().insert(hash, violations.clone());
         violations
     }
 
@@ -295,24 +284,23 @@ impl Rule for MD044ProperNames {
         let warnings = violations
             .into_iter()
             .filter_map(|(line, column, found_name)| {
-                self.get_proper_name_for(&found_name)
-                    .map(|proper_name| LintWarning {
-                        rule_name: Some(self.name()),
-                        line,
-                        column,
-                        end_line: line,
-                        end_column: column + found_name.len(),
-                        message: format!(
-                            "Proper name '{
+                self.get_proper_name_for(&found_name).map(|proper_name| LintWarning {
+                    rule_name: Some(self.name()),
+                    line,
+                    column,
+                    end_line: line,
+                    end_column: column + found_name.len(),
+                    message: format!(
+                        "Proper name '{
             }' should be '{}'",
-                            found_name, proper_name
-                        ),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line, column),
-                            replacement: proper_name,
-                        }),
-                    })
+                        found_name, proper_name
+                    ),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range(line, column),
+                        replacement: proper_name,
+                    }),
+                })
             })
             .collect();
 

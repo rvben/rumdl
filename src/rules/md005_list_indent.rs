@@ -74,7 +74,7 @@ impl MD005ListIndent {
             // Check if this is a list item using cached info
             if let Some(list_item) = &line_info.list_item {
                 let indent = list_item.marker_column;
-                
+
                 // Determine if this starts a new list
                 let is_new_list = !in_list
                     || indent == 0
@@ -223,7 +223,6 @@ impl MD005ListIndent {
                 } else {
                     level_indents.insert(key, indent);
                 }
-
             } else {
                 // Check if it's a list continuation
                 if list_items.is_empty() || !in_list {
@@ -232,8 +231,9 @@ impl MD005ListIndent {
 
                 let (prev_line_num, prev_indent, _) = list_items.last().unwrap();
                 let prev_line_info = &ctx.lines[*prev_line_num];
-                if prev_line_info.list_item.is_some() && 
-                   !Self::is_list_continuation(*prev_indent, &line_info.content, false) {
+                if prev_line_info.list_item.is_some()
+                    && !Self::is_list_continuation(*prev_indent, &line_info.content, false)
+                {
                     in_list = false;
                 }
             }
@@ -272,9 +272,7 @@ impl Rule for MD005ListIndent {
         // Sort warnings by position (descending) to apply from end to start
         let mut warnings_with_fixes: Vec<_> = warnings
             .into_iter()
-            .filter_map(|w| {
-                w.fix.clone().map(|fix| (w, fix))
-            })
+            .filter_map(|w| w.fix.clone().map(|fix| (w, fix)))
             .collect();
         warnings_with_fixes.sort_by_key(|(_, fix)| std::cmp::Reverse(fix.range.start));
 
@@ -295,7 +293,11 @@ impl Rule for MD005ListIndent {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || (!ctx.content.contains('*') && !ctx.content.contains('-') && !ctx.content.contains('+') && !ctx.content.contains(|c: char| c.is_ascii_digit()))
+        ctx.content.is_empty()
+            || (!ctx.content.contains('*')
+                && !ctx.content.contains('-')
+                && !ctx.content.contains('+')
+                && !ctx.content.contains(|c: char| c.is_ascii_digit()))
     }
 
     /// Optimized check using document structure

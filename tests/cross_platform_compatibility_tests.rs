@@ -1,9 +1,9 @@
-use std::fs;
-use std::path::PathBuf;
-use tempfile::tempdir;
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::*;
+use std::fs;
+use std::path::PathBuf;
+use tempfile::tempdir;
 
 #[test]
 fn test_line_ending_compatibility() {
@@ -12,7 +12,10 @@ fn test_line_ending_compatibility() {
     // Test different line ending styles
     let test_cases = vec![
         ("unix_lf", "# Title\n\nContent here.\n\n## Section\nMore content.\n"),
-        ("windows_crlf", "# Title\r\n\r\nContent here.\r\n\r\n## Section\r\nMore content.\r\n"),
+        (
+            "windows_crlf",
+            "# Title\r\n\r\nContent here.\r\n\r\n## Section\r\nMore content.\r\n",
+        ),
         ("mac_cr", "# Title\r\rContent here.\r\r## Section\rMore content.\r"),
         ("mixed", "# Title\r\n\nContent here.\n\r\n## Section\r\nMore content.\n"),
     ];
@@ -69,13 +72,7 @@ fn test_file_path_handling() {
     ];
 
     // Create subdirectories to test nested paths
-    let nested_dirs = vec![
-        "docs",
-        "docs/api",
-        "docs/guides",
-        "src/components",
-        "tests/fixtures",
-    ];
+    let nested_dirs = vec!["docs", "docs/api", "docs/guides", "src/components", "tests/fixtures"];
 
     for dir in &nested_dirs {
         fs::create_dir_all(base_path.join(dir)).unwrap();
@@ -110,7 +107,8 @@ Some content here.
 
     // Test files in nested directories
     for dir in &nested_dirs {
-        for filename in &test_paths[..3] { // Test subset to avoid too many files
+        for filename in &test_paths[..3] {
+            // Test subset to avoid too many files
             let file_path = base_path.join(dir).join(filename);
             fs::write(&file_path, test_content).unwrap();
 
@@ -138,9 +136,15 @@ fn test_unicode_content_handling() {
         ("latin1", "# Título con Acentos\n\nContenido en español con ñ y ü.\n"),
         ("utf8_basic", "# 基本的な日本語\n\n日本語のコンテンツです。\n"),
         ("utf8_emoji", "# Title with Emoji 🚀\n\nContent with emojis: 📝 ✅ 🎯\n"),
-        ("utf8_mixed", "# Mixed: English, 日本語, Español 🌍\n\nMultilingual content.\n"),
+        (
+            "utf8_mixed",
+            "# Mixed: English, 日本語, Español 🌍\n\nMultilingual content.\n",
+        ),
         ("utf8_rtl", "# عنوان باللغة العربية\n\nمحتوى باللغة العربية.\n"),
-        ("utf8_cyrillic", "# Заголовок на русском\n\nСодержание на русском языке.\n"),
+        (
+            "utf8_cyrillic",
+            "# Заголовок на русском\n\nСодержание на русском языке.\n",
+        ),
         ("utf8_chinese", "# 中文标题\n\n中文内容测试。\n"),
     ];
 
@@ -162,9 +166,18 @@ fn test_unicode_content_handling() {
 
             // Verify that Unicode doesn't break rule processing
             for warning in &warnings {
-                assert!(warning.line > 0, "Line number should be valid for {} with rule {}", name, rule.name());
+                assert!(
+                    warning.line > 0,
+                    "Line number should be valid for {} with rule {}",
+                    name,
+                    rule.name()
+                );
                 // Column is usize, so it's always non-negative
-                assert!(!warning.message.is_empty(), "Warning message should not be empty for {}", name);
+                assert!(
+                    !warning.message.is_empty(),
+                    "Warning message should not be empty for {}",
+                    name
+                );
             }
         }
 
@@ -209,30 +222,34 @@ fn test_platform_specific_newlines_in_fixes() {
                         fixed_content.contains("\n")
                     };
 
-                    assert!(has_proper_line_endings, "Fix should use consistent line endings for {} platform", platform);
+                    assert!(
+                        has_proper_line_endings,
+                        "Fix should use consistent line endings for {} platform",
+                        platform
+                    );
 
                     // Check for actual reversed line endings (not overlapping CRLF sequences)
                     // Look for \n\r that are not part of \r\n\r\n patterns
-                    let has_genuine_reversed_endings = fixed_content
-                        .as_bytes()
-                        .windows(2)
-                        .enumerate()
-                        .any(|(i, window)| {
+                    let has_genuine_reversed_endings =
+                        fixed_content.as_bytes().windows(2).enumerate().any(|(i, window)| {
                             if window == b"\n\r" {
                                 // Check if this is part of a \r\n\r\n pattern
-                                let is_overlapping_crlf = i > 0 &&
-                                    fixed_content.as_bytes().get(i-1) == Some(&b'\r') &&
-                                    fixed_content.as_bytes().get(i+2) == Some(&b'\n');
+                                let is_overlapping_crlf = i > 0
+                                    && fixed_content.as_bytes().get(i - 1) == Some(&b'\r')
+                                    && fixed_content.as_bytes().get(i + 2) == Some(&b'\n');
                                 !is_overlapping_crlf
                             } else {
                                 false
                             }
                         });
 
-                    assert!(!has_genuine_reversed_endings, "Should not have genuine reversed line endings");
+                    assert!(
+                        !has_genuine_reversed_endings,
+                        "Should not have genuine reversed line endings"
+                    );
 
                     println!("  {} platform fix generated successfully", platform);
-                },
+                }
                 Err(_) => {
                     println!("  {} platform fix not available (rule may not support fixes)", platform);
                 }
@@ -261,10 +278,7 @@ fn test_file_encoding_detection() {
     fs::write(&utf8_path, utf8_content).unwrap();
 
     // Test files
-    let test_files = vec![
-        (utf8_bom_path, "UTF-8 with BOM"),
-        (utf8_path, "Regular UTF-8"),
-    ];
+    let test_files = vec![(utf8_bom_path, "UTF-8 with BOM"), (utf8_path, "Regular UTF-8")];
 
     for (file_path, description) in test_files {
         println!("Testing {} file...", description);
@@ -320,7 +334,10 @@ fn test_path_separator_normalization() {
         {
             if path_str.contains('\\') && !path_str.contains('/') {
                 // Pure backslash paths on Unix become single filename
-                assert!(!normalized.contains('/'), "Unix should treat backslashes as filename characters");
+                assert!(
+                    !normalized.contains('/'),
+                    "Unix should treat backslashes as filename characters"
+                );
             }
         }
 
@@ -328,7 +345,10 @@ fn test_path_separator_normalization() {
         {
             // Windows should normalize to backslashes
             if path_str.contains('/') || path_str.contains('\\') {
-                assert!(normalized.contains('\\') || normalized.contains('/'), "Windows should handle both separators");
+                assert!(
+                    normalized.contains('\\') || normalized.contains('/'),
+                    "Windows should handle both separators"
+                );
             }
         }
     }
@@ -351,7 +371,10 @@ fn test_large_file_cross_platform() {
 
     for i in 0..1000 {
         large_content.push_str(&format!("# Heading {}{}", i, line_ending));
-        large_content.push_str(&format!("{}Content for section {}.{}{}", line_ending, i, line_ending, line_ending));
+        large_content.push_str(&format!(
+            "{}Content for section {}.{}{}",
+            line_ending, i, line_ending, line_ending
+        ));
     }
 
     fs::write(&large_file_path, &large_content).unwrap();
@@ -372,7 +395,10 @@ fn test_large_file_cross_platform() {
     println!("  Found {} warnings", warnings.len());
 
     // Should complete in reasonable time
-    assert!(elapsed.as_secs() < 10, "Large file processing should complete within 10 seconds");
+    assert!(
+        elapsed.as_secs() < 10,
+        "Large file processing should complete within 10 seconds"
+    );
 
     println!("✅ Large file cross-platform test passed");
 }
@@ -394,15 +420,17 @@ fn test_concurrent_file_access() {
     }
 
     // Test concurrent reading
-    let handles: Vec<_> = (0..file_count).map(|i| {
-        let file_path = base_path.join(format!("concurrent_test_{}.md", i));
-        std::thread::spawn(move || {
-            let content = fs::read_to_string(&file_path).unwrap();
-            let ctx = LintContext::new(&content);
-            let rule = MD025SingleTitle::default();
-            rule.check(&ctx).unwrap()
+    let handles: Vec<_> = (0..file_count)
+        .map(|i| {
+            let file_path = base_path.join(format!("concurrent_test_{}.md", i));
+            std::thread::spawn(move || {
+                let content = fs::read_to_string(&file_path).unwrap();
+                let ctx = LintContext::new(&content);
+                let rule = MD025SingleTitle::default();
+                rule.check(&ctx).unwrap()
+            })
         })
-    }).collect();
+        .collect();
 
     // Wait for all threads to complete
     let mut total_warnings = 0;

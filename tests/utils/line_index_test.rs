@@ -2,8 +2,7 @@ use rumdl::utils::range_utils::LineIndex;
 
 #[test]
 fn test_backtick_code_fence_detection() {
-    let content =
-        "# Heading\n\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n\nText after.";
+    let content = "# Heading\n\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n\nText after.";
     let index = LineIndex::new(content.to_string());
 
     // Not in code block
@@ -44,8 +43,7 @@ fn test_tilde_code_fence_detection() {
 
 #[test]
 fn test_indented_code_block_detection() {
-    let content =
-        "# Heading\n\n    This is an indented code block\n    More indented code\n\nText after.";
+    let content = "# Heading\n\n    This is an indented code block\n    More indented code\n\nText after.";
     let index = LineIndex::new(content.to_string());
 
     // Not in code block
@@ -63,8 +61,7 @@ fn test_indented_code_block_detection() {
 
 #[test]
 fn test_tab_indented_code_block_detection() {
-    let content =
-        "# Heading\n\n\tThis is a tab-indented code block\n\tMore tab-indented code\n\nText after.";
+    let content = "# Heading\n\n\tThis is a tab-indented code block\n\tMore tab-indented code\n\nText after.";
     let index = LineIndex::new(content.to_string());
 
     // Not in code block
@@ -97,23 +94,12 @@ fn test_nested_code_blocks() {
     // Debug information
     println!("\nContent lines with is_code_block status:");
     content.lines().enumerate().for_each(|(i, line)| {
-        println!(
-            "Line {}: '{}' - is_code_block: {}",
-            i,
-            line,
-            index.is_code_block(i)
-        );
+        println!("Line {}: '{}' - is_code_block: {}", i, line, index.is_code_block(i));
     });
 
     // Not in code block
-    assert!(
-        !index.is_code_block(0),
-        "Line 0 should not be in a code block"
-    ); // # Heading
-    assert!(
-        !index.is_code_block(1),
-        "Line 1 should not be in a code block"
-    ); // Empty line
+    assert!(!index.is_code_block(0), "Line 0 should not be in a code block"); // # Heading
+    assert!(!index.is_code_block(1), "Line 1 should not be in a code block"); // Empty line
 
     // Outer code block
     assert!(index.is_code_block(2), "Line 2 should be in a code block"); // ```markdown - fence marker (OPENS block)
@@ -130,14 +116,8 @@ fn test_nested_code_blocks() {
     assert!(index.is_code_block(10), "Line 10 should be in a code block"); // ``` - fence marker (CLOSES block)
 
     // Not in code block
-    assert!(
-        !index.is_code_block(11),
-        "Line 11 should not be in a code block"
-    ); // Empty line
-    assert!(
-        !index.is_code_block(12),
-        "Line 12 should not be in a code block"
-    ); // Text after.
+    assert!(!index.is_code_block(11), "Line 11 should not be in a code block"); // Empty line
+    assert!(!index.is_code_block(12), "Line 12 should not be in a code block"); // Text after.
 }
 
 #[test]

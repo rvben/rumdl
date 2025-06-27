@@ -152,11 +152,7 @@ impl ListUtils {
 
             // Check for table delimiter rows without pipes (e.g., in cases where pipes are optional)
             // These have dashes and possibly colons for alignment
-            if trimmed.contains('-')
-                && trimmed
-                    .chars()
-                    .all(|c| c == '-' || c == ':' || c.is_whitespace())
-            {
+            if trimmed.contains('-') && trimmed.chars().all(|c| c == '-' || c == ':' || c.is_whitespace()) {
                 return false;
             }
         }
@@ -167,16 +163,12 @@ impl ListUtils {
         }
 
         // Handle potential regex errors gracefully
-        UNORDERED_LIST_NO_SPACE_PATTERN
-            .is_match(line)
-            .unwrap_or(false)
-            || ORDERED_LIST_NO_SPACE_PATTERN.is_match(line)
+        UNORDERED_LIST_NO_SPACE_PATTERN.is_match(line).unwrap_or(false) || ORDERED_LIST_NO_SPACE_PATTERN.is_match(line)
     }
 
     /// Check if a line is a list item with multiple spaces after the marker
     pub fn is_list_item_with_multiple_spaces(line: &str) -> bool {
-        UNORDERED_LIST_MULTIPLE_SPACE_PATTERN.is_match(line)
-            || ORDERED_LIST_MULTIPLE_SPACE_PATTERN.is_match(line)
+        UNORDERED_LIST_MULTIPLE_SPACE_PATTERN.is_match(line) || ORDERED_LIST_MULTIPLE_SPACE_PATTERN.is_match(line)
     }
 
     /// Parse a line as a list item
@@ -243,9 +235,7 @@ impl ListUtils {
         let indentation = line.chars().take_while(|c| c.is_whitespace()).count();
 
         // Continuation should be indented at least as much as the content of the previous item
-        let min_indent = prev_list_item.indentation
-            + prev_list_item.marker.len()
-            + prev_list_item.spaces_after_marker;
+        let min_indent = prev_list_item.indentation + prev_list_item.marker.len() + prev_list_item.spaces_after_marker;
         indentation >= min_indent && !Self::is_list_item(line)
     }
 
@@ -279,11 +269,7 @@ impl ListUtils {
 
             // Get content after multiple spaces
             let start_pos = leading_space.len() + marker.len() + spaces.len();
-            let content = if start_pos < line.len() {
-                &line[start_pos..]
-            } else {
-                ""
-            };
+            let content = if start_pos < line.len() { &line[start_pos..] } else { "" };
 
             // Replace multiple spaces with a single space
             return format!("{}{} {}", leading_space, marker, content);
@@ -296,11 +282,7 @@ impl ListUtils {
 
             // Get content after multiple spaces
             let start_pos = leading_space.len() + marker.len() + spaces.len();
-            let content = if start_pos < line.len() {
-                &line[start_pos..]
-            } else {
-                ""
-            };
+            let content = if start_pos < line.len() { &line[start_pos..] } else { "" };
 
             // Replace multiple spaces with a single space
             return format!("{}{} {}", leading_space, marker, content);
@@ -324,14 +306,10 @@ pub fn is_list_item(line: &str) -> Option<(ListType, String, usize)> {
         return None;
     }
     // Horizontal rule check (--- or ***)
-    if trimmed_line.chars().all(|c| c == '-' || c == ' ')
-        && trimmed_line.chars().filter(|&c| c == '-').count() >= 3
-    {
+    if trimmed_line.chars().all(|c| c == '-' || c == ' ') && trimmed_line.chars().filter(|&c| c == '-').count() >= 3 {
         return None;
     }
-    if trimmed_line.chars().all(|c| c == '*' || c == ' ')
-        && trimmed_line.chars().filter(|&c| c == '*').count() >= 3
-    {
+    if trimmed_line.chars().all(|c| c == '*' || c == ' ') && trimmed_line.chars().filter(|&c| c == '*').count() >= 3 {
         return None;
     }
     if let Some(cap) = LIST_REGEX.captures(line) {
@@ -359,14 +337,8 @@ pub fn is_multi_line_item(lines: &[&str], current_idx: usize) -> bool {
     if is_list_item(next_line).is_some() {
         return false;
     }
-    let curr_indent = lines[current_idx]
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .count();
-    let next_indent = lines[current_idx + 1]
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .count();
+    let curr_indent = lines[current_idx].chars().take_while(|c| c.is_whitespace()).count();
+    let next_indent = lines[current_idx + 1].chars().take_while(|c| c.is_whitespace()).count();
     next_indent > curr_indent
 }
 
@@ -401,13 +373,9 @@ mod tests {
         assert!(!ListUtils::is_list_item_without_space("_Italic text_"));
 
         // Table cells with bold/emphasis (should return false)
-        assert!(!ListUtils::is_list_item_without_space(
-            "| **Heading** | Content |"
-        ));
+        assert!(!ListUtils::is_list_item_without_space("| **Heading** | Content |"));
         assert!(!ListUtils::is_list_item_without_space("**Bold** | Normal"));
-        assert!(!ListUtils::is_list_item_without_space(
-            "| Cell 1 | **Bold** |"
-        ));
+        assert!(!ListUtils::is_list_item_without_space("| Cell 1 | **Bold** |"));
 
         // Horizontal rules (should return false)
         assert!(!ListUtils::is_list_item_without_space("---"));
@@ -415,21 +383,11 @@ mod tests {
         assert!(!ListUtils::is_list_item_without_space("   ---   "));
 
         // Table delimiter rows (should return false)
-        assert!(!ListUtils::is_list_item_without_space(
-            "|--------|---------|"
-        ));
-        assert!(!ListUtils::is_list_item_without_space(
-            "|:-------|:-------:|"
-        ));
-        assert!(!ListUtils::is_list_item_without_space(
-            "| ------ | ------- |"
-        ));
-        assert!(!ListUtils::is_list_item_without_space(
-            "---------|----------|"
-        ));
-        assert!(!ListUtils::is_list_item_without_space(
-            ":--------|:--------:"
-        ));
+        assert!(!ListUtils::is_list_item_without_space("|--------|---------|"));
+        assert!(!ListUtils::is_list_item_without_space("|:-------|:-------:|"));
+        assert!(!ListUtils::is_list_item_without_space("| ------ | ------- |"));
+        assert!(!ListUtils::is_list_item_without_space("---------|----------|"));
+        assert!(!ListUtils::is_list_item_without_space(":--------|:--------:"));
     }
 
     #[test]

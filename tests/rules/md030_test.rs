@@ -30,7 +30,8 @@ mod tests {
         assert_eq!(result.len(), 2);
         for warning in result {
             assert!(
-                warning.message.starts_with("Spaces after list markers (Expected:") && warning.message.contains("Actual:"),
+                warning.message.starts_with("Spaces after list markers (Expected:")
+                    && warning.message.contains("Actual:"),
                 "Warning message should include expected and actual values, got: '{}'",
                 warning.message
             );
@@ -46,7 +47,8 @@ mod tests {
         assert_eq!(result.len(), 2);
         for warning in result {
             assert!(
-                warning.message.starts_with("Spaces after list markers (Expected:") && warning.message.contains("Actual:"),
+                warning.message.starts_with("Spaces after list markers (Expected:")
+                    && warning.message.contains("Actual:"),
                 "Warning message should include expected and actual values, got: '{}'",
                 warning.message
             );
@@ -137,7 +139,8 @@ mod tests {
     #[test]
     fn test_real_world_single_space() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "* [danbev](https://github.com/danbev) -\n  **Daniel Bevenius** <<daniel.bevenius@gmail.com>> (he/him)";
+        let content =
+            "* [danbev](https://github.com/danbev) -\n  **Daniel Bevenius** <<daniel.bevenius@gmail.com>> (he/him)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
@@ -146,12 +149,14 @@ mod tests {
     #[test]
     fn test_real_world_multiple_spaces() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "*   [bengl](https://github.com/bengl) -\n    **Bryan English** <<bryan@bryanenglish.com>> (he/him)";
+        let content =
+            "*   [bengl](https://github.com/bengl) -\n    **Bryan English** <<bryan@bryanenglish.com>> (he/him)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(
-            result[0].message.starts_with("Spaces after list markers (Expected:") && result[0].message.contains("Actual:"),
+            result[0].message.starts_with("Spaces after list markers (Expected:")
+                && result[0].message.contains("Actual:"),
             "Warning message should include expected and actual values, got: '{}'",
             result[0].message
         );
@@ -160,12 +165,14 @@ mod tests {
     #[test]
     fn test_real_world_tab_after_marker() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "*	[benjamingr](https://github.com/benjamingr) -\n    **Benjamin Gruenbaum** <<benjamingr@gmail.com>>";
+        let content =
+            "*	[benjamingr](https://github.com/benjamingr) -\n    **Benjamin Gruenbaum** <<benjamingr@gmail.com>>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(
-            result[0].message.starts_with("Spaces after list markers (Expected:") && result[0].message.contains("Actual:"),
+            result[0].message.starts_with("Spaces after list markers (Expected:")
+                && result[0].message.contains("Actual:"),
             "Warning message should include expected and actual values, got: '{}'",
             result[0].message
         );
@@ -179,7 +186,8 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(
-            result[0].message.starts_with("Spaces after list markers (Expected:") && result[0].message.contains("Actual:"),
+            result[0].message.starts_with("Spaces after list markers (Expected:")
+                && result[0].message.contains("Actual:"),
             "Warning message should include expected and actual values, got: '{}'",
             result[0].message
         );
@@ -193,7 +201,8 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(
-            result[0].message.starts_with("Spaces after list markers (Expected:") && result[0].message.contains("Actual:"),
+            result[0].message.starts_with("Spaces after list markers (Expected:")
+                && result[0].message.contains("Actual:"),
             "Warning message should include expected and actual values, got: '{}'",
             result[0].message
         );
@@ -207,7 +216,8 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(
-            result[0].message.starts_with("Spaces after list markers (Expected:") && result[0].message.contains("Actual:"),
+            result[0].message.starts_with("Spaces after list markers (Expected:")
+                && result[0].message.contains("Actual:"),
             "Warning message should include expected and actual values, got: '{}'",
             result[0].message
         );
@@ -228,8 +238,7 @@ mod tests {
     #[test]
     fn test_fix_basic_unordered_list_extra_spaces() {
         let rule = MD030ListMarkerSpace::default();
-        let content =
-            "*  Item with two spaces\n-   Item with three spaces\n+    Item with four spaces";
+        let content = "*  Item with two spaces\n-   Item with three spaces\n+    Item with four spaces";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "* Item with two spaces\n- Item with three spaces\n+ Item with four spaces";
@@ -239,12 +248,10 @@ mod tests {
     #[test]
     fn test_fix_basic_ordered_list_extra_spaces() {
         let rule = MD030ListMarkerSpace::default();
-        let content =
-            "1.  Item with two spaces\n2.   Item with three spaces\n10.    Item with four spaces";
+        let content = "1.  Item with two spaces\n2.   Item with three spaces\n10.    Item with four spaces";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected =
-            "1. Item with two spaces\n2. Item with three spaces\n10. Item with four spaces";
+        let expected = "1. Item with two spaces\n2. Item with three spaces\n10. Item with four spaces";
         assert_eq!(fixed, expected);
     }
 
@@ -261,8 +268,7 @@ mod tests {
     #[test]
     fn test_fix_mixed_spaces_and_tabs() {
         let rule = MD030ListMarkerSpace::default();
-        let content =
-            "* \tMixed space and tab\n- \t Item with space-tab-space\n1. \t\tOrdered mixed";
+        let content = "* \tMixed space and tab\n- \t Item with space-tab-space\n1. \t\tOrdered mixed";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "* Mixed space and tab\n- Item with space-tab-space\n1. Ordered mixed";
@@ -302,10 +308,12 @@ mod tests {
     #[test]
     fn test_fix_preserves_indented_code_blocks() {
         let rule = MD030ListMarkerSpace::default();
-        let content = "*  Normal item\n\n    *  Indented code block\n    1.   Should not be fixed\n\n-   Another normal item";
+        let content =
+            "*  Normal item\n\n    *  Indented code block\n    1.   Should not be fixed\n\n-   Another normal item";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "* Normal item\n\n    *  Indented code block\n    1.   Should not be fixed\n\n- Another normal item";
+        let expected =
+            "* Normal item\n\n    *  Indented code block\n    1.   Should not be fixed\n\n- Another normal item";
         assert_eq!(fixed, expected);
     }
 
@@ -315,20 +323,17 @@ mod tests {
         let content = "*  Normal item\n> *  Blockquote item\n> 1.   Blockquote ordered\n-   Another normal item";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected =
-            "* Normal item\n> *  Blockquote item\n> 1.   Blockquote ordered\n- Another normal item";
+        let expected = "* Normal item\n> *  Blockquote item\n> 1.   Blockquote ordered\n- Another normal item";
         assert_eq!(fixed, expected);
     }
 
     #[test]
     fn test_fix_preserves_front_matter() {
         let rule = MD030ListMarkerSpace::default();
-        let content =
-            "---\ntitle: Test\n*  This is in front matter\n---\n*  This is a real list item";
+        let content = "---\ntitle: Test\n*  This is in front matter\n---\n*  This is a real list item";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected =
-            "---\ntitle: Test\n*  This is in front matter\n---\n* This is a real list item";
+        let expected = "---\ntitle: Test\n*  This is in front matter\n---\n* This is a real list item";
         assert_eq!(fixed, expected);
     }
 
@@ -353,12 +358,10 @@ mod tests {
     #[test]
     fn test_fix_only_fixes_clear_violations() {
         let rule = MD030ListMarkerSpace::default();
-        let content =
-            "* Correct spacing\n*  Two spaces (fixed)\n* Another correct\n*   Three spaces (fixed)";
+        let content = "* Correct spacing\n*  Two spaces (fixed)\n* Another correct\n*   Three spaces (fixed)";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected =
-            "* Correct spacing\n* Two spaces (fixed)\n* Another correct\n* Three spaces (fixed)";
+        let expected = "* Correct spacing\n* Two spaces (fixed)\n* Another correct\n* Three spaces (fixed)";
         assert_eq!(fixed, expected);
     }
 
@@ -398,7 +401,8 @@ mod tests {
         let content = "*  Top level\n  *  Nested level\n    *   Deep nested\n      1.  Ordered nested\n        2.   Very deep ordered";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "* Top level\n  * Nested level\n    * Deep nested\n      1. Ordered nested\n        2. Very deep ordered";
+        let expected =
+            "* Top level\n  * Nested level\n    * Deep nested\n      1. Ordered nested\n        2. Very deep ordered";
         assert_eq!(fixed, expected);
     }
 
@@ -408,7 +412,8 @@ mod tests {
         let content = "# Heading\n\n*  List item\n\nParagraph text.\n\n1.  Ordered item\n\n```\ncode block\n```\n\n-   Another item";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "# Heading\n\n* List item\n\nParagraph text.\n\n1. Ordered item\n\n```\ncode block\n```\n\n- Another item";
+        let expected =
+            "# Heading\n\n* List item\n\nParagraph text.\n\n1. Ordered item\n\n```\ncode block\n```\n\n- Another item";
         assert_eq!(fixed, expected);
     }
 
@@ -443,20 +448,17 @@ mod tests {
     #[test]
     fn test_fix_handles_unicode_content() {
         let rule = MD030ListMarkerSpace::default();
-        let content =
-            "*  Unicode content: 你好世界\n-   Emoji content: 🚀🎉\n+    Mixed: café naïve résumé";
+        let content = "*  Unicode content: 你好世界\n-   Emoji content: 🚀🎉\n+    Mixed: café naïve résumé";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected =
-            "* Unicode content: 你好世界\n- Emoji content: 🚀🎉\n+ Mixed: café naïve résumé";
+        let expected = "* Unicode content: 你好世界\n- Emoji content: 🚀🎉\n+ Mixed: café naïve résumé";
         assert_eq!(fixed, expected);
     }
 
     #[test]
     fn test_fix_handles_special_characters() {
         let rule = MD030ListMarkerSpace::default();
-        let content =
-            "*  Content with `code`\n-   Content with **bold**\n+    Content with [link](url)";
+        let content = "*  Content with `code`\n-   Content with **bold**\n+    Content with [link](url)";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "* Content with `code`\n- Content with **bold**\n+ Content with [link](url)";

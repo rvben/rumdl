@@ -121,12 +121,8 @@ This is a [shortcut] reference.
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
-    assert!(result
-        .iter()
-        .any(|w| w.line == 3 && w.message.contains("full")));
-    assert!(result
-        .iter()
-        .any(|w| w.line == 4 && w.message.contains("shortcut")));
+    assert!(result.iter().any(|w| w.line == 3 && w.message.contains("full")));
+    assert!(result.iter().any(|w| w.line == 4 && w.message.contains("shortcut")));
 }
 
 #[test]
@@ -230,10 +226,7 @@ A ![shortcut image].
     "#;
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "All image styles should be valid by default"
-    );
+    assert!(result.is_empty(), "All image styles should be valid by default");
 
     // Disallow collapsed style
     let rule_no_collapse = MD054LinkImageStyle::new(true, false, true, true, true, true);
@@ -245,11 +238,7 @@ An ![collapsed image][].
     "#;
     let ctx_mix = LintContext::new(content_mix);
     let result = rule_no_collapse.check(&ctx_mix).unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Should flag disallowed collapsed image style"
-    );
+    assert_eq!(result.len(), 1, "Should flag disallowed collapsed image style");
     assert_eq!(result[0].line, 3);
     assert!(result[0].message.contains("collapsed"));
 
@@ -266,10 +255,7 @@ And `![shortcut]`
     "#;
     let ctx_code = LintContext::new(content_code);
     let result = rule.check(&ctx_code).unwrap();
-    assert!(
-        result.is_empty(),
-        "Image styles in code spans should be ignored"
-    );
+    assert!(result.is_empty(), "Image styles in code spans should be ignored");
 }
 
 #[test]
@@ -324,11 +310,7 @@ fn test_html_comments_are_ignored() {
 "#;
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        0,
-        "Links in HTML comments should not be flagged"
-    );
+    assert_eq!(result.len(), 0, "Links in HTML comments should not be flagged");
 }
 
 #[test]
@@ -340,11 +322,7 @@ This is an autolink: <https://example.com/汉字>
 "#;
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Only autolink outside comment should be flagged"
-    );
+    assert_eq!(result.len(), 1, "Only autolink outside comment should be flagged");
     assert_eq!(result[0].line, 2);
     assert_eq!(
         result[0].message,

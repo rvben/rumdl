@@ -41,10 +41,7 @@ fn test_multiple_emphasis() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "\n# First emphasis\n\nNormal line\n\n# Second emphasis\n"
-    );
+    assert_eq!(fixed, "\n# First emphasis\n\nNormal line\n\n# Second emphasis\n");
 }
 
 #[test]
@@ -201,7 +198,8 @@ fn test_table_of_contents_labels() {
 #[test]
 fn test_table_of_contents_with_other_emphasis() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
-    let content = "**Table of Contents**\n\n**This should be a heading**\n\n*Contents*\n\n*This should also be a heading*";
+    let content =
+        "**Table of Contents**\n\n**This should be a heading**\n\n*Contents*\n\n*This should also be a heading*";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // Only the non-TOC emphasis should be flagged

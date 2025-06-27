@@ -17,11 +17,7 @@ fn test_unicode_edge_cases() {
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        0,
-        "Unicode characters should not trigger warnings"
-    );
+    assert_eq!(result.len(), 0, "Unicode characters should not trigger warnings");
 
     // Test with very long Unicode strings that might cause overflow
     let content_long = r#"
@@ -35,11 +31,7 @@ This text is intentionally very long to test edge cases with string length handl
 
     let ctx = LintContext::new(content_long);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        0,
-        "Long Unicode content should not cause panic"
-    );
+    assert_eq!(result.len(), 0, "Long Unicode content should not cause panic");
 
     // Test with mixed URL styles containing Unicode
     let content_mixed = r#"
@@ -70,11 +62,7 @@ Text before [Unicode link at exact چmulti-byteڇ character boundary](https://ex
 
     let ctx = LintContext::new(content_boundaries);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        0,
-        "Unicode character boundaries should not cause issues"
-    );
+    assert_eq!(result.len(), 0, "Unicode character boundaries should not cause issues");
 }
 
 #[test]
@@ -94,11 +82,7 @@ fn test_unicode_images() {
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        0,
-        "Unicode in image links should not trigger warnings"
-    );
+    assert_eq!(result.len(), 0, "Unicode in image links should not trigger warnings");
 
     // Test with restricted styles
     let rule_restricted = MD054LinkImageStyle::new(true, true, false, true, true, true);

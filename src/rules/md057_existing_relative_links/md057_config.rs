@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -10,9 +10,7 @@ pub struct MD057Config {
 
 impl Default for MD057Config {
     fn default() -> Self {
-        Self {
-            skip_media_files: true,
-        }
+        Self { skip_media_files: true }
     }
 }
 

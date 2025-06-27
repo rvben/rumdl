@@ -27,11 +27,7 @@ fn test_md002_first_heading_h1() {
 
 #[test]
 fn test_md018_missing_space_atx() {
-    let test = simple_test(
-        "MD018",
-        "#Heading without space",
-        ExpectedWarning::new(1, 2, 1, 2, ""),
-    );
+    let test = simple_test("MD018", "#Heading without space", ExpectedWarning::new(1, 2, 1, 2, ""));
     test_character_ranges(test);
 }
 
@@ -57,11 +53,7 @@ fn test_md009_trailing_spaces() {
 
 #[test]
 fn test_md012_multiple_blank_lines() {
-    let test = simple_test(
-        "MD012",
-        "Line 1\n\n\nLine 2",
-        ExpectedWarning::new(3, 1, 3, 1, ""),
-    );
+    let test = simple_test("MD012", "Line 1\n\n\nLine 2", ExpectedWarning::new(3, 1, 3, 1, ""));
     test_character_ranges(test);
 }
 

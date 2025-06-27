@@ -76,10 +76,7 @@ impl Profiler {
         sorted_measurements.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
 
         // Calculate total time across all sections
-        let total_time: Duration = sorted_measurements
-            .iter()
-            .map(|(_, (duration, _))| duration)
-            .sum();
+        let total_time: Duration = sorted_measurements.iter().map(|(_, (duration, _))| duration).sum();
 
         // Generate the report
         let mut report = String::new();
@@ -88,8 +85,12 @@ impl Profiler {
             "Total execution time: {:.6} seconds\n\n",
             total_time.as_secs_f64()
         ));
-        report.push_str("Section                                  | Total Time (s) | Calls | Avg Time (ms) | % of Total\n");
-        report.push_str("------------------------------------------|----------------|-------|---------------|----------\n");
+        report.push_str(
+            "Section                                  | Total Time (s) | Calls | Avg Time (ms) | % of Total\n",
+        );
+        report.push_str(
+            "------------------------------------------|----------------|-------|---------------|----------\n",
+        );
 
         for (section, (duration, calls)) in sorted_measurements {
             let total_seconds = duration.as_secs_f64();

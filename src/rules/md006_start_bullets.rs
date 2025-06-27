@@ -31,17 +31,17 @@ impl MD006StartBullets {
         let line_index = LineIndex::new(content.to_string());
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Track which lines contain valid bullet items
         let mut valid_bullet_lines = vec![false; lines.len()];
-        
+
         // Process each unordered list block
         for list_block in &ctx.list_blocks {
             // Skip ordered lists
             if list_block.is_ordered {
                 continue;
             }
-            
+
             // Check each list item in this block
             for &item_line in &list_block.item_lines {
                 if let Some(line_info) = ctx.line_info(item_line) {
@@ -49,9 +49,9 @@ impl MD006StartBullets {
                         let line_idx = item_line - 1;
                         let indent = list_item.marker_column;
                         let line = &lines[line_idx];
-                        
+
                         let mut is_valid = false;
-                        
+
                         if indent == 0 {
                             // Top-level items are always valid
                             is_valid = true;
@@ -74,14 +74,14 @@ impl MD006StartBullets {
                                 }
                             }
                         }
-                        
+
                         valid_bullet_lines[line_idx] = is_valid;
-                        
+
                         if !is_valid {
                             // Calculate the precise range for the indentation that needs to be removed
                             let start_col = 1;
                             let end_col = indent + 3; // Include marker and space after it
-                            
+
                             // For the fix, we need to replace the highlighted part with just the bullet marker
                             let trimmed = line.trim_start();
                             let bullet_part = if let Some(captures) = BULLET_PATTERN.captures(trimmed) {
@@ -90,14 +90,14 @@ impl MD006StartBullets {
                             } else {
                                 "* ".to_string()
                             };
-                            
+
                             // Calculate the byte range for the fix
                             let fix_range = line_index.line_col_to_byte_range_with_length(
                                 item_line,
                                 start_col,
                                 end_col - start_col,
                             );
-                            
+
                             result.push(LintWarning {
                                 line: item_line,
                                 column: start_col,
@@ -119,7 +119,7 @@ impl MD006StartBullets {
                 }
             }
         }
-        
+
         Ok(result)
     }
     /// Checks if a line is a bullet list item and returns its indentation level
@@ -350,21 +350,21 @@ impl Rule for MD006StartBullets {
                     let replacement = bullet_part;
 
                     result.push(LintWarning {
-                rule_name: Some(self.name()),
-                severity: Severity::Warning,
-                line: line_num,
-                column: start_col,
-                end_line: line_num,
-                end_column: end_col,
-                message: "List item indentation".to_string(),
-                fix: Some(Fix {
-                    range: {
-                        let start_byte = line_index.line_col_to_byte_range(line_num, start_col).start;
-                        let end_byte = line_index.line_col_to_byte_range(line_num, end_col).start;
-                        start_byte..end_byte
-                    },
-                    replacement,
-            }),
+                        rule_name: Some(self.name()),
+                        severity: Severity::Warning,
+                        line: line_num,
+                        column: start_col,
+                        end_line: line_num,
+                        end_column: end_col,
+                        message: "List item indentation".to_string(),
+                        fix: Some(Fix {
+                            range: {
+                                let start_byte = line_index.line_col_to_byte_range(line_num, start_col).start;
+                                let end_byte = line_index.line_col_to_byte_range(line_num, end_col).start;
+                                start_byte..end_byte
+                            },
+                            replacement,
+                        }),
                     });
                 }
             }
@@ -380,8 +380,7 @@ impl Rule for MD006StartBullets {
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         let content = ctx.content;
-        content.is_empty()
-            || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
+        content.is_empty() || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -427,9 +426,7 @@ mod tests {
         let content_valid = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
         let structure_valid = DocumentStructure::new(content_valid);
         let ctx_valid = crate::lint_context::LintContext::new(content_valid);
-        let result_valid = rule
-            .check_with_structure(&ctx_valid, &structure_valid)
-            .unwrap();
+        let result_valid = rule.check_with_structure(&ctx_valid, &structure_valid).unwrap();
         assert!(
             result_valid.is_empty(),
             "Properly formatted lists should not generate warnings, found: {:?}",
@@ -443,10 +440,7 @@ mod tests {
         let result = rule.check_with_structure(&ctx_invalid, &structure).unwrap();
 
         // If no warnings are generated, the test should be updated to match implementation behavior
-        assert!(
-            !result.is_empty(),
-            "Improperly indented lists should generate warnings"
-        );
+        assert!(!result.is_empty(), "Improperly indented lists should generate warnings");
         assert_eq!(
             result.len(),
             2,

@@ -1,8 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use rumdl::rule::Rule;
 use rumdl::rules::{
-    MD013LineLength, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD044ProperNames,
-    MD051LinkFragments, MD053LinkImageReferenceDefinitions,
+    MD013LineLength, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD044ProperNames, MD051LinkFragments,
+    MD053LinkImageReferenceDefinitions,
 };
 
 /// Benchmark MD013 rule on a large content with long lines
@@ -29,7 +29,10 @@ fn bench_md033(c: &mut Criterion) {
     let mut content = String::with_capacity(50_000);
     // Generate 500 lines with HTML tags
     for i in 0..500 {
-        content.push_str(&format!("Line {} with <span class=\"highlight\">HTML</span> and <div>nested <em>tags</em></div>\n", i));
+        content.push_str(&format!(
+            "Line {} with <span class=\"highlight\">HTML</span> and <div>nested <em>tags</em></div>\n",
+            i
+        ));
     }
 
     let rule = MD033NoInlineHtml::default();
@@ -79,22 +82,12 @@ fn bench_md044(c: &mut Criterion) {
         "Docker".to_string(),
         "Kubernetes".to_string(),
     ];
-    let incorrect_names = [
-        "javascript",
-        "typescript",
-        "github",
-        "vs code",
-        "docker",
-        "kubernetes",
-    ];
+    let incorrect_names = ["javascript", "typescript", "github", "vs code", "docker", "kubernetes"];
 
     for i in 0..500 {
         if i % 2 == 0 {
             let name_idx = i % proper_names.len();
-            content.push_str(&format!(
-                "Line {} mentions {} correctly\n",
-                i, proper_names[name_idx]
-            ));
+            content.push_str(&format!("Line {} mentions {} correctly\n", i, proper_names[name_idx]));
         } else {
             let name_idx = i % incorrect_names.len();
             content.push_str(&format!(
@@ -130,16 +123,10 @@ fn bench_md051(c: &mut Criterion) {
         if i % 3 == 0 {
             // Valid link
             let heading_number = (i % 100) + 1;
-            content.push_str(&format!(
-                "This is a [valid link](#heading-{})\n",
-                heading_number
-            ));
+            content.push_str(&format!("This is a [valid link](#heading-{})\n", heading_number));
         } else {
             // Invalid link
-            content.push_str(&format!(
-                "This is an [invalid link](#non-existent-heading-{})\n",
-                i
-            ));
+            content.push_str(&format!("This is an [invalid link](#non-existent-heading-{})\n", i));
         }
     }
 
@@ -169,10 +156,7 @@ fn bench_md053(c: &mut Criterion) {
     // Add reference usages
     content.push_str("\n## Content with References\n\n");
     for i in 0..100 {
-        content.push_str(&format!(
-            "This is a paragraph with a [link][ref{}] reference.\n",
-            i
-        ));
+        content.push_str(&format!("This is a paragraph with a [link][ref{}] reference.\n", i));
     }
 
     let rule = MD053LinkImageReferenceDefinitions::default();

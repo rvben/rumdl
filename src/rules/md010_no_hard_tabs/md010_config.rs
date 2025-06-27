@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for MD010 (No hard tabs)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -8,7 +8,7 @@ pub struct MD010Config {
     /// Number of spaces per tab (default: 4)
     #[serde(default = "default_spaces_per_tab")]
     pub spaces_per_tab: usize,
-    
+
     /// Check code blocks (default: true)
     #[serde(default = "default_code_blocks")]
     pub code_blocks: bool,

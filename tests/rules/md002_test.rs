@@ -75,10 +75,7 @@ fn test_mixed_heading_styles() {
     let content = "## Heading\n### Subheading ###\n#### Another heading";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        result,
-        "# Heading\n### Subheading ###\n#### Another heading"
-    );
+    assert_eq!(result, "# Heading\n### Subheading ###\n#### Another heading");
 }
 
 #[test]
@@ -94,11 +91,7 @@ fn test_indented_first_heading() {
         "  # Heading\n# Subheading".replace("\n", "\\n"),
         "  # Heading\n# Subheading".len()
     );
-    println!(
-        "Got:      '{}' (len {})",
-        result.replace("\n", "\\n"),
-        result.len()
-    );
+    println!("Got:      '{}' (len {})", result.replace("\n", "\\n"), result.len());
 
     // Print each character's byte value
     println!("Expected bytes: ");
@@ -147,8 +140,5 @@ fn test_setext_with_front_matter() {
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 5);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "---\ntitle: Test\n---\n\nHeading\n=======\n\n### Subheading"
-    );
+    assert_eq!(fixed, "---\ntitle: Test\n---\n\nHeading\n=======\n\n### Subheading");
 }

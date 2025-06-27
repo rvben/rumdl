@@ -88,10 +88,7 @@ fn test_md026_empty_document() {
     let content = "";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Empty documents should not produce warnings"
-    );
+    assert!(result.is_empty(), "Empty documents should not produce warnings");
 }
 
 #[test]
@@ -100,10 +97,7 @@ fn test_md026_with_code_blocks() {
     let content = "# Valid heading\n\n```\n# This is a code block with heading syntax!\n```\n\n```rust\n# This is another code block with a punctuation mark.\n```";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Content in code blocks should be ignored"
-    );
+    assert!(result.is_empty(), "Content in code blocks should be ignored");
 }
 
 #[test]
@@ -114,11 +108,7 @@ fn test_md026_with_front_matter() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // No issues expected with the new lenient behavior
-    assert_eq!(
-        result.len(),
-        0,
-        "No headings should be detected with lenient rules"
-    );
+    assert_eq!(result.len(), 0, "No headings should be detected with lenient rules");
 
     let fixed = rule.fix(&ctx).unwrap();
     // Content should remain unchanged
@@ -152,11 +142,7 @@ fn test_md026_indented_headings() {
     let result = rule.check(&ctx).unwrap();
 
     // No issues expected with the new lenient behavior
-    assert_eq!(
-        result.len(),
-        0,
-        "No headings should be detected with lenient rules"
-    );
+    assert_eq!(result.len(), 0, "No headings should be detected with lenient rules");
 
     let fixed = rule.fix(&ctx).unwrap();
     // Content should remain unchanged
@@ -173,10 +159,7 @@ fn test_md026_fix_setext_headings() {
     let fixed = rule.fix(&ctx).unwrap();
 
     // Content should remain unchanged with lenient behavior
-    assert_eq!(
-        fixed, content,
-        "Content should not be modified with lenient rules"
-    );
+    assert_eq!(fixed, content, "Content should not be modified with lenient rules");
 }
 
 #[test]
@@ -190,7 +173,7 @@ fn test_md026_performance() {
         content.push_str(&format!(
             "# Heading {}{}\n\nSome content paragraph.\n\n",
             i,
-            if i % 3 == 0 { "." } else { "" }  // Use periods instead of ! for testing
+            if i % 3 == 0 { "." } else { "" } // Use periods instead of ! for testing
         ));
     }
 
@@ -202,11 +185,7 @@ fn test_md026_performance() {
     let duration = start.elapsed();
 
     // Verify correctness - only periods are flagged now
-    assert_eq!(
-        result.len(),
-        33,
-        "Should detect exactly 33 headings with periods"
-    );
+    assert_eq!(result.len(), 33, "Should detect exactly 33 headings with periods");
 
     // Verify performance
     println!("MD026 performance test completed in {:?}", duration);
@@ -219,8 +198,7 @@ fn test_md026_performance() {
 #[test]
 fn test_md026_non_standard_punctuation() {
     let rule = MD026NoTrailingPunctuation::new(Some("@$%".to_string()));
-    let content =
-        "# Heading 1@\n## Heading 2$\n### Heading 3%\n#### Heading 4#\n##### Heading 5!\n";
+    let content = "# Heading 1@\n## Heading 2$\n### Heading 3%\n#### Heading 4#\n##### Heading 5!\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
@@ -238,7 +216,7 @@ fn test_md026_non_standard_punctuation() {
 #[test]
 fn test_md026_legitimate_punctuation_patterns() {
     let rule = MD026NoTrailingPunctuation::default();
-    
+
     // Test legitimate colon usage
     let colon_content = r#"# FAQ: Frequently Asked Questions
 ## API: Methods
@@ -247,11 +225,11 @@ fn test_md026_legitimate_punctuation_patterns() {
 ##### Chapter 1: Introduction
 ###### Error: File Not Found
 ####### Note: Implementation Details"#;
-    
+
     let ctx = LintContext::new(colon_content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Legitimate colon patterns should not be flagged");
-    
+
     // Test legitimate question marks
     let question_content = r#"# What is Markdown?
 ## How does it work?
@@ -268,11 +246,11 @@ fn test_md026_legitimate_punctuation_patterns() {
 ############# Do we proceed?
 ############## Does this work?
 ############### Did it succeed?"#;
-    
+
     let ctx = LintContext::new(question_content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Legitimate question patterns should not be flagged");
-    
+
     // Test legitimate exclamation marks
     let exclamation_content = r#"# Important!
 ## New!
@@ -280,16 +258,16 @@ fn test_md026_legitimate_punctuation_patterns() {
 #### Alert!
 ##### Notice!
 ###### Attention!"#;
-    
+
     let ctx = LintContext::new(exclamation_content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Legitimate exclamation patterns should not be flagged");
-    
+
     // Test that inappropriate punctuation is still flagged
     let bad_content = r#"# This is a regular sentence.
 ## Random heading;
 ### This seems wrong,"#;
-    
+
     let ctx = LintContext::new(bad_content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "Inappropriate punctuation should still be flagged");

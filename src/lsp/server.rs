@@ -76,9 +76,7 @@ impl RumdlLanguageServer {
     async fn update_diagnostics(&self, uri: Url, text: String) {
         match self.lint_document(&uri, &text).await {
             Ok(diagnostics) => {
-                self.client
-                    .publish_diagnostics(uri, diagnostics, None)
-                    .await;
+                self.client.publish_diagnostics(uri, diagnostics, None).await;
             }
             Err(e) => {
                 log::error!("Failed to update diagnostics: {}", e);
@@ -87,12 +85,7 @@ impl RumdlLanguageServer {
     }
 
     /// Get code actions for diagnostics at a position
-    async fn get_code_actions(
-        &self,
-        uri: &Url,
-        text: &str,
-        range: Range,
-    ) -> Result<Vec<CodeAction>> {
+    async fn get_code_actions(&self, uri: &Url, text: &str, range: Range) -> Result<Vec<CodeAction>> {
         let rumdl_config = self.rumdl_config.read().await;
         let all_rules = rules::all_rules(&rumdl_config);
         drop(rumdl_config);
@@ -120,7 +113,7 @@ impl RumdlLanguageServer {
         }
     }
 
-        /// Load or reload rumdl configuration from files
+    /// Load or reload rumdl configuration from files
     async fn load_configuration(&self, notify_client: bool) {
         let config_guard = self.config.read().await;
         let explicit_config_path = config_guard.config_path.clone();
@@ -136,9 +129,7 @@ impl RumdlLanguageServer {
                     let message = format!("Loaded rumdl config from: {}", loaded_files.join(", "));
                     log::info!("{}", message);
                     if notify_client {
-                        self.client
-                            .log_message(MessageType::INFO, &message)
-                            .await;
+                        self.client.log_message(MessageType::INFO, &message).await;
                     }
                 } else {
                     log::info!("Using default rumdl configuration (no config files found)");
@@ -148,9 +139,7 @@ impl RumdlLanguageServer {
                 let message = format!("Failed to load rumdl config: {}", e);
                 log::warn!("{}", message);
                 if notify_client {
-                    self.client
-                        .log_message(MessageType::WARNING, &message)
-                        .await;
+                    self.client.log_message(MessageType::WARNING, &message).await;
                 }
                 // Use default configuration
                 *self.rumdl_config.write().await = crate::config::Config::default();
@@ -189,18 +178,14 @@ impl LanguageServer for RumdlLanguageServer {
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
-                )),
+                text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
-                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
-                    DiagnosticOptions {
-                        identifier: Some("rumdl".to_string()),
-                        inter_file_dependencies: false,
-                        workspace_diagnostics: false,
-                        work_done_progress_options: WorkDoneProgressOptions::default(),
-                    },
-                )),
+                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
+                    identifier: Some("rumdl".to_string()),
+                    inter_file_dependencies: false,
+                    workspace_diagnostics: false,
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported: Some(true),
@@ -230,8 +215,6 @@ impl LanguageServer for RumdlLanguageServer {
         self.reload_configuration().await;
     }
 
-
-
     async fn shutdown(&self) -> JsonRpcResult<()> {
         log::info!("Shutting down rumdl Language Server");
         Ok(())
@@ -242,10 +225,7 @@ impl LanguageServer for RumdlLanguageServer {
         let text = params.text_document.text;
 
         // Store document
-        self.documents
-            .write()
-            .await
-            .insert(uri.clone(), text.clone());
+        self.documents.write().await.insert(uri.clone(), text.clone());
 
         // Update diagnostics
         self.update_diagnostics(uri, text).await;
@@ -259,10 +239,7 @@ impl LanguageServer for RumdlLanguageServer {
             let text = change.text;
 
             // Update stored document
-            self.documents
-                .write()
-                .await
-                .insert(uri.clone(), text.clone());
+            self.documents.write().await.insert(uri.clone(), text.clone());
 
             // Update diagnostics
             self.update_diagnostics(uri, text).await;
@@ -282,17 +259,13 @@ impl LanguageServer for RumdlLanguageServer {
 
         // Re-lint the document
         if let Some(text) = self.documents.read().await.get(&params.text_document.uri) {
-            self.update_diagnostics(params.text_document.uri, text.clone())
-                .await;
+            self.update_diagnostics(params.text_document.uri, text.clone()).await;
         }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         // Remove document from storage
-        self.documents
-            .write()
-            .await
-            .remove(&params.text_document.uri);
+        self.documents.write().await.remove(&params.text_document.uri);
 
         // Clear diagnostics
         self.client
@@ -300,20 +273,15 @@ impl LanguageServer for RumdlLanguageServer {
             .await;
     }
 
-    async fn code_action(
-        &self,
-        params: CodeActionParams,
-    ) -> JsonRpcResult<Option<CodeActionResponse>> {
+    async fn code_action(&self, params: CodeActionParams) -> JsonRpcResult<Option<CodeActionResponse>> {
         let uri = params.text_document.uri;
         let range = params.range;
 
         if let Some(text) = self.documents.read().await.get(&uri) {
             match self.get_code_actions(&uri, text, range).await {
                 Ok(actions) => {
-                    let response: Vec<CodeActionOrCommand> = actions
-                        .into_iter()
-                        .map(CodeActionOrCommand::CodeAction)
-                        .collect();
+                    let response: Vec<CodeActionOrCommand> =
+                        actions.into_iter().map(CodeActionOrCommand::CodeAction).collect();
                     Ok(Some(response))
                 }
                 Err(e) => {
@@ -326,46 +294,43 @@ impl LanguageServer for RumdlLanguageServer {
         }
     }
 
-    async fn diagnostic(
-        &self,
-        params: DocumentDiagnosticParams,
-    ) -> JsonRpcResult<DocumentDiagnosticReportResult> {
+    async fn diagnostic(&self, params: DocumentDiagnosticParams) -> JsonRpcResult<DocumentDiagnosticReportResult> {
         let uri = params.text_document.uri;
 
         if let Some(text) = self.documents.read().await.get(&uri) {
             match self.lint_document(&uri, text).await {
-                Ok(diagnostics) => Ok(DocumentDiagnosticReportResult::Report(
-                    DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
+                Ok(diagnostics) => Ok(DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
+                    RelatedFullDocumentDiagnosticReport {
                         related_documents: None,
                         full_document_diagnostic_report: FullDocumentDiagnosticReport {
                             result_id: None,
                             items: diagnostics,
                         },
-                    }),
-                )),
+                    },
+                ))),
                 Err(e) => {
                     log::error!("Failed to get diagnostics: {}", e);
-                    Ok(DocumentDiagnosticReportResult::Report(
-                        DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
+                    Ok(DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
+                        RelatedFullDocumentDiagnosticReport {
                             related_documents: None,
                             full_document_diagnostic_report: FullDocumentDiagnosticReport {
                                 result_id: None,
                                 items: Vec::new(),
                             },
-                        }),
-                    ))
+                        },
+                    )))
                 }
             }
         } else {
-            Ok(DocumentDiagnosticReportResult::Report(
-                DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
+            Ok(DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
+                RelatedFullDocumentDiagnosticReport {
                     related_documents: None,
                     full_document_diagnostic_report: FullDocumentDiagnosticReport {
                         result_id: None,
                         items: Vec::new(),
                     },
-                }),
-            ))
+                },
+            )))
         }
     }
 }

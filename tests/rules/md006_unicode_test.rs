@@ -30,11 +30,7 @@ Some Unicode text here 汉字.
   * Third item with Unicode こんにちは should not be indented";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        3,
-        "Indented Unicode list items should trigger warnings"
-    );
+    assert_eq!(result.len(), 3, "Indented Unicode list items should trigger warnings");
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
@@ -56,11 +52,7 @@ Some Unicode text here こんにちは
   * Indented Unicode list 2 مرحبا";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        2,
-        "Indented Unicode list items should trigger warnings"
-    );
+    assert_eq!(result.len(), 2, "Indented Unicode list items should trigger warnings");
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
@@ -99,8 +91,5 @@ fn test_unicode_code_blocks() {
 * Regular Unicode item こんにちは outside code block";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Unicode content in code blocks should be ignored"
-    );
+    assert!(result.is_empty(), "Unicode content in code blocks should be ignored");
 }

@@ -205,10 +205,7 @@ impl BlockquoteUtils {
                 let prev_line = lines[i - 1];
                 let next_line = lines[i + 1];
 
-                if Self::is_blockquote(prev_line)
-                    && Self::is_blockquote(next_line)
-                    && current_line.trim().is_empty()
-                {
+                if Self::is_blockquote(prev_line) && Self::is_blockquote(next_line) && current_line.trim().is_empty() {
                     // Skip this blank line between blockquotes
                     skip_next = false;
                     continue;

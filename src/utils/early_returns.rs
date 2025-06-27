@@ -27,22 +27,17 @@ pub fn should_skip_heading_rule(content: &str) -> bool {
 /// Common early return checks for list-related rules
 pub fn should_skip_list_rule(content: &str) -> bool {
     content.is_empty()
-        || (!content.contains('*')
-            && !content.contains('-')
-            && !content.contains('+')
-            && !content.contains(". "))
+        || (!content.contains('*') && !content.contains('-') && !content.contains('+') && !content.contains(". "))
 }
 
 /// Common early return checks for code block related rules
 pub fn should_skip_code_block_rule(content: &str) -> bool {
-    content.is_empty()
-        || (!content.contains("```") && !content.contains("~~~") && !content.contains("    "))
+    content.is_empty() || (!content.contains("```") && !content.contains("~~~") && !content.contains("    "))
 }
 
 /// Common early return checks for link-related rules
 pub fn should_skip_link_rule(content: &str) -> bool {
-    content.is_empty()
-        || (!content.contains('[') && !content.contains('(') && !content.contains("]:"))
+    content.is_empty() || (!content.contains('[') && !content.contains('(') && !content.contains("]:"))
 }
 
 /// Common early return checks for inline HTML rules
@@ -89,9 +84,7 @@ pub fn has_headings(content: &str) -> bool {
 pub fn has_setext_headings(content: &str) -> bool {
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed.len() > 1
-            && (trimmed.chars().all(|c| c == '=') || trimmed.chars().all(|c| c == '-'))
-        {
+        if trimmed.len() > 1 && (trimmed.chars().all(|c| c == '=') || trimmed.chars().all(|c| c == '-')) {
             return true;
         }
     }
@@ -101,10 +94,7 @@ pub fn has_setext_headings(content: &str) -> bool {
 /// Check if content has any list markers
 #[inline]
 pub fn has_lists(content: &str) -> bool {
-    content.contains("* ")
-        || content.contains("- ")
-        || content.contains("+ ")
-        || has_ordered_lists(content)
+    content.contains("* ") || content.contains("- ") || content.contains("+ ") || has_ordered_lists(content)
 }
 
 /// Check if content has ordered lists
@@ -225,9 +215,7 @@ impl ContentAnalysis {
             // Headings
             if !analysis.has_headings
                 && (trimmed.starts_with('#')
-                    || (trimmed.len() > 1
-                        && (trimmed.chars().all(|c| c == '=')
-                            || trimmed.chars().all(|c| c == '-'))))
+                    || (trimmed.len() > 1 && (trimmed.chars().all(|c| c == '=') || trimmed.chars().all(|c| c == '-'))))
             {
                 analysis.has_headings = true;
             }
@@ -244,10 +232,7 @@ impl ContentAnalysis {
             }
 
             // Links and images
-            if !analysis.has_links
-                && line.contains('[')
-                && (line.contains("](") || line.contains("]:"))
-            {
+            if !analysis.has_links && line.contains('[') && (line.contains("](") || line.contains("]:")) {
                 analysis.has_links = true;
             }
 

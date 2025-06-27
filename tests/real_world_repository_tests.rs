@@ -12,7 +12,7 @@ fn test_large_repository_simulation() {
         ("CONTRIBUTING.md", create_contributing_content()),
         ("CHANGELOG.md", create_changelog_content()),
     ];
-    
+
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD001HeadingIncrement::default()),
         Box::new(MD009TrailingSpaces::default()),
@@ -21,61 +21,79 @@ fn test_large_repository_simulation() {
         Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD032BlanksAroundLists::default()),
     ];
-    
+
     for (filename, content) in &test_files {
         println!("Testing file: {}", filename);
         let start_time = Instant::now();
-        
+
         let ctx = LintContext::new(content);
         let mut all_warnings = Vec::new();
-        
+
         for rule in &rules {
             let rule_start = Instant::now();
             let warnings = rule.check(&ctx).expect("Rule check should succeed");
             let rule_duration = rule_start.elapsed();
-            
+
             // Performance validation - no rule should take more than 1 second
-            assert!(rule_duration.as_millis() < 1000,
-                "Rule {} took too long on {}: {}ms", 
-                rule.name(), filename, rule_duration.as_millis());
-            
+            assert!(
+                rule_duration.as_millis() < 1000,
+                "Rule {} took too long on {}: {}ms",
+                rule.name(),
+                filename,
+                rule_duration.as_millis()
+            );
+
             all_warnings.extend(warnings);
         }
-        
+
         let total_check_duration = start_time.elapsed();
-        println!("  Total check time: {}ms, {} warnings", 
-            total_check_duration.as_millis(), all_warnings.len());
-        
+        println!(
+            "  Total check time: {}ms, {} warnings",
+            total_check_duration.as_millis(),
+            all_warnings.len()
+        );
+
         // Test CLI/LSP consistency for critical rules
         let critical_rules = vec![
             Box::new(MD022BlanksAroundHeadings::new()) as Box<dyn Rule>,
             Box::new(MD009TrailingSpaces::default()) as Box<dyn Rule>,
         ];
-        
+
         for rule in &critical_rules {
             let warnings = rule.check(&ctx).expect("Rule check should succeed");
             if !warnings.is_empty() {
                 let cli_start = Instant::now();
                 let cli_fixed = rule.fix(&ctx).expect("CLI fix should succeed");
                 let cli_duration = cli_start.elapsed();
-                
+
                 let lsp_start = Instant::now();
-                let lsp_fixed = apply_warning_fixes(content, &warnings)
-                    .expect("LSP fix should succeed");
+                let lsp_fixed = apply_warning_fixes(content, &warnings).expect("LSP fix should succeed");
                 let lsp_duration = lsp_start.elapsed();
-                
+
                 // Performance check
-                assert!(cli_duration.as_millis() < 1000,
+                assert!(
+                    cli_duration.as_millis() < 1000,
                     "CLI fix for {} took too long on {}: {}ms",
-                    rule.name(), filename, cli_duration.as_millis());
-                assert!(lsp_duration.as_millis() < 1000,
+                    rule.name(),
+                    filename,
+                    cli_duration.as_millis()
+                );
+                assert!(
+                    lsp_duration.as_millis() < 1000,
                     "LSP fix for {} took too long on {}: {}ms",
-                    rule.name(), filename, lsp_duration.as_millis());
-                
+                    rule.name(),
+                    filename,
+                    lsp_duration.as_millis()
+                );
+
                 // Consistency check
-                assert_eq!(cli_fixed, lsp_fixed,
+                assert_eq!(
+                    cli_fixed,
+                    lsp_fixed,
                     "Rule {} produced different CLI vs LSP results on {}",
-                    rule.name(), filename);
+                    rule.name(),
+                    filename
+                );
             }
         }
     }
@@ -174,7 +192,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Thanks to all contributors who have helped improve this project
 - Inspired by markdownlint and other linting tools
 - Built with Rust for maximum performance and reliability
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn create_contributing_content() -> String {
@@ -283,7 +302,8 @@ cargo test --release
 - Use proper markdown formatting
 
 Thank you for contributing to make this project better for everyone!
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn create_changelog_content() -> String {
@@ -388,47 +408,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Limited rule coverage
 - No configuration support
 - Performance not optimized
-"#.to_string()
+"#
+    .to_string()
 }
 
 #[test]
 fn test_memory_usage_with_large_content() {
     // Test memory behavior with a very large single file
     let large_content = create_large_content(50000); // ~50k lines
-    
+
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD022BlanksAroundHeadings::new()),
     ];
-    
+
     for rule in &rules {
         let ctx = LintContext::new(&large_content);
-        
+
         let start_time = Instant::now();
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
         let check_duration = start_time.elapsed();
-        
+
         // Should handle large content efficiently (under 5 seconds)
-        assert!(check_duration.as_secs() < 5,
+        assert!(
+            check_duration.as_secs() < 5,
             "Rule {} took too long on large content: {}s",
-            rule.name(), check_duration.as_secs());
-        
+            rule.name(),
+            check_duration.as_secs()
+        );
+
         // Test fix performance if there are warnings
         if !warnings.is_empty() {
             let start_time = Instant::now();
             let _fixed = rule.fix(&ctx).expect("Fix should succeed");
             let fix_duration = start_time.elapsed();
-            
-            assert!(fix_duration.as_secs() < 10,
+
+            assert!(
+                fix_duration.as_secs() < 10,
                 "Rule {} fix took too long on large content: {}s",
-                rule.name(), fix_duration.as_secs());
+                rule.name(),
+                fix_duration.as_secs()
+            );
         }
     }
 }
 
 fn create_large_content(lines: usize) -> String {
     let mut content = String::with_capacity(lines * 50); // Rough estimate
-    
+
     for i in 1..=lines {
         if i % 100 == 1 {
             content.push_str(&format!("# Section {}\n", i / 100 + 1));
@@ -442,6 +469,6 @@ fn create_large_content(lines: usize) -> String {
             content.push_str(&format!("This is line {} with some content.\n", i));
         }
     }
-    
+
     content
 }

@@ -1,11 +1,10 @@
 /// Configuration helper trait and utilities for rules
-/// 
+///
 /// This module provides utilities to reduce boilerplate in rule configuration
-
 use toml::Value;
 
 /// Helper macro to implement default_config_section for rules
-/// 
+///
 /// Usage:
 /// ```ignore
 /// fn default_config_section(&self) -> Option<(String, toml::Value)> {

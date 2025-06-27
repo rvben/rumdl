@@ -38,21 +38,16 @@ fn read_file_efficiently(path: &Path) -> Result<String, Box<dyn Error>> {
         let mmap = unsafe { Mmap::map(&file)? };
 
         // Convert to string - this is still a copy but more efficient for large files
-        String::from_utf8(mmap.to_vec())
-            .map_err(|e| format!("Invalid UTF-8 in file {}: {}", path.display(), e).into())
+        String::from_utf8(mmap.to_vec()).map_err(|e| format!("Invalid UTF-8 in file {}: {}", path.display(), e).into())
     } else {
         // Use regular reading for small files
-        fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read file {}: {}", path.display(), e).into())
+        fs::read_to_string(path).map_err(|e| format!("Failed to read file {}: {}", path.display(), e).into())
     }
 }
 
 /// Utility function to load configuration with standard CLI error handling.
 /// This eliminates duplication between different CLI commands that load configuration.
-fn load_config_with_cli_error_handling(
-    config_path: Option<&str>,
-    no_config: bool,
-) -> rumdl_config::SourcedConfig {
+fn load_config_with_cli_error_handling(config_path: Option<&str>, no_config: bool) -> rumdl_config::SourcedConfig {
     load_config_with_cli_error_handling_with_dir(config_path, no_config, None)
 }
 
@@ -64,26 +59,26 @@ fn load_config_with_cli_error_handling_with_dir(
     let result = if let Some(dir) = discovery_dir {
         // Temporarily change working directory for config discovery
         let original_dir = std::env::current_dir().ok();
-        
+
         // Change to the discovery directory if it exists
         if dir.is_dir() {
             let _ = std::env::set_current_dir(dir);
         } else if let Some(parent) = dir.parent() {
             let _ = std::env::set_current_dir(parent);
         }
-        
+
         let config_result = rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config);
-        
+
         // Restore original directory
         if let Some(orig) = original_dir {
             let _ = std::env::set_current_dir(orig);
         }
-        
+
         config_result
     } else {
         rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config)
     };
-    
+
     match result {
         Ok(config) => config,
         Err(e) => {
@@ -292,16 +287,26 @@ struct CheckArgs {
     #[arg(long, short = 'o', default_value = "text")]
     output: String,
 
+    /// Output format for linting results
+    #[arg(long, value_parser = ["text", "full", "concise", "grouped", "json", "json-lines", "github", "gitlab", "pylint", "azure", "sarif", "junit"],
+          help = "Output format for linting results (text, full, concise, grouped, json, json-lines, github, gitlab, pylint, azure, sarif, junit)")]
+    output_format: Option<String>,
+
     /// Read from stdin instead of files
     #[arg(long, help = "Read from stdin instead of files")]
     stdin: bool,
+
+    /// Output linting results to stderr instead of stdout
+    #[arg(long, help = "Output diagnostics to stderr instead of stdout")]
+    stderr: bool,
+
+    /// Disable all output except linting results (implies --quiet)
+    #[arg(short, long, help = "Disable all output except diagnostics")]
+    silent: bool,
 }
 
 // Get a complete set of enabled rules based on CLI options and config
-fn get_enabled_rules_from_checkargs(
-    args: &CheckArgs,
-    config: &rumdl_config::Config,
-) -> Vec<Box<dyn Rule>> {
+fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {
     // 1. Initialize all available rules using from_config only
     let all_rules: Vec<Box<dyn Rule>> = rumdl::rules::all_rules(config);
 
@@ -309,32 +314,24 @@ fn get_enabled_rules_from_checkargs(
     let final_rules: Vec<Box<dyn Rule>>;
 
     // Rule names provided via CLI flags
-    let cli_enable_set: Option<HashSet<&str>> = args.enable.as_deref().map(|s| {
-        s.split(',')
-            .map(|r| r.trim())
-            .filter(|r| !r.is_empty())
-            .collect()
-    });
-    let cli_disable_set: Option<HashSet<&str>> = args.disable.as_deref().map(|s| {
-        s.split(',')
-            .map(|r| r.trim())
-            .filter(|r| !r.is_empty())
-            .collect()
-    });
+    let cli_enable_set: Option<HashSet<&str>> = args
+        .enable
+        .as_deref()
+        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
+    let cli_disable_set: Option<HashSet<&str>> = args
+        .disable
+        .as_deref()
+        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
 
     // Rule names provided via config file
-    let config_enable_set: HashSet<&str> =
-        config.global.enable.iter().map(|s| s.as_str()).collect();
+    let config_enable_set: HashSet<&str> = config.global.enable.iter().map(|s| s.as_str()).collect();
 
-    let config_disable_set: HashSet<&str> =
-        config.global.disable.iter().map(|s| s.as_str()).collect();
+    let config_disable_set: HashSet<&str> = config.global.disable.iter().map(|s| s.as_str()).collect();
 
     if let Some(enabled_cli) = &cli_enable_set {
         // Normalize CLI enable values
-        let enabled_cli_normalized: HashSet<String> =
-            enabled_cli.iter().map(|s| normalize_key(s)).collect();
-        let _all_rule_names: Vec<String> =
-            all_rules.iter().map(|r| normalize_key(r.name())).collect();
+        let enabled_cli_normalized: HashSet<String> = enabled_cli.iter().map(|s| normalize_key(s)).collect();
+        let _all_rule_names: Vec<String> = all_rules.iter().map(|r| normalize_key(r.name())).collect();
         final_rules = all_rules
             .into_iter()
             .filter(|rule| enabled_cli_normalized.contains(&normalize_key(rule.name())))
@@ -370,8 +367,7 @@ fn get_enabled_rules_from_checkargs(
             current_rules.retain(|rule| {
                 let rule_name_upper = rule.name();
                 let rule_name_lower = normalize_key(rule_name_upper);
-                !disabled_cli.contains(rule_name_upper)
-                    && !disabled_cli.contains(rule_name_lower.as_str())
+                !disabled_cli.contains(rule_name_upper) && !disabled_cli.contains(rule_name_lower.as_str())
             });
         }
 
@@ -453,7 +449,7 @@ fn find_markdown_files(
     } else {
         config.global.exclude.clone()
     };
-    
+
     // Debug: Log exclude patterns
     if args.verbose {
         eprintln!("Exclude patterns: {:?}", final_exclude_patterns);
@@ -512,7 +508,7 @@ fn find_markdown_files(
     walk_builder.parents(use_gitignore); // Enable/disable parent ignores
     walk_builder.hidden(true); // Keep hidden files ignored unconditionally
     walk_builder.require_git(false); // Process git ignores even if no repo detected
-    
+
     // Add support for .markdownlintignore file
     walk_builder.add_custom_ignore_filename(".markdownlintignore");
 
@@ -548,8 +544,7 @@ fn find_markdown_files(
     // regardless of how ignore crate overrides interacted with type filters.
     file_paths.retain(|path_str| {
         let path = Path::new(path_str);
-        path.extension()
-            .map_or(false, |ext| ext == "md" || ext == "markdown")
+        path.extension().map_or(false, |ext| ext == "md" || ext == "markdown")
     });
     // -------------------------------------
 
@@ -580,16 +575,8 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
         duration_ms,
     } = params;
     // Choose singular or plural form of "file" based on count
-    let file_text = if total_files_processed == 1 {
-        "file"
-    } else {
-        "files"
-    };
-    let file_with_issues_text = if files_with_issues == 1 {
-        "file"
-    } else {
-        "files"
-    };
+    let file_text = if total_files_processed == 1 { "file" } else { "files" };
+    let file_with_issues_text = if files_with_issues == 1 { "file" } else { "files" };
 
     // Show results summary
     if has_issues {
@@ -789,10 +776,7 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
                     };
                     lines.push((
                         format!("{} = {}", key, value_str),
-                        format!(
-                            "[from {}]",
-                            format_provenance(rumdl_config::ConfigSource::Default)
-                        ),
+                        format!("[from {}]", format_provenance(rumdl_config::ConfigSource::Default)),
                     ));
                 }
             }
@@ -833,17 +817,17 @@ fn format_toml_value(val: &toml::Value) -> String {
 /// Offer to install the VS Code extension during init
 fn offer_vscode_extension_install() {
     use rumdl::vscode::VsCodeExtension;
-    
+
     // Check if we're in an integrated terminal
     if let Some((cmd, editor_name)) = VsCodeExtension::current_editor_from_env() {
         println!("\nDetected you're using {}.", editor_name.green());
         println!("Would you like to install the rumdl extension? [Y/n]");
         print!("> ");
         io::stdout().flush().unwrap();
-        
+
         let mut answer = String::new();
         io::stdin().read_line(&mut answer).unwrap();
-        
+
         if answer.trim().is_empty() || answer.trim().eq_ignore_ascii_case("y") {
             match VsCodeExtension::with_command(cmd) {
                 Ok(vscode) => {
@@ -859,7 +843,7 @@ fn offer_vscode_extension_install() {
     } else {
         // Check for available editors
         let available_editors = VsCodeExtension::find_all_editors();
-        
+
         match available_editors.len() {
             0 => {
                 // No editors found, skip silently
@@ -871,10 +855,10 @@ fn offer_vscode_extension_install() {
                 println!("Would you like to install the rumdl extension for real-time linting? [y/N]");
                 print!("> ");
                 io::stdout().flush().unwrap();
-                
+
                 let mut answer = String::new();
                 io::stdin().read_line(&mut answer).unwrap();
-                
+
                 if answer.trim().eq_ignore_ascii_case("y") {
                     match VsCodeExtension::with_command(cmd) {
                         Ok(vscode) => {
@@ -894,14 +878,17 @@ fn offer_vscode_extension_install() {
                 for (i, (_, editor_name)) in available_editors.iter().enumerate() {
                     println!("  {}. {}", i + 1, editor_name);
                 }
-                println!("\nInstall the rumdl extension? [1-{}/a=all/n=none]:", available_editors.len());
+                println!(
+                    "\nInstall the rumdl extension? [1-{}/a=all/n=none]:",
+                    available_editors.len()
+                );
                 print!("> ");
                 io::stdout().flush().unwrap();
-                
+
                 let mut answer = String::new();
                 io::stdin().read_line(&mut answer).unwrap();
                 let answer = answer.trim().to_lowercase();
-                
+
                 if answer == "a" || answer == "all" {
                     // Install in all editors
                     for (cmd, editor_name) in &available_editors {
@@ -936,7 +923,7 @@ fn offer_vscode_extension_install() {
             }
         }
     }
-    
+
     println!("\nSetup complete! You can now:");
     println!("  • Run {} to lint your Markdown files", "rumdl check .".cyan());
     println!("  • Open your editor to see real-time linting");
@@ -981,8 +968,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     }
 
                                     // Append with a blank line for separation
-                                    let new_content =
-                                        format!("{}\n\n{}", content.trim_end(), config_content);
+                                    let new_content = format!("{}\n\n{}", content.trim_end(), config_content);
                                     match fs::write("pyproject.toml", new_content) {
                                         Ok(_) => {
                                             println!("Added rumdl configuration to pyproject.toml")
@@ -998,11 +984,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!(
-                                        "{}: Failed to read pyproject.toml: {}",
-                                        "Error".red().bold(),
-                                        e
-                                    );
+                                    eprintln!("{}: Failed to read pyproject.toml: {}", "Error".red().bold(), e);
                                     std::process::exit(1);
                                 }
                             }
@@ -1023,11 +1005,7 @@ build-backend = \"setuptools.build_meta\"
                                 println!("Created pyproject.toml with rumdl configuration");
                             }
                             Err(e) => {
-                                eprintln!(
-                                    "{}: Failed to create pyproject.toml: {}",
-                                    "Error".red().bold(),
-                                    e
-                                );
+                                eprintln!("{}: Failed to create pyproject.toml: {}", "Error".red().bold(), e);
                                 std::process::exit(1);
                             }
                         }
@@ -1038,16 +1016,12 @@ build-backend = \"setuptools.build_meta\"
                 match rumdl_config::create_default_config(".rumdl.toml") {
                     Ok(_) => {
                         println!("Created default configuration file: .rumdl.toml");
-                        
+
                         // Offer to install VS Code extension
                         offer_vscode_extension_install();
                     }
                     Err(e) => {
-                        eprintln!(
-                            "{}: Failed to create config file: {}",
-                            "Error".red().bold(),
-                            e
-                        );
+                        eprintln!("{}: Failed to create config file: {}", "Error".red().bold(), e);
                         std::process::exit(1);
                     }
                 }
@@ -1259,14 +1233,9 @@ build-backend = \"setuptools.build_meta\"
                                 );
                                 // Successfully handled 'get', exit the command processing
                             } else {
-                                let all_rules =
-                                    rumdl::rules::all_rules(&rumdl_config::Config::default());
-                                if let Some(rule) =
-                                    all_rules.iter().find(|r| r.name() == section_part)
-                                {
-                                    if let Some((_, toml::Value::Table(table))) =
-                                        rule.default_config_section()
-                                    {
+                                let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
+                                if let Some(rule) = all_rules.iter().find(|r| r.name() == section_part) {
+                                    if let Some((_, toml::Value::Table(table))) = rule.default_config_section() {
                                         if let Some(v) = table.get(&normalized_field) {
                                             let value_str = format_toml_value(v);
                                             println!(
@@ -1278,10 +1247,7 @@ build-backend = \"setuptools.build_meta\"
                                         }
                                     }
                                 }
-                                eprintln!(
-                                    "Unknown config key: {}.{}",
-                                    normalized_rule_name, normalized_field
-                                );
+                                eprintln!("Unknown config key: {}.{}", normalized_rule_name, normalized_field);
                                 std::process::exit(1);
                             }
                         }
@@ -1349,8 +1315,7 @@ build-backend = \"setuptools.build_meta\"
                     } else {
                         load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config)
                     };
-                    let validation_warnings =
-                        rumdl_config::validate_config_sourced(&sourced_reg, &registry_reg);
+                    let validation_warnings = rumdl_config::validate_config_sourced(&sourced_reg, &registry_reg);
                     if !validation_warnings.is_empty() {
                         for warn in &validation_warnings {
                             eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
@@ -1403,11 +1368,7 @@ build-backend = \"setuptools.build_meta\"
                     }
                 }
             }
-            Some(Commands::Server {
-                port,
-                stdio,
-                verbose,
-            }) => {
+            Some(Commands::Server { port, stdio, verbose }) => {
                 // Setup logging for the LSP server
                 if *verbose {
                     env_logger::Builder::from_default_env()
@@ -1420,8 +1381,7 @@ build-backend = \"setuptools.build_meta\"
                 }
 
                 // Start the LSP server
-                let runtime =
-                    tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+                let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
 
                 runtime.block_on(async {
                     if let Some(port) = port {
@@ -1441,7 +1401,12 @@ build-backend = \"setuptools.build_meta\"
                     }
                 });
             }
-            Some(Commands::Import { file, output, format, dry_run }) => {
+            Some(Commands::Import {
+                file,
+                output,
+                format,
+                dry_run,
+            }) => {
                 use rumdl::markdownlint_config;
 
                 // Load the markdownlint config file
@@ -1463,9 +1428,12 @@ build-backend = \"setuptools.build_meta\"
                         let mut output = String::new();
 
                         // Add global settings if any
-                        if !fragment.global.enable.value.is_empty() || !fragment.global.disable.value.is_empty() ||
-                           !fragment.global.exclude.value.is_empty() || !fragment.global.include.value.is_empty() ||
-                           fragment.global.line_length.value != 80 {
+                        if !fragment.global.enable.value.is_empty()
+                            || !fragment.global.disable.value.is_empty()
+                            || !fragment.global.exclude.value.is_empty()
+                            || !fragment.global.include.value.is_empty()
+                            || fragment.global.line_length.value != 80
+                        {
                             output.push_str("[global]\n");
                             if !fragment.global.enable.value.is_empty() {
                                 output.push_str(&format!("enable = {:?}\n", fragment.global.enable.value));
@@ -1502,7 +1470,8 @@ build-backend = \"setuptools.build_meta\"
                                         toml::Value::Boolean(b) => output.push_str(&format!("{} = {}\n", key, b)),
                                         toml::Value::Array(arr) => {
                                             // Format arrays properly for TOML
-                                            let arr_str = arr.iter()
+                                            let arr_str = arr
+                                                .iter()
                                                 .map(|v| match v {
                                                     toml::Value::String(s) => format!("\"{}\"", s),
                                                     _ => format!("{}", v),
@@ -1510,7 +1479,7 @@ build-backend = \"setuptools.build_meta\"
                                                 .collect::<Vec<_>>()
                                                 .join(", ");
                                             output.push_str(&format!("{} = [{}]\n", key, arr_str));
-                                        },
+                                        }
                                         _ => {
                                             // Use proper TOML serialization for complex values
                                             if let Ok(toml_str) = toml::to_string_pretty(&sourced_value.value) {
@@ -1531,40 +1500,82 @@ build-backend = \"setuptools.build_meta\"
                             }
                         }
                         output
-                    },
+                    }
                     "json" => {
                         // Convert to JSON format (similar to pyproject.toml structure)
                         let mut json_config = serde_json::Map::new();
 
                         // Add global settings
-                        if !fragment.global.enable.value.is_empty() || !fragment.global.disable.value.is_empty() ||
-                           !fragment.global.exclude.value.is_empty() || !fragment.global.include.value.is_empty() ||
-                           fragment.global.line_length.value != 80 {
+                        if !fragment.global.enable.value.is_empty()
+                            || !fragment.global.disable.value.is_empty()
+                            || !fragment.global.exclude.value.is_empty()
+                            || !fragment.global.include.value.is_empty()
+                            || fragment.global.line_length.value != 80
+                        {
                             let mut global = serde_json::Map::new();
                             if !fragment.global.enable.value.is_empty() {
-                                global.insert("enable".to_string(), serde_json::Value::Array(
-                                    fragment.global.enable.value.iter().map(|s| serde_json::Value::String(s.clone())).collect()
-                                ));
+                                global.insert(
+                                    "enable".to_string(),
+                                    serde_json::Value::Array(
+                                        fragment
+                                            .global
+                                            .enable
+                                            .value
+                                            .iter()
+                                            .map(|s| serde_json::Value::String(s.clone()))
+                                            .collect(),
+                                    ),
+                                );
                             }
                             if !fragment.global.disable.value.is_empty() {
-                                global.insert("disable".to_string(), serde_json::Value::Array(
-                                    fragment.global.disable.value.iter().map(|s| serde_json::Value::String(s.clone())).collect()
-                                ));
+                                global.insert(
+                                    "disable".to_string(),
+                                    serde_json::Value::Array(
+                                        fragment
+                                            .global
+                                            .disable
+                                            .value
+                                            .iter()
+                                            .map(|s| serde_json::Value::String(s.clone()))
+                                            .collect(),
+                                    ),
+                                );
                             }
                             if !fragment.global.exclude.value.is_empty() {
-                                global.insert("exclude".to_string(), serde_json::Value::Array(
-                                    fragment.global.exclude.value.iter().map(|s| serde_json::Value::String(s.clone())).collect()
-                                ));
+                                global.insert(
+                                    "exclude".to_string(),
+                                    serde_json::Value::Array(
+                                        fragment
+                                            .global
+                                            .exclude
+                                            .value
+                                            .iter()
+                                            .map(|s| serde_json::Value::String(s.clone()))
+                                            .collect(),
+                                    ),
+                                );
                             }
                             if !fragment.global.include.value.is_empty() {
-                                global.insert("include".to_string(), serde_json::Value::Array(
-                                    fragment.global.include.value.iter().map(|s| serde_json::Value::String(s.clone())).collect()
-                                ));
+                                global.insert(
+                                    "include".to_string(),
+                                    serde_json::Value::Array(
+                                        fragment
+                                            .global
+                                            .include
+                                            .value
+                                            .iter()
+                                            .map(|s| serde_json::Value::String(s.clone()))
+                                            .collect(),
+                                    ),
+                                );
                             }
                             if fragment.global.line_length.value != 80 {
-                                global.insert("line_length".to_string(), serde_json::Value::Number(
-                                    serde_json::Number::from(fragment.global.line_length.value)
-                                ));
+                                global.insert(
+                                    "line_length".to_string(),
+                                    serde_json::Value::Number(serde_json::Number::from(
+                                        fragment.global.line_length.value,
+                                    )),
+                                );
                             }
                             json_config.insert("global".to_string(), serde_json::Value::Object(global));
                         }
@@ -1586,9 +1597,13 @@ build-backend = \"setuptools.build_meta\"
                             eprintln!("{}: Failed to serialize to JSON: {}", "Error".red().bold(), e);
                             std::process::exit(1);
                         })
-                    },
+                    }
                     _ => {
-                        eprintln!("{}: Unsupported format '{}'. Use 'toml' or 'json'.", "Error".red().bold(), format);
+                        eprintln!(
+                            "{}: Unsupported format '{}'. Use 'toml' or 'json'.",
+                            "Error".red().bold(),
+                            format
+                        );
                         std::process::exit(1);
                     }
                 };
@@ -1598,9 +1613,11 @@ build-backend = \"setuptools.build_meta\"
                     println!("{}", output_content);
                 } else {
                     // Write to output file
-                    let output_path = output.as_deref().unwrap_or(
-                        if format == "json" { "rumdl-config.json" } else { ".rumdl.toml" }
-                    );
+                    let output_path = output.as_deref().unwrap_or(if format == "json" {
+                        "rumdl-config.json"
+                    } else {
+                        ".rumdl.toml"
+                    });
 
                     if Path::new(output_path).exists() {
                         eprintln!("{}: Output file '{}' already exists", "Error".red().bold(), output_path);
@@ -1611,7 +1628,7 @@ build-backend = \"setuptools.build_meta\"
                         Ok(_) => {
                             println!("Converted markdownlint config from '{}' to '{}'", file, output_path);
                             println!("You can now use: rumdl check --config {} .", output_path);
-                        },
+                        }
                         Err(e) => {
                             eprintln!("{}: Failed to write to '{}': {}", "Error".red().bold(), output_path, e);
                             std::process::exit(1);
@@ -1622,7 +1639,7 @@ build-backend = \"setuptools.build_meta\"
             Some(Commands::Vscode { force, status }) => {
                 // Handle VS Code extension installation
                 match rumdl::vscode::handle_vscode_command(*force, *status) {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(e) => {
                         eprintln!("{}: {}", "Error".red().bold(), e);
                         std::process::exit(1);
@@ -1649,15 +1666,18 @@ build-backend = \"setuptools.build_meta\"
                         profile: cli.profile,
                         quiet: cli.quiet,
                         output: "text".to_string(),
+                        output_format: None,
                         stdin: false,
+                        stderr: false,
+                        silent: false,
                     };
                     eprintln!("{}: Deprecation warning: Running 'rumdl .' or 'rumdl [PATHS...]' without a subcommand is deprecated and will be removed in a future release. Please use 'rumdl check .' instead.", "[rumdl]".yellow().bold());
                     run_check(&args, cli.config.as_deref(), cli.no_config);
                 } else {
                     eprintln!(
-                "{}: No files or directories specified. Please provide at least one path to lint.",
-                "Error".red().bold()
-            );
+                        "{}: No files or directories specified. Please provide at least one path to lint.",
+                        "Error".red().bold()
+                    );
                     std::process::exit(1);
                 }
             }
@@ -1672,11 +1692,45 @@ build-backend = \"setuptools.build_meta\"
 }
 
 /// Process markdown content from stdin
-fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs) {
+fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_config::Config) {
+    use rumdl::output::{OutputFormat, OutputWriter};
+
+    // If silent mode is enabled, also enable quiet mode
+    let quiet = args.quiet || args.silent;
+
+    // Create output writer for linting results
+    let output_writer = OutputWriter::new(args.stderr, quiet, args.silent);
+
+    // Determine output format
+    let output_format_str = args
+        .output_format
+        .as_deref()
+        .or_else(|| {
+            // Check config for output format
+            config.global.output_format.as_deref()
+        })
+        .or_else(|| {
+            // Legacy support: map --output json to --output-format json
+            if args.output == "json" {
+                Some("json")
+            } else {
+                None
+            }
+        })
+        .unwrap_or("text");
+
+    let output_format = match OutputFormat::from_str(output_format_str) {
+        Ok(fmt) => fmt,
+        Err(e) => {
+            eprintln!("{}: {}", "Error".red().bold(), e);
+            process::exit(1);
+        }
+    };
+
     // Read all content from stdin
     let mut content = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut content) {
-        if !args.quiet {
+        if !args.silent {
             eprintln!("Error reading from stdin: {}", e);
         }
         process::exit(1);
@@ -1690,65 +1744,78 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs) {
     for rule in rules {
         match rule.check(&ctx) {
             Ok(warnings) => {
-                // Set file path to "<stdin>" for all warnings
-                // The warnings already have the correct character ranges
                 all_warnings.extend(warnings);
             }
             Err(e) => {
-                if !args.quiet {
+                if !args.silent {
                     eprintln!("Error running rule {}: {}", rule.name(), e);
                 }
             }
         }
     }
 
-    // Output results
-    if args.output == "json" {
-        // For JSON output, modify warnings to show "<stdin>" as filename
-        let mut json_warnings = Vec::new();
-        for warning in all_warnings {
-            let mut json_warning = serde_json::to_value(&warning).unwrap();
-            if let Some(obj) = json_warning.as_object_mut() {
-                obj.insert(
-                    "file".to_string(),
-                    serde_json::Value::String("<stdin>".to_string()),
-                );
-            }
-            json_warnings.push(json_warning);
+    // Sort warnings by line/column
+    all_warnings.sort_by(|a, b| {
+        if a.line == b.line {
+            a.column.cmp(&b.column)
+        } else {
+            a.line.cmp(&b.line)
         }
-        println!("{}", serde_json::to_string_pretty(&json_warnings).unwrap());
+    });
+
+    let has_issues = !all_warnings.is_empty();
+
+    // For formats that need collection
+    if matches!(
+        output_format,
+        OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit
+    ) {
+        let file_warnings = vec![("<stdin>".to_string(), all_warnings)];
+        let output = match output_format {
+            OutputFormat::Json => rumdl::output::formatters::json::format_all_warnings_as_json(&file_warnings),
+            OutputFormat::GitLab => rumdl::output::formatters::gitlab::format_gitlab_report(&file_warnings),
+            OutputFormat::Sarif => rumdl::output::formatters::sarif::format_sarif_report(&file_warnings),
+            OutputFormat::Junit => rumdl::output::formatters::junit::format_junit_report(&file_warnings, 0),
+            _ => unreachable!(),
+        };
+
+        output_writer.writeln(&output).unwrap_or_else(|e| {
+            eprintln!("Error writing output: {}", e);
+        });
     } else {
-        // Text output
-        let has_issues = !all_warnings.is_empty();
-        if has_issues {
-            for warning in &all_warnings {
-                let rule_name = warning.rule_name.unwrap_or("unknown");
-                println!(
-                    "<stdin>:{}:{}: {} {}",
-                    warning.line.to_string().cyan(),
-                    warning.column.to_string().cyan(),
-                    format!("[{:5}]", rule_name).yellow(), // Align rule names consistently
-                    warning.message
-                );
-            }
+        // Use formatter for line-by-line output
+        let formatter = output_format.create_formatter();
+        if !all_warnings.is_empty() {
+            let formatted = formatter.format_warnings(&all_warnings, "<stdin>");
+            output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                eprintln!("Error writing output: {}", e);
+            });
         }
 
-        if !args.quiet {
+        // Print summary if not quiet
+        if !quiet {
             if has_issues {
-                println!("\nFound {} issue(s) in stdin", all_warnings.len());
+                output_writer
+                    .writeln(&format!("\nFound {} issue(s) in stdin", all_warnings.len()))
+                    .ok();
             } else {
-                println!("No issues found in stdin");
+                output_writer.writeln("No issues found in stdin").ok();
             }
         }
+    }
 
-        // Exit with error code if issues found
-        if has_issues {
-            process::exit(1);
-        }
+    // Exit with error code if issues found
+    if has_issues {
+        process::exit(1);
     }
 }
 
 fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool) {
+    use rumdl::output::{OutputFormat, OutputWriter};
+
+    // If silent mode is enabled, also enable quiet mode
+    let quiet = args.quiet || args.silent;
+
     // 1. Determine the directory for config discovery
     // Only use the path's directory for discovery if it's an absolute path
     // This ensures we discover config from the project root when running relative commands
@@ -1767,30 +1834,59 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     } else {
         None
     };
-    
-    // 1. Load sourced config (for provenance and validation)
+
+    // 2. Load sourced config (for provenance and validation)
     let sourced = load_config_with_cli_error_handling_with_dir(global_config_path, no_config, discovery_dir);
 
-    // 2. Validate config (unknown keys/rules/options)
+    // 3. Validate configuration
     let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
     let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
     let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
-    if !validation_warnings.is_empty() {
+    if !validation_warnings.is_empty() && !args.silent {
         for warn in &validation_warnings {
             eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
         }
         // Do NOT exit; continue with valid config
     }
 
-    // 3. Convert to Config for the rest of the linter
+    // 4. Convert to Config for the rest of the linter
     let config: rumdl_config::Config = sourced.into();
+
+    // Create output writer for linting results
+    let output_writer = OutputWriter::new(args.stderr, quiet, args.silent);
+
+    // Determine output format
+    let output_format_str = args
+        .output_format
+        .as_deref()
+        .or_else(|| {
+            // Check config for output format
+            config.global.output_format.as_deref()
+        })
+        .or_else(|| {
+            // Legacy support: map --output json to --output-format json
+            if args.output == "json" {
+                Some("json")
+            } else {
+                None
+            }
+        })
+        .unwrap_or("text");
+
+    let output_format = match OutputFormat::from_str(output_format_str) {
+        Ok(fmt) => fmt,
+        Err(e) => {
+            eprintln!("{}: {}", "Error".red().bold(), e);
+            process::exit(1);
+        }
+    };
 
     // Initialize rules with configuration
     let enabled_rules = get_enabled_rules_from_checkargs(args, &config);
 
     // Handle stdin input
     if args.stdin {
-        process_stdin(&enabled_rules, args);
+        process_stdin(&enabled_rules, args, &config);
         return;
     }
 
@@ -1798,35 +1894,70 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     let file_paths = match find_markdown_files(&args.paths, args, &config) {
         Ok(paths) => paths,
         Err(e) => {
-            eprintln!(
-                "{}: Failed to find markdown files: {}",
-                "Error".red().bold(),
-                e
-            );
+            if !args.silent {
+                eprintln!("{}: Failed to find markdown files: {}", "Error".red().bold(), e);
+            }
             process::exit(1);
         }
     };
     if file_paths.is_empty() {
-        if !args.quiet {
+        if !quiet {
             println!("No markdown files found to check.");
         }
         return;
     }
 
-    // JSON output mode: collect all warnings and print as JSON
-    if args.output == "json" {
-        let mut all_warnings = Vec::new();
+    // For formats that need to collect all warnings first
+    let needs_collection = matches!(
+        output_format,
+        OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit
+    );
+
+    if needs_collection {
+        let start_time = Instant::now();
+        let mut all_file_warnings = Vec::new();
+        let mut has_issues = false;
+        let mut files_with_issues = 0;
+        let mut total_issues = 0;
+
         for file_path in &file_paths {
             let warnings = process_file_collect_warnings(
                 file_path,
                 &enabled_rules,
                 args._fix,
-                args.verbose,
-                args.quiet,
+                args.verbose && !args.silent,
+                quiet,
             );
-            all_warnings.extend(warnings);
+
+            if !warnings.is_empty() {
+                has_issues = true;
+                files_with_issues += 1;
+                total_issues += warnings.len();
+                all_file_warnings.push((file_path.clone(), warnings));
+            }
         }
-        println!("{}", serde_json::to_string_pretty(&all_warnings).unwrap());
+
+        let duration_ms = start_time.elapsed().as_millis() as u64;
+
+        // Format output based on type
+        let output = match output_format {
+            OutputFormat::Json => rumdl::output::formatters::json::format_all_warnings_as_json(&all_file_warnings),
+            OutputFormat::GitLab => rumdl::output::formatters::gitlab::format_gitlab_report(&all_file_warnings),
+            OutputFormat::Sarif => rumdl::output::formatters::sarif::format_sarif_report(&all_file_warnings),
+            OutputFormat::Junit => {
+                rumdl::output::formatters::junit::format_junit_report(&all_file_warnings, duration_ms)
+            }
+            _ => unreachable!(),
+        };
+
+        output_writer.writeln(&output).unwrap_or_else(|e| {
+            eprintln!("Error writing output: {}", e);
+        });
+
+        // Exit with appropriate code
+        if has_issues {
+            process::exit(1);
+        }
         return;
     }
 
@@ -1835,101 +1966,99 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     // Choose processing strategy based on file count and fix mode
     let use_parallel = file_paths.len() > 1 && !args._fix; // Don't parallelize fixes due to file I/O conflicts
 
-    let (
-        has_issues,
-        files_with_issues,
-        total_issues,
-        total_issues_fixed,
-        total_fixable_issues,
-        total_files_processed,
-    ) = if use_parallel {
-        // Parallel processing for multiple files without fixes
-        let enabled_rules_arc = Arc::new(enabled_rules);
+    let (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed) =
+        if use_parallel {
+            // Parallel processing for multiple files without fixes
+            let enabled_rules_arc = Arc::new(enabled_rules);
 
-        let results: Vec<_> = file_paths
-            .par_iter()
-            .map(|file_path| {
-                process_file(
+            let results: Vec<_> = file_paths
+                .par_iter()
+                .map(|file_path| {
+                    process_file_with_formatter(
+                        file_path,
+                        &enabled_rules_arc,
+                        args._fix,
+                        args.verbose && !args.silent,
+                        quiet,
+                        &output_format,
+                        &output_writer,
+                    )
+                })
+                .collect();
+
+            // Aggregate results
+            let mut has_issues = false;
+            let mut files_with_issues = 0;
+            let mut total_issues = 0;
+            let mut total_issues_fixed = 0;
+            let mut total_fixable_issues = 0;
+            let total_files_processed = results.len();
+
+            for (file_has_issues, issues_found, issues_fixed, fixable_issues) in results {
+                total_issues_fixed += issues_fixed;
+                total_fixable_issues += fixable_issues;
+
+                if file_has_issues {
+                    has_issues = true;
+                    files_with_issues += 1;
+                    total_issues += issues_found;
+                }
+            }
+
+            (
+                has_issues,
+                files_with_issues,
+                total_issues,
+                total_issues_fixed,
+                total_fixable_issues,
+                total_files_processed,
+            )
+        } else {
+            // Sequential processing for single files or when fixing
+            let mut has_issues = false;
+            let mut files_with_issues = 0;
+            let mut total_issues = 0;
+            let mut total_issues_fixed = 0;
+            let mut total_fixable_issues = 0;
+            let mut total_files_processed = 0;
+
+            for file_path in &file_paths {
+                let (file_has_issues, issues_found, issues_fixed, fixable_issues) = process_file_with_formatter(
                     file_path,
-                    &enabled_rules_arc,
+                    &enabled_rules,
                     args._fix,
-                    args.verbose,
-                    args.quiet,
-                )
-            })
-            .collect();
+                    args.verbose && !args.silent,
+                    quiet,
+                    &output_format,
+                    &output_writer,
+                );
 
-        // Aggregate results
-        let mut has_issues = false;
-        let mut files_with_issues = 0;
-        let mut total_issues = 0;
-        let mut total_issues_fixed = 0;
-        let mut total_fixable_issues = 0;
-        let total_files_processed = results.len();
+                total_files_processed += 1;
+                total_issues_fixed += issues_fixed;
+                total_fixable_issues += fixable_issues;
 
-        for (file_has_issues, issues_found, issues_fixed, fixable_issues) in results {
-            total_issues_fixed += issues_fixed;
-            total_fixable_issues += fixable_issues;
-
-            if file_has_issues {
-                has_issues = true;
-                files_with_issues += 1;
-                total_issues += issues_found;
+                if file_has_issues {
+                    has_issues = true;
+                    files_with_issues += 1;
+                    total_issues += issues_found;
+                }
             }
-        }
 
-        (
-            has_issues,
-            files_with_issues,
-            total_issues,
-            total_issues_fixed,
-            total_fixable_issues,
-            total_files_processed,
-        )
-    } else {
-        // Sequential processing for single files or when fixing
-        let mut has_issues = false;
-        let mut files_with_issues = 0;
-        let mut total_issues = 0;
-        let mut total_issues_fixed = 0;
-        let mut total_fixable_issues = 0;
-        let mut total_files_processed = 0;
-
-        for file_path in &file_paths {
-            let (file_has_issues, issues_found, issues_fixed, fixable_issues) = process_file(
-                file_path,
-                &enabled_rules,
-                args._fix,
-                args.verbose,
-                args.quiet,
-            );
-
-            total_files_processed += 1;
-            total_issues_fixed += issues_fixed;
-            total_fixable_issues += fixable_issues;
-
-            if file_has_issues {
-                has_issues = true;
-                files_with_issues += 1;
-                total_issues += issues_found;
-            }
-        }
-
-        (
-            has_issues,
-            files_with_issues,
-            total_issues,
-            total_issues_fixed,
-            total_fixable_issues,
-            total_files_processed,
-        )
-    };
+            (
+                has_issues,
+                files_with_issues,
+                total_issues,
+                total_issues_fixed,
+                total_fixable_issues,
+                total_files_processed,
+            )
+        };
 
     let duration = start_time.elapsed();
     let duration_ms = duration.as_secs() * 1000 + duration.subsec_millis() as u64;
 
     // Print results summary if not in quiet mode
-    if !args.quiet {
+    if !quiet {
         print_results_from_checkargs(PrintResultsArgs {
             args,
             has_issues,
@@ -1943,10 +2072,14 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     }
 
     // Print profiling information if enabled and not in quiet mode
-    if args.profile && !args.quiet {
+    if args.profile && !quiet {
         match std::panic::catch_unwind(rumdl::profiling::get_report) {
-            Ok(report) => println!("\n{}", report),
-            Err(_) => println!("\nProfiling information not available"),
+            Ok(report) => {
+                output_writer.writeln(&format!("\n{}", report)).ok();
+            }
+            Err(_) => {
+                output_writer.writeln("\nProfiling information not available").ok();
+            }
         }
     }
 
@@ -1956,7 +2089,94 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     }
 }
 
-// Process file operation
+// Process file with output formatter
+fn process_file_with_formatter(
+    file_path: &str,
+    rules: &[Box<dyn Rule>],
+    _fix: bool,
+    verbose: bool,
+    quiet: bool,
+    output_format: &rumdl::output::OutputFormat,
+    output_writer: &rumdl::output::OutputWriter,
+) -> (bool, usize, usize, usize) {
+    let formatter = output_format.create_formatter();
+
+    // Call the original process_file_inner to get warnings
+    let (all_warnings, mut content, total_warnings, fixable_warnings) =
+        process_file_inner(file_path, rules, verbose, quiet);
+
+    if total_warnings == 0 {
+        return (false, 0, 0, 0);
+    }
+
+    // Format and output warnings
+    if !quiet && !_fix {
+        // In check mode, show warnings with [*] for fixable issues
+        let formatted = formatter.format_warnings(&all_warnings, file_path);
+        if !formatted.is_empty() {
+            output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                eprintln!("Error writing output: {}", e);
+            });
+        }
+    }
+
+    // Fix issues if requested
+    let mut warnings_fixed = 0;
+    if _fix {
+        warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, file_path, quiet);
+
+        // In fix mode, show warnings with [fixed] for issues that were fixed
+        if !quiet {
+            // Re-lint the fixed content to see which warnings remain
+            let fixed_ctx = LintContext::new(&content);
+            let mut remaining_warnings = Vec::new();
+
+            for rule in rules {
+                if let Ok(rule_warnings) = rule.check(&fixed_ctx) {
+                    remaining_warnings.extend(rule_warnings);
+                }
+            }
+
+            // Create a custom formatter that shows [fixed] instead of [*]
+            let mut output = String::new();
+            for warning in &all_warnings {
+                let was_fixed = warning.fix.is_some()
+                    && !remaining_warnings.iter().any(|w| {
+                        w.line == warning.line && w.column == warning.column && w.rule_name == warning.rule_name
+                    });
+
+                let rule_name = warning.rule_name.unwrap_or("unknown");
+                let fix_indicator = if was_fixed {
+                    " [fixed]"
+                } else if warning.fix.is_some() {
+                    " [*]"
+                } else {
+                    ""
+                };
+
+                // Format: file:line:column: [rule] message [fixed/*/]
+                let line = format!(
+                    "{}:{}:{}: [{:5}] {}{}",
+                    file_path, warning.line, warning.column, rule_name, warning.message, fix_indicator
+                );
+
+                output.push_str(&line);
+                output.push('\n');
+            }
+
+            if !output.is_empty() {
+                output.pop(); // Remove trailing newline
+                output_writer.writeln(&output).unwrap_or_else(|e| {
+                    eprintln!("Error writing output: {}", e);
+                });
+            }
+        }
+    }
+
+    (true, total_warnings, warnings_fixed, fixable_warnings)
+}
+
+// Process file operation - for legacy compatibility
 fn process_file(
     file_path: &str,
     rules: &[Box<dyn Rule>],
@@ -1964,6 +2184,20 @@ fn process_file(
     verbose: bool,
     quiet: bool,
 ) -> (bool, usize, usize, usize) {
+    // Use text formatter by default
+    let output_format = rumdl::output::OutputFormat::Text;
+    let output_writer = rumdl::output::OutputWriter::new(false, quiet, false);
+
+    process_file_with_formatter(file_path, rules, _fix, verbose, quiet, &output_format, &output_writer)
+}
+
+// Inner processing logic that returns warnings
+fn process_file_inner(
+    file_path: &str,
+    rules: &[Box<dyn Rule>],
+    verbose: bool,
+    quiet: bool,
+) -> (Vec<rumdl::rule::LintWarning>, String, usize, usize) {
     use std::time::Instant;
 
     let start_time = Instant::now();
@@ -1972,19 +2206,19 @@ fn process_file(
     }
 
     // Read file content efficiently
-    let mut content = match read_file_efficiently(Path::new(file_path)) {
+    let content = match read_file_efficiently(Path::new(file_path)) {
         Ok(content) => content,
         Err(e) => {
             if !quiet {
                 eprintln!("Error reading file {}: {}", file_path, e);
             }
-            return (false, 0, 0, 0);
+            return (Vec::new(), String::new(), 0, 0);
         }
     };
 
     // Early content analysis for ultra-fast skip decisions
     if content.is_empty() {
-        return (false, 0, 0, 0);
+        return (Vec::new(), String::new(), 0, 0);
     }
 
     let lint_start = Instant::now();
@@ -2015,101 +2249,6 @@ fn process_file(
     // Count fixable issues
     let fixable_warnings = all_warnings.iter().filter(|w| w.fix.is_some()).count();
 
-    // If no warnings, return early
-    if total_warnings == 0 {
-        return (false, 0, 0, 0);
-    }
-
-    // Print warnings regardless of fix mode (unless in quiet mode)
-    if !quiet {
-        // Print the individual warnings
-        for warning in &all_warnings {
-            let rule_name = warning.rule_name.unwrap_or("unknown");
-
-            // Add fix indicator if this warning has a fix
-            let fix_indicator = if warning.fix.is_some() {
-                if _fix {
-                    " [fixed]"
-                } else {
-                    " [*]"
-                }
-            } else {
-                ""
-            };
-
-            // Print the warning in the format: file:line:column: [rule] message [*]
-            println!(
-                "{}:{}:{}: {} {}{}",
-                file_path.blue().underline(),
-                warning.line.to_string().cyan(),
-                warning.column.to_string().cyan(),
-                format!("[{:5}]", rule_name).yellow(), // Pad rule name to 5 characters for alignment
-                warning.message,
-                fix_indicator.green()
-            );
-        }
-    }
-
-    // Fix issues if requested
-    let mut warnings_fixed = 0;
-    if _fix {
-        // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
-        for rule in rules {
-            let rule_warnings: Vec<_> = all_warnings
-                .iter()
-                .filter(|w| w.rule_name == Some(rule.name()))
-                .collect();
-
-            if !rule_warnings.is_empty() {
-                // Check if any warnings for this rule are in non-disabled regions
-                let has_non_disabled_warnings = rule_warnings.iter().any(|w| {
-                    !rumdl::rule::is_rule_disabled_at_line(
-                        &content,
-                        rule.name(),
-                        w.line.saturating_sub(1), // Convert to 0-based line index
-                    )
-                });
-
-                if has_non_disabled_warnings {
-                let ctx = LintContext::new(&content);
-                match rule.fix(&ctx) {
-                    Ok(fixed_content) => {
-                        if fixed_content != content {
-                            content = fixed_content;
-                            // Apply fixes for this rule - we consider all warnings for the rule fixed
-                                warnings_fixed += rule_warnings.len();
-                        }
-                    }
-                    Err(err) => {
-                        if !quiet {
-                            eprintln!(
-                                "{} Failed to apply fix for rule {}: {}",
-                                "Warning:".yellow().bold(),
-                                rule.name(),
-                                err
-                            );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Write fixed content back to file
-        if warnings_fixed > 0 {
-            if let Err(err) = std::fs::write(file_path, &content) {
-                if !quiet {
-                    eprintln!(
-                        "{} Failed to write fixed content to file {}: {}",
-                        "Error:".red().bold(),
-                        file_path,
-                        err
-                    );
-                }
-            }
-        }
-    }
-
     let lint_end_time = Instant::now();
     let lint_time = lint_end_time.duration_since(lint_start);
 
@@ -2122,7 +2261,76 @@ fn process_file(
         println!("Total processing time for {}: {:?}", file_path, total_time);
     }
 
-    (true, total_warnings, warnings_fixed, fixable_warnings)
+    (all_warnings, content, total_warnings, fixable_warnings)
+}
+
+// Apply fixes to content based on warnings
+fn apply_fixes(
+    rules: &[Box<dyn Rule>],
+    all_warnings: &[rumdl::rule::LintWarning],
+    content: &mut String,
+    file_path: &str,
+    quiet: bool,
+) -> usize {
+    let mut warnings_fixed = 0;
+
+    // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
+    for rule in rules {
+        let rule_warnings: Vec<_> = all_warnings
+            .iter()
+            .filter(|w| w.rule_name == Some(rule.name()))
+            .collect();
+
+        if !rule_warnings.is_empty() {
+            // Check if any warnings for this rule are in non-disabled regions
+            let has_non_disabled_warnings = rule_warnings.iter().any(|w| {
+                !rumdl::rule::is_rule_disabled_at_line(
+                    content,
+                    rule.name(),
+                    w.line.saturating_sub(1), // Convert to 0-based line index
+                )
+            });
+
+            if has_non_disabled_warnings {
+                let ctx = LintContext::new(content);
+                match rule.fix(&ctx) {
+                    Ok(fixed_content) => {
+                        if fixed_content != *content {
+                            *content = fixed_content;
+                            // Apply fixes for this rule - we consider all warnings for the rule fixed
+                            warnings_fixed += rule_warnings.len();
+                        }
+                    }
+                    Err(err) => {
+                        if !quiet {
+                            eprintln!(
+                                "{} Failed to apply fix for rule {}: {}",
+                                "Warning:".yellow().bold(),
+                                rule.name(),
+                                err
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Write fixed content back to file
+    if warnings_fixed > 0 {
+        if let Err(err) = std::fs::write(file_path, content) {
+            if !quiet {
+                eprintln!(
+                    "{} Failed to write fixed content to file {}: {}",
+                    "Error:".red().bold(),
+                    file_path,
+                    err
+                );
+            }
+        }
+    }
+
+    warnings_fixed
 }
 
 fn process_file_collect_warnings(

@@ -1,7 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::{calculate_trailing_range, LineIndex};
 use crate::utils::regex_cache::get_cached_regex;
-use crate::rule_config_serde::RuleConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -32,11 +32,10 @@ impl MD009TrailingSpaces {
             config: MD009Config { br_spaces, strict },
         }
     }
-    
+
     pub fn from_config_struct(config: MD009Config) -> Self {
         Self { config }
     }
-
 
     fn is_empty_blockquote_line(line: &str) -> bool {
         let trimmed = line.trim_start();
@@ -85,8 +84,7 @@ impl Rule for MD009TrailingSpaces {
             if line.trim().is_empty() {
                 if trailing_spaces > 0 {
                     // Calculate precise character range for all trailing spaces on empty line
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_trailing_range(line_num + 1, line, 0);
+                    let (start_line, start_col, end_line, end_col) = calculate_trailing_range(line_num + 1, line, 0);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
@@ -116,7 +114,7 @@ impl Rule for MD009TrailingSpaces {
             }
 
             // Check if it's a valid line break
-            // Special handling: if the content ends with a newline, the last line from .lines() 
+            // Special handling: if the content ends with a newline, the last line from .lines()
             // is not really the "last line" in terms of trailing spaces rules
             let is_truly_last_line = line_num == lines.len() - 1 && !content.ends_with('\n');
             if !self.config.strict && !is_truly_last_line && trailing_spaces == self.config.br_spaces {
@@ -139,7 +137,11 @@ impl Rule for MD009TrailingSpaces {
                     message: "Empty blockquote line needs a space after >".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range_with_length(line_num + 1, trimmed.len() + 1, line.len() - trimmed.len()),
+                        range: _line_index.line_col_to_byte_range_with_length(
+                            line_num + 1,
+                            trimmed.len() + 1,
+                            line.len() - trimmed.len(),
+                        ),
                         replacement: " ".to_string(),
                     }),
                 });
@@ -164,8 +166,12 @@ impl Rule for MD009TrailingSpaces {
                 },
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: _line_index.line_col_to_byte_range_with_length(line_num + 1, trimmed.len() + 1, trailing_spaces),
-                    replacement: if !self.config.strict && !is_truly_last_line && trailing_spaces >= 1 {
+                    range: _line_index.line_col_to_byte_range_with_length(
+                        line_num + 1,
+                        trimmed.len() + 1,
+                        trailing_spaces,
+                    ),
+                    replacement: if !self.config.strict && !is_truly_last_line && trailing_spaces > 0 {
                         " ".repeat(self.config.br_spaces)
                     } else {
                         String::new()
@@ -226,13 +232,12 @@ impl Rule for MD009TrailingSpaces {
             // Handle lines with trailing spaces
             let trailing_spaces = Self::count_trailing_spaces(line);
             let is_truly_last_line = i == lines.len() - 1 && !content.ends_with('\n');
-            if !self.config.strict && !is_truly_last_line && trailing_spaces >= 1 {
-                // This is a line break (intentional trailing spaces)
-                result.push_str(trimmed);
+
+            result.push_str(trimmed);
+
+            // In non-strict mode, preserve line breaks by normalizing to br_spaces
+            if !self.config.strict && !is_truly_last_line && trailing_spaces > 0 {
                 result.push_str(&" ".repeat(self.config.br_spaces));
-            } else {
-                // Normal line, just use trimmed content
-                result.push_str(trimmed);
             }
             result.push('\n');
         }
@@ -257,7 +262,7 @@ impl Rule for MD009TrailingSpaces {
         let default_config = MD009Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;
         let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-        
+
         if let toml::Value::Table(table) = toml_value {
             if !table.is_empty() {
                 Some((MD009Config::RULE_NAME.to_string(), toml::Value::Table(table)))

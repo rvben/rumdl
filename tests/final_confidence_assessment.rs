@@ -9,29 +9,29 @@ use std::time::Instant;
 #[test]
 fn test_comprehensive_release_validation() {
     println!("🚀 Running Final Release Confidence Assessment");
-    
+
     // Core functionality validation
     validate_core_functionality();
-    
-    // CLI/LSP consistency validation  
+
+    // CLI/LSP consistency validation
     validate_cli_lsp_consistency();
-    
+
     // Performance validation
     validate_performance_characteristics();
-    
+
     // Unicode and edge case validation
     validate_unicode_and_edge_cases();
-    
+
     // Integration validation
     validate_integration_scenarios();
-    
+
     println!("✅ All validation checks passed!");
     println!("🎯 System is ready for release with high confidence");
 }
 
 fn validate_core_functionality() {
     println!("📋 Validating Core Functionality...");
-    
+
     let test_content = r#"# Test Document
 This is a test paragraph with trailing spaces   
 
@@ -46,7 +46,7 @@ code without language
 ```
 Another paragraph.
 "#;
-    
+
     let critical_rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD001HeadingIncrement::default()),
         Box::new(MD009TrailingSpaces::default()),
@@ -55,80 +55,93 @@ Another paragraph.
         Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD040FencedCodeLanguage::default()),
     ];
-    
+
     let ctx = LintContext::new(test_content);
     let mut total_warnings = 0;
-    
+
     for rule in &critical_rules {
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
         total_warnings += warnings.len();
-        
+
         // Each rule should find expected issues
-        assert!(!warnings.is_empty(), 
-            "Rule {} should find issues in test content", rule.name());
-        
+        assert!(
+            !warnings.is_empty(),
+            "Rule {} should find issues in test content",
+            rule.name()
+        );
+
         // Fixes should work without errors
         if !warnings.is_empty() {
             let _fixed = rule.fix(&ctx).expect("Rule fix should succeed");
         }
     }
-    
-    assert!(total_warnings >= 5, 
-        "Should find multiple issues in test content, found {}", total_warnings);
-    
-    println!("   ✓ Core rules functioning correctly ({} warnings found)", total_warnings);
+
+    assert!(
+        total_warnings >= 5,
+        "Should find multiple issues in test content, found {}",
+        total_warnings
+    );
+
+    println!(
+        "   ✓ Core rules functioning correctly ({} warnings found)",
+        total_warnings
+    );
 }
 
 fn validate_cli_lsp_consistency() {
     println!("🔄 Validating CLI/LSP Consistency...");
-    
+
     let test_cases = vec![
         // Basic heading issues
         "# Heading\nContent without spacing",
-        
         // Trailing spaces
         "Line with trailing spaces   \nAnother line   ",
-        
         // Mixed issues
         "# Title\nContent   \n##Bad Heading\nMore content",
-        
         // Line ending variations
         "# Heading 1\r\nContent with CRLF\n# Heading 2\nContent with LF",
     ];
-    
+
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD018NoMissingSpaceAtx::default()),
         Box::new(MD022BlanksAroundHeadings::new()),
     ];
-    
+
     let mut consistency_checks = 0;
-    
+
     for (i, content) in test_cases.iter().enumerate() {
         for rule in &rules {
             let ctx = LintContext::new(content);
             let warnings = rule.check(&ctx).expect("Rule check should succeed");
-            
+
             if !warnings.is_empty() {
                 let cli_fixed = rule.fix(&ctx).expect("CLI fix should succeed");
-                let lsp_fixed = apply_warning_fixes(content, &warnings)
-                    .expect("LSP fix should succeed");
-                
-                assert_eq!(cli_fixed, lsp_fixed,
-                    "CLI/LSP inconsistency in test case {} with rule {}", i, rule.name());
-                
+                let lsp_fixed = apply_warning_fixes(content, &warnings).expect("LSP fix should succeed");
+
+                assert_eq!(
+                    cli_fixed,
+                    lsp_fixed,
+                    "CLI/LSP inconsistency in test case {} with rule {}",
+                    i,
+                    rule.name()
+                );
+
                 consistency_checks += 1;
             }
         }
     }
-    
+
     assert!(consistency_checks > 0, "Should have performed consistency checks");
-    println!("   ✓ CLI/LSP consistency validated ({} checks passed)", consistency_checks);
+    println!(
+        "   ✓ CLI/LSP consistency validated ({} checks passed)",
+        consistency_checks
+    );
 }
 
 fn validate_performance_characteristics() {
     println!("⚡ Validating Performance Characteristics...");
-    
+
     // Test responsiveness on typical content
     let typical_content = create_typical_document();
     let rules: Vec<Box<dyn Rule>> = vec![
@@ -136,104 +149,117 @@ fn validate_performance_characteristics() {
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD031BlanksAroundFences::default()),
     ];
-    
+
     let start_time = Instant::now();
     let ctx = LintContext::new(&typical_content);
-    
+
     for rule in &rules {
         let rule_start = Instant::now();
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
         let rule_duration = rule_start.elapsed();
-        
+
         // Should be very responsive for typical content
-        assert!(rule_duration.as_millis() < 50,
-            "Rule {} took too long on typical content: {}ms", 
-            rule.name(), rule_duration.as_millis());
-        
+        assert!(
+            rule_duration.as_millis() < 50,
+            "Rule {} took too long on typical content: {}ms",
+            rule.name(),
+            rule_duration.as_millis()
+        );
+
         // Test fix performance
         if !warnings.is_empty() {
             let fix_start = Instant::now();
-            let _fixed = apply_warning_fixes(&typical_content, &warnings)
-                .expect("Fix should succeed");
+            let _fixed = apply_warning_fixes(&typical_content, &warnings).expect("Fix should succeed");
             let fix_duration = fix_start.elapsed();
-            
-            assert!(fix_duration.as_millis() < 30,
-                "Fix for {} took too long: {}ms", rule.name(), fix_duration.as_millis());
+
+            assert!(
+                fix_duration.as_millis() < 30,
+                "Fix for {} took too long: {}ms",
+                rule.name(),
+                fix_duration.as_millis()
+            );
         }
     }
-    
+
     let total_duration = start_time.elapsed();
-    assert!(total_duration.as_millis() < 200,
-        "Total processing took too long: {}ms", total_duration.as_millis());
-    
-    println!("   ✓ Performance characteristics validated ({}ms total)", total_duration.as_millis());
+    assert!(
+        total_duration.as_millis() < 200,
+        "Total processing took too long: {}ms",
+        total_duration.as_millis()
+    );
+
+    println!(
+        "   ✓ Performance characteristics validated ({}ms total)",
+        total_duration.as_millis()
+    );
 }
 
 fn validate_unicode_and_edge_cases() {
     println!("🌍 Validating Unicode and Edge Cases...");
-    
+
     let long_line = format!("# Heading\n{}", "a".repeat(1000));
     let edge_cases = vec![
         // Unicode headings
         "# 中文标题\n内容",
-        
         // Emoji in content
         "# Test 🚀\nContent with emojis 😀",
-        
         // Very long lines
         &long_line,
-        
         // Empty content
         "",
-        
         // Only whitespace
         "   \n\t\n   ",
-        
         // Mixed line endings
         "# Title\r\n\nContent\n",
     ];
-    
+
     let rule = MD009TrailingSpaces::default();
     let mut edge_case_checks = 0;
-    
+
     for (i, content) in edge_cases.iter().enumerate() {
         let ctx = LintContext::new(content);
-        
+
         // Should not panic or error on edge cases
         let result = rule.check(&ctx);
-        assert!(result.is_ok(), 
-            "Rule check failed on edge case {}: {:?}", i, result.err());
-        
+        assert!(
+            result.is_ok(),
+            "Rule check failed on edge case {}: {:?}",
+            i,
+            result.err()
+        );
+
         let warnings = result.unwrap();
-        
+
         // Test fixes don't break on edge cases
         if !warnings.is_empty() {
             let fix_result = apply_warning_fixes(content, &warnings);
-            assert!(fix_result.is_ok(),
-                "Fix failed on edge case {}: {:?}", i, fix_result.err());
+            assert!(
+                fix_result.is_ok(),
+                "Fix failed on edge case {}: {:?}",
+                i,
+                fix_result.err()
+            );
         }
-        
+
         edge_case_checks += 1;
     }
-    
+
     println!("   ✓ Unicode and edge cases validated ({} cases)", edge_case_checks);
 }
 
 fn validate_integration_scenarios() {
     println!("🔌 Validating Integration Scenarios...");
-    
+
     // Simulate real-world usage patterns
     let integration_tests = vec![
         // README file scenario
         create_readme_scenario(),
-        
-        // Documentation file scenario  
+        // Documentation file scenario
         create_docs_scenario(),
-        
         // Mixed content scenario
         create_mixed_content_scenario(),
     ];
-    
+
     let comprehensive_rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD001HeadingIncrement::default()),
         Box::new(MD009TrailingSpaces::default()),
@@ -241,31 +267,34 @@ fn validate_integration_scenarios() {
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD031BlanksAroundFences::default()),
     ];
-    
+
     for (scenario_name, content) in &integration_tests {
         let ctx = LintContext::new(content);
         let mut total_warnings = 0;
-        
+
         for rule in &comprehensive_rules {
             let warnings = rule.check(&ctx).expect("Rule check should succeed");
             total_warnings += warnings.len();
-            
+
             // Test that fixes can be applied successfully
             if !warnings.is_empty() {
                 let cli_fixed = rule.fix(&ctx).expect("CLI fix should succeed");
-                let lsp_fixed = apply_warning_fixes(content, &warnings)
-                    .expect("LSP fix should succeed");
-                
+                let lsp_fixed = apply_warning_fixes(content, &warnings).expect("LSP fix should succeed");
+
                 // Consistency check
-                assert_eq!(cli_fixed, lsp_fixed,
-                    "CLI/LSP inconsistency in {} scenario with rule {}", 
-                    scenario_name, rule.name());
+                assert_eq!(
+                    cli_fixed,
+                    lsp_fixed,
+                    "CLI/LSP inconsistency in {} scenario with rule {}",
+                    scenario_name,
+                    rule.name()
+                );
             }
         }
-        
+
         println!("   ✓ {} scenario: {} warnings processed", scenario_name, total_warnings);
     }
-    
+
     println!("   ✓ Integration scenarios validated");
 }
 
@@ -325,11 +354,14 @@ We welcome contributions! Please see our contributing guide for details.
 ## License
 
 This project is licensed under the MIT License.
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn create_readme_scenario() -> (&'static str, String) {
-    ("README", r#"# My Project
+    (
+        "README",
+        r#"# My Project
 
 [![Build Status](https://img.shields.io/badge/build-passing-green)](https://example.com)
 
@@ -373,11 +405,15 @@ Please read CONTRIBUTING.md for details.
 ## License
 
 MIT License - see LICENSE file.
-"#.to_string())
+"#
+        .to_string(),
+    )
 }
 
 fn create_docs_scenario() -> (&'static str, String) {
-    ("Documentation", r#"# API Documentation
+    (
+        "Documentation",
+        r#"# API Documentation
 
 This document describes the public API.
 
@@ -435,11 +471,15 @@ The API returns standard HTTP status codes:
 ## Rate Limiting
 
 Requests are limited to 1000 per hour per API key.
-"#.to_string())
+"#
+        .to_string(),
+    )
 }
 
 fn create_mixed_content_scenario() -> (&'static str, String) {
-    ("Mixed Content", r#"# Mixed Content Test
+    (
+        "Mixed Content",
+        r#"# Mixed Content Test
 
 This file contains various markdown elements to test comprehensive processing.
 
@@ -508,5 +548,7 @@ You can also use ***bold italic*** for emphasis.
 ---
 
 That's the end of the mixed content test.
-"#.to_string())
+"#
+        .to_string(),
+    )
 }

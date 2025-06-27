@@ -15,8 +15,7 @@ fn test_consistent_fenced_blocks() {
 #[test]
 fn test_consistent_indented_blocks() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
-    let content =
-        "# Code blocks\n\n    code here\n    more code\n\n    another block\n    continues";
+    let content = "# Code blocks\n\n    code here\n    more code\n\n    another block\n    continues";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -58,10 +57,7 @@ fn test_mixed_blocks_prefer_indented() {
         fixed.contains("    fenced block") && !fixed.contains("```\nfenced block\n```"),
         "Should convert fenced blocks to indented"
     );
-    assert!(
-        fixed.contains("    indented block"),
-        "Should preserve indented blocks"
-    );
+    assert!(fixed.contains("    indented block"), "Should preserve indented blocks");
 }
 
 #[test]
@@ -92,10 +88,7 @@ fn test_consistent_style_indented_first() {
     assert!(!result.is_empty(), "Should detect inconsistent code blocks");
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
-    assert!(
-        fixed.contains("    indented block"),
-        "Should preserve indented blocks"
-    );
+    assert!(fixed.contains("    indented block"), "Should preserve indented blocks");
     assert!(
         fixed.contains("    fenced block") && !fixed.contains("```\nfenced block\n```"),
         "Should convert fenced blocks to indented"
@@ -168,13 +161,16 @@ console.log("Hello");
 
 The above shows proper markdown syntax.
 "#;
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should not detect any issues with markdown example blocks
-    assert!(result.is_empty(), "Should not flag code blocks inside markdown examples as unclosed");
-    
+    assert!(
+        result.is_empty(),
+        "Should not flag code blocks inside markdown examples as unclosed"
+    );
+
     // Test that fix doesn't break markdown examples
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(content, fixed, "Should not modify markdown example blocks");
@@ -187,7 +183,10 @@ fn test_unclosed_code_block() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect exactly one unclosed code block");
-    assert!(result[0].message.contains("never closed"), "Should mention that the block is unclosed");
+    assert!(
+        result[0].message.contains("never closed"),
+        "Should mention that the block is unclosed"
+    );
     assert_eq!(result[0].line, 3, "Should point to the opening fence line");
 
     let fixed = rule.fix(&ctx).unwrap();
@@ -202,8 +201,14 @@ fn test_unclosed_tilde_code_block() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect exactly one unclosed code block");
-    assert!(result[0].message.contains("never closed"), "Should mention that the block is unclosed");
-    assert!(result[0].message.contains("~~~"), "Should mention the tilde fence marker");
+    assert!(
+        result[0].message.contains("never closed"),
+        "Should mention that the block is unclosed"
+    );
+    assert!(
+        result[0].message.contains("~~~"),
+        "Should mention the tilde fence marker"
+    );
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("~~~javascript"), "Should preserve the opening fence");
@@ -217,15 +222,24 @@ fn test_nested_code_block_opening() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-
     assert_eq!(result.len(), 1, "Should detect exactly one nested code block issue");
-    assert_eq!(result[0].line, 3, "Should flag the opening line (```bash) not the nested line");
-    assert!(result[0].message.contains("Code block '```' should be closed before starting new one at line 5"),
-           "Should explain the problem clearly");
+    assert_eq!(
+        result[0].line, 3,
+        "Should flag the opening line (```bash) not the nested line"
+    );
+    assert!(
+        result[0]
+            .message
+            .contains("Code block '```' should be closed before starting new one at line 5"),
+        "Should explain the problem clearly"
+    );
 
     // Test fix - should add closing fence before the nested opening
     let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("```bash\n\n```\n\n```markdown"), "Should close bash block before markdown block");
+    assert!(
+        fixed.contains("```bash\n\n```\n\n```markdown"),
+        "Should close bash block before markdown block"
+    );
 }
 
 #[test]
@@ -237,7 +251,9 @@ fn test_nested_code_block_different_languages() {
 
     assert_eq!(result.len(), 1, "Should detect nested opening");
     assert_eq!(result[0].line, 1, "Should flag the opening python block");
-    assert!(result[0].message.contains("Code block '```' should be closed before starting new one at line 3"));
+    assert!(result[0]
+        .message
+        .contains("Code block '```' should be closed before starting new one at line 3"));
 }
 
 #[test]
@@ -278,13 +294,16 @@ And unclosed:
 ```rust
 fn main() {
 ```
-```"#;  // Close the markdown block
-    
+```"#; // Close the markdown block
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should not flag anything - all nested blocks are inside markdown documentation
-    assert!(result.is_empty(), "Nested blocks in markdown documentation should be allowed");
+    assert!(
+        result.is_empty(),
+        "Nested blocks in markdown documentation should be allowed"
+    );
 }
 
 #[test]
@@ -292,10 +311,10 @@ fn test_nested_same_language() {
     // Test nested blocks with same language (not markdown)
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "```python\n\n```python\nprint('nested')\n```";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     assert_eq!(result.len(), 1, "Should flag nested non-markdown blocks");
     assert!(result[0].message.contains("should be closed before starting new one"));
 }
@@ -317,10 +336,10 @@ print("code")
 
 More content
 ````"#;
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     assert!(result.is_empty(), "Deeply nested markdown blocks should be allowed");
 }
 
@@ -329,10 +348,10 @@ fn test_mixed_fence_lengths() {
     // Test with different fence lengths
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "````python\n\n```javascript\ncode\n```\n\n````";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should work correctly with 4-backtick fences
     assert!(result.is_empty(), "Different fence lengths should work correctly");
 }
@@ -342,10 +361,10 @@ fn test_adjacent_code_blocks() {
     // Test code blocks that are adjacent (not nested)
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "```rust\ncode1\n```\n```python\ncode2\n```";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     assert!(result.is_empty(), "Adjacent blocks should not be flagged as nested");
 }
 
@@ -354,10 +373,10 @@ fn test_markdown_block_at_end() {
     // Test markdown block that ends the document
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "# Doc\n\n```markdown\n## Example\n\n```rust\nfn test() {}\n```";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // The markdown block is unclosed but contains properly formatted examples
     assert_eq!(result.len(), 1, "Should flag unclosed markdown block");
     assert!(result[0].message.contains("never closed"));
@@ -377,9 +396,9 @@ fn test_fence_in_list_context() {
    def also_in_list():
        pass
    ```"#;
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     assert!(result.is_empty(), "Code blocks in lists should not cause issues");
 }

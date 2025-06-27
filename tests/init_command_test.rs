@@ -27,9 +27,9 @@ mod init_command_tests {
         let assert = cmd.arg("init").assert();
 
         // Check that the command succeeded
-        assert.success().stdout(predicates::str::contains(
-            "Created default configuration file",
-        ));
+        assert
+            .success()
+            .stdout(predicates::str::contains("Created default configuration file"));
 
         // Check that the config file was created
         assert!(config_path.exists());

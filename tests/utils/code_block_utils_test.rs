@@ -153,10 +153,7 @@ fn test_performance_code_block_utils() {
     assert!(info.has_code_spans());
 
     println!("CodeBlockInfo creation time: {:?}", create_time);
-    println!(
-        "is_in_code_block check time for all lines: {:?}",
-        is_in_code_block_time
-    );
+    println!("is_in_code_block check time for all lines: {:?}", is_in_code_block_time);
 
     // Simple verification that our test code works
     let total_lines = content.lines().count();
@@ -169,7 +166,10 @@ fn test_indented_list_items_not_code_blocks() {
     let content = "- Item 1\n    - Nested item\n    - Another nested\n- Item 2";
     // Using LintContext to get proper code block detection
     let ctx = rumdl::lint_context::LintContext::new(content);
-    assert!(ctx.code_blocks.is_empty(), "Indented list items should not be detected as code blocks");
+    assert!(
+        ctx.code_blocks.is_empty(),
+        "Indented list items should not be detected as code blocks"
+    );
 }
 
 #[test]
@@ -177,7 +177,10 @@ fn test_numbered_list_indentation() {
     // Test numbered lists with various formats
     let content = "1. First item\n    1) Nested with parenthesis\n    2. Another nested\n2. Second item";
     let ctx = rumdl::lint_context::LintContext::new(content);
-    assert!(ctx.code_blocks.is_empty(), "Indented numbered list items should not be detected as code blocks");
+    assert!(
+        ctx.code_blocks.is_empty(),
+        "Indented numbered list items should not be detected as code blocks"
+    );
 }
 
 #[test]
@@ -225,7 +228,10 @@ fn test_tab_indented_lists() {
     // Test with tab indentation
     let content = "-\tTab after marker\n\t-\tNested with tabs\n\t\tContent";
     let ctx = rumdl::lint_context::LintContext::new(content);
-    assert!(ctx.code_blocks.is_empty(), "Tab-indented lists should not be code blocks");
+    assert!(
+        ctx.code_blocks.is_empty(),
+        "Tab-indented lists should not be code blocks"
+    );
 }
 
 #[test]
@@ -233,5 +239,8 @@ fn test_edge_case_single_digit_lists() {
     // Test edge cases with single digit followed by period/paren
     let content = "5. Five\n    5) Sub item\n6) Six with paren\n    6. Sub item";
     let ctx = rumdl::lint_context::LintContext::new(content);
-    assert!(ctx.code_blocks.is_empty(), "All numbered list formats should be recognized");
+    assert!(
+        ctx.code_blocks.is_empty(),
+        "All numbered list formats should be recognized"
+    );
 }

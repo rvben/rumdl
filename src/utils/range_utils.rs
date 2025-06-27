@@ -64,7 +64,10 @@ impl LineIndex {
     pub fn whole_line_range(&self, line: usize) -> Range<usize> {
         let line_idx = line.saturating_sub(1);
         let start = *self.line_starts.get(line_idx).unwrap_or(&self.content.len());
-        let end = self.line_starts.get(line_idx + 1).copied()
+        let end = self
+            .line_starts
+            .get(line_idx + 1)
+            .copied()
             .unwrap_or(self.content.len());
         start..end
     }
@@ -74,11 +77,11 @@ impl LineIndex {
     pub fn line_text_range(&self, line: usize, start_col: usize, end_col: usize) -> Range<usize> {
         let line_idx = line.saturating_sub(1);
         let line_start = *self.line_starts.get(line_idx).unwrap_or(&self.content.len());
-        
+
         // Get the actual line content to ensure we don't exceed bounds
         let current_line = self.content.lines().nth(line_idx).unwrap_or("");
         let line_len = current_line.len();
-        
+
         let start = line_start + start_col.saturating_sub(1).min(line_len);
         let end = line_start + end_col.saturating_sub(1).min(line_len);
         start..end.max(start)
@@ -89,7 +92,7 @@ impl LineIndex {
     pub fn line_content_range(&self, line: usize) -> Range<usize> {
         let line_idx = line.saturating_sub(1);
         let line_start = *self.line_starts.get(line_idx).unwrap_or(&self.content.len());
-        
+
         let current_line = self.content.lines().nth(line_idx).unwrap_or("");
         let line_end = line_start + current_line.len();
         line_start..line_end
@@ -214,10 +217,7 @@ impl LineIndex {
 
                 // Check if this line matches the closing fence pattern for the outer block
                 if trimmed.starts_with(&active_fence_type.to_string().repeat(3)) {
-                    let count = trimmed
-                        .chars()
-                        .take_while(|&c| c == active_fence_type)
-                        .count();
+                    let count = trimmed.chars().take_while(|&c| c == active_fence_type).count();
                     let remaining = if trimmed.len() > count {
                         trimmed[count..].trim()
                     } else {
@@ -229,14 +229,12 @@ impl LineIndex {
                     // 2. It has at least as many fence characters as the opening fence
                     // 3. It has no content after the fence characters (except for whitespace)
                     // 4. Its indentation level is less than or equal to the opening fence
-                    let is_valid_closing_fence = count >= block_fence_length
-                        && remaining.is_empty()
-                        && indent <= block_indent;
+                    let is_valid_closing_fence =
+                        count >= block_fence_length && remaining.is_empty() && indent <= block_indent;
 
                     // For nested code blocks in markdown, the first backtick fence after the nested content
                     // should be recognized as the closing fence for the outer block
-                    let is_nested_closing =
-                        nested_fence_end.is_some() && i == nested_fence_end.unwrap();
+                    let is_nested_closing = nested_fence_end.is_some() && i == nested_fence_end.unwrap();
 
                     // Skip nested closing fences
                     if is_valid_closing_fence && !is_nested_closing {
@@ -252,11 +250,7 @@ impl LineIndex {
 }
 
 /// Calculate end position for a single-line range
-pub fn calculate_single_line_range(
-    line: usize,
-    start_col: usize,
-    length: usize,
-) -> (usize, usize, usize, usize) {
+pub fn calculate_single_line_range(line: usize, start_col: usize, length: usize) -> (usize, usize, usize, usize) {
     (line, start_col, line, start_col + length)
 }
 
@@ -275,18 +269,12 @@ pub fn calculate_match_range(
 ) -> (usize, usize, usize, usize) {
     // Convert byte positions to character positions
     let char_start = line_content[..match_start].chars().count() + 1; // 1-indexed
-    let char_len = line_content[match_start..match_start + match_len]
-        .chars()
-        .count();
+    let char_len = line_content[match_start..match_start + match_len].chars().count();
     (line, char_start, line, char_start + char_len)
 }
 
 /// Calculate range for trailing content (like trailing spaces)
-pub fn calculate_trailing_range(
-    line: usize,
-    line_content: &str,
-    content_end: usize,
-) -> (usize, usize, usize, usize) {
+pub fn calculate_trailing_range(line: usize, line_content: &str, content_end: usize) -> (usize, usize, usize, usize) {
     let char_content_end = line_content[..content_end].chars().count() + 1; // 1-indexed
     let line_char_len = line_content.chars().count() + 1;
     (line, char_content_end, line, line_char_len)
@@ -340,11 +328,7 @@ pub fn calculate_list_marker_range(
 }
 
 /// Calculate range that exceeds a limit (like line length)
-pub fn calculate_excess_range(
-    line: usize,
-    line_content: &str,
-    limit: usize,
-) -> (usize, usize, usize, usize) {
+pub fn calculate_excess_range(line: usize, line_content: &str, limit: usize) -> (usize, usize, usize, usize) {
     let char_limit = std::cmp::min(limit, line_content.chars().count());
     let line_char_len = line_content.chars().count() + 1;
     (line, char_limit + 1, line, line_char_len)
@@ -378,8 +362,7 @@ mod tests {
         let content = "Text <div>content</div> more";
         let tag_start = 5; // Position of '<'
         let tag_len = 5; // Length of "<div>"
-        let (start_line, start_col, end_line, end_col) =
-            calculate_match_range(1, content, tag_start, tag_len);
+        let (start_line, start_col, end_line, end_col) = calculate_match_range(1, content, tag_start, tag_len);
         assert_eq!(start_line, 1);
         assert_eq!(start_col, 6); // 1-indexed
         assert_eq!(end_line, 1);
@@ -390,8 +373,7 @@ mod tests {
     fn test_trailing_range() {
         let content = "Text content   "; // 3 trailing spaces
         let content_end = 12; // End of "Text content"
-        let (start_line, start_col, end_line, end_col) =
-            calculate_trailing_range(1, content, content_end);
+        let (start_line, start_col, end_line, end_col) = calculate_trailing_range(1, content, content_end);
         assert_eq!(start_line, 1);
         assert_eq!(start_col, 13); // content_end + 1 (1-indexed)
         assert_eq!(end_line, 1);
@@ -409,19 +391,19 @@ mod tests {
         assert_eq!(end_col, 36); // Total length + 1 (35 chars + 1 = 36)
     }
 
-    #[test] 
+    #[test]
     fn test_whole_line_range() {
         let content = "Line 1\nLine 2\nLine 3".to_string();
         let line_index = LineIndex::new(content);
-        
+
         // Test first line (includes newline)
         let range = line_index.whole_line_range(1);
         assert_eq!(range, 0..7); // "Line 1\n"
-        
+
         // Test middle line
         let range = line_index.whole_line_range(2);
         assert_eq!(range, 7..14); // "Line 2\n"
-        
+
         // Test last line (no newline)
         let range = line_index.whole_line_range(3);
         assert_eq!(range, 14..20); // "Line 3"
@@ -431,15 +413,15 @@ mod tests {
     fn test_line_content_range() {
         let content = "Line 1\nLine 2\nLine 3".to_string();
         let line_index = LineIndex::new(content);
-        
+
         // Test first line content (excludes newline)
         let range = line_index.line_content_range(1);
         assert_eq!(range, 0..6); // "Line 1"
-        
+
         // Test middle line content
         let range = line_index.line_content_range(2);
         assert_eq!(range, 7..13); // "Line 2"
-        
+
         // Test last line content
         let range = line_index.line_content_range(3);
         assert_eq!(range, 14..20); // "Line 3"
@@ -449,15 +431,15 @@ mod tests {
     fn test_line_text_range() {
         let content = "Hello world\nAnother line".to_string();
         let line_index = LineIndex::new(content);
-        
+
         // Test partial text in first line
         let range = line_index.line_text_range(1, 1, 5); // "Hell"
         assert_eq!(range, 0..4);
-        
-        // Test partial text in second line  
+
+        // Test partial text in second line
         let range = line_index.line_text_range(2, 1, 7); // "Anothe"
         assert_eq!(range, 12..18);
-        
+
         // Test bounds checking
         let range = line_index.line_text_range(1, 1, 100); // Should clamp to line end
         assert_eq!(range, 0..11); // "Hello world"

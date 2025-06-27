@@ -41,8 +41,7 @@ fn test_rumdl_lsp_config_serde() {
     let json = serde_json::to_string(&config).expect("Failed to serialize config");
 
     // Test deserialization
-    let deserialized: RumdlLspConfig =
-        serde_json::from_str(&json).expect("Failed to deserialize config");
+    let deserialized: RumdlLspConfig = serde_json::from_str(&json).expect("Failed to deserialize config");
 
     assert_eq!(deserialized.config_path, config.config_path);
     assert_eq!(deserialized.enable_linting, config.enable_linting);
@@ -171,7 +170,8 @@ async fn test_lsp_server_initialization() {
     let (service, _socket) = LspService::new(RumdlLanguageServer::new);
 
     let init_params = InitializeParams {
-        process_id: None, root_path: None, // Deprecated but required
+        process_id: None,
+        root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///test").unwrap()),
         initialization_options: None,
         capabilities: ClientCapabilities::default(),
@@ -212,7 +212,8 @@ async fn test_lsp_server_initialization_with_config() {
     };
 
     let init_params = InitializeParams {
-        process_id: None, root_path: None, // Deprecated but required
+        process_id: None,
+        root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///test").unwrap()),
         initialization_options: Some(serde_json::to_value(custom_config).unwrap()),
         capabilities: ClientCapabilities::default(),
@@ -234,7 +235,8 @@ async fn test_document_lifecycle() {
 
     // Initialize server first
     let init_params = InitializeParams {
-        process_id: None, root_path: None, // Deprecated but required
+        process_id: None,
+        root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///test").unwrap()),
         initialization_options: None,
         capabilities: ClientCapabilities::default(),
@@ -300,7 +302,8 @@ async fn test_code_action_request() {
 
     // Initialize server
     let init_params = InitializeParams {
-        process_id: None, root_path: None, // Deprecated but required
+        process_id: None,
+        root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///test").unwrap()),
         initialization_options: None,
         capabilities: ClientCapabilities::default(),
@@ -331,14 +334,8 @@ async fn test_code_action_request() {
     let code_action_params = CodeActionParams {
         text_document: TextDocumentIdentifier { uri },
         range: Range {
-            start: Position {
-                line: 2,
-                character: 0,
-            },
-            end: Position {
-                line: 2,
-                character: 25,
-            },
+            start: Position { line: 2, character: 0 },
+            end: Position { line: 2, character: 25 },
         },
         context: CodeActionContext {
             diagnostics: vec![],
@@ -367,7 +364,8 @@ async fn test_diagnostic_request() {
 
     // Initialize server
     let init_params = InitializeParams {
-        process_id: None, root_path: None, // Deprecated but required
+        process_id: None,
+        root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///test").unwrap()),
         initialization_options: None,
         capabilities: ClientCapabilities::default(),
@@ -424,7 +422,8 @@ async fn test_real_workflow_integration() {
 
     // 1. Initialize
     let init_params = InitializeParams {
-        process_id: None, root_path: None, // Deprecated but required
+        process_id: None,
+        root_path: None, // Deprecated but required
         root_uri: Some(Url::parse("file:///workspace").unwrap()),
         initialization_options: Some(serde_json::json!({
             "enableLinting": true,
@@ -478,14 +477,8 @@ Another paragraph.
     let code_action_params = CodeActionParams {
         text_document: TextDocumentIdentifier { uri: uri.clone() },
         range: Range {
-            start: Position {
-                line: 0,
-                character: 0,
-            },
-            end: Position {
-                line: 0,
-                character: 25,
-            },
+            start: Position { line: 0, character: 0 },
+            end: Position { line: 0, character: 25 },
         },
         context: CodeActionContext {
             diagnostics: vec![],
@@ -584,7 +577,8 @@ mod edge_cases {
 
         // Initialize
         let init_params = InitializeParams {
-            process_id: None, root_path: None, // Deprecated but required
+            process_id: None,
+            root_path: None, // Deprecated but required
             root_uri: Some(Url::parse("file:///test").unwrap()),
             initialization_options: None,
             capabilities: ClientCapabilities::default(),

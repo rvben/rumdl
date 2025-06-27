@@ -42,7 +42,7 @@ impl MD035HRStyle {
             config: MD035Config { style },
         }
     }
-    
+
     pub fn from_config_struct(config: MD035Config) -> Self {
         Self { config }
     }
@@ -95,10 +95,7 @@ impl MD035HRStyle {
             .max_by_key(|&(style, count)| {
                 (
                     *count,
-                    -(order
-                        .iter()
-                        .position(|&s| s == *style)
-                        .unwrap_or(usize::MAX) as isize),
+                    -(order.iter().position(|&s| s == *style).unwrap_or(usize::MAX) as isize),
                 )
             })
             .map(|(style, _)| style.to_string())
@@ -141,8 +138,7 @@ impl Rule for MD035HRStyle {
 
                 if style_mismatch || has_indentation {
                     // Calculate precise character range for the entire horizontal rule
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_line_range(i + 1, line);
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),

@@ -4,9 +4,9 @@
 //! See [docs/md003.md](../../docs/md003.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::RuleConfig;
 use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::range_utils::calculate_heading_range;
-use crate::rule_config_serde::RuleConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -16,8 +16,7 @@ use md003_config::MD003Config;
 
 lazy_static! {
     static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
-    static ref QUICK_HEADING_CHECK: Regex =
-        Regex::new(r"(?m)^(\s*)#|^(\s*)[^\s].*\n(\s*)(=+|-+)\s*$").unwrap();
+    static ref QUICK_HEADING_CHECK: Regex = Regex::new(r"(?m)^(\s*)#|^(\s*)[^\s].*\n(\s*)(=+|-+)\s*$").unwrap();
 }
 
 /// Rule MD003: Heading style
@@ -40,11 +39,10 @@ impl MD003HeadingStyle {
             config: MD003Config { style },
         }
     }
-    
+
     pub fn from_config_struct(config: MD003Config) -> Self {
         Self { config }
     }
-
 
     /// Check if we should use consistent mode (detect first style)
     fn is_consistent_mode(&self) -> bool {
@@ -53,10 +51,7 @@ impl MD003HeadingStyle {
     }
 
     /// Gets the target heading style based on configuration and document content
-    fn get_target_style(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-    ) -> HeadingStyle {
+    fn get_target_style(&self, ctx: &crate::lint_context::LintContext) -> HeadingStyle {
         if !self.is_consistent_mode() {
             return self.config.style;
         }
@@ -78,7 +73,7 @@ impl MD003HeadingStyle {
                 };
             }
         }
-        
+
         // Default to ATX if no headings found
         HeadingStyle::Atx
     }
@@ -98,7 +93,7 @@ impl Rule for MD003HeadingStyle {
 
         // Get the target style using cached heading information
         let target_style = self.get_target_style(ctx);
-        
+
         // Create LineIndex once outside the loop
         let line_index = crate::utils::range_utils::LineIndex::new(ctx.content.to_string());
 
@@ -106,7 +101,7 @@ impl Rule for MD003HeadingStyle {
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
                 let level = heading.level;
-                
+
                 // Map the cached heading style to the rule's HeadingStyle
                 let current_style = match heading.style {
                     crate::lint_context::HeadingStyle::ATX => {
@@ -126,8 +121,7 @@ impl Rule for MD003HeadingStyle {
                 {
                     // Setext only supports levels 1-2, so levels 3+ must be ATX
                     HeadingStyle::Atx
-                } else if (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2)
-                    && level <= 2
+                } else if (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2) && level <= 2
                 {
                     // For Setext target, use appropriate style based on level
                     if level == 1 {
@@ -145,11 +139,8 @@ impl Rule for MD003HeadingStyle {
                         use crate::rules::heading_utils::HeadingUtils;
 
                         // Convert heading to target style
-                        let converted_heading = HeadingUtils::convert_heading_style(
-                            &heading.text,
-                            level as u32,
-                            expected_style,
-                        );
+                        let converted_heading =
+                            HeadingUtils::convert_heading_style(&heading.text, level as u32, expected_style);
 
                         // Add indentation
                         let final_heading = format!("{}{}", " ".repeat(line_info.indent), converted_heading);
@@ -212,11 +203,7 @@ impl Rule for MD003HeadingStyle {
         // Collect all fixes and sort by range start (descending) to apply from end to beginning
         let mut fixes: Vec<_> = warnings
             .iter()
-            .filter_map(|w| {
-                w.fix
-                    .as_ref()
-                    .map(|f| (f.range.start, f.range.end, &f.replacement))
-            })
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
             .collect();
         fixes.sort_by(|a, b| b.0.cmp(&a.0));
 
@@ -230,7 +217,6 @@ impl Rule for MD003HeadingStyle {
 
         Ok(result)
     }
-
 
     fn category(&self) -> RuleCategory {
         RuleCategory::Heading
@@ -253,7 +239,7 @@ impl Rule for MD003HeadingStyle {
         let default_config = MD003Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;
         let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-        
+
         if let toml::Value::Table(table) = toml_value {
             if !table.is_empty() {
                 Some((MD003Config::RULE_NAME.to_string(), toml::Value::Table(table)))
@@ -273,7 +259,6 @@ impl Rule for MD003HeadingStyle {
         Box::new(Self::from_config_struct(rule_config))
     }
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -82,14 +82,13 @@ pub struct MD055TablePipeStyle {
     config: MD055Config,
 }
 
-
 impl MD055TablePipeStyle {
     pub fn new(style: String) -> Self {
         Self {
             config: MD055Config { style },
         }
     }
-    
+
     pub fn from_config_struct(config: MD055Config) -> Self {
         Self { config }
     }
@@ -190,11 +189,9 @@ impl Rule for MD055TablePipeStyle {
 
         // Get the configured style explicitly and validate it
         let configured_style = match self.config.style.as_str() {
-            "leading_and_trailing"
-            | "no_leading_or_trailing"
-            | "leading_only"
-            | "trailing_only"
-            | "consistent" => self.config.style.as_str(),
+            "leading_and_trailing" | "no_leading_or_trailing" | "leading_only" | "trailing_only" | "consistent" => {
+                self.config.style.as_str()
+            }
             _ => {
                 // Invalid style provided, default to "leading_and_trailing"
                 "leading_and_trailing"
@@ -211,9 +208,7 @@ impl Rule for MD055TablePipeStyle {
             // First pass: determine the table's style for "consistent" mode
             if configured_style == "consistent" {
                 // Check header row first
-                if let Some(style) =
-                    TableUtils::determine_pipe_style(lines[table_block.header_line])
-                {
+                if let Some(style) = TableUtils::determine_pipe_style(lines[table_block.header_line]) {
                     table_style = Some(style);
                 } else {
                     // Check content rows if header doesn't have a clear style
@@ -245,8 +240,7 @@ impl Rule for MD055TablePipeStyle {
                     let needs_fixing = current_style != target_style;
 
                     if needs_fixing {
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_line_range(line_idx + 1, line);
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);
 
                         let message = format!(
                             "Table pipe style should be {}",
@@ -291,11 +285,9 @@ impl Rule for MD055TablePipeStyle {
 
         // Use the configured style but validate it first
         let configured_style = match self.config.style.as_str() {
-            "leading_and_trailing"
-            | "no_leading_or_trailing"
-            | "leading_only"
-            | "trailing_only"
-            | "consistent" => self.config.style.as_str(),
+            "leading_and_trailing" | "no_leading_or_trailing" | "leading_only" | "trailing_only" | "consistent" => {
+                self.config.style.as_str()
+            }
             _ => {
                 // Invalid style provided, default to "leading_and_trailing"
                 "leading_and_trailing"
@@ -306,10 +298,7 @@ impl Rule for MD055TablePipeStyle {
         let table_blocks = TableUtils::find_table_blocks(content, ctx);
 
         // Create a copy of lines that we can modify
-        let mut result_lines = lines
-            .iter()
-            .map(|&s| s.to_string())
-            .collect::<Vec<String>>();
+        let mut result_lines = lines.iter().map(|&s| s.to_string()).collect::<Vec<String>>();
 
         // Process each table block
         for table_block in table_blocks {
@@ -318,9 +307,7 @@ impl Rule for MD055TablePipeStyle {
             // First pass: determine the table's style for "consistent" mode
             if configured_style == "consistent" {
                 // Check header row first
-                if let Some(style) =
-                    TableUtils::determine_pipe_style(lines[table_block.header_line])
-                {
+                if let Some(style) = TableUtils::determine_pipe_style(lines[table_block.header_line]) {
                     table_style = Some(style);
                 } else {
                     // Check content rows if header doesn't have a clear style
@@ -411,13 +398,11 @@ mod tests {
         let result = rule.fix(&ctx).unwrap();
 
         // Output the actual result for debugging
-        log::info!(
-            "Actual leading_and_trailing result:\n{}",
-            result.replace('\n', "\\n")
-        );
+        log::info!("Actual leading_and_trailing result:\n{}", result.replace('\n', "\\n"));
 
         // The delimiter row should have pipes added with spacing as in the implementation
-        let expected = "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
+        let expected =
+            "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
 
         assert_eq!(result, expected);
     }
@@ -478,13 +463,11 @@ mod tests {
         let result = rule.fix(&ctx).unwrap();
 
         // Output the actual result for debugging
-        log::info!(
-            "Actual result with invalid style:\n{}",
-            result.replace('\n', "\\n")
-        );
+        log::info!("Actual result with invalid style:\n{}", result.replace('\n', "\\n"));
 
         // Should default to "leading_and_trailing" and fix any inconsistencies with that style
-        let expected = "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
+        let expected =
+            "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
 
         // Should match the expected output after processing with the default style
         assert_eq!(result, expected);
@@ -495,7 +478,8 @@ mod tests {
         let result = rule.fix(&ctx2).unwrap();
 
         // Should add pipes to match the default "leading_and_trailing" style
-        let expected = "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
+        let expected =
+            "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
         assert_eq!(result, expected);
 
         // Check that warning messages also work with the fallback style

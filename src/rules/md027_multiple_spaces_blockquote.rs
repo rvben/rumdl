@@ -45,27 +45,28 @@ impl Rule for MD027MultipleSpacesBlockquote {
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
-            
+
             // Skip lines in code blocks
             if line_info.in_code_block {
                 continue;
             }
-            
+
             // Check if this line is a blockquote using cached info
             if let Some(blockquote) = &line_info.blockquote {
                 // Part 1: Check for multiple spaces after the blockquote marker
                 if blockquote.has_multiple_spaces_after_marker {
                     // Calculate the position of the extra spaces
                     let extra_spaces_start = blockquote.marker_column + blockquote.nesting_level + 1; // Position after all '>' markers + 1 for the first space
-                    let spaces_in_prefix = blockquote.prefix.chars().skip(blockquote.indent.len() + blockquote.nesting_level).take_while(|&c| c == ' ').count();
+                    let spaces_in_prefix = blockquote
+                        .prefix
+                        .chars()
+                        .skip(blockquote.indent.len() + blockquote.nesting_level)
+                        .take_while(|&c| c == ' ')
+                        .count();
                     let extra_spaces_len = spaces_in_prefix - 1; // All spaces except the first one
 
-                    let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                        line_num,
-                        &line_info.content,
-                        extra_spaces_start,
-                        extra_spaces_len,
-                    );
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_match_range(line_num, &line_info.content, extra_spaces_start, extra_spaces_len);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
@@ -90,12 +91,8 @@ impl Rule for MD027MultipleSpacesBlockquote {
                 // Part 2: Check for malformed blockquote attempts on non-blockquote lines
                 let malformed_attempts = self.detect_malformed_blockquote_attempts(&line_info.content);
                 for (start, len, fixed_line, description) in malformed_attempts {
-                    let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                        line_num,
-                        &line_info.content,
-                        start,
-                        len,
-                    );
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_match_range(line_num, &line_info.content, start, len);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
@@ -179,7 +176,8 @@ impl MD027MultipleSpacesBlockquote {
                 let len = match_obj.len();
 
                 // Extract potential blockquote components
-                if let Some((fixed_line, description)) = self.extract_blockquote_fix_from_match(&cap, issue_type, line) {
+                if let Some((fixed_line, description)) = self.extract_blockquote_fix_from_match(&cap, issue_type, line)
+                {
                     // Only proceed if this looks like a genuine blockquote attempt
                     if self.looks_like_blockquote_attempt(line, &fixed_line) {
                         results.push((start, len, fixed_line, description));
@@ -192,32 +190,49 @@ impl MD027MultipleSpacesBlockquote {
     }
 
     /// Extract the proper blockquote format from a malformed match
-    fn extract_blockquote_fix_from_match(&self, cap: &regex::Captures, issue_type: &str, _original_line: &str) -> Option<(String, String)> {
+    fn extract_blockquote_fix_from_match(
+        &self,
+        cap: &regex::Captures,
+        issue_type: &str,
+        _original_line: &str,
+    ) -> Option<(String, String)> {
         match issue_type {
             "missing spaces in nested blockquote" => {
                 // >>text -> > > text
                 let indent = cap.get(1).map_or("", |m| m.as_str());
                 let content = cap.get(2).map_or("", |m| m.as_str());
-                Some((format!("{}> > {}", indent, content.trim()), "Missing spaces in nested blockquote".to_string()))
-            },
+                Some((
+                    format!("{}> > {}", indent, content.trim()),
+                    "Missing spaces in nested blockquote".to_string(),
+                ))
+            }
             "missing spaces in deeply nested blockquote" => {
                 // >>>text -> > > > text
                 let indent = cap.get(1).map_or("", |m| m.as_str());
                 let content = cap.get(2).map_or("", |m| m.as_str());
-                Some((format!("{}> > > {}", indent, content.trim()), "Missing spaces in deeply nested blockquote".to_string()))
-            },
+                Some((
+                    format!("{}> > > {}", indent, content.trim()),
+                    "Missing spaces in deeply nested blockquote".to_string(),
+                ))
+            }
             "extra blockquote marker" => {
                 // > >text -> > text
                 let indent = cap.get(1).map_or("", |m| m.as_str());
                 let content = cap.get(2).map_or("", |m| m.as_str());
-                Some((format!("{}> {}", indent, content.trim()), "Extra blockquote marker".to_string()))
-            },
+                Some((
+                    format!("{}> {}", indent, content.trim()),
+                    "Extra blockquote marker".to_string(),
+                ))
+            }
             "indented blockquote missing space" => {
                 // (spaces)>text -> (spaces)> text
                 let indent = cap.get(1).map_or("", |m| m.as_str());
                 let content = cap.get(2).map_or("", |m| m.as_str());
-                Some((format!("{}> {}", indent, content.trim()), "Indented blockquote missing space".to_string()))
-            },
+                Some((
+                    format!("{}> {}", indent, content.trim()),
+                    "Indented blockquote missing space".to_string(),
+                ))
+            }
             _ => None,
         }
     }
@@ -228,13 +243,15 @@ impl MD027MultipleSpacesBlockquote {
 
         // 1. Content should not be too short (avoid flagging things like ">>>" alone)
         let trimmed_original = original.trim();
-        if trimmed_original.len() < 5 {  // More restrictive
+        if trimmed_original.len() < 5 {
+            // More restrictive
             return false;
         }
 
         // 2. Should contain some text content after the markers
         let content_after_markers = trimmed_original.trim_start_matches('>').trim_start_matches(' ');
-        if content_after_markers.is_empty() || content_after_markers.len() < 3 {  // More restrictive
+        if content_after_markers.is_empty() || content_after_markers.len() < 3 {
+            // More restrictive
             return false;
         }
 
@@ -256,14 +273,16 @@ impl MD027MultipleSpacesBlockquote {
             || content_after_markers.starts_with('`') // Code
             || content_after_markers.starts_with("http") // URLs
             || content_after_markers.starts_with("www.") // URLs
-            || content_after_markers.starts_with("ftp") // URLs
+            || content_after_markers.starts_with("ftp")
+        // URLs
         {
             return false;
         }
 
         // 6. Content should look like prose, not code or markup
         let word_count = content_after_markers.split_whitespace().count();
-        if word_count < 3 {  // Should be at least 3 words to look like prose
+        if word_count < 3 {
+            // Should be at least 3 words to look like prose
             return false;
         }
 

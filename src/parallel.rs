@@ -63,9 +63,7 @@ impl FileParallelProcessor {
             rayon::ThreadPoolBuilder::new()
                 .num_threads(thread_count)
                 .build_global()
-                .unwrap_or_else(|_| {
-                    log::warn!("Failed to set thread pool size to {}", thread_count)
-                });
+                .unwrap_or_else(|_| log::warn!("Failed to set thread pool size to {}", thread_count));
         }
 
         let results: Vec<(String, LintResult)> = files
@@ -138,10 +136,7 @@ impl ParallelPerformanceComparison {
             "   Sequential time: {:.3}ms",
             self.sequential_time.as_secs_f64() * 1000.0
         );
-        println!(
-            "   Parallel time: {:.3}ms",
-            self.parallel_time.as_secs_f64() * 1000.0
-        );
+        println!("   Parallel time: {:.3}ms", self.parallel_time.as_secs_f64() * 1000.0);
         println!("   Speedup factor: {:.2}x", self.speedup_factor);
 
         if self.speedup_factor > 1.0 {
@@ -197,10 +192,7 @@ mod tests {
 
         let test_files = vec![
             ("test1.md".to_string(), "# Test 1\n\nContent".to_string()),
-            (
-                "test2.md".to_string(),
-                "# Test 2\n\nMore content".to_string(),
-            ),
+            ("test2.md".to_string(), "# Test 2\n\nMore content".to_string()),
         ];
 
         let results = processor.process_files(&test_files, &rules).unwrap();

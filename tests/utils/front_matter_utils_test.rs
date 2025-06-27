@@ -145,53 +145,26 @@ fn test_extract_front_matter() {
 fn test_has_front_matter_field() {
     // YAML front matter with field
     let yaml_content = "---\ntitle: Test Document\ndate: 2023-04-01\n---\n# Heading";
-    assert!(FrontMatterUtils::has_front_matter_field(
-        yaml_content,
-        "title"
-    ));
-    assert!(FrontMatterUtils::has_front_matter_field(
-        yaml_content,
-        "date"
-    ));
-    assert!(!FrontMatterUtils::has_front_matter_field(
-        yaml_content,
-        "author"
-    ));
+    assert!(FrontMatterUtils::has_front_matter_field(yaml_content, "title"));
+    assert!(FrontMatterUtils::has_front_matter_field(yaml_content, "date"));
+    assert!(!FrontMatterUtils::has_front_matter_field(yaml_content, "author"));
 
     // TOML front matter with field
     let toml_content = "+++\ntitle = \"Test Document\"\ndate = 2023-04-01\n+++\n# Heading";
-    assert!(FrontMatterUtils::has_front_matter_field(
-        toml_content,
-        "title"
-    ));
-    assert!(FrontMatterUtils::has_front_matter_field(
-        toml_content,
-        "date"
-    ));
-    assert!(!FrontMatterUtils::has_front_matter_field(
-        toml_content,
-        "author"
-    ));
+    assert!(FrontMatterUtils::has_front_matter_field(toml_content, "title"));
+    assert!(FrontMatterUtils::has_front_matter_field(toml_content, "date"));
+    assert!(!FrontMatterUtils::has_front_matter_field(toml_content, "author"));
 
     // No front matter
     let no_front_matter = "# Heading\nThis is content.";
-    assert!(!FrontMatterUtils::has_front_matter_field(
-        no_front_matter,
-        "title"
-    ));
+    assert!(!FrontMatterUtils::has_front_matter_field(no_front_matter, "title"));
 
     // Edge cases
     let empty_content = "";
-    assert!(!FrontMatterUtils::has_front_matter_field(
-        empty_content,
-        "title"
-    ));
+    assert!(!FrontMatterUtils::has_front_matter_field(empty_content, "title"));
 
     let short_content = "---\ntitle";
-    assert!(!FrontMatterUtils::has_front_matter_field(
-        short_content,
-        "title"
-    ));
+    assert!(!FrontMatterUtils::has_front_matter_field(short_content, "title"));
 }
 
 #[test]
@@ -264,13 +237,11 @@ fn test_extract_front_matter_fields() {
     assert_eq!(toml_fields.get("date"), Some(&"2023-04-01".to_string()));
 
     // Front matter with nested fields
-    let nested_content = "---\ntitle: Test Document\nmetadata:\n  date: 2023-04-01\n  author: Test Author\n---\n# Heading";
+    let nested_content =
+        "---\ntitle: Test Document\nmetadata:\n  date: 2023-04-01\n  author: Test Author\n---\n# Heading";
     let nested_fields = FrontMatterUtils::extract_front_matter_fields(nested_content);
     assert!(!nested_fields.is_empty());
-    assert_eq!(
-        nested_fields.get("title"),
-        Some(&"Test Document".to_string())
-    );
+    assert_eq!(nested_fields.get("title"), Some(&"Test Document".to_string()));
 
     // No front matter
     let no_front_matter = "# Heading\nThis is content.";
@@ -293,14 +264,8 @@ fn test_complex_front_matter_scenarios() {
         FrontMatterUtils::detect_front_matter_type(complex_yaml),
         FrontMatterType::Yaml
     );
-    assert!(FrontMatterUtils::has_front_matter_field(
-        complex_yaml,
-        "tags"
-    ));
-    assert!(FrontMatterUtils::has_front_matter_field(
-        complex_yaml,
-        "metadata"
-    ));
+    assert!(FrontMatterUtils::has_front_matter_field(complex_yaml, "tags"));
+    assert!(FrontMatterUtils::has_front_matter_field(complex_yaml, "metadata"));
 
     // Front matter with indentation
     let indented_yaml = "---\ntitle: Test Document\n  subtitle: With indentation\n---\n# Heading";
@@ -355,10 +320,7 @@ version = \"1.0.0\"\n\
 # Heading";
 
     let nested_toml_fields = FrontMatterUtils::extract_front_matter_fields(toml_nested);
-    assert_eq!(
-        nested_toml_fields.get("title"),
-        Some(&"Test Document".to_string())
-    );
+    assert_eq!(nested_toml_fields.get("title"), Some(&"Test Document".to_string()));
 
     // YAML with complex nested structures
     let complex_nested_yaml = "---\n\
@@ -380,10 +342,7 @@ metadata:\n\
 # Heading";
 
     let complex_fields = FrontMatterUtils::extract_front_matter_fields(complex_nested_yaml);
-    assert_eq!(
-        complex_fields.get("title"),
-        Some(&"Advanced YAML Test".to_string())
-    );
+    assert_eq!(complex_fields.get("title"), Some(&"Advanced YAML Test".to_string()));
 
     // The current implementation doesn't fully support deep nesting with dot notation
     // but it should at least extract the top-level "author" field
@@ -398,10 +357,7 @@ complex: \"Title with \\\"nested\\\" quotes\"\n\
 # Heading";
 
     let quoted_fields = FrontMatterUtils::extract_front_matter_fields(yaml_with_quotes);
-    assert_eq!(
-        quoted_fields.get("title"),
-        Some(&"Quoted Title".to_string())
-    );
+    assert_eq!(quoted_fields.get("title"), Some(&"Quoted Title".to_string()));
     assert_eq!(
         quoted_fields.get("description"),
         Some(&"'Single quoted description'".to_string())
@@ -421,18 +377,9 @@ regex: \\d+\\.\\d+\n\
 # Heading";
 
     let special_fields = FrontMatterUtils::extract_front_matter_fields(special_chars);
-    assert_eq!(
-        special_fields.get("special"),
-        Some(&"!@#$%^&*()".to_string())
-    );
-    assert_eq!(
-        special_fields.get("path"),
-        Some(&"/usr/local/bin".to_string())
-    );
-    assert_eq!(
-        special_fields.get("regex"),
-        Some(&"\\d+\\.\\d+".to_string())
-    );
+    assert_eq!(special_fields.get("special"), Some(&"!@#$%^&*()".to_string()));
+    assert_eq!(special_fields.get("path"), Some(&"/usr/local/bin".to_string()));
+    assert_eq!(special_fields.get("regex"), Some(&"\\d+\\.\\d+".to_string()));
 
     // Mixed delimiter edge case
     let mixed_delimiters = "---\n\

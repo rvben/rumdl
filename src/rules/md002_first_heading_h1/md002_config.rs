@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for MD002 (First heading should be top level)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -16,9 +16,7 @@ fn default_level() -> u32 {
 
 impl Default for MD002Config {
     fn default() -> Self {
-        Self {
-            level: default_level(),
-        }
+        Self { level: default_level() }
     }
 }
 

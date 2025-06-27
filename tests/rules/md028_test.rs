@@ -92,5 +92,8 @@ fn test_md028_multi_blockquotes() {
     let fixed_ctx = LintContext::new(&fixed);
     let fixed_result = rule.check(&fixed_ctx).unwrap();
     assert!(fixed_result.is_empty());
-    assert_eq!(fixed, "> First quote\n> Another line\n\n> Second quote\n> Another line\n> \n> Still second quote\n");
+    assert_eq!(
+        fixed,
+        "> First quote\n> Another line\n\n> Second quote\n> Another line\n> \n> Still second quote\n"
+    );
 }

@@ -142,10 +142,8 @@ fn content_has_problematic_lists(content: &str) -> bool {
             let line2 = window[1].trim_start();
 
             // Check if both lines are list items with different markers
-            let is_list1 =
-                line1.starts_with("* ") || line1.starts_with("+ ") || line1.starts_with("- ");
-            let is_list2 =
-                line2.starts_with("* ") || line2.starts_with("+ ") || line2.starts_with("- ");
+            let is_list1 = line1.starts_with("* ") || line1.starts_with("+ ") || line1.starts_with("- ");
+            let is_list2 = line2.starts_with("* ") || line2.starts_with("+ ") || line2.starts_with("- ");
 
             if is_list1 && is_list2 {
                 let marker1 = line1.chars().next().unwrap_or(' ');
@@ -183,9 +181,7 @@ pub fn ast_contains_node_type(ast: &MarkdownAst, node_type: &str) -> bool {
         _ => {
             // Check children recursively
             if let Some(children) = ast.children() {
-                children
-                    .iter()
-                    .any(|child| ast_contains_node_type(child, node_type))
+                children.iter().any(|child| ast_contains_node_type(child, node_type))
             } else {
                 false
             }
@@ -200,11 +196,7 @@ pub fn extract_nodes_by_type<'a>(ast: &'a MarkdownAst, node_type: &str) -> Vec<&
     nodes
 }
 
-fn extract_nodes_by_type_recursive<'a>(
-    ast: &'a MarkdownAst,
-    node_type: &str,
-    nodes: &mut Vec<&'a MarkdownAst>,
-) {
+fn extract_nodes_by_type_recursive<'a>(ast: &'a MarkdownAst, node_type: &str, nodes: &mut Vec<&'a MarkdownAst>) {
     match ast {
         MarkdownAst::Heading(_) if node_type == "heading" => nodes.push(ast),
         MarkdownAst::List(_) if node_type == "list" => nodes.push(ast),
@@ -236,11 +228,7 @@ pub fn get_text_content(ast: &MarkdownAst) -> String {
         MarkdownAst::Code(code) => code.value.clone(),
         _ => {
             if let Some(children) = ast.children() {
-                children
-                    .iter()
-                    .map(get_text_content)
-                    .collect::<Vec<_>>()
-                    .join("")
+                children.iter().map(get_text_content).collect::<Vec<_>>().join("")
             } else {
                 String::new()
             }

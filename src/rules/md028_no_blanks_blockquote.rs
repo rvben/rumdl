@@ -55,7 +55,7 @@ impl Rule for MD028NoBlanksBlockquote {
         // Process all lines using cached blockquote information
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
-            
+
             // Skip lines in code blocks
             if line_info.in_code_block {
                 continue;
@@ -65,8 +65,7 @@ impl Rule for MD028NoBlanksBlockquote {
             if let Some(blockquote) = &line_info.blockquote {
                 if blockquote.needs_md028_fix {
                     // Calculate precise character range for the entire empty blockquote line
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_line_range(line_num, &line_info.content);
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, &line_info.content);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
@@ -100,7 +99,7 @@ impl Rule for MD028NoBlanksBlockquote {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let mut result = Vec::with_capacity(ctx.lines.len());
-        
+
         for line_info in &ctx.lines {
             if let Some(blockquote) = &line_info.blockquote {
                 if blockquote.needs_md028_fix {
@@ -113,13 +112,8 @@ impl Rule for MD028NoBlanksBlockquote {
                 result.push(line_info.content.clone());
             }
         }
-        
-        Ok(result.join("\n")
-            + if ctx.content.ends_with('\n') {
-                "\n"
-            } else {
-                ""
-            })
+
+        Ok(result.join("\n") + if ctx.content.ends_with('\n') { "\n" } else { "" })
     }
 
     /// Get the category of this rule for selective processing

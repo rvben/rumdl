@@ -23,12 +23,7 @@ fn check_file(file_path: &str) -> PyResult<i32> {
     let status = std::process::Command::new("rumdl")
         .arg(file_path)
         .status()
-        .map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to execute rumdl: {}",
-                e
-            ))
-        })?;
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Failed to execute rumdl: {}", e)))?;
 
     Ok(status.code().unwrap_or(1))
 }

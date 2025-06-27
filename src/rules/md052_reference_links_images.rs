@@ -50,7 +50,6 @@ impl MD052ReferenceLinkImages {
         Self
     }
 
-
     fn extract_references(&self, content: &str) -> HashSet<String> {
         let mut references = HashSet::new();
         let mut in_code_block = false;
@@ -99,16 +98,16 @@ impl MD052ReferenceLinkImages {
         let mut in_code_block = false;
         let mut code_fence_marker = String::new();
         let mut in_example_section = false;
-        
+
         // Use cached data for reference links and images
         for link in &ctx.links {
             if !link.is_reference {
                 continue; // Skip inline links
             }
-            
+
             if let Some(ref_id) = &link.reference_id {
                 let reference_lower = ref_id.to_lowercase();
-                
+
                 // Check if reference is defined
                 if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
                     // Check if the line is in an example section or list item
@@ -117,33 +116,33 @@ impl MD052ReferenceLinkImages {
                             in_example_section = true;
                             continue;
                         }
-                        
+
                         if in_example_section {
                             continue;
                         }
-                        
+
                         // Skip list items
                         if LIST_ITEM_REGEX.is_match(&line_info.content) {
                             continue;
                         }
                     }
-                    
+
                     let match_len = link.byte_end - link.byte_offset;
                     undefined.push((link.line - 1, link.start_col, match_len, ref_id.clone()));
                     reported_refs.insert(reference_lower, true);
                 }
             }
         }
-        
+
         // Use cached data for reference images
         for image in &ctx.images {
             if !image.is_reference {
                 continue; // Skip inline images
             }
-            
+
             if let Some(ref_id) = &image.reference_id {
                 let reference_lower = ref_id.to_lowercase();
-                
+
                 // Check if reference is defined
                 if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
                     // Check if the line is in an example section or list item
@@ -152,29 +151,29 @@ impl MD052ReferenceLinkImages {
                             in_example_section = true;
                             continue;
                         }
-                        
+
                         if in_example_section {
                             continue;
                         }
-                        
+
                         // Skip list items
                         if LIST_ITEM_REGEX.is_match(&line_info.content) {
                             continue;
                         }
                     }
-                    
+
                     let match_len = image.byte_end - image.byte_offset;
                     undefined.push((image.line - 1, image.start_col, match_len, ref_id.clone()));
                     reported_refs.insert(reference_lower, true);
                 }
             }
         }
-        
+
         // Handle shortcut references [text] which aren't captured in ctx.links
         // Need to use regex for these
         let lines: Vec<&str> = content.lines().collect();
         in_example_section = false; // Reset for line-by-line processing
-        
+
         for (line_num, line) in lines.iter().enumerate() {
             // Handle code blocks
             if let Some(cap) = FENCED_CODE_START.captures(line) {
@@ -190,17 +189,17 @@ impl MD052ReferenceLinkImages {
                 }
                 continue;
             }
-            
+
             if in_code_block {
                 continue;
             }
-            
+
             // Check for example sections
             if OUTPUT_EXAMPLE_START.is_match(line) {
                 in_example_section = true;
                 continue;
             }
-            
+
             if in_example_section {
                 // Check if we're exiting the example section (another heading)
                 if line.starts_with('#') && !OUTPUT_EXAMPLE_START.is_match(line) {
@@ -209,19 +208,19 @@ impl MD052ReferenceLinkImages {
                     continue;
                 }
             }
-            
+
             // Skip list items
             if LIST_ITEM_REGEX.is_match(line) {
                 continue;
             }
-            
+
             // Check shortcut references: [reference]
             if let Ok(captures) = SHORTCUT_REF_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
                 for cap in captures {
                     if let Some(ref_match) = cap.get(1) {
                         let reference = ref_match.as_str();
                         let reference_lower = reference.to_lowercase();
-                        
+
                         if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
                             let full_match = cap.get(0).unwrap();
                             let col = full_match.start();
@@ -233,7 +232,7 @@ impl MD052ReferenceLinkImages {
                 }
             }
         }
-        
+
         undefined
     }
 }
@@ -253,9 +252,7 @@ impl Rule for MD052ReferenceLinkImages {
         let references = self.extract_references(content);
 
         // Use optimized detection method with cached link/image data
-        for (line_num, col, match_len, reference) in
-            self.find_undefined_references(content, &references, ctx)
-        {
+        for (line_num, col, match_len, reference) in self.find_undefined_references(content, &references, ctx) {
             let lines: Vec<&str> = content.lines().collect();
             let line_content = lines.get(line_num).unwrap_or(&"");
 
@@ -269,10 +266,7 @@ impl Rule for MD052ReferenceLinkImages {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!(
-                    "Reference '{}' not found",
-                    reference
-                ),
+                message: format!("Reference '{}' not found", reference),
                 severity: Severity::Warning,
                 fix: None,
             });

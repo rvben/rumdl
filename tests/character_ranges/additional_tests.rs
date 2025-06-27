@@ -45,8 +45,8 @@ fn test_md022_blanks_around_headings() {
         "MD022",
         "Some text\n# Heading\nMore text",
         vec![
-            ExpectedWarning::new(2, 1, 2, 10, "# Heading"),  // Missing blank above
-            ExpectedWarning::new(2, 1, 2, 10, "# Heading"),  // Missing blank below
+            ExpectedWarning::new(2, 1, 2, 10, "# Heading"), // Missing blank above
+            ExpectedWarning::new(2, 1, 2, 10, "# Heading"), // Missing blank below
         ],
     );
     test_character_ranges(test);
@@ -75,7 +75,7 @@ fn test_md003_mixed_styles() {
         vec![
             ExpectedWarning::new(3, 1, 3, 15, "Second Heading"),
             ExpectedWarning::new(8, 1, 8, 15, "Fourth Heading"),
-        ]
+        ],
     );
     test_character_ranges(test);
 }

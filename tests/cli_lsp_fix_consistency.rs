@@ -3,11 +3,11 @@
 //! This test suite validates that both CLI batch fixes (using rule.fix()) and
 //! LSP individual fixes (using warning.fix) produce the same final content.
 
+use rumdl::config::Config;
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::*;
 use rumdl::utils::fix_utils;
-use rumdl::config::Config;
 
 /// Test helper to compare CLI and LSP fix results for a given rule and content
 fn test_cli_lsp_consistency(rule: &dyn Rule, content: &str, test_name: &str) {
@@ -48,7 +48,10 @@ fn test_cli_lsp_consistency(rule: &dyn Rule, content: &str, test_name: &str) {
             }
         }
         (Ok(_), Err(warnings_error)) => {
-            panic!("{}: CLI fix succeeded but check failed: {:?}", test_name, warnings_error);
+            panic!(
+                "{}: CLI fix succeeded but check failed: {:?}",
+                test_name, warnings_error
+            );
         }
         (Err(cli_error), Ok(_)) => {
             println!("○ {}: CLI fix not implemented: {:?}", test_name, cli_error);
@@ -64,10 +67,19 @@ fn test_md030_list_marker_space_consistency() {
     let rule = MD030ListMarkerSpace::new(1, 1, 1, 1);
 
     let test_cases = vec![
-        ("1.  Multiple spaces after ordered marker", "Single ordered list with extra spaces"),
-        ("*   Multiple spaces after unordered marker", "Single unordered list with extra spaces"),
+        (
+            "1.  Multiple spaces after ordered marker",
+            "Single ordered list with extra spaces",
+        ),
+        (
+            "*   Multiple spaces after unordered marker",
+            "Single unordered list with extra spaces",
+        ),
         ("1.  First\n*   Second", "Mixed list types with extra spaces"),
-        ("- Item\n  -   Nested with extra spaces", "Nested list with extra spaces"),
+        (
+            "- Item\n  -   Nested with extra spaces",
+            "Nested list with extra spaces",
+        ),
         ("1.\tTab after marker", "Tab instead of spaces"),
         ("*\t\tMultiple tabs", "Multiple tabs after marker"),
     ];
@@ -196,7 +208,10 @@ fn test_md039_no_space_in_links_consistency() {
         ("[link text ]( url )", "Link with spaces around URL"),
         ("[text ](url)", "Link with trailing space in text"),
         ("[text](  url  )", "Link with spaces around URL only"),
-        ("Multiple [bad ]( link ) examples [here ](  too  )", "Multiple bad links"),
+        (
+            "Multiple [bad ]( link ) examples [here ](  too  )",
+            "Multiple bad links",
+        ),
     ];
 
     for (content, description) in test_cases {
@@ -269,7 +284,11 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
 fn test_comprehensive_rule_consistency() {
     // Test a comprehensive set of rules that commonly provide fixes
     let rules_with_test_content: Vec<(Box<dyn Rule>, &str, &str)> = vec![
-        (Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1)), "1.  Multiple spaces", "MD030"),
+        (
+            Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1)),
+            "1.  Multiple spaces",
+            "MD030",
+        ),
         (Box::new(MD019NoMultipleSpaceAtx::new()), "##  Multiple spaces", "MD019"),
         (Box::new(MD009TrailingSpaces::default()), "Trailing spaces   ", "MD009"),
         (Box::new(MD018NoMissingSpaceAtx::default()), "#Missing space", "MD018"),
@@ -340,7 +359,10 @@ fn test_comprehensive_rule_consistency() {
     println!("No fixes: {}", no_fix_count);
 
     // We expect at least some consistent fixes
-    assert!(consistent_count > 0, "Expected at least some rules to have consistent CLI/LSP fixes");
+    assert!(
+        consistent_count > 0,
+        "Expected at least some rules to have consistent CLI/LSP fixes"
+    );
 
     // All tested rules should either be consistent or have a valid reason for inconsistency
     assert_eq!(
@@ -465,11 +487,17 @@ fn test_all_53_rules_systematic_coverage() {
         0.0
     };
 
-    println!("📈 Test coverage: {}/{} rules ({:.1}%)", coverage_tested, total_tested, coverage_percentage);
+    println!(
+        "📈 Test coverage: {}/{} rules ({:.1}%)",
+        coverage_tested, total_tested, coverage_percentage
+    );
 
     if consistent_fixes > 0 {
         let consistency_rate = (consistent_fixes as f64 / coverage_tested as f64) * 100.0;
-        println!("🎯 Fix consistency rate: {}/{} ({:.1}%)", consistent_fixes, coverage_tested, consistency_rate);
+        println!(
+            "🎯 Fix consistency rate: {}/{} ({:.1}%)",
+            consistent_fixes, coverage_tested, consistency_rate
+        );
     }
 
     // Quality assertions
@@ -485,7 +513,8 @@ fn test_all_53_rules_systematic_coverage() {
 
     // For now, allow inconsistencies but track them
     assert_eq!(
-        coverage_tested, consistent_fixes + cli_only_fixes + no_fixes + lsp_errors + inconsistent_rules,
+        coverage_tested,
+        consistent_fixes + cli_only_fixes + no_fixes + lsp_errors + inconsistent_rules,
         "All tested rules should be properly categorized"
     );
 

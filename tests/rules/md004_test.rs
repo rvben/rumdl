@@ -173,10 +173,7 @@ fn test_md004_asterisk_style() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4); // All non-asterisk markers are flagged
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "* Item 1\n* Item 2\n  * Nested 1\n  * Nested 2\n* Item 3"
-    );
+    assert_eq!(fixed, "* Item 1\n* Item 2\n  * Nested 1\n  * Nested 2\n* Item 3");
 }
 
 #[test]
@@ -186,10 +183,7 @@ fn test_md004_plus_style() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4); // All non-plus markers are flagged
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "+ Item 1\n+ Item 2\n  + Nested 1\n  + Nested 2\n+ Item 3"
-    );
+    assert_eq!(fixed, "+ Item 1\n+ Item 2\n  + Nested 1\n  + Nested 2\n+ Item 3");
 }
 
 #[test]
@@ -199,17 +193,12 @@ fn test_md004_dash_style() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4); // All non-dash markers are flagged
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "- Item 1\n- Item 2\n  - Nested 1\n  - Nested 2\n- Item 3"
-    );
+    assert_eq!(fixed, "- Item 1\n- Item 2\n  - Nested 1\n  - Nested 2\n- Item 3");
 }
 
 #[test]
 fn test_md004_deeply_nested() {
-    let ctx = LintContext::new(
-        "* Level 1\n  + Level 2\n    - Level 3\n      + Level 4\n  * Back to 2\n* Level 1\n",
-    );
+    let ctx = LintContext::new("* Level 1\n  + Level 2\n    - Level 3\n      + Level 4\n  * Back to 2\n* Level 1\n");
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&ctx).unwrap();
     // Flags mixed markers (+ and - don't match the first marker *)
@@ -223,9 +212,7 @@ fn test_md004_deeply_nested() {
 
 #[test]
 fn test_md004_mixed_content() {
-    let ctx = LintContext::new(
-        "# Heading\n\n* Item 1\n  Some text\n  + Nested with text\n    More text\n* Item 2\n",
-    );
+    let ctx = LintContext::new("# Heading\n\n* Item 1\n  Some text\n  + Nested with text\n    More text\n* Item 2\n");
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&ctx).unwrap();
     // Flags the + marker that doesn't match the first marker *
@@ -262,10 +249,7 @@ fn test_md004_code_blocks() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "* Item 1\n```\n* Not a list\n+ Also not a list\n```\n* Item 2\n"
-    );
+    assert_eq!(fixed, "* Item 1\n```\n* Not a list\n+ Also not a list\n```\n* Item 2\n");
 }
 
 #[test]
@@ -275,17 +259,12 @@ fn test_md004_blockquotes() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Should flag the + marker that doesn't match asterisk style
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "* Item 1\n> * Quoted item\n> * Another quoted item\n* Item 2\n"
-    );
+    assert_eq!(fixed, "* Item 1\n> * Quoted item\n> * Another quoted item\n* Item 2\n");
 }
 
 #[test]
 fn test_md004_list_continuations() {
-    let ctx = LintContext::new(
-        "* Item 1\n  Continuation 1\n  + Nested item\n    Continuation 2\n* Item 2\n",
-    );
+    let ctx = LintContext::new("* Item 1\n  Continuation 1\n  + Nested item\n    Continuation 2\n* Item 2\n");
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&ctx).unwrap();
     // Flags the + marker that doesn't match the first marker *
@@ -299,9 +278,7 @@ fn test_md004_list_continuations() {
 
 #[test]
 fn test_md004_mixed_ordered_unordered() {
-    let ctx = LintContext::new(
-        "1. Ordered item\n   * Unordered sub-item\n   + Another sub-item\n2. Ordered item\n",
-    );
+    let ctx = LintContext::new("1. Ordered item\n   * Unordered sub-item\n   + Another sub-item\n2. Ordered item\n");
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -318,13 +295,17 @@ fn test_complex_list_patterns() {
     let ctx = LintContext::new(content);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "* Level 1 item 1\n  * Level 2 item 1\n    * Level 3 item 1\n  * Level 2 item 2\n* Level 1 item 2");
+    assert_eq!(
+        fixed,
+        "* Level 1 item 1\n  * Level 2 item 1\n    * Level 3 item 1\n  * Level 2 item 2\n* Level 1 item 2"
+    );
 }
 
 #[test]
 fn test_lists_in_code_blocks() {
     // Test lists inside code blocks (should be ignored)
-    let content = "* Valid list item\n\n```\n* This is in a code block\n- Also in code block\n```\n\n* Another valid item";
+    let content =
+        "* Valid list item\n\n```\n* This is in a code block\n- Also in code block\n```\n\n* Another valid item";
 
     let ctx = LintContext::new(content);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
@@ -349,10 +330,7 @@ fn test_nested_list_complexity() {
     // Flags mixed markers (- and + don't match the first marker *)
     assert_eq!(result.len(), 3); // - on line 2, + on line 3, - on line 4
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "* Item 1\n  * Item 2\n    * Item 3\n  * Item 5\n* Item 6\n"
-    );
+    assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3\n  * Item 5\n* Item 6\n");
 }
 
 #[test]
@@ -366,8 +344,7 @@ fn test_indentation_handling() {
     assert_eq!(result.len(), 0); // Should handle different indentation levels
 
     // Non-list content with asterisks
-    let content =
-        "* Actual list item\nText with * asterisk that's not a list\n  * Indented list item";
+    let content = "* Actual list item\nText with * asterisk that's not a list\n  * Indented list item";
 
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let ctx = LintContext::new(content);
@@ -417,10 +394,7 @@ fn test_performance_md004() {
                     _ => "+",
                 };
 
-                content.push_str(&format!(
-                    "    {} Third level item {}.{}.{}\n",
-                    marker, i, j, k
-                ));
+                content.push_str(&format!("    {} Third level item {}.{}.{}\n", marker, i, j, k));
             }
         }
 

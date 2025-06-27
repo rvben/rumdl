@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for MD035 (Horizontal rule style)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -17,9 +17,7 @@ fn default_style() -> String {
 
 impl Default for MD035Config {
     fn default() -> Self {
-        Self {
-            style: default_style(),
-        }
+        Self { style: default_style() }
     }
 }
 

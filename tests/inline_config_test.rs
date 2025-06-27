@@ -1,7 +1,7 @@
+use rumdl::config::Config;
 use rumdl::inline_config::InlineConfig;
 use rumdl::lint;
 use rumdl::rules::all_rules;
-use rumdl::config::Config;
 
 #[test]
 fn test_markdownlint_disable_enable() {
@@ -18,7 +18,8 @@ This is another very long line that exceeds 80 characters and should trigger MD0
     let warnings = lint(content, &rules, false).unwrap();
 
     // Find MD013 warnings
-    let md013_warnings: Vec<_> = warnings.iter()
+    let md013_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
         .collect();
 
@@ -40,7 +41,8 @@ This is another very long line that exceeds 80 characters and should trigger MD0
     let warnings = lint(content, &rules, false).unwrap();
 
     // Find MD013 warnings
-    let md013_warnings: Vec<_> = warnings.iter()
+    let md013_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
         .collect();
 
@@ -63,7 +65,8 @@ This is another very long line that exceeds 80 characters and should trigger MD0
     let warnings = lint(content, &rules, false).unwrap();
 
     // Find MD013 warnings
-    let md013_warnings: Vec<_> = warnings.iter()
+    let md013_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
         .collect();
 
@@ -92,22 +95,25 @@ This is another very long line that exceeds 80 characters and should not trigger
     let warnings = lint(content, &rules, false).unwrap();
 
     // Find warnings by rule
-    let md013_warnings: Vec<_> = warnings.iter()
+    let md013_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
         .collect();
-    let md025_warnings: Vec<_> = warnings.iter()
+    let md025_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD025"))
         .collect();
-    let md009_warnings: Vec<_> = warnings.iter()
+    let md009_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD009"))
         .collect();
 
     // MD013 should be disabled throughout
     assert_eq!(md013_warnings.len(), 0);
-    
+
     // MD009 should be disabled throughout (trailing spaces)
     assert_eq!(md009_warnings.len(), 0);
-    
+
     // MD025 should only be disabled between capture and restore
     // Line 12 should have MD025 warning
     assert_eq!(md025_warnings.len(), 1);
@@ -134,11 +140,16 @@ This is another very long line that exceeds 80 characters and should trigger MD0
 
     // All warnings should be from lines after the enable comment
     for warning in &warnings {
-        assert!(warning.line >= 11, "Warning on line {} should have been disabled", warning.line);
+        assert!(
+            warning.line >= 11,
+            "Warning on line {} should have been disabled",
+            warning.line
+        );
     }
 
     // Should have at least one MD013 warning on line 11
-    let md013_warnings: Vec<_> = warnings.iter()
+    let md013_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
         .collect();
     assert!(!md013_warnings.is_empty());
@@ -160,15 +171,16 @@ Trailing spaces should now trigger MD009
 
     let rules = all_rules(&Config::default());
     let warnings = lint(content, &rules, false).unwrap();
-    
+
     // Find warnings by rule
-    let md013_warnings: Vec<_> = warnings.iter()
+    let md013_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
         .collect();
-    let md009_warnings: Vec<_> = warnings.iter()
+    let md009_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD009"))
         .collect();
-
 
     // MD013 warning on line 7
     assert_eq!(md013_warnings.len(), 1);
@@ -177,8 +189,11 @@ Trailing spaces should now trigger MD009
     // Debug: Check inline config state for line 10
     let inline_config = InlineConfig::from_content(content);
     let md009_disabled_at_10 = inline_config.is_rule_disabled("MD009", 10);
-    assert!(!md009_disabled_at_10, "MD009 should not be disabled at line 10, but it is!");
-    
+    assert!(
+        !md009_disabled_at_10,
+        "MD009 should not be disabled at line 10, but it is!"
+    );
+
     // MD009 warning on line 10
     assert_eq!(md009_warnings.len(), 1);
     assert_eq!(md009_warnings[0].line, 10);
@@ -204,7 +219,8 @@ This is a very long line that exceeds 80 characters but is disabled by the previ
     let warnings = lint(content, &rules, false).unwrap();
 
     // Find MD013 warnings
-    let md013_warnings: Vec<_> = warnings.iter()
+    let md013_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
         .collect();
 
@@ -231,18 +247,18 @@ Text
 
     // MD001 should be disabled at line 5
     assert!(config.is_rule_disabled("MD001", 5));
-    
+
     // MD002 should be disabled only at line 4
     assert!(config.is_rule_disabled("MD002", 4));
     assert!(!config.is_rule_disabled("MD002", 5));
-    
+
     // MD003 should be disabled only at line 6 (next line after comment)
     assert!(config.is_rule_disabled("MD003", 6));
     assert!(!config.is_rule_disabled("MD003", 5));
-    
+
     // MD004 should not be disabled after restore
     assert!(!config.is_rule_disabled("MD004", 10));
-    
+
     // MD001 should be enabled after line 11
     assert!(!config.is_rule_disabled("MD001", 11));
 }
@@ -252,10 +268,16 @@ fn test_md009_simple() {
     let content = "Test  ";
     let rules = all_rules(&Config::default());
     let warnings = lint(content, &rules, false).unwrap();
-    
-    let md009_warnings: Vec<_> = warnings.iter()
+
+    let md009_warnings: Vec<_> = warnings
+        .iter()
         .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD009"))
         .collect();
-    
-    assert_eq!(md009_warnings.len(), 1, "Expected 1 MD009 warning but got {}", md009_warnings.len());
+
+    assert_eq!(
+        md009_warnings.len(),
+        1,
+        "Expected 1 MD009 warning but got {}",
+        md009_warnings.len()
+    );
 }

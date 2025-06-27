@@ -153,7 +153,12 @@ impl MD053LinkImageReferenceDefinitions {
     ///
     /// This method returns a HashSet of all normalized reference IDs found in usage.
     /// It leverages cached data from LintContext for efficiency.
-    fn find_usages(&self, content: &str, doc_structure: &DocumentStructure, ctx: &crate::lint_context::LintContext) -> HashSet<String> {
+    fn find_usages(
+        &self,
+        content: &str,
+        doc_structure: &DocumentStructure,
+        ctx: &crate::lint_context::LintContext,
+    ) -> HashSet<String> {
         let lines: Vec<&str> = content.lines().collect();
         let mut usages: HashSet<String> = HashSet::new();
 
@@ -187,9 +192,7 @@ impl MD053LinkImageReferenceDefinitions {
             let line_num = i + 1; // 1-indexed
 
             // Skip lines in code blocks or front matter
-            if doc_structure.is_in_code_block(line_num)
-                || doc_structure.is_in_front_matter(line_num)
-            {
+            if doc_structure.is_in_code_block(line_num) || doc_structure.is_in_front_matter(line_num) {
                 continue;
             }
 
@@ -197,13 +200,13 @@ impl MD053LinkImageReferenceDefinitions {
             for caps in SHORTCUT_REFERENCE_REGEX.captures_iter(line).flatten() {
                 if let Some(full_match) = caps.get(0) {
                     if let Some(ref_id_match) = caps.get(1) {
-
                         // Check if the match is within a code span
                         let line_start_byte = ctx.line_to_byte_offset(line_num).unwrap_or(0);
                         let match_byte_offset = line_start_byte + full_match.start();
-                        let in_code_span = ctx.code_spans.iter().any(|span| 
-                            match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end
-                        );
+                        let in_code_span = ctx
+                            .code_spans
+                            .iter()
+                            .any(|span| match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end);
 
                         if !in_code_span {
                             let ref_id = ref_id_match.as_str().trim();
@@ -314,8 +317,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
             let line_content = lines.get(start).unwrap_or(&"");
 
             // Calculate precise character range for the entire reference definition line
-            let (start_line, start_col, end_line, end_col) =
-                calculate_line_range(line_num, line_content);
+            let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line_content);
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
@@ -323,16 +325,15 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!(
-                    "Unused link/image reference: [{}]",
-                    definition
-                ),
+                message: format!("Unused link/image reference: [{}]", definition),
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     // Remove the entire line including the newline
                     range: {
                         let line_start = line_index.get_line_start_byte(line_num).unwrap_or(0);
-                        let line_end = line_index.get_line_start_byte(line_num + 1).unwrap_or(line_start + line_content.len());
+                        let line_end = line_index
+                            .get_line_start_byte(line_num + 1)
+                            .unwrap_or(line_start + line_content.len());
                         line_start..line_end
                     },
                     replacement: String::new(), // Remove the line
@@ -367,10 +368,8 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         }
 
         // Collect all line ranges to remove (sort by start line descending)
-        let mut lines_to_remove: Vec<(usize, usize)> = unused_refs
-            .iter()
-            .map(|(_, start, end)| (*start, *end))
-            .collect();
+        let mut lines_to_remove: Vec<(usize, usize)> =
+            unused_refs.iter().map(|(_, start, end)| (*start, *end)).collect();
         lines_to_remove.sort_by(|a, b| b.0.cmp(&a.0)); // Sort descending by start line
 
         // Remove lines from end to beginning to preserve line numbers

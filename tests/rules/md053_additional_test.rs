@@ -113,8 +113,7 @@ fn test_case_difference_between_usage_and_definition() {
 #[test]
 fn test_references_separated_by_content() {
     let rule = MD053LinkImageReferenceDefinitions::new();
-    let content =
-        "[link][id]\n\nLots of content here...\nMore content...\n\n[id]: http://example.com";
+    let content = "[link][id]\n\nLots of content here...\nMore content...\n\n[id]: http://example.com";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -168,7 +167,8 @@ fn test_ignored_definitions_case_insensitivity() {
 #[test]
 fn test_multiple_ignored_definitions() {
     let rule = MD053LinkImageReferenceDefinitions::new();
-    let content = "[ignore1]: http://example1.com\n[ignore2]: http://example2.com\n[used]: http://example3.com\n[used] is a link";
+    let content =
+        "[ignore1]: http://example1.com\n[ignore2]: http://example2.com\n[used]: http://example3.com\n[used] is a link";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // Assert they are detected as unused (default behavior)
@@ -243,10 +243,7 @@ fn test_nested_formatting() {
     let content = "[**bold _italic_ reference**][ref]\n\n[ref]: http://example.com";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Formatted reference should be properly detected"
-    );
+    assert!(result.is_empty(), "Formatted reference should be properly detected");
 }
 
 #[test]
@@ -267,10 +264,7 @@ fn test_references_in_list() {
     let content = "- [List item link][ref1]\n- Another item\n- ![Image in list][ref2]\n\n[ref1]: http://example.com/1\n[ref2]: http://example.com/image.png";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "References in lists should be properly detected"
-    );
+    assert!(result.is_empty(), "References in lists should be properly detected");
 }
 
 #[test]
@@ -409,7 +403,8 @@ fn test_reference_with_backslash_in_definition() {
 #[test]
 fn test_fix_nested_references() {
     let rule = MD053LinkImageReferenceDefinitions::new();
-    let content = "[![alt][img1]][link1]\n\n[img1]: /path/to/img1.png\n[img2]: /path/to/img2.png\n[link1]: http://example1.com";
+    let content =
+        "[![alt][img1]][link1]\n\n[img1]: /path/to/img1.png\n[img2]: /path/to/img2.png\n[link1]: http://example1.com";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
     // Both 'img1' and 'link1' are used according to CommonMark spec

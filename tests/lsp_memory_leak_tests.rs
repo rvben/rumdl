@@ -1,10 +1,10 @@
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use std::process::{Command, Stdio};
 use tempfile::tempdir;
-use std::fs;
-use std::io::{BufRead, BufReader, Write};
 
 #[test]
 fn test_lsp_memory_usage_over_time() {
@@ -50,8 +50,14 @@ Final content.
     let mut reader = BufReader::new(stdout);
 
     // Initialize LSP with proper error handling
-    let initialize_request = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":"file://"}}"#;
-    if let Err(_) = writeln!(stdin, "Content-Length: {}\r\n\r\n{}", initialize_request.len(), initialize_request) {
+    let initialize_request =
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":"file://"}}"#;
+    if let Err(_) = writeln!(
+        stdin,
+        "Content-Length: {}\r\n\r\n{}",
+        initialize_request.len(),
+        initialize_request
+    ) {
         println!("LSP process terminated early, skipping test");
         return;
     }
@@ -77,7 +83,8 @@ Final content.
 
     // Memory monitoring thread with error handling
     let monitor_handle = thread::spawn(move || {
-        for _ in 0..15 { // Reduced monitoring time to 15 seconds
+        for _ in 0..15 {
+            // Reduced monitoring time to 15 seconds
             if let Ok(memory_kb) = get_process_memory(lsp_pid) {
                 if let Ok(mut samples) = memory_samples_clone.lock() {
                     samples.push(memory_kb);
@@ -91,11 +98,16 @@ Final content.
     });
 
     // Simulate LSP usage with error handling
-    for i in 0..50 { // Reduced iterations
+    for i in 0..50 {
+        // Reduced iterations
         let file_uri = format!("file://{}/test{}.md", project_path.display(), i % 10);
 
         // Send textDocument/didOpen with error handling
-        let did_open = format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"markdown","version":1,"text":"{}"}}}}}}"#, file_uri, test_content.replace('\n', "\\n"));
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"markdown","version":1,"text":"{}"}}}}}}"#,
+            file_uri,
+            test_content.replace('\n', "\\n")
+        );
         if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_open.len(), did_open).is_err() {
             println!("LSP process terminated during operation");
             break;
@@ -103,14 +115,20 @@ Final content.
 
         // Send textDocument/didChange with error handling
         let updated_content = "# Updated Content\\n\\nThis is updated content.";
-        let did_change = format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":2}},"contentChanges":[{{"text":"{}"}}]}}}}"#, file_uri, updated_content);
+        let did_change = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":2}},"contentChanges":[{{"text":"{}"}}]}}}}"#,
+            file_uri, updated_content
+        );
         if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_change.len(), did_change).is_err() {
             println!("LSP process terminated during operation");
             break;
         }
 
         // Send textDocument/didClose with error handling
-        let did_close = format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{}"}}}}}}"#, file_uri);
+        let did_close = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+            file_uri
+        );
         if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_close.len(), did_close).is_err() {
             println!("LSP process terminated during operation");
             break;
@@ -164,7 +182,8 @@ fn test_lsp_memory_stress_with_large_files() {
 
     // Create large test file (smaller for reliability)
     let mut large_content = String::new();
-    for i in 0..500 { // Reduced size
+    for i in 0..500 {
+        // Reduced size
         large_content.push_str(&format!("# Heading {}\n\nContent for section {}.\n\n", i, i));
     }
 
@@ -183,8 +202,16 @@ fn test_lsp_memory_stress_with_large_files() {
     let mut stdin = lsp_process.stdin.take().unwrap();
 
     // Initialize LSP with error handling
-    let initialize_request = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":"file://"}}"#;
-    if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", initialize_request.len(), initialize_request).is_err() {
+    let initialize_request =
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":"file://"}}"#;
+    if writeln!(
+        stdin,
+        "Content-Length: {}\r\n\r\n{}",
+        initialize_request.len(),
+        initialize_request
+    )
+    .is_err()
+    {
         println!("LSP process terminated early, skipping test");
         return;
     }
@@ -200,7 +227,11 @@ fn test_lsp_memory_stress_with_large_files() {
 
     // Open large file with error handling
     let file_uri = format!("file://{}/large.md", project_path.display());
-    let did_open = format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"markdown","version":1,"text":"{}"}}}}}}"#, file_uri, large_content.replace('\n', "\\n"));
+    let did_open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"markdown","version":1,"text":"{}"}}}}}}"#,
+        file_uri,
+        large_content.replace('\n', "\\n")
+    );
     if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_open.len(), did_open).is_err() {
         println!("LSP process terminated, skipping test");
         return;
@@ -211,9 +242,15 @@ fn test_lsp_memory_stress_with_large_files() {
     let after_open_memory = get_process_memory(lsp_process.id()).unwrap_or(0);
 
     // Make multiple edits with error handling
-    for i in 0..5 { // Reduced iterations
+    for i in 0..5 {
+        // Reduced iterations
         let edit_content = format!("# Updated Heading {}\\n\\nUpdated content.", i);
-        let did_change = format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":{}}},"contentChanges":[{{"text":"{}"}}]}}}}"#, file_uri, i + 2, edit_content);
+        let did_change = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":{}}},"contentChanges":[{{"text":"{}"}}]}}}}"#,
+            file_uri,
+            i + 2,
+            edit_content
+        );
         if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_change.len(), did_change).is_err() {
             println!("LSP process terminated during edits");
             break;
@@ -224,7 +261,10 @@ fn test_lsp_memory_stress_with_large_files() {
     let after_edits_memory = get_process_memory(lsp_process.id()).unwrap_or(0);
 
     // Close file with error handling
-    let did_close = format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{}"}}}}}}"#, file_uri);
+    let did_close = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+        file_uri
+    );
     let _ = writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_close.len(), did_close);
 
     thread::sleep(Duration::from_secs(1)); // Allow cleanup time
@@ -240,7 +280,11 @@ fn test_lsp_memory_stress_with_large_files() {
     // Memory should be released after closing (or at least not grow excessively)
     if after_edits_memory > 0 && initial_memory > 0 {
         let total_growth = after_edits_memory as f64 / initial_memory as f64;
-        assert!(total_growth < 10.0, "Memory usage grew too much with large file: {}x", total_growth);
+        assert!(
+            total_growth < 10.0,
+            "Memory usage grew too much with large file: {}x",
+            total_growth
+        );
     }
 
     // Graceful cleanup
@@ -276,8 +320,16 @@ fn test_lsp_concurrent_document_handling() {
     let mut stdin = lsp_process.stdin.take().unwrap();
 
     // Initialize LSP with error handling
-    let initialize_request = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":"file://"}}"#;
-    if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", initialize_request.len(), initialize_request).is_err() {
+    let initialize_request =
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":"file://"}}"#;
+    if writeln!(
+        stdin,
+        "Content-Length: {}\r\n\r\n{}",
+        initialize_request.len(),
+        initialize_request
+    )
+    .is_err()
+    {
         println!("LSP process terminated early, skipping test");
         return;
     }
@@ -294,7 +346,10 @@ fn test_lsp_concurrent_document_handling() {
     for i in 0..10 {
         let file_uri = format!("file://{}/doc{}.md", project_path.display(), i);
         let content = format!("# Document {}\\n\\nContent for document {}.", i, i);
-        let did_open = format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"markdown","version":1,"text":"{}"}}}}}}"#, file_uri, content);
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"markdown","version":1,"text":"{}"}}}}}}"#,
+            file_uri, content
+        );
         if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_open.len(), did_open).is_err() {
             println!("LSP process terminated during document opening");
             break;
@@ -307,7 +362,10 @@ fn test_lsp_concurrent_document_handling() {
     // Close all documents with error handling
     for i in 0..10 {
         let file_uri = format!("file://{}/doc{}.md", project_path.display(), i);
-        let did_close = format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{}"}}}}}}"#, file_uri);
+        let did_close = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+            file_uri
+        );
         let _ = writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_close.len(), did_close);
     }
 
@@ -321,8 +379,13 @@ fn test_lsp_concurrent_document_handling() {
 
     // Memory checks (more lenient for reliability)
     if after_open_memory > initial_memory && initial_memory > 0 {
-        let memory_retention = (after_close_memory as f64 - initial_memory as f64) / (after_open_memory as f64 - initial_memory as f64);
-        assert!(memory_retention < 0.8, "Too much memory retained after closing documents: {:.2}%", memory_retention * 100.0);
+        let memory_retention =
+            (after_close_memory as f64 - initial_memory as f64) / (after_open_memory as f64 - initial_memory as f64);
+        assert!(
+            memory_retention < 0.8,
+            "Too much memory retained after closing documents: {:.2}%",
+            memory_retention * 100.0
+        );
     }
 
     // Graceful cleanup
