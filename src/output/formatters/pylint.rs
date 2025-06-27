@@ -18,12 +18,19 @@ impl OutputFormatter for PylintFormatter {
 
         for warning in warnings {
             let rule_name = warning.rule_name.unwrap_or("unknown");
+            
+            // Convert MD prefix to CMD for pylint convention
+            // Pylint uses C for Convention, so CMD = Convention + MD rule
+            let pylint_code = if rule_name.starts_with("MD") {
+                format!("CMD{}", &rule_name[2..])
+            } else {
+                format!("C{}", rule_name)
+            };
 
             // Pylint format: file:line:column: [C0000] message
-            // We use C (convention) for all markdown linting rules
             let line = format!(
-                "{}:{}:{}: [C{}] {}",
-                file_path, warning.line, warning.column, rule_name, warning.message
+                "{}:{}:{}: [{}] {}",
+                file_path, warning.line, warning.column, pylint_code, warning.message
             );
 
             output.push_str(&line);
