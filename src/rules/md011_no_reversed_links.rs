@@ -46,12 +46,7 @@ impl MD011NoReversedLinks {
                     let url = cap[3].trim_matches('(').trim_matches(')');
                     let text = &cap[4];
                     let start = line_start + cap.get(0).unwrap().start();
-                    results.push((
-                        current_line,
-                        start - line_start + 1,
-                        text.to_string(),
-                        url.to_string(),
-                    ));
+                    results.push((current_line, start - line_start + 1, text.to_string(), url.to_string()));
                 }
             }
             line_start += line.len() + 1; // +1 for newline
@@ -74,9 +69,10 @@ impl MD011NoReversedLinks {
                 let end = start + len;
 
                 // Skip if this range overlaps with already processed ranges
-                if processed_ranges.iter().any(|(proc_start, proc_end)|
-                    (start < *proc_end && end > *proc_start)
-                ) {
+                if processed_ranges
+                    .iter()
+                    .any(|(proc_start, proc_end)| (start < *proc_end && end > *proc_start))
+                {
                     continue;
                 }
 
@@ -100,11 +96,11 @@ impl MD011NoReversedLinks {
             "missing closing bracket" => {
                 // (URL)[text -> cap[1] = URL, cap[2] = incomplete text
                 Some((cap[1].to_string(), format!("{}]", &cap[2])))
-            },
+            }
             "missing closing parenthesis" => {
                 // [text](URL -> cap[1] = text, cap[2] = incomplete URL
                 Some((format!("{})", &cap[2]), cap[1].to_string()))
-            },
+            }
             "wrong bracket type (curly instead of parentheses)" => {
                 // {URL}[text] or [text]{URL} -> cap[1] and cap[2]
                 if cap.get(0).unwrap().as_str().starts_with('{') {
@@ -114,11 +110,11 @@ impl MD011NoReversedLinks {
                     // [text]{URL} -> already in correct order, fix brackets
                     Some((cap[2].to_string(), cap[1].to_string()))
                 }
-            },
+            }
             "URL and text appear to be swapped" => {
                 // [URL](text) -> cap[1] = URL, cap[2] = text, need to swap
                 Some((cap[1].to_string(), cap[2].to_string()))
-            },
+            }
             _ => None,
         }
     }
@@ -127,31 +123,29 @@ impl MD011NoReversedLinks {
     fn looks_like_link_attempt(&self, url: &str, text: &str) -> bool {
         // URL should look like a URL
         let url_indicators = [
-            "http://", "https://", "www.", "ftp://",
-            ".com", ".org", ".net", ".edu", ".gov", ".io", ".co"
+            "http://", "https://", "www.", "ftp://", ".com", ".org", ".net", ".edu", ".gov", ".io", ".co",
         ];
 
-        let has_url_indicator = url_indicators.iter().any(|indicator|
-            url.to_lowercase().contains(indicator)
-        );
+        let has_url_indicator = url_indicators
+            .iter()
+            .any(|indicator| url.to_lowercase().contains(indicator));
 
         // Text should be reasonable length and not look like a URL
-        let text_looks_reasonable = text.len() >= 3 && text.len() <= 50
-            && !url_indicators.iter().any(|indicator|
-                text.to_lowercase().contains(indicator)
-            )
+        let text_looks_reasonable = text.len() >= 3
+            && text.len() <= 50
+            && !url_indicators
+                .iter()
+                .any(|indicator| text.to_lowercase().contains(indicator))
             && !text.to_lowercase().starts_with("http")
             && text.chars().any(|c| c.is_alphabetic()); // Must contain at least one letter
 
         // URL should not be too short or contain only non-URL characters
-        let url_looks_reasonable = url.len() >= 4
-            && (has_url_indicator || url.contains('.'))
-            && !url.chars().all(|c| c.is_alphabetic()); // Shouldn't be just letters
+        let url_looks_reasonable =
+            url.len() >= 4 && (has_url_indicator || url.contains('.')) && !url.chars().all(|c| c.is_alphabetic()); // Shouldn't be just letters
 
         // Both URL and text should look reasonable for this to be a link attempt
         has_url_indicator && text_looks_reasonable && url_looks_reasonable
     }
-
 }
 
 impl Default for MD011NoReversedLinks {
@@ -214,8 +208,7 @@ impl Rule for MD011NoReversedLinks {
             let malformed_attempts = self.detect_malformed_link_attempts(line);
             for (start, len, url, text) in malformed_attempts {
                 // Calculate precise character range for the malformed syntax
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_match_range(line_num + 1, line, start, len);
+                let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, start, len);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
@@ -237,7 +230,7 @@ impl Rule for MD011NoReversedLinks {
                     }),
                 });
             }
-            
+
             byte_pos += line.len() + 1; // Update byte position for next line
         }
 
@@ -330,8 +323,14 @@ mod tests {
         assert_eq!(result.len(), 2);
 
         // Verify both fixes are correct
-        assert_eq!(result[0].fix.as_ref().unwrap().replacement, "[Example](https://example.com)");
-        assert_eq!(result[1].fix.as_ref().unwrap().replacement, "[Test Site](https://test.com)");
+        assert_eq!(
+            result[0].fix.as_ref().unwrap().replacement,
+            "[Example](https://example.com)"
+        );
+        assert_eq!(
+            result[1].fix.as_ref().unwrap().replacement,
+            "[Test Site](https://test.com)"
+        );
     }
 
     #[test]
@@ -470,10 +469,10 @@ static ref TRAILING_PUNCTUATION: Regex = Regex::new(r"(?m)[.!?]+\s*$").unwrap();
 ```
 
 But this (https://example.com)[reversed link] should be flagged."#;
-        
+
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should only flag the reversed link outside the code block
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Reversed link syntax"));

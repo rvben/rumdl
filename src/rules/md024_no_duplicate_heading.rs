@@ -1,8 +1,8 @@
 use toml;
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::calculate_match_range;
 use crate::rule_config_serde::RuleConfig;
+use crate::utils::range_utils::calculate_match_range;
 use std::collections::{HashMap, HashSet};
 
 mod md024_config;
@@ -30,7 +30,7 @@ impl MD024NoDuplicateHeading {
             },
         }
     }
-    
+
     pub fn from_config_struct(config: MD024Config) -> Self {
         Self { config }
     }
@@ -119,7 +119,7 @@ impl Rule for MD024NoDuplicateHeading {
                 }
             }
         }
-        
+
         Ok(warnings)
     }
 
@@ -150,7 +150,7 @@ impl Rule for MD024NoDuplicateHeading {
         let default_config = MD024Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;
         let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-        
+
         if let toml::Value::Table(table) = toml_value {
             if !table.is_empty() {
                 Some((MD024Config::RULE_NAME.to_string(), toml::Value::Table(table)))

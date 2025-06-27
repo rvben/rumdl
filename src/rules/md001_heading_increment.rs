@@ -92,8 +92,7 @@ impl Rule for MD001HeadingIncrement {
 
                     // Create a fix with the correct heading level
                     let fixed_level = prev_level + 1;
-                    let replacement =
-                        HeadingUtils::convert_heading_style(heading_text, fixed_level as u32, style);
+                    let replacement = HeadingUtils::convert_heading_style(heading_text, fixed_level as u32, style);
 
                     // Calculate precise range: highlight the entire heading
                     let line_content = &line_info.content;
@@ -155,8 +154,7 @@ impl Rule for MD001HeadingIncrement {
                     }
                 };
 
-                let replacement =
-                    HeadingUtils::convert_heading_style(&heading.text, fixed_level as u32, style);
+                let replacement = HeadingUtils::convert_heading_style(&heading.text, fixed_level as u32, style);
                 fixed_lines.push(format!("{}{}", " ".repeat(line_info.indent), replacement));
 
                 prev_level = fixed_level;
@@ -196,7 +194,6 @@ impl Rule for MD001HeadingIncrement {
         Box::new(MD001HeadingIncrement)
     }
 }
-
 
 #[cfg(test)]
 mod tests {

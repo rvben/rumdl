@@ -7,14 +7,12 @@ use tempfile::tempdir;
 const COMMONMARK_ATX_HEADING: &str = "# Heading 1\n## Heading 2\n### Heading 3";
 const COMMONMARK_SETEXT_HEADING: &str = "Heading 1\n=========\n\nHeading 2\n---------";
 const COMMONMARK_LISTS: &str = "- Item 1\n- Item 2\n  - Nested item\n  - Another nested item\n- Item 3\n\n1. Ordered item 1\n2. Ordered item 2\n   1. Nested ordered item\n3. Ordered item 3";
-const COMMONMARK_CODE_BLOCKS: &str = "```\nCode block without language\n```\n\n```rust\nfn main() {\n    println!(\"Hello, world!\");\n}\n```";
+const COMMONMARK_CODE_BLOCKS: &str =
+    "```\nCode block without language\n```\n\n```rust\nfn main() {\n    println!(\"Hello, world!\");\n}\n```";
 const COMMONMARK_EMPHASIS: &str = "This is *emphasized* text and this is **strong** text.";
-const COMMONMARK_LINKS: &str =
-    "[Link](https://example.com) and [Reference link][ref]\n\n[ref]: https://example.org";
-const COMMONMARK_IMAGES: &str =
-    "![Alt text](image.png) and ![Referenced image][img]\n\n[img]: other-image.jpg";
-const COMMONMARK_BLOCKQUOTES: &str =
-    "> This is a blockquote\n> With multiple lines\n>\n> And a paragraph break";
+const COMMONMARK_LINKS: &str = "[Link](https://example.com) and [Reference link][ref]\n\n[ref]: https://example.org";
+const COMMONMARK_IMAGES: &str = "![Alt text](image.png) and ![Referenced image][img]\n\n[img]: other-image.jpg";
+const COMMONMARK_BLOCKQUOTES: &str = "> This is a blockquote\n> With multiple lines\n>\n> And a paragraph break";
 const COMMONMARK_HTML: &str = "<div>\n  Some text in HTML\n</div>";
 
 #[test]
@@ -23,11 +21,7 @@ fn test_rules_produce_commonmark_compliant_output() {
 
     // Test all CommonMark elements
     validate_commonmark_compliance(COMMONMARK_ATX_HEADING, "headings-atx.md", temp_dir.path());
-    validate_commonmark_compliance(
-        COMMONMARK_SETEXT_HEADING,
-        "headings-setext.md",
-        temp_dir.path(),
-    );
+    validate_commonmark_compliance(COMMONMARK_SETEXT_HEADING, "headings-setext.md", temp_dir.path());
     validate_commonmark_compliance(COMMONMARK_LISTS, "lists.md", temp_dir.path());
     validate_commonmark_compliance(COMMONMARK_CODE_BLOCKS, "code-blocks.md", temp_dir.path());
     validate_commonmark_compliance(COMMONMARK_EMPHASIS, "emphasis.md", temp_dir.path());
@@ -84,14 +78,8 @@ fn verify_commonmark_elements(content: &str, filename: &str) {
         }
         "headings-setext.md" => {
             // Verify Setext headings are preserved or converted to ATX (both valid CommonMark)
-            assert!(
-                content.contains("Heading 1"),
-                "Missing level 1 heading content"
-            );
-            assert!(
-                content.contains("Heading 2"),
-                "Missing level 2 heading content"
-            );
+            assert!(content.contains("Heading 1"), "Missing level 1 heading content");
+            assert!(content.contains("Heading 2"), "Missing level 2 heading content");
             // The format may be converted to ATX, so don't check for =======
         }
         "lists.md" => {
@@ -129,10 +117,7 @@ fn verify_commonmark_elements(content: &str, filename: &str) {
         }
         "blockquotes.md" => {
             // Check for blockquote syntax
-            assert!(
-                content.contains("> This is a blockquote"),
-                "Missing blockquote content"
-            );
+            assert!(content.contains("> This is a blockquote"), "Missing blockquote content");
         }
         "html.md" => {
             // HTML may be removed by rules, so we don't assert about it
@@ -219,8 +204,7 @@ Final paragraph with a footnote[^1] and a horizontal rule:
     );
 
     // Read the fixed content
-    let fixed_content =
-        fs::read_to_string(&complex_markdown_path).expect("Failed to read fixed content");
+    let fixed_content = fs::read_to_string(&complex_markdown_path).expect("Failed to read fixed content");
 
     // Verify structure preservation
     verify_document_structure(&fixed_content);
@@ -230,16 +214,10 @@ Final paragraph with a footnote[^1] and a horizontal rule:
 fn verify_document_structure(content: &str) {
     // Verify headings
     assert!(content.contains("# Main Heading"), "Missing main heading");
-    assert!(
-        content.contains("## Secondary Heading"),
-        "Missing secondary heading"
-    );
+    assert!(content.contains("## Secondary Heading"), "Missing secondary heading");
 
     // Verify lists
-    assert!(
-        content.contains("- List item"),
-        "Missing unordered list items"
-    );
+    assert!(content.contains("- List item"), "Missing unordered list items");
     assert!(content.contains("1. Ordered"), "Missing ordered list items");
 
     // Verify code blocks (either backticks or tildes are valid)

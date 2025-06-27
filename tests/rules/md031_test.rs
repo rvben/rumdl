@@ -184,7 +184,7 @@ fn test_fence_length_specificity() {
 #[test]
 fn test_code_blocks_in_lists() {
     let rule = MD031BlanksAroundFences;
-    
+
     // Test code blocks inside list items - this was causing issues in docs/md031.md
     let content = r#"# Test
 
@@ -206,13 +206,16 @@ Regular paragraph."#;
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Code blocks in lists should still require blank lines
-    assert!(result.len() > 0, "Should detect missing blank lines around code blocks in lists");
-    
+    assert!(
+        result.len() > 0,
+        "Should detect missing blank lines around code blocks in lists"
+    );
+
     // Test the fix
     let fixed = rule.fix(&ctx).unwrap();
-    
+
     // Should add blank lines around code blocks in lists
     assert!(fixed.contains("1. First item with code:\n\n   ```python"));
     assert!(fixed.contains("   ```\n\n2. Second item"));

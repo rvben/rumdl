@@ -4,10 +4,10 @@
 //! See [docs/md030.md](../../docs/md030.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::RuleConfig;
 use crate::rules::list_utils::ListType;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::calculate_match_range;
-use crate::rule_config_serde::RuleConfig;
 use toml;
 
 mod md030_config;
@@ -37,7 +37,7 @@ impl MD030ListMarkerSpace {
             },
         }
     }
-    
+
     pub fn from_config_struct(config: MD030Config) -> Self {
         Self { config }
     }
@@ -67,7 +67,7 @@ impl Rule for MD030ListMarkerSpace {
         let mut in_blockquote = false;
         for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1;
-            
+
             // Skip if in code block
             if let Some(line_info) = ctx.line_info(line_num) {
                 if line_info.in_code_block {
@@ -96,7 +96,7 @@ impl Rule for MD030ListMarkerSpace {
                     } else {
                         ListType::Unordered
                     };
-                    
+
                     // Calculate actual spacing after marker
                     let marker_end = list_info.marker_column + list_info.marker.len();
                     let actual_spaces = if list_info.content_column > marker_end {
@@ -105,9 +105,9 @@ impl Rule for MD030ListMarkerSpace {
                         // No space after marker
                         0
                     };
-                    
+
                     let expected_spaces = self.get_expected_spaces(list_type, false);
-                    
+
                     // Check for tabs in the spacing
                     let line_content = &line[list_info.marker_column..];
                     let spacing_content = if line_content.len() > list_info.marker.len() {
@@ -118,7 +118,7 @@ impl Rule for MD030ListMarkerSpace {
                         ""
                     };
                     let has_tabs = spacing_content.contains('\t');
-                    
+
                     // Check if spacing is incorrect or contains tabs
                     if actual_spaces != expected_spaces || has_tabs {
                         // Calculate precise character range for the problematic spacing
@@ -131,12 +131,12 @@ impl Rule for MD030ListMarkerSpace {
 
                         // Generate the correct replacement text (just the correct spacing)
                         let correct_spaces = " ".repeat(expected_spaces);
-                        
+
                         // Calculate byte positions for the fix range
                         let line_start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
                         let whitespace_start_byte = line_start_byte + whitespace_start_pos;
                         let whitespace_end_byte = whitespace_start_byte + whitespace_len;
-                        
+
                         let fix = Some(crate::rule::Fix {
                             range: whitespace_start_byte..whitespace_end_byte,
                             replacement: correct_spaces,
@@ -145,8 +145,7 @@ impl Rule for MD030ListMarkerSpace {
                         // Generate appropriate message
                         let message = format!(
                             "Spaces after list markers (Expected: {}; Actual: {})",
-                            expected_spaces,
-                            actual_spaces
+                            expected_spaces, actual_spaces
                         );
 
                         warnings.push(LintWarning {
@@ -190,7 +189,7 @@ impl Rule for MD030ListMarkerSpace {
         let default_config = MD030Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;
         let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-        
+
         if let toml::Value::Table(table) = toml_value {
             if !table.is_empty() {
                 Some((MD030Config::RULE_NAME.to_string(), toml::Value::Table(table)))
@@ -207,10 +206,7 @@ impl Rule for MD030ListMarkerSpace {
         Box::new(Self::from_config_struct(rule_config))
     }
 
-    fn fix(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-    ) -> Result<String, crate::rule::LintError> {
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, crate::rule::LintError> {
         let content = ctx.content;
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
         let lines: Vec<&str> = content.lines().collect();
@@ -396,7 +392,8 @@ mod tests {
         );
         for warning in result {
             assert!(
-                warning.message.starts_with("Spaces after list markers (Expected:") && warning.message.contains("Actual:"),
+                warning.message.starts_with("Spaces after list markers (Expected:")
+                    && warning.message.contains("Actual:"),
                 "Warning message should include expected and actual values, got: '{}'",
                 warning.message
             );

@@ -23,7 +23,7 @@ pub use markdown_elements::{ElementQuality, ElementType, MarkdownElement, Markdo
 pub fn detect_line_ending(content: &str) -> &'static str {
     let crlf_count = content.matches("\r\n").count();
     let lf_count = content.matches('\n').count() - crlf_count;
-    
+
     if crlf_count > lf_count {
         "\r\n"
     } else {
@@ -66,9 +66,8 @@ impl StrExt for str {
         }
 
         // Build the final string
-        let mut result = String::with_capacity(
-            non_space_len + replacement.len() + if ends_with_newline { 1 } else { 0 },
-        );
+        let mut result =
+            String::with_capacity(non_space_len + replacement.len() + if ends_with_newline { 1 } else { 0 });
         result.push_str(&content[..non_space_len]);
         result.push_str(replacement);
         if ends_with_newline {

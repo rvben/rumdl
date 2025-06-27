@@ -62,10 +62,7 @@ impl RegexCache {
     }
 
     /// Get or compile a fancy regex pattern
-    pub fn get_fancy_regex(
-        &mut self,
-        pattern: &str,
-    ) -> Result<Arc<FancyRegex>, Box<fancy_regex::Error>> {
+    pub fn get_fancy_regex(&mut self, pattern: &str) -> Result<Arc<FancyRegex>, Box<fancy_regex::Error>> {
         if let Some(regex) = self.fancy_cache.get(pattern) {
             *self.usage_stats.entry(pattern.to_string()).or_insert(0) += 1;
             return Ok(regex.clone());
@@ -74,8 +71,7 @@ impl RegexCache {
         match FancyRegex::new(pattern) {
             Ok(regex) => {
                 let arc_regex = Arc::new(regex);
-                self.fancy_cache
-                    .insert(pattern.to_string(), arc_regex.clone());
+                self.fancy_cache.insert(pattern.to_string(), arc_regex.clone());
                 Ok(arc_regex)
             }
             Err(e) => Err(Box::new(e)),
@@ -148,8 +144,7 @@ macro_rules! regex_cached {
 #[macro_export]
 macro_rules! fancy_regex_cached {
     ($pattern:expr) => {{
-        $crate::utils::regex_cache::get_cached_fancy_regex($pattern)
-            .expect("Failed to compile fancy regex")
+        $crate::utils::regex_cache::get_cached_fancy_regex($pattern).expect("Failed to compile fancy regex")
     }};
 }
 
@@ -324,9 +319,7 @@ pub fn contains_url(content: &str) -> bool {
 
 /// Escapes a string to be used in a regex pattern
 pub fn escape_regex(s: &str) -> String {
-    let special_chars = [
-        '.', '+', '*', '?', '^', '$', '(', ')', '[', ']', '{', '}', '|', '\\',
-    ];
+    let special_chars = ['.', '+', '*', '?', '^', '$', '(', ')', '[', ']', '{', '}', '|', '\\'];
     let mut result = String::with_capacity(s.len() * 2);
 
     for c in s.chars() {

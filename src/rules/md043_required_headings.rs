@@ -26,13 +26,13 @@ impl MD043RequiredHeadings {
 
     fn extract_headings(&self, ctx: &crate::lint_context::LintContext) -> Vec<String> {
         let mut result = Vec::new();
-        
+
         for line_info in &ctx.lines {
             if let Some(heading) = &line_info.heading {
                 result.push(heading.text.trim().to_string());
             }
         }
-        
+
         result
     }
 
@@ -72,22 +72,18 @@ impl Rule for MD043RequiredHeadings {
                     column: 1,
                     end_line: 1,
                     end_column: 2,
-                    message: format!(
-                        "Required headings not found: {:?}",
-                        self.headings
-                    ),
+                    message: format!("Required headings not found: {:?}", self.headings),
                     severity: Severity::Warning,
                     fix: None,
                 });
                 return Ok(warnings);
             }
-            
+
             // Create warnings for each heading that doesn't match
             for (i, line_info) in ctx.lines.iter().enumerate() {
                 if self.is_heading(i, ctx) {
                     // Calculate precise character range for the entire heading
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_heading_range(i + 1, &line_info.content);
+                    let (start_line, start_col, end_line, end_col) = calculate_heading_range(i + 1, &line_info.content);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
@@ -95,14 +91,13 @@ impl Rule for MD043RequiredHeadings {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: "Heading structure does not match the required structure"
-                            .to_string(),
+                        message: "Heading structure does not match the required structure".to_string(),
                         severity: Severity::Warning,
                         fix: None, // Cannot automatically fix as we don't know the intended structure
                     });
                 }
             }
-            
+
             // If we have no warnings but headings don't match (could happen if we have no headings),
             // add a warning at the beginning of the file
             if warnings.is_empty() {
@@ -169,7 +164,7 @@ impl Rule for MD043RequiredHeadings {
 
         // Check if any heading exists using cached information
         let has_heading = ctx.lines.iter().any(|line| line.heading.is_some());
-        
+
         !has_heading
     }
 
@@ -182,8 +177,7 @@ impl Rule for MD043RequiredHeadings {
         Self: Sized,
     {
         let headings =
-            crate::config::get_rule_config_value::<Vec<String>>(config, "MD043", "headings")
-                .unwrap_or_default();
+            crate::config::get_rule_config_value::<Vec<String>>(config, "MD043", "headings").unwrap_or_default();
         Box::new(MD043RequiredHeadings::new(headings))
     }
 }
@@ -226,10 +220,7 @@ mod tests {
         let actual_headings = rule.extract_headings(&ctx);
         assert_eq!(
             actual_headings,
-            vec![
-                "Test Document".to_string(),
-                "Not Real heading 2".to_string()
-            ],
+            vec!["Test Document".to_string(), "Not Real heading 2".to_string()],
             "Should extract actual headings including mismatched ones"
         );
     }
@@ -237,24 +228,16 @@ mod tests {
     #[test]
     fn test_with_document_structure() {
         // Test with required headings
-        let required = vec![
-            "Introduction".to_string(),
-            "Method".to_string(),
-            "Results".to_string(),
-        ];
+        let required = vec!["Introduction".to_string(), "Method".to_string(), "Results".to_string()];
         let rule = MD043RequiredHeadings::new(required);
 
         // Test with matching headings
-        let content =
-            "# Introduction\n\nContent\n\n# Method\n\nMore content\n\n# Results\n\nFinal content";
+        let content = "# Introduction\n\nContent\n\n# Method\n\nMore content\n\n# Results\n\nFinal content";
         let structure = document_structure_from_str(content);
         let warnings = rule
             .check_with_structure(&LintContext::new(content), &structure)
             .unwrap();
-        assert!(
-            warnings.is_empty(),
-            "Expected no warnings for matching headings"
-        );
+        assert!(warnings.is_empty(), "Expected no warnings for matching headings");
 
         // Test with mismatched headings
         let content = "# Introduction\n\nContent\n\n# Results\n\nSkipped method";
@@ -262,10 +245,7 @@ mod tests {
         let warnings = rule
             .check_with_structure(&LintContext::new(content), &structure)
             .unwrap();
-        assert!(
-            !warnings.is_empty(),
-            "Expected warnings for mismatched headings"
-        );
+        assert!(!warnings.is_empty(), "Expected warnings for mismatched headings");
 
         // Test with no headings but requirements exist
         let content = "No headings here, just plain text";
@@ -273,10 +253,7 @@ mod tests {
         let warnings = rule
             .check_with_structure(&LintContext::new(content), &structure)
             .unwrap();
-        assert!(
-            !warnings.is_empty(),
-            "Expected warnings when headings are missing"
-        );
+        assert!(!warnings.is_empty(), "Expected warnings when headings are missing");
 
         // Test with setext headings
         let content = "Introduction\n===========\n\nContent\n\nMethod\n------\n\nMore content\n\nResults\n=======\n\nFinal content";
@@ -284,10 +261,7 @@ mod tests {
         let warnings = rule
             .check_with_structure(&LintContext::new(content), &structure)
             .unwrap();
-        assert!(
-            warnings.is_empty(),
-            "Expected no warnings for matching setext headings"
-        );
+        assert!(warnings.is_empty(), "Expected no warnings for matching setext headings");
     }
 
     #[test]
@@ -304,8 +278,7 @@ mod tests {
         );
 
         // Test 2: Content with code block containing heading-like syntax
-        let content =
-            "Regular paragraph\n\n```markdown\n# This is not a real heading\n```\n\nMore text";
+        let content = "Regular paragraph\n\n```markdown\n# This is not a real heading\n```\n\nMore text";
         assert!(
             rule.should_skip(&LintContext::new(content)),
             "Should skip content with heading-like syntax in code blocks"

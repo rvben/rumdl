@@ -100,9 +100,7 @@ impl CodeBlockUtils {
     /// assert_eq!(specifier, None);
     /// ```
     pub fn get_language_specifier(line: &str) -> Option<String> {
-        if FENCED_CODE_BLOCK_START.is_match(line)
-            || ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line)
-        {
+        if FENCED_CODE_BLOCK_START.is_match(line) || ALTERNATE_FENCED_CODE_BLOCK_START.is_match(line) {
             let trimmed = line.trim_start();
             let after_fence = &trimmed[3..].trim_start();
             if !after_fence.is_empty() {
@@ -175,9 +173,7 @@ impl CodeBlockUtils {
             } else if !in_code_block[i] {
                 // Check for indented code blocks only if not already marked
                 // Do not mark as code block if the line is a list item
-                if (line.starts_with("    ") || INDENTED_CODE_BLOCK.is_match(line))
-                    && !LIST_ITEM_RE.is_match(line)
-                {
+                if (line.starts_with("    ") || INDENTED_CODE_BLOCK.is_match(line)) && !LIST_ITEM_RE.is_match(line) {
                     in_code_block[i] = true;
                 }
             }
@@ -267,9 +263,7 @@ impl CodeBlockInfo {
 
     /// Quick check if content contains any code blocks
     pub fn has_code_blocks(&self) -> bool {
-        self.block_states
-            .iter()
-            .any(|state| *state != CodeBlockState::None)
+        self.block_states.iter().any(|state| *state != CodeBlockState::None)
     }
 
     /// Quick check if content contains any code spans
@@ -294,11 +288,7 @@ pub fn compute_code_blocks(content: &str) -> Vec<CodeBlockState> {
             }
         } else if FENCED_CODE_BLOCK_PATTERN.is_match(line) {
             in_fenced_block = true;
-            fence_marker = if line.trim().starts_with("```") {
-                "```"
-            } else {
-                "~~~"
-            };
+            fence_marker = if line.trim().starts_with("```") { "```" } else { "~~~" };
             result.push(CodeBlockState::Fenced); // The opening fence is part of the block
         } else if INDENTED_CODE_BLOCK_PATTERN.is_match(line) && !line.trim().is_empty() {
             result.push(CodeBlockState::Indented);

@@ -1,19 +1,21 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::code_block_utils::CodeBlockStyle;
 use serde::ser::Serializer;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MD046Config {
-    #[serde(default = "default_style", serialize_with = "serialize_style", deserialize_with = "deserialize_style")]
+    #[serde(
+        default = "default_style",
+        serialize_with = "serialize_style",
+        deserialize_with = "deserialize_style"
+    )]
     pub style: CodeBlockStyle,
 }
 
 impl Default for MD046Config {
     fn default() -> Self {
-        Self {
-            style: default_style(),
-        }
+        Self { style: default_style() }
     }
 }
 

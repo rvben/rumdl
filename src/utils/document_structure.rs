@@ -259,8 +259,7 @@ impl DocumentStructure {
         let has_html_blocks = CONTAINS_HTML_BLOCK.is_match(content);
         let has_backticks = content.contains('`');
         let has_brackets = content.contains('[');
-        let has_headings =
-            CONTAINS_ATX_HEADING.is_match(content) || CONTAINS_SETEXT_UNDERLINE.is_match(content);
+        let has_headings = CONTAINS_ATX_HEADING.is_match(content) || CONTAINS_SETEXT_UNDERLINE.is_match(content);
         // More comprehensive list detection to handle edge cases
         let has_list_markers = CONTAINS_LIST_MARKERS.is_match(content)
             || content.contains("- ")
@@ -310,15 +309,18 @@ impl DocumentStructure {
         }
 
         // Detect horizontal rules only if needed
-        let has_potential_hrs = content.contains("---") || content.contains("***") || content.contains("___") ||
-                                content.contains("- -") || content.contains("* *") || content.contains("_ _");
+        let has_potential_hrs = content.contains("---")
+            || content.contains("***")
+            || content.contains("___")
+            || content.contains("- -")
+            || content.contains("* *")
+            || content.contains("_ _");
         if has_potential_hrs {
             self.detect_horizontal_rules(content);
         }
 
         // Check for URLs only if needed
-        if content.contains("http://") || content.contains("https://") || content.contains("ftp://")
-        {
+        if content.contains("http://") || content.contains("https://") || content.contains("ftp://") {
             self.has_urls = true;
         }
 
@@ -473,8 +475,7 @@ impl DocumentStructure {
     /// Compute code blocks in the document
     fn compute_code_blocks(&self, content: &str) -> Vec<CodeBlock> {
         lazy_static! {
-            static ref FENCED_START: Regex =
-                Regex::new(r"^(\s*)(`{3,}|~{3,})\s*([^`\s]*)").unwrap();
+            static ref FENCED_START: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*([^`\s]*)").unwrap();
             static ref FENCED_END: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*$").unwrap();
         }
 
@@ -494,9 +495,7 @@ impl DocumentStructure {
                 if let Some(captures) = FENCED_START.captures(line) {
                     in_code_block = true;
                     current_block_start = i + 1;
-                    current_fence_char = captures
-                        .get(2)
-                        .map_or('`', |m| m.as_str().chars().next().unwrap());
+                    current_fence_char = captures.get(2).map_or('`', |m| m.as_str().chars().next().unwrap());
 
                     // Only set language if it's not empty
                     let lang = captures.get(3).map(|m| m.as_str().to_string());
@@ -844,10 +843,8 @@ impl DocumentStructure {
                             let url = cap.get(2).map_or("", |m| m.as_str()).to_string();
 
                             // Ensure we're not inside a code span
-                            let is_in_span = (i..i + whole_match.end()).any(|pos| {
-                                pos < self.in_code_span[line_num].len()
-                                    && self.in_code_span[line_num][pos]
-                            });
+                            let is_in_span = (i..i + whole_match.end())
+                                .any(|pos| pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]);
 
                             if !is_in_span {
                                 self.links.push(Link {
@@ -872,16 +869,11 @@ impl DocumentStructure {
                             let ref_id = if id.is_empty() { text.clone() } else { id };
 
                             // Look up the URL from link definitions
-                            let url = link_defs
-                                .get(&ref_id.to_lowercase())
-                                .cloned()
-                                .unwrap_or_default();
+                            let url = link_defs.get(&ref_id.to_lowercase()).cloned().unwrap_or_default();
 
                             // Ensure we're not inside a code span
-                            let is_in_span = (i..i + whole_match.end()).any(|pos| {
-                                pos < self.in_code_span[line_num].len()
-                                    && self.in_code_span[line_num][pos]
-                            });
+                            let is_in_span = (i..i + whole_match.end())
+                                .any(|pos| pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]);
 
                             if !is_in_span {
                                 self.links.push(Link {
@@ -908,10 +900,8 @@ impl DocumentStructure {
                             let src = cap.get(2).map_or("", |m| m.as_str()).to_string();
 
                             // Ensure we're not inside a code span
-                            let is_in_span = (i..i + whole_match.end()).any(|pos| {
-                                pos < self.in_code_span[line_num].len()
-                                    && self.in_code_span[line_num][pos]
-                            });
+                            let is_in_span = (i..i + whole_match.end())
+                                .any(|pos| pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]);
 
                             if !is_in_span {
                                 self.images.push(Image {
@@ -936,16 +926,11 @@ impl DocumentStructure {
                             let ref_id = if id.is_empty() { alt_text.clone() } else { id };
 
                             // Look up the URL from link definitions
-                            let src = link_defs
-                                .get(&ref_id.to_lowercase())
-                                .cloned()
-                                .unwrap_or_default();
+                            let src = link_defs.get(&ref_id.to_lowercase()).cloned().unwrap_or_default();
 
                             // Ensure we're not inside a code span
-                            let is_in_span = (i..i + whole_match.end()).any(|pos| {
-                                pos < self.in_code_span[line_num].len()
-                                    && self.in_code_span[line_num][pos]
-                            });
+                            let is_in_span = (i..i + whole_match.end())
+                                .any(|pos| pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]);
 
                             if !is_in_span {
                                 self.images.push(Image {
@@ -986,9 +971,14 @@ impl DocumentStructure {
         // - Use lookbehind to ensure marker is at the start or after whitespace
         // - Use Unicode support for whitespace
         lazy_static! {
-            static ref UL_MARKER: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
-            static ref OL_MARKER: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>\d+\.)(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
-            static ref TASK_MARKER: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)\[(?P<checked>[ xX])\](?P<content>.*)$").unwrap();
+            static ref UL_MARKER: FancyRegex =
+                FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
+            static ref OL_MARKER: FancyRegex =
+                FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>\d+\.)(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
+            static ref TASK_MARKER: FancyRegex = FancyRegex::new(
+                r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)\[(?P<checked>[ xX])\](?P<content>.*)$"
+            )
+            .unwrap();
         }
         self.list_items.clear();
         self.list_lines.clear();
@@ -1125,10 +1115,10 @@ impl DocumentStructure {
                 // (setext headings have content on the previous line)
                 let is_setext_marker = if i > 0 {
                     let prev_line = lines[i - 1].trim();
-                    !prev_line.is_empty() && 
-                    !self.is_in_code_block(i) && 
-                    !self.is_in_front_matter(i) &&
-                    line.trim().chars().all(|c| c == '-' || c == ' ')
+                    !prev_line.is_empty()
+                        && !self.is_in_code_block(i)
+                        && !self.is_in_front_matter(i)
+                        && line.trim().chars().all(|c| c == '-' || c == ' ')
                 } else {
                     false
                 };
@@ -1362,9 +1352,7 @@ impl DocumentStructure {
 
     /// Get detailed information about a list item at a specific line
     pub fn get_list_item_at_line(&self, line_num: usize) -> Option<&ListItem> {
-        self.list_items
-            .iter()
-            .find(|item| item.line_number == line_num)
+        self.list_items.iter().find(|item| item.line_number == line_num)
     }
 
     /// Get all list items with a specific marker type
@@ -1430,8 +1418,7 @@ mod tests {
 
     #[test]
     fn test_document_structure_creation() {
-        let content =
-            "# Heading 1\n\nSome text.\n\n## Heading 2\n\nMore text.\n\n```\nCode block\n```\n";
+        let content = "# Heading 1\n\nSome text.\n\n## Heading 2\n\nMore text.\n\n```\nCode block\n```\n";
         let structure = DocumentStructure::new(content);
 
         assert_eq!(structure.heading_lines.len(), 2);
@@ -1442,8 +1429,7 @@ mod tests {
 
     #[test]
     fn test_document_with_front_matter() {
-        let content =
-            "---\ntitle: Test Document\ndate: 2021-01-01\n---\n\n# Heading 1\n\nSome text.\n";
+        let content = "---\ntitle: Test Document\ndate: 2021-01-01\n---\n\n# Heading 1\n\nSome text.\n";
         let structure = DocumentStructure::new(content);
 
         assert!(structure.has_front_matter);
@@ -1469,14 +1455,14 @@ mod tests {
     #[test]
     fn test_headings_edge_cases() {
         // ATX, closed ATX, Setext, mixed styles
-        let content = "  # ATX Heading\n# Closed ATX Heading #\nSetext H1\n=======\nSetext H2\n-------\n\n# ATX Again\n";
+        let content =
+            "  # ATX Heading\n# Closed ATX Heading #\nSetext H1\n=======\nSetext H2\n-------\n\n# ATX Again\n";
         let structure = DocumentStructure::new(content);
         assert_eq!(structure.heading_lines, vec![1, 2, 3, 5, 8]);
         assert_eq!(structure.heading_levels, vec![1, 1, 1, 2, 1]);
 
         // Headings in code blocks and front matter (should be ignored)
-        let content =
-            "---\ntitle: Test\n---\n# Heading 1\n\n```\n# Not a heading\n```\n# Heading 2\n";
+        let content = "---\ntitle: Test\n---\n# Heading 1\n\n```\n# Not a heading\n```\n# Heading 2\n";
         let structure = DocumentStructure::new(content);
         assert_eq!(structure.heading_lines, vec![4, 9]);
         assert_eq!(structure.heading_levels, vec![1, 1]);

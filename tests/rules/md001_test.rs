@@ -19,10 +19,7 @@ pub fn test_md001_invalid() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
-    assert_eq!(
-        result[0].message,
-        "Expected heading level 2"
-    );
+    assert_eq!(result[0].message, "Expected heading level 2");
 }
 
 #[test]

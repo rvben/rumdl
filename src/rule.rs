@@ -90,11 +90,7 @@ pub trait Rule: DynClone + Send + Sync {
 
     /// Enhanced check method using document structure
     /// By default, calls the regular check method if not overridden
-    fn check_with_structure(
-        &self,
-        ctx: &LintContext,
-        _structure: &DocumentStructure,
-    ) -> LintResult {
+    fn check_with_structure(&self, ctx: &LintContext, _structure: &DocumentStructure) -> LintResult {
         self.check(ctx)
     }
 
@@ -378,10 +374,7 @@ mod tests {
     #[test]
     fn test_parse_disable_comment() {
         // Test rumdl-disable global
-        assert_eq!(
-            parse_disable_comment("<!-- rumdl-disable -->"),
-            Some(vec![])
-        );
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable -->"), Some(vec![]));
 
         // Test rumdl-disable specific rules
         assert_eq!(
@@ -390,10 +383,7 @@ mod tests {
         );
 
         // Test markdownlint-disable global
-        assert_eq!(
-            parse_disable_comment("<!-- markdownlint-disable -->"),
-            Some(vec![])
-        );
+        assert_eq!(parse_disable_comment("<!-- markdownlint-disable -->"), Some(vec![]));
 
         // Test markdownlint-disable specific rules
         assert_eq!(
@@ -423,10 +413,7 @@ mod tests {
         );
 
         // Test markdownlint-enable global
-        assert_eq!(
-            parse_enable_comment("<!-- markdownlint-enable -->"),
-            Some(vec![])
-        );
+        assert_eq!(parse_enable_comment("<!-- markdownlint-enable -->"), Some(vec![]));
 
         // Test markdownlint-enable specific rules
         assert_eq!(

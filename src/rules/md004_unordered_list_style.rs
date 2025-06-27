@@ -70,7 +70,6 @@ impl Default for UnorderedListStyle {
     }
 }
 
-
 /// Rule MD004: Unordered list style
 #[derive(Clone)]
 pub struct MD004UnorderedListStyle {
@@ -88,13 +87,10 @@ impl Default for MD004UnorderedListStyle {
 impl MD004UnorderedListStyle {
     pub fn new(style: UnorderedListStyle) -> Self {
         Self {
-            config: MD004Config {
-                style,
-                after_marker: 1,
-            },
+            config: MD004Config { style, after_marker: 1 },
         }
     }
-    
+
     pub fn from_config_struct(config: MD004Config) -> Self {
         Self { config }
     }
@@ -145,7 +141,7 @@ impl Rule for MD004UnorderedListStyle {
 
                         // Get the marker character
                         let marker = list_item.marker.chars().next().unwrap();
-                        
+
                         // Calculate offset for the marker position
                         let offset = line_info.byte_offset + list_item.marker_column;
 
@@ -242,7 +238,7 @@ impl Rule for MD004UnorderedListStyle {
 
                         let line = &lines[line_idx];
                         let marker = list_item.marker.chars().next().unwrap();
-                        
+
                         // Determine the target marker
                         let target_marker = match self.config.style {
                             UnorderedListStyle::Consistent => {
@@ -332,7 +328,6 @@ impl DocumentStructureExtensions for MD004UnorderedListStyle {
         _doc_structure: &crate::utils::document_structure::DocumentStructure,
     ) -> bool {
         // Quick check for any list markers and unordered list blocks
-        ctx.content.contains(['*', '-', '+']) && 
-        ctx.list_blocks.iter().any(|block| !block.is_ordered)
+        ctx.content.contains(['*', '-', '+']) && ctx.list_blocks.iter().any(|block| !block.is_ordered)
     }
 }

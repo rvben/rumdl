@@ -13,8 +13,7 @@ pub struct MarkdownlintConfig(pub HashMap<String, serde_yaml::Value>);
 
 /// Load a markdownlint config file (JSON or YAML) from the given path
 pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read config file {}: {}", path, e))?;
+    let content = fs::read_to_string(path).map_err(|e| format!("Failed to read config file {}: {}", path, e))?;
 
     if path.ends_with(".json") || path.ends_with(".jsonc") {
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse JSON: {}", e))
@@ -100,9 +99,7 @@ fn normalize_toml_table_keys(val: toml::Value) -> toml::Value {
             }
             toml::Value::Table(new_table)
         }
-        toml::Value::Array(arr) => {
-            toml::Value::Array(arr.into_iter().map(normalize_toml_table_keys).collect())
-        }
+        toml::Value::Array(arr) => toml::Value::Array(arr.into_iter().map(normalize_toml_table_keys).collect()),
         other => other,
     }
 }
@@ -117,13 +114,9 @@ impl MarkdownlintConfig {
             let mapped = markdownlint_to_rumdl_rule_key(key);
             if let Some(rumdl_key) = mapped {
                 let norm_rule_key = rumdl_key.to_ascii_uppercase();
-                let toml_value: Option<toml::Value> =
-                    serde_yaml::from_value::<toml::Value>(value.clone()).ok();
+                let toml_value: Option<toml::Value> = serde_yaml::from_value::<toml::Value>(value.clone()).ok();
                 let toml_value = toml_value.map(normalize_toml_table_keys);
-                let rule_config = sourced_config
-                    .rules
-                    .entry(norm_rule_key.clone())
-                    .or_default();
+                let rule_config = sourced_config.rules.entry(norm_rule_key.clone()).or_default();
                 if let Some(tv) = toml_value {
                     if let toml::Value::Table(table) = tv {
                         for (k, v) in table {
@@ -209,7 +202,7 @@ impl MarkdownlintConfig {
                 }
                 continue;
             }
-            
+
             let mapped = markdownlint_to_rumdl_rule_key(key);
             if let Some(rumdl_key) = mapped {
                 let norm_rule_key = rumdl_key.to_ascii_uppercase();
@@ -234,30 +227,17 @@ impl MarkdownlintConfig {
                     }
                     continue;
                 }
-                let toml_value: Option<toml::Value> =
-                    serde_yaml::from_value::<toml::Value>(value.clone()).ok();
+                let toml_value: Option<toml::Value> = serde_yaml::from_value::<toml::Value>(value.clone()).ok();
                 let toml_value = toml_value.map(normalize_toml_table_keys);
                 let rule_config = fragment.rules.entry(norm_rule_key.clone()).or_default();
                 if let Some(tv) = toml_value {
                     if let toml::Value::Table(table) = tv {
                         for (rk, rv) in table {
                             let norm_rk = crate::config::normalize_key(&rk);
-                            let sv =
-                                rule_config
-                                    .values
-                                    .entry(norm_rk.clone())
-                                    .or_insert_with(|| {
-                                        crate::config::SourcedValue::new(
-                                            rv.clone(),
-                                            crate::config::ConfigSource::Markdownlint,
-                                        )
-                                    });
-                            sv.push_override(
-                                rv,
-                                crate::config::ConfigSource::Markdownlint,
-                                file.clone(),
-                                None,
-                            );
+                            let sv = rule_config.values.entry(norm_rk.clone()).or_insert_with(|| {
+                                crate::config::SourcedValue::new(rv.clone(), crate::config::ConfigSource::Markdownlint)
+                            });
+                            sv.push_override(rv, crate::config::ConfigSource::Markdownlint, file.clone(), None);
                         }
                     } else {
                         rule_config

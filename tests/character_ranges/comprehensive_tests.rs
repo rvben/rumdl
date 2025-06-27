@@ -70,21 +70,13 @@ fn test_md041_first_line_heading() {
 // Unicode tests
 #[test]
 fn test_unicode_characters() {
-    let test = simple_test(
-        "MD018",
-        "#Café without space",
-        ExpectedWarning::new(1, 2, 1, 2, ""),
-    );
+    let test = simple_test("MD018", "#Café without space", ExpectedWarning::new(1, 2, 1, 2, ""));
     test_character_ranges(test);
 }
 
 #[test]
 fn test_emoji_characters() {
-    let test = simple_test(
-        "MD018",
-        "#🎉Emoji without space",
-        ExpectedWarning::new(1, 2, 1, 2, ""),
-    );
+    let test = simple_test("MD018", "#🎉Emoji without space", ExpectedWarning::new(1, 2, 1, 2, ""));
     test_character_ranges(test);
 }
 

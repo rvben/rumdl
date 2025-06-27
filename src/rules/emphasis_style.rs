@@ -37,10 +37,8 @@ impl From<&str> for EmphasisStyle {
 /// Get regex pattern for finding emphasis markers based on style
 pub fn get_emphasis_pattern(style: EmphasisStyle) -> &'static Regex {
     lazy_static! {
-        static ref ASTERISK_EMPHASIS: Regex =
-            Regex::new(r"\*([^\s*][^*]*?[^\s*]|[^\s*])\*").unwrap();
-        static ref UNDERSCORE_EMPHASIS: Regex =
-            Regex::new(r"_([^\s_][^_]*?[^\s_]|[^\s_])_").unwrap();
+        static ref ASTERISK_EMPHASIS: Regex = Regex::new(r"\*([^\s*][^*]*?[^\s*]|[^\s*])\*").unwrap();
+        static ref UNDERSCORE_EMPHASIS: Regex = Regex::new(r"_([^\s_][^_]*?[^\s_]|[^\s_])_").unwrap();
     }
 
     match style {

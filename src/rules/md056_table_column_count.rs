@@ -120,23 +120,18 @@ impl Rule for MD056TableColumnCount {
                     let fix_result = self.fix_table_row(line, expected_count);
 
                     // Calculate precise character range for the entire table row
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_line_range(line_idx + 1, line);
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
-                        message: format!(
-                            "Table row has {} cells, but expected {}",
-                            count, expected_count
-                        ),
+                        message: format!("Table row has {} cells, but expected {}", count, expected_count),
                         line: start_line,
                         column: start_col,
                         end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
                         fix: fix_result.map(|fixed_row| Fix {
-                            range: LineIndex::new(content.to_string())
-                                .line_col_to_byte_range(line_idx + 1, 1),
+                            range: LineIndex::new(content.to_string()).line_col_to_byte_range(line_idx + 1, 1),
                             replacement: fixed_row,
                         }),
                     });

@@ -14,10 +14,7 @@ fn test_init_command_creates_and_loads_config() {
         .unwrap();
 
     assert!(output.status.success(), "Init command failed");
-    assert!(
-        base_path.join(".rumdl.toml").exists(),
-        "Config file not created"
-    );
+    assert!(base_path.join(".rumdl.toml").exists(), "Config file not created");
 
     // Create a test file with a heading level increment issue
     fs::write(
@@ -39,9 +36,7 @@ fn test_init_command_creates_and_loads_config() {
 
     // Verify that we've detected at least one rule violation
     assert!(
-        !output.status.success()
-            || combined_output.contains("warning")
-            || combined_output.contains("MD"),
+        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
         "Should detect at least one rule violation"
     );
 }
@@ -118,9 +113,7 @@ ___
 
     // Simply verify that the linter detected some issues with our complex file
     assert!(
-        !output.status.success()
-            || combined_output.contains("warning")
-            || combined_output.contains("MD"),
+        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
         "Should detect at least some issues in the complex Markdown"
     );
 
@@ -133,10 +126,7 @@ ___
 
     // Verify file was modified in some way
     let fixed_content = fs::read_to_string(base_path.join("complex.md")).unwrap();
-    assert!(
-        complex_md != fixed_content,
-        "File should be modified by fix operation"
-    );
+    assert!(complex_md != fixed_content, "File should be modified by fix operation");
 }
 
 #[test]
@@ -177,9 +167,7 @@ Multiple blank lines above this one.
 
     // Simply verify that we detected some issues
     assert!(
-        !output.status.success()
-            || combined_output.contains("warning")
-            || combined_output.contains("MD"),
+        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
         "Should detect some issues with the test file"
     );
 }
@@ -221,9 +209,7 @@ Text immediately below heading (MD022)
 
     // Check if at least one rule violation was detected
     assert!(
-        !output.status.success()
-            || combined_output.contains("warning")
-            || combined_output.contains("MD"),
+        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
         "Should detect at least one rule violation"
     );
 
@@ -235,14 +221,8 @@ Text immediately below heading (MD022)
         .unwrap();
 
     // Print debug output
-    println!(
-        "Fix command stdout: {}",
-        String::from_utf8_lossy(&fix_output.stdout)
-    );
-    println!(
-        "Fix command stderr: {}",
-        String::from_utf8_lossy(&fix_output.stderr)
-    );
+    println!("Fix command stdout: {}", String::from_utf8_lossy(&fix_output.stdout));
+    println!("Fix command stderr: {}", String::from_utf8_lossy(&fix_output.stderr));
 
     // Verify some issues were fixed
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();
@@ -293,9 +273,7 @@ Visit http://example.com for more information.
 
     // Check if at least one link-related issue was detected
     assert!(
-        !output.status.success()
-            || combined_output.contains("warning")
-            || combined_output.contains("MD"),
+        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
         "Should detect at least one link-related issue"
     );
 
@@ -307,14 +285,8 @@ Visit http://example.com for more information.
         .unwrap();
 
     // Print debug output
-    println!(
-        "Fix command stdout: {}",
-        String::from_utf8_lossy(&fix_output.stdout)
-    );
-    println!(
-        "Fix command stderr: {}",
-        String::from_utf8_lossy(&fix_output.stderr)
-    );
+    println!("Fix command stdout: {}", String::from_utf8_lossy(&fix_output.stdout));
+    println!("Fix command stderr: {}", String::from_utf8_lossy(&fix_output.stderr));
 
     // Verify the file was modified
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();
@@ -332,11 +304,7 @@ fn test_profiling_features() {
     let base_path = temp_dir.path();
 
     // Create a simple test file
-    fs::write(
-        base_path.join("test.md"),
-        "# Test Heading\n\nSimple content.\n",
-    )
-    .unwrap();
+    fs::write(base_path.join("test.md"), "# Test Heading\n\nSimple content.\n").unwrap();
 
     // Run with verbose output that should include rule names
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
@@ -400,9 +368,7 @@ fn test_low_coverage_rules() {
 
     // Verify we detected some issues
     assert!(
-        !output.status.success()
-            || combined_output.contains("warning")
-            || combined_output.contains("MD"),
+        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
         "Should detect some Markdown issues"
     );
 

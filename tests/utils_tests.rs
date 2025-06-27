@@ -45,10 +45,7 @@ Another paragraph
     assert_eq!(headings.len(), 3);
 
     // Check each heading's level
-    let levels: Vec<Option<u32>> = headings
-        .iter()
-        .map(MarkdownElements::get_heading_level)
-        .collect();
+    let levels: Vec<Option<u32>> = headings.iter().map(MarkdownElements::get_heading_level).collect();
 
     // Regular ATX headings
     assert_eq!(levels[0], Some(1)); // # Heading 1
@@ -95,10 +92,7 @@ Another paragraph
     assert!(!MarkdownElements::is_in_code_span(line, 5)); // Outside code span
 
     // Test heading to fragment conversion
-    assert_eq!(
-        MarkdownElements::heading_to_fragment("Heading 1"),
-        "heading-1"
-    );
+    assert_eq!(MarkdownElements::heading_to_fragment("Heading 1"), "heading-1");
 }
 
 #[test]
@@ -123,13 +117,7 @@ Unclosed code block
 
     // Test content with only whitespace
     let whitespace_content = "   \n  \n";
-    assert_eq!(
-        MarkdownElements::detect_code_blocks(whitespace_content).len(),
-        0
-    );
-    assert_eq!(
-        MarkdownElements::detect_headings(whitespace_content).len(),
-        0
-    );
+    assert_eq!(MarkdownElements::detect_code_blocks(whitespace_content).len(), 0);
+    assert_eq!(MarkdownElements::detect_headings(whitespace_content).len(), 0);
     assert_eq!(MarkdownElements::detect_lists(whitespace_content).len(), 0);
 }

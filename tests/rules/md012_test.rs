@@ -111,10 +111,7 @@ fn test_md012_fix_with_front_matter() {
     let content = "---\ntitle: Test\n\n\ndescription: Test\n---\n\n\n\nContent\n";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        result,
-        "---\ntitle: Test\n\n\ndescription: Test\n---\n\nContent\n"
-    );
+    assert_eq!(result, "---\ntitle: Test\n\n\ndescription: Test\n---\n\nContent\n");
 }
 
 #[test]

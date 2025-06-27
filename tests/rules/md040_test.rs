@@ -66,7 +66,10 @@ fn test_mixed_code_blocks() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "```rust\nfn main() {}\n```\nSome text\n```text\nmore code\n```\n```js\nconsole.log('hi');\n```");
+    assert_eq!(
+        fixed,
+        "```rust\nfn main() {}\n```\nSome text\n```text\nmore code\n```\n```js\nconsole.log('hi');\n```"
+    );
 }
 
 #[test]
@@ -89,7 +92,10 @@ fn test_nested_code_blocks_no_false_positives() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // Should find no issues - the closing ``` should not be flagged as missing language
-    assert!(result.is_empty(), "Nested code blocks should not generate false positives");
+    assert!(
+        result.is_empty(),
+        "Nested code blocks should not generate false positives"
+    );
 
     // Test that fix doesn't modify the content incorrectly
     let fixed = rule.fix(&ctx).unwrap();
@@ -108,6 +114,12 @@ fn test_indented_closing_fence_not_flagged() {
 
     // Test that fix doesn't add 'text' to closing fences
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content, "Fix should not modify indented content inside code blocks");
-    assert!(!fixed.contains("```text"), "Fix should not add 'text' to closing fences");
+    assert_eq!(
+        fixed, content,
+        "Fix should not modify indented content inside code blocks"
+    );
+    assert!(
+        !fixed.contains("```text"),
+        "Fix should not add 'text' to closing fences"
+    );
 }

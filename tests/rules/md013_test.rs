@@ -37,8 +37,7 @@ This is a code block line that is very very very very very very very long and sh
 #[test]
 fn test_tables() {
     let rule = MD013LineLength::new(50, false, false, true, false);
-    let content =
-        "| This is a very long table cell that should be flagged |\n| This is another long cell |";
+    let content = "| This is a very long table cell that should be flagged |\n| This is another long cell |";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -59,7 +58,8 @@ fn test_headings() {
 #[test]
 fn test_mixed_content() {
     let rule = MD013LineLength::new(20, false, false, false, false);
-    let content = "# Long heading\n```\nLong code\n```\n| Long table |\nThis is a very long line that should be flagged.";
+    let content =
+        "# Long heading\n```\nLong code\n```\n| Long table |\nThis is a very long line that should be flagged.";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Only the last line should be flagged
@@ -96,8 +96,7 @@ fn test_image_ref_exceptions() {
 #[test]
 fn test_link_ref_exceptions() {
     let rule = MD013LineLength::new(20, true, true, true, false);
-    let content =
-        "[reference]: https://very-long-url-that-exceeds-length.com/path/to/resource\nNormal text.";
+    let content = "[reference]: https://very-long-url-that-exceeds-length.com/path/to/resource\nNormal text.";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0); // Link reference should be ignored
@@ -163,7 +162,8 @@ fn test_parity_list_items_are_checked() {
 #[test]
 fn test_parity_only_url_line_skipped() {
     let rule = MD013LineLength::new(80, true, true, true, false);
-    let content = "https://example.com/this/is/a/very/long/url/that/should/not/be/flagged/by/md013/even/if/it/exceeds/the/limit";
+    let content =
+        "https://example.com/this/is/a/very/long/url/that/should/not/be/flagged/by/md013/even/if/it/exceeds/the/limit";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -238,8 +238,7 @@ fn test_parity_image_reference_line_skipped() {
 #[test]
 fn test_parity_link_reference_definition_skipped() {
     let rule = MD013LineLength::new(80, true, true, true, false);
-    let content =
-        "[reference]: https://example.com/this/is/a/very/long/url/that/should/not/be/flagged";
+    let content = "[reference]: https://example.com/this/is/a/very/long/url/that/should/not/be/flagged";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -258,7 +257,8 @@ fn test_parity_table_rows_skipped() {
 #[test]
 fn test_parity_blockquotes_skipped() {
     let rule = MD013LineLength::new(80, true, true, true, false);
-    let content = "> This is a very long blockquote line that should not be flagged by MD013 even if it is over the limit.";
+    let content =
+        "> This is a very long blockquote line that should not be flagged by MD013 even if it is over the limit.";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());

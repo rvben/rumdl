@@ -39,16 +39,9 @@ fn test_nested_elements() {
     // Verify code block properties
     let code_block = &code_blocks[0];
     assert_eq!(code_block.element_type, ElementType::CodeBlock);
-    assert_eq!(
-        code_block.start_line, 10,
-        "Code block should start at line 10"
-    );
+    assert_eq!(code_block.start_line, 10, "Code block should start at line 10");
     assert_eq!(code_block.end_line, 13, "Code block should end at line 13");
-    assert_eq!(
-        code_block.quality,
-        ElementQuality::Valid,
-        "Code block should be valid"
-    );
+    assert_eq!(code_block.quality, ElementQuality::Valid, "Code block should be valid");
 
     let lists = MarkdownElements::detect_lists(content);
     // Only the 3 list items outside the blockquote/code block
@@ -57,11 +50,7 @@ fn test_nested_elements() {
     // Verify each list item
     for list in &lists {
         assert_eq!(list.element_type, ElementType::List);
-        assert_eq!(
-            list.quality,
-            ElementQuality::Valid,
-            "List should be well-formed"
-        );
+        assert_eq!(list.quality, ElementQuality::Valid, "List should be well-formed");
         assert!(list.start_line >= 15, "Lists should start after line 15");
     }
 }
@@ -88,10 +77,7 @@ fn test_indentation_edge_cases() {
 
     let headings = MarkdownElements::detect_headings(content);
     assert_eq!(headings.len(), 1, "Expected exactly one heading");
-    assert_eq!(
-        headings[0].text, "Indented heading",
-        "Heading text should match"
-    );
+    assert_eq!(headings[0].text, "Indented heading", "Heading text should match");
     assert_eq!(
         headings[0].quality,
         ElementQuality::Valid,
@@ -107,11 +93,7 @@ fn test_indentation_edge_cases() {
     );
 
     let lists = MarkdownElements::detect_lists(content);
-    assert_eq!(
-        lists.len(),
-        6,
-        "Expected exactly 6 list items (3 unordered, 3 ordered)"
-    );
+    assert_eq!(lists.len(), 6, "Expected exactly 6 list items (3 unordered, 3 ordered)");
 
     // Count unordered and ordered lists
     let unordered_count = lists
@@ -132,11 +114,7 @@ fn test_indentation_edge_cases() {
 
     // All lists should be valid
     for list in &lists {
-        assert_eq!(
-            list.quality,
-            ElementQuality::Valid,
-            "Indented lists should be valid"
-        );
+        assert_eq!(list.quality, ElementQuality::Valid, "Indented lists should be valid");
     }
 }
 
@@ -297,10 +275,7 @@ Empty front matter
     // Check that empty headings are recognized
     assert_eq!(headings[0].text, "", "First heading should be empty");
     assert_eq!(headings[1].text, "", "Second heading should be empty");
-    assert_eq!(
-        headings[2].text, "Empty heading",
-        "Third heading should have content"
-    );
+    assert_eq!(headings[2].text, "Empty heading", "Third heading should have content");
 
     // All are valid because they have proper spacing
     for heading in &headings {
@@ -312,20 +287,12 @@ Empty front matter
                 "Heading without space is malformed"
             );
         } else {
-            assert_eq!(
-                heading.quality,
-                ElementQuality::Valid,
-                "Other headings should be valid"
-            );
+            assert_eq!(heading.quality, ElementQuality::Valid, "Other headings should be valid");
         }
     }
 
     let empty_code_blocks = MarkdownElements::detect_code_blocks(content);
-    assert_eq!(
-        empty_code_blocks.len(),
-        2,
-        "Should detect 2 empty code blocks"
-    );
+    assert_eq!(empty_code_blocks.len(), 2, "Should detect 2 empty code blocks");
 
     // Check that empty code blocks are detected and valid
     for block in &empty_code_blocks {
@@ -400,11 +367,7 @@ Not a code block
     );
 
     let lists = MarkdownElements::detect_lists(content);
-    assert_eq!(
-        lists.len(),
-        0,
-        "No lists should be detected with escaped characters"
-    );
+    assert_eq!(lists.len(), 0, "No lists should be detected with escaped characters");
 }
 
 #[test]
@@ -420,11 +383,7 @@ function test() {
 "#;
 
     let code_blocks = MarkdownElements::detect_code_blocks(content);
-    assert_eq!(
-        code_blocks.len(),
-        1,
-        "Should detect the unclosed code block"
-    );
+    assert_eq!(code_blocks.len(), 1, "Should detect the unclosed code block");
     assert_eq!(
         code_blocks[0].quality,
         ElementQuality::Malformed,

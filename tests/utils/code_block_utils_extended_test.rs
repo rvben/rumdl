@@ -48,12 +48,8 @@ fn test_is_code_block_end() {
 fn test_is_indented_code_block() {
     // Test valid indented code blocks
     assert!(CodeBlockUtils::is_indented_code_block("    code"));
-    assert!(CodeBlockUtils::is_indented_code_block(
-        "     code with more indent"
-    ));
-    assert!(CodeBlockUtils::is_indented_code_block(
-        "      still indented"
-    ));
+    assert!(CodeBlockUtils::is_indented_code_block("     code with more indent"));
+    assert!(CodeBlockUtils::is_indented_code_block("      still indented"));
     assert!(!CodeBlockUtils::is_indented_code_block("\tcode with tab"));
 
     // Test invalid indented code blocks
@@ -214,11 +210,7 @@ fn test_compute_code_blocks() {
     let result = compute_code_blocks(content);
     assert_eq!(
         result,
-        vec![
-            CodeBlockState::None,
-            CodeBlockState::Indented,
-            CodeBlockState::None
-        ]
+        vec![CodeBlockState::None, CodeBlockState::Indented, CodeBlockState::None]
     );
 
     // Test mixed styles
@@ -241,11 +233,7 @@ fn test_compute_code_blocks() {
     let result = compute_code_blocks(content);
     assert_eq!(
         result,
-        vec![
-            CodeBlockState::None,
-            CodeBlockState::Fenced,
-            CodeBlockState::Fenced
-        ]
+        vec![CodeBlockState::None, CodeBlockState::Fenced, CodeBlockState::Fenced]
     );
 
     // Test empty content

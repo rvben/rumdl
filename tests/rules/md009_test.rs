@@ -89,8 +89,5 @@ fn test_md009_fix_strict() {
     let content = "Line with spaces   \nAnother line  \nNo spaces\n  \n```\nCode   \n```\n";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        result,
-        "Line with spaces\nAnother line\nNo spaces\n\n```\nCode\n```\n"
-    );
+    assert_eq!(result, "Line with spaces\nAnother line\nNo spaces\n\n```\nCode\n```\n");
 }

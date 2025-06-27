@@ -29,7 +29,7 @@ impl MD046CodeBlockStyle {
             config: MD046Config { style },
         }
     }
-    
+
     pub fn from_config_struct(config: MD046Config) -> Self {
         Self { config }
     }
@@ -129,11 +129,7 @@ impl MD046CodeBlockStyle {
 
         // Look at surrounding lines to see if this is part of a prose block
         let start = if i >= 5 { i - 5 } else { 0 };
-        let end = if i + 5 < lines.len() {
-            i + 5
-        } else {
-            lines.len()
-        };
+        let end = if i + 5 < lines.len() { i + 5 } else { lines.len() };
 
         for check_line in lines.iter().take(end).skip(start) {
             if check_line.starts_with("    ") || check_line.starts_with("\t") {
@@ -216,13 +212,7 @@ impl MD046CodeBlockStyle {
     /// Helper function to check if a line is part of a list
     fn is_in_list(&self, lines: &[&str], i: usize) -> bool {
         // Check if current line is a list item
-        if i > 0
-            && lines[i - 1]
-                .trim_start()
-                .matches(&['-', '*', '+'][..])
-                .count()
-                > 0
-        {
+        if i > 0 && lines[i - 1].trim_start().matches(&['-', '*', '+'][..]).count() > 0 {
             return true;
         }
 
@@ -248,7 +238,7 @@ impl MD046CodeBlockStyle {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = ctx.content.lines().collect();
         let mut fence_stack: Vec<(String, usize, usize, bool, bool)> = Vec::new(); // (fence_marker, fence_length, opening_line, flagged_for_nested, is_markdown_example)
-        
+
         // Track if we're inside a markdown code block (for documentation examples)
         // This is used to allow nested code blocks in markdown documentation
         let mut inside_markdown_documentation_block = false;
@@ -262,7 +252,7 @@ impl MD046CodeBlockStyle {
 
                 // Count the fence length
                 let fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
-                
+
                 // We'll check if this is a markdown block after determining if it's an opening fence
 
                 // Check if this is a closing fence for the current open fence
@@ -274,9 +264,9 @@ impl MD046CodeBlockStyle {
                         if after_fence.trim().is_empty() {
                             // This is a valid closing fence
                             let _popped = fence_stack.pop();
-                            
+
                             // Check if we're exiting a markdown documentation block
-                            if let Some((_,_,_,_,is_md)) = _popped {
+                            if let Some((_, _, _, _, is_md)) = _popped {
                                 if is_md {
                                     inside_markdown_documentation_block = false;
                                 }
@@ -286,15 +276,18 @@ impl MD046CodeBlockStyle {
                     }
                 }
 
-                                // This is an opening fence (has content after marker or no matching open fence)
+                // This is an opening fence (has content after marker or no matching open fence)
                 let after_fence = &trimmed[fence_length..];
                 if !after_fence.trim().is_empty() || fence_stack.is_empty() {
                     // Only flag as problematic if we're opening a new fence while another is still open
                     // AND they use the same fence character (indicating potential confusion)
                     // AND we're not inside a markdown documentation block
-                    let has_nested_issue = 
+                    let has_nested_issue =
                         if let Some((open_marker, open_length, open_line, _, _)) = fence_stack.last_mut() {
-                            if fence_char == open_marker.chars().next().unwrap() && fence_length >= *open_length && !inside_markdown_documentation_block {
+                            if fence_char == open_marker.chars().next().unwrap()
+                                && fence_length >= *open_length
+                                && !inside_markdown_documentation_block
+                            {
                                 // This is problematic - same fence character used with equal or greater length while another is open
                                 let (opening_start_line, opening_start_col, opening_end_line, opening_end_col) =
                                     calculate_line_range(*open_line, &lines[*open_line - 1]);
@@ -308,8 +301,11 @@ impl MD046CodeBlockStyle {
                                     column: opening_start_col,
                                     end_line: opening_end_line,
                                     end_column: opening_end_col,
-                                    message: format!("Code block '{}' should be closed before starting new one at line {}",
-                                                   open_marker, i + 1),
+                                    message: format!(
+                                        "Code block '{}' should be closed before starting new one at line {}",
+                                        open_marker,
+                                        i + 1
+                                    ),
                                     severity: Severity::Warning,
                                     fix: Some(Fix {
                                         range: (line_start_byte..line_start_byte),
@@ -331,12 +327,12 @@ impl MD046CodeBlockStyle {
                     let after_fence_for_lang = &trimmed[fence_length..];
                     let lang_info = after_fence_for_lang.trim().to_lowercase();
                     let is_markdown_fence = lang_info.starts_with("markdown") || lang_info.starts_with("md");
-                    
+
                     // If we're opening a markdown documentation block, mark that we're inside one
                     if is_markdown_fence && !inside_markdown_documentation_block {
                         inside_markdown_documentation_block = true;
                     }
-                    
+
                     // Add this fence to the stack
                     let fence_marker = fence_char.to_string().repeat(fence_length);
                     fence_stack.push((fence_marker, fence_length, i + 1, has_nested_issue, is_markdown_fence));
@@ -426,17 +422,14 @@ impl Rule for MD046CodeBlockStyle {
         Some(self)
     }
 
-        fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         // Early return for empty content
         if ctx.content.is_empty() {
             return Ok(Vec::new());
         }
 
         // Quick check for code blocks before processing
-        if !ctx.content.contains("```")
-            && !ctx.content.contains("~~~")
-            && !ctx.content.contains("    ")
-        {
+        if !ctx.content.contains("```") && !ctx.content.contains("~~~") && !ctx.content.contains("    ") {
             return Ok(Vec::new());
         }
 
@@ -472,7 +465,10 @@ impl Rule for MD046CodeBlockStyle {
         if !unclosed_warnings.is_empty() {
             // Check if any warnings are about nested fences (not just unclosed blocks)
             for warning in &unclosed_warnings {
-                if warning.message.contains("should be closed before starting new one at line") {
+                if warning
+                    .message
+                    .contains("should be closed before starting new one at line")
+                {
                     // Apply the nested fence fix
                     if let Some(fix) = &warning.fix {
                         let mut result = String::new();
@@ -489,9 +485,7 @@ impl Rule for MD046CodeBlockStyle {
 
         // Determine target style
         let target_style = match self.config.style {
-            CodeBlockStyle::Consistent => {
-                self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced)
-            }
+            CodeBlockStyle::Consistent => self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced),
             _ => self.config.style,
         };
 
@@ -506,11 +500,7 @@ impl Rule for MD046CodeBlockStyle {
             // Handle fenced code blocks
             if !in_fenced_block && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
                 in_fenced_block = true;
-                fenced_fence_type = Some(if trimmed.starts_with("```") {
-                    "```"
-                } else {
-                    "~~~"
-                });
+                fenced_fence_type = Some(if trimmed.starts_with("```") { "```" } else { "~~~" });
 
                 if target_style == CodeBlockStyle::Indented {
                     // Skip the opening fence
@@ -564,8 +554,7 @@ impl Rule for MD046CodeBlockStyle {
                     }
 
                     // Check if this is the end of the indented block
-                    let _next_line_is_indented =
-                        i < lines.len() - 1 && self.is_indented_code_block(&lines, i + 1);
+                    let _next_line_is_indented = i < lines.len() - 1 && self.is_indented_code_block(&lines, i + 1);
                     if !_next_line_is_indented && in_indented_block {
                         result.push_str("```\n");
                         in_indented_block = false;
@@ -611,13 +600,11 @@ impl Rule for MD046CodeBlockStyle {
         RuleCategory::CodeBlock
     }
 
-        /// Check if this rule should be skipped
+    /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or unlikely to contain code blocks
         ctx.content.is_empty()
-            || (!ctx.content.contains("```")
-                && !ctx.content.contains("~~~")
-                && !ctx.content.contains("    "))
+            || (!ctx.content.contains("```") && !ctx.content.contains("~~~") && !ctx.content.contains("    "))
     }
 
     /// Optimized check using document structure
@@ -652,8 +639,6 @@ impl Rule for MD046CodeBlockStyle {
         if structure.code_blocks.is_empty() {
             return Ok(Vec::new());
         }
-
-
 
         // Analyze code blocks in the content to determine what types are present
         // If all blocks are fenced and target style is fenced, or all blocks are indented and target style is indented, return empty
@@ -692,13 +677,10 @@ impl Rule for MD046CodeBlockStyle {
 
                 for (i, line) in lines.iter().enumerate() {
                     if first_fenced_line == usize::MAX
-                        && (line.trim_start().starts_with("```")
-                            || line.trim_start().starts_with("~~~"))
+                        && (line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~"))
                     {
                         first_fenced_line = i;
-                    } else if first_indented_line == usize::MAX
-                        && self.is_indented_code_block(&lines, i)
-                    {
+                    } else if first_indented_line == usize::MAX && self.is_indented_code_block(&lines, i) {
                         first_indented_line = i;
                     }
 
@@ -709,8 +691,7 @@ impl Rule for MD046CodeBlockStyle {
 
                 // Determine which style to use based on which appears first
                 if first_fenced_line != usize::MAX
-                    && (first_indented_line == usize::MAX
-                        || first_fenced_line < first_indented_line)
+                    && (first_indented_line == usize::MAX || first_fenced_line < first_indented_line)
                 {
                     CodeBlockStyle::Fenced
                 } else if first_indented_line != usize::MAX {
@@ -741,8 +722,7 @@ impl Rule for MD046CodeBlockStyle {
             {
                 if target_style == CodeBlockStyle::Indented {
                     // Calculate precise character range for the entire fence line
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_line_range(i + 1, line);
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
 
                     // Add warning for opening fence
                     warnings.push(LintWarning {
@@ -762,13 +742,9 @@ impl Rule for MD046CodeBlockStyle {
                     // Find closing fence and add warnings for all lines in the fenced block
                     let mut j = i + 1;
                     while j < lines.len() {
-                        if lines[j].trim_start().starts_with("```")
-                            || lines[j].trim_start().starts_with("~~~")
-                        {
+                        if lines[j].trim_start().starts_with("```") || lines[j].trim_start().starts_with("~~~") {
                             // Add warnings for content lines and closing fence
-                            for (k, line_content) in
-                                lines.iter().enumerate().take(j + 1).skip(i + 1)
-                            {
+                            for (k, line_content) in lines.iter().enumerate().take(j + 1).skip(i + 1) {
                                 // Calculate precise character range for the entire line
                                 let (start_line, start_col, end_line, end_col) =
                                     calculate_line_range(k + 1, line_content);
@@ -808,9 +784,7 @@ impl Rule for MD046CodeBlockStyle {
                     // Find closing fence to mark all lines as processed
                     let mut j = i + 1;
                     while j < lines.len() {
-                        if lines[j].trim_start().starts_with("```")
-                            || lines[j].trim_start().starts_with("~~~")
-                        {
+                        if lines[j].trim_start().starts_with("```") || lines[j].trim_start().starts_with("~~~") {
                             // Mark all lines in between as processed
                             for k in i + 1..=j {
                                 processed_blocks.insert(k + 1);
@@ -829,8 +803,7 @@ impl Rule for MD046CodeBlockStyle {
 
                     if !prev_line_is_indented {
                         // Calculate precise character range for the entire indented line
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_line_range(i + 1, line);
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
 
                         // Add warning for indented block that should be fenced
                         warnings.push(LintWarning {
@@ -879,11 +852,7 @@ impl Rule for MD046CodeBlockStyle {
 }
 
 impl DocumentStructureExtensions for MD046CodeBlockStyle {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> bool {
         !ctx.content.is_empty() && !structure.code_blocks.is_empty()
     }
 }

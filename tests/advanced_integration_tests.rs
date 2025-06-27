@@ -54,11 +54,7 @@ This is a line that would normally exceed the default line length limit, but we'
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
 
     // Execute the command and capture output first
-    let assert = cmd
-        .arg("--config")
-        .arg(&_config_path)
-        .arg(&markdown_path)
-        .assert();
+    let assert = cmd.arg("--config").arg(&_config_path).arg(&markdown_path).assert();
 
     // Get the output
     let output = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
@@ -141,11 +137,7 @@ fn test_init_load_apply_config() {
 
     // First use the init command to create the config
     let mut init_cmd = Command::cargo_bin("rumdl").unwrap();
-    init_cmd
-        .arg("init")
-        .current_dir(temp_dir.path())
-        .assert()
-        .success();
+    init_cmd.arg("init").current_dir(temp_dir.path()).assert().success();
 
     // Verify the config file was created
     assert!(_config_path.exists());
@@ -166,10 +158,7 @@ fn test_init_load_apply_config() {
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
 
     // Execute the command and capture output first
-    let assert = cmd
-        .arg(&markdown_path)
-        .current_dir(temp_dir.path())
-        .assert();
+    let assert = cmd.arg(&markdown_path).current_dir(temp_dir.path()).assert();
 
     // May contain line length issues by default, depending on the default config
     // Just check that we can run the command
@@ -270,14 +259,8 @@ Link to [non-existent heading](#nowhere)
 
     // Should have significantly fewer warnings
     assert!(
-        recheck_output
-            .split('\n')
-            .filter(|line| line.contains("MD"))
-            .count()
-            < output
-                .split('\n')
-                .filter(|line| line.contains("MD"))
-                .count()
+        recheck_output.split('\n').filter(|line| line.contains("MD")).count()
+            < output.split('\n').filter(|line| line.contains("MD")).count()
     );
 }
 
@@ -361,8 +344,7 @@ fn test_cli_options() {
         .arg(&options_test_path)
         .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
-    let default_output_options =
-        String::from_utf8(default_assert_options.get_output().stdout.clone()).unwrap();
+    let default_output_options = String::from_utf8(default_assert_options.get_output().stdout.clone()).unwrap();
     assert!(default_output_options.contains("MD033"));
     assert!(!default_output_options.contains("MD047")); // Corrected: MD047 should NOT be reported for this file
     default_assert_options.code(1);

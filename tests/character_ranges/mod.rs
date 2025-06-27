@@ -46,13 +46,7 @@ pub struct ExpectedWarning {
 
 impl ExpectedWarning {
     /// Create a new expected warning with basic range information
-    pub fn new(
-        line: usize,
-        column: usize,
-        end_line: usize,
-        end_column: usize,
-        highlighted_text: &'static str,
-    ) -> Self {
+    pub fn new(line: usize, column: usize, end_line: usize, end_column: usize, highlighted_text: &'static str) -> Self {
         Self {
             line,
             column,
@@ -67,8 +61,7 @@ impl ExpectedWarning {
 /// Generic test runner for character range validation
 pub fn test_character_ranges(test: CharacterRangeTest) {
     // Create the rule instance
-    let rule = create_rule_by_name(test.rule_name)
-        .unwrap_or_else(|| panic!("Unknown rule: {}", test.rule_name));
+    let rule = create_rule_by_name(test.rule_name).unwrap_or_else(|| panic!("Unknown rule: {}", test.rule_name));
 
     // Run the rule check
     let ctx = LintContext::new(test.content);
@@ -89,11 +82,7 @@ pub fn test_character_ranges(test: CharacterRangeTest) {
     );
 
     // Validate each warning
-    for (i, (actual, expected)) in warnings
-        .iter()
-        .zip(test.expected_warnings.iter())
-        .enumerate()
-    {
+    for (i, (actual, expected)) in warnings.iter().zip(test.expected_warnings.iter()).enumerate() {
         validate_warning(test.rule_name, test.content, i, actual, expected);
     }
 }
@@ -164,11 +153,7 @@ pub fn extract_highlighted_text(content: &str, warning: &LintWarning) -> String 
         if let Some(line) = lines.get(warning.line - 1) {
             let start_idx = (warning.column - 1).min(line.len());
             let end_idx = (warning.end_column - 1).min(line.len());
-            return line
-                .chars()
-                .skip(start_idx)
-                .take(end_idx - start_idx)
-                .collect();
+            return line.chars().skip(start_idx).take(end_idx - start_idx).collect();
         }
     } else {
         // Handle multi-line ranges
@@ -209,9 +194,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD001" => Some(Box::new(MD001HeadingIncrement)),
         "MD002" => Some(Box::new(MD002FirstHeadingH1::new(1))),
         "MD003" => Some(Box::new(MD003HeadingStyle::new(HeadingStyle::Consistent))),
-        "MD004" => Some(Box::new(MD004UnorderedListStyle::new(
-            UnorderedListStyle::Consistent,
-        ))),
+        "MD004" => Some(Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent))),
         "MD005" => Some(Box::new(MD005ListIndent)),
         "MD006" => Some(Box::new(MD006StartBullets)),
         "MD007" => Some(Box::new(MD007ULIndent::new(2))),
@@ -228,9 +211,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD022" => Some(Box::new(MD022BlanksAroundHeadings::new())),
         "MD023" => Some(Box::new(MD023HeadingStartLeft)),
         "MD025" => Some(Box::new(MD025SingleTitle::new(1, ""))),
-        "MD026" => Some(Box::new(MD026NoTrailingPunctuation::new(Some(
-            ".,;:!?".to_string(),
-        )))),
+        "MD026" => Some(Box::new(MD026NoTrailingPunctuation::new(Some(".,;:!?".to_string())))),
         "MD027" => Some(Box::new(MD027MultipleSpacesBlockquote)),
         "MD028" => Some(Box::new(MD028NoBlanksBlockquote)),
         "MD030" => Some(Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1))),
@@ -239,9 +220,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD033" => Some(Box::new(MD033NoInlineHtml::new())),
         "MD034" => Some(Box::new(MD034NoBareUrls)),
         "MD035" => Some(Box::new(MD035HRStyle::new("consistent".to_string()))),
-        "MD036" => Some(Box::new(MD036NoEmphasisAsHeading::new(
-            ".,;:!?".to_string(),
-        ))),
+        "MD036" => Some(Box::new(MD036NoEmphasisAsHeading::new(".,;:!?".to_string()))),
         "MD037" => Some(Box::new(MD037NoSpaceInEmphasis)),
         "MD038" => Some(Box::new(MD038NoSpaceInCode::new())),
         "MD039" => Some(Box::new(MD039NoSpaceInLinks)),
@@ -259,11 +238,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
 }
 
 /// Utility function to create a simple test case
-pub fn simple_test(
-    rule_name: &'static str,
-    content: &'static str,
-    expected: ExpectedWarning,
-) -> CharacterRangeTest {
+pub fn simple_test(rule_name: &'static str, content: &'static str, expected: ExpectedWarning) -> CharacterRangeTest {
     CharacterRangeTest {
         rule_name,
         content,

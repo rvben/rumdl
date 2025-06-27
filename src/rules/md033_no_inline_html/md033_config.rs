@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -10,9 +10,7 @@ pub struct MD033Config {
 
 impl Default for MD033Config {
     fn default() -> Self {
-        Self {
-            allowed: Vec::new(),
-        }
+        Self { allowed: Vec::new() }
     }
 }
 

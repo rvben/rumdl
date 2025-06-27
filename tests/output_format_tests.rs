@@ -124,10 +124,7 @@ fn test_output_format_fix_mode_singular() {
     );
 
     // Verify only the Fixed line is shown, not the Issues line
-    assert!(
-        stdout.contains("Fixed:"),
-        "Output should contain 'Fixed:' line"
-    );
+    assert!(stdout.contains("Fixed:"), "Output should contain 'Fixed:' line");
     assert!(
         !stdout.contains("Issues:"),
         "Output should not contain 'Issues:' line when in fix mode"
@@ -157,10 +154,7 @@ fn test_output_format_fix_mode_plural() {
     );
 
     // Verify only the Fixed line is shown, not the Issues line
-    assert!(
-        stdout.contains("Fixed:"),
-        "Output should contain 'Fixed:' line"
-    );
+    assert!(stdout.contains("Fixed:"), "Output should contain 'Fixed:' line");
     assert!(
         !stdout.contains("Issues:"),
         "Output should not contain 'Issues:' line when in fix mode"
@@ -207,10 +201,7 @@ fn test_output_format_fix_mode_label() {
         stdout_fix.contains("[fixed]"),
         "Fix mode should show [fixed] for fixed issues"
     );
-    assert!(
-        !stdout_fix.contains("[*]"),
-        "Fix mode should not show [*] labels"
-    );
+    assert!(!stdout_fix.contains("[*]"), "Fix mode should not show [*] labels");
 }
 
 #[test]
@@ -241,18 +232,15 @@ fn test_multi_issue_output_format() {
         "Should detect duplicate level 1 heading issue"
     );
     assert!(
-        stdout_normal.contains("[MD012]")
-            && stdout_normal.contains("Multiple consecutive blank lines"),
+        stdout_normal.contains("[MD012]") && stdout_normal.contains("Multiple consecutive blank lines"),
         "Should detect multiple blank lines issue"
     );
     assert!(
-        stdout_normal.contains("[MD040]")
-            && stdout_normal.contains("Code block (```) missing language"),
+        stdout_normal.contains("[MD040]") && stdout_normal.contains("Code block (```) missing language"),
         "Should detect code block language issue"
     );
     assert!(
-        stdout_normal.contains("[MD047]")
-            && stdout_normal.contains("File should end with a single newline"),
+        stdout_normal.contains("[MD047]") && stdout_normal.contains("File should end with a single newline"),
         "Should detect file ending newline issue"
     );
 
@@ -282,10 +270,7 @@ fn test_multi_issue_output_format() {
     );
 
     // Verify all the fixable issues are marked as fixed
-    assert!(
-        !stdout_fix.contains("[*]"),
-        "Fix mode should not have any [*] labels"
-    );
+    assert!(!stdout_fix.contains("[*]"), "Fix mode should not have any [*] labels");
 
     // Verify the summary counts match
     if stdout_fix.contains("Fixed:") {
@@ -339,17 +324,11 @@ fn test_fixable_issues_labeling() {
     println!("Fixable issue output:\n{}", stdout);
 
     // Verify MD037 emphasis spaces issue is reported
-    assert!(
-        stdout.contains("[MD037]"),
-        "Should detect spaces around emphasis issue"
-    );
+    assert!(stdout.contains("[MD037]"), "Should detect spaces around emphasis issue");
 
     // Verify issue has a [*] label, indicating it's fixable
     if stdout.contains("[MD037]") {
-        let md037_line = stdout
-            .lines()
-            .find(|line| line.contains("[MD037]"))
-            .unwrap_or("");
+        let md037_line = stdout.lines().find(|line| line.contains("[MD037]")).unwrap_or("");
         assert!(
             md037_line.contains("[*]"),
             "MD037 should have [*] label indicating it's fixable"
@@ -372,10 +351,7 @@ fn test_fixable_issues_labeling() {
     );
 
     if fix_stdout.contains("[MD037]") {
-        let md037_line = fix_stdout
-            .lines()
-            .find(|line| line.contains("[MD037]"))
-            .unwrap_or("");
+        let md037_line = fix_stdout.lines().find(|line| line.contains("[MD037]")).unwrap_or("");
         assert!(
             md037_line.contains("[fixed]"),
             "Fixed issue (MD037) should have [fixed] label"
@@ -427,10 +403,7 @@ fn test_truly_unfixable_issues_labeling() {
 
     // Verify issue does NOT have a [*] label, indicating it's NOT fixable
     if stdout.contains("[MD013]") {
-        let md013_line = stdout
-            .lines()
-            .find(|line| line.contains("[MD013]"))
-            .unwrap_or("");
+        let md013_line = stdout.lines().find(|line| line.contains("[MD013]")).unwrap_or("");
         assert!(
             !md013_line.contains("[*]"),
             "MD013 should NOT have [*] label since it's not fixable"
@@ -453,10 +426,7 @@ fn test_truly_unfixable_issues_labeling() {
     );
 
     if fix_stdout.contains("[MD013]") {
-        let md013_line = fix_stdout
-            .lines()
-            .find(|line| line.contains("[MD013]"))
-            .unwrap_or("");
+        let md013_line = fix_stdout.lines().find(|line| line.contains("[MD013]")).unwrap_or("");
         assert!(
             !md013_line.contains("[fixed]"),
             "Unfixable issue (MD013) should NOT have [fixed] label"
@@ -528,10 +498,7 @@ fn test_mixed_fixable_unfixable_issues() {
 
     // Check that MD013 doesn't have [*] label
     if stdout.contains("[MD013]") {
-        let md013_line = stdout
-            .lines()
-            .find(|line| line.contains("[MD013]"))
-            .unwrap_or("");
+        let md013_line = stdout.lines().find(|line| line.contains("[MD013]")).unwrap_or("");
         assert!(
             !md013_line.contains("[*]"),
             "MD013 should NOT have [*] label since it's not fixable"
@@ -555,10 +522,7 @@ fn test_mixed_fixable_unfixable_issues() {
 
     // Verify MD037 is marked as fixed
     if fix_stdout.contains("[MD037]") {
-        let md037_line = fix_stdout
-            .lines()
-            .find(|line| line.contains("[MD037]"))
-            .unwrap_or("");
+        let md037_line = fix_stdout.lines().find(|line| line.contains("[MD037]")).unwrap_or("");
         assert!(
             md037_line.contains("[fixed]"),
             "MD037 should have [fixed] label after applying fixes"
@@ -567,10 +531,7 @@ fn test_mixed_fixable_unfixable_issues() {
 
     // Verify MD013 is NOT marked as fixed
     if fix_stdout.contains("[MD013]") {
-        let md013_line = fix_stdout
-            .lines()
-            .find(|line| line.contains("[MD013]"))
-            .unwrap_or("");
+        let md013_line = fix_stdout.lines().find(|line| line.contains("[MD013]")).unwrap_or("");
         assert!(
             !md013_line.contains("[fixed]"),
             "MD013 should NOT have [fixed] label as it cannot be fixed automatically"
@@ -839,11 +800,7 @@ fn test_fixed_content_validation() {
 
     // Create a simple test file with specific fixable issues
     let test_file = temp_dir.path().join("fixable_issues.md");
-    fs::write(
-        &test_file,
-        "# Missing Newline\nThis line does not end with a newline",
-    )
-    .unwrap();
+    fs::write(&test_file, "# Missing Newline\nThis line does not end with a newline").unwrap();
 
     let test_file_path = test_file.to_str().unwrap();
 
@@ -882,10 +839,7 @@ fn test_fixed_content_validation() {
     );
 
     // Missing newline should be added
-    assert!(
-        fixed_content.ends_with('\n'),
-        "Fixed content should end with a newline"
-    );
+    assert!(fixed_content.ends_with('\n'), "Fixed content should end with a newline");
 
     // Run linter again to verify no issues remain
     let recheck_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
@@ -897,8 +851,5 @@ fn test_fixed_content_validation() {
     println!("Post-fix check output:\n{}", recheck_stdout);
 
     // The specific fixed issue should not be reported again
-    assert!(
-        !recheck_stdout.contains("[MD047]"),
-        "MD047 issue should be fixed"
-    );
+    assert!(!recheck_stdout.contains("[MD047]"), "MD047 issue should be fixed");
 }

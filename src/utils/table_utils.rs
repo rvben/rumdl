@@ -76,11 +76,7 @@ impl TableUtils {
             }
 
             // Check if this part looks like a delimiter (contains dashes and optionally colons)
-            if part_trimmed
-                .chars()
-                .all(|c| c == '-' || c == ':' || c.is_whitespace())
-                && part_trimmed.contains('-')
-            {
+            if part_trimmed.chars().all(|c| c == '-' || c == ':' || c.is_whitespace()) && part_trimmed.contains('-') {
                 valid_delimiter_parts += 1;
             }
         }
@@ -213,9 +209,7 @@ mod tests {
 
     #[test]
     fn test_is_potential_table_row() {
-        assert!(TableUtils::is_potential_table_row(
-            "| Header 1 | Header 2 |"
-        ));
+        assert!(TableUtils::is_potential_table_row("| Header 1 | Header 2 |"));
         assert!(TableUtils::is_potential_table_row("| Cell 1 | Cell 2 |"));
         assert!(!TableUtils::is_potential_table_row("- List item"));
         assert!(!TableUtils::is_potential_table_row("Regular text"));

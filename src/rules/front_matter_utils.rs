@@ -67,8 +67,7 @@ impl FrontMatterUtils {
             // Standard YAML front matter handling
             if i == 0 && STANDARD_FRONT_MATTER_START.is_match(line) {
                 in_standard_front_matter = true;
-            } else if STANDARD_FRONT_MATTER_END.is_match(line) && in_standard_front_matter && i > 0
-            {
+            } else if STANDARD_FRONT_MATTER_END.is_match(line) && in_standard_front_matter && i > 0 {
                 in_standard_front_matter = false;
             }
             // TOML front matter handling
@@ -86,19 +85,13 @@ impl FrontMatterUtils {
             // Malformed front matter type 1 (- --)
             else if i == 0 && MALFORMED_FRONT_MATTER_START1.is_match(line) {
                 in_malformed_front_matter1 = true;
-            } else if MALFORMED_FRONT_MATTER_END1.is_match(line)
-                && in_malformed_front_matter1
-                && i > 0
-            {
+            } else if MALFORMED_FRONT_MATTER_END1.is_match(line) && in_malformed_front_matter1 && i > 0 {
                 in_malformed_front_matter1 = false;
             }
             // Malformed front matter type 2 (-- -)
             else if i == 0 && MALFORMED_FRONT_MATTER_START2.is_match(line) {
                 in_malformed_front_matter2 = true;
-            } else if MALFORMED_FRONT_MATTER_END2.is_match(line)
-                && in_malformed_front_matter2
-                && i > 0
-            {
+            } else if MALFORMED_FRONT_MATTER_END2.is_match(line) && in_malformed_front_matter2 && i > 0 {
                 in_malformed_front_matter2 = false;
             }
         }
@@ -151,10 +144,7 @@ impl FrontMatterUtils {
             match front_matter_type {
                 FrontMatterType::Toml => {
                     // Handle TOML-style fields (key = value)
-                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#)
-                        .unwrap()
-                        .captures(line)
-                    {
+                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap().captures(line) {
                         let key = captures.get(1).unwrap().as_str().trim();
                         if key == field_name {
                             let value = captures.get(2).unwrap().as_str();
@@ -221,10 +211,7 @@ impl FrontMatterUtils {
             match front_matter_type {
                 FrontMatterType::Toml => {
                     // Handle TOML-style fields
-                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#)
-                        .unwrap()
-                        .captures(line)
-                    {
+                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap().captures(line) {
                         let key = captures.get(1).unwrap().as_str().trim();
                         let value = captures.get(2).unwrap().as_str();
                         let full_key = if current_prefix.is_empty() {
@@ -318,8 +305,7 @@ impl FrontMatterUtils {
                     {
                         in_front_matter = true;
                         continue;
-                    } else if (MALFORMED_FRONT_MATTER_END1.is_match(line)
-                        || MALFORMED_FRONT_MATTER_END2.is_match(line))
+                    } else if (MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line))
                         && in_front_matter
                         && i > 0
                     {
@@ -372,9 +358,7 @@ impl FrontMatterUtils {
         {
             // Check if there's a closing marker
             for line in lines.iter().skip(1) {
-                if MALFORMED_FRONT_MATTER_END1.is_match(line)
-                    || MALFORMED_FRONT_MATTER_END2.is_match(line)
-                {
+                if MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line) {
                     return FrontMatterType::Malformed;
                 }
             }
@@ -426,8 +410,7 @@ impl FrontMatterUtils {
                             || MALFORMED_FRONT_MATTER_START2.is_match(line))
                     {
                         in_front_matter = true;
-                    } else if (MALFORMED_FRONT_MATTER_END1.is_match(line)
-                        || MALFORMED_FRONT_MATTER_END2.is_match(line))
+                    } else if (MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line))
                         && in_front_matter
                         && i > 0
                     {
@@ -459,9 +442,7 @@ impl FrontMatterUtils {
                     // Standard front matter - keep as is
                     in_front_matter = true;
                     result.push(line.to_string());
-                } else if MALFORMED_FRONT_MATTER_START1.is_match(line)
-                    || MALFORMED_FRONT_MATTER_START2.is_match(line)
-                {
+                } else if MALFORMED_FRONT_MATTER_START1.is_match(line) || MALFORMED_FRONT_MATTER_START2.is_match(line) {
                     // Malformed front matter - fix it
                     in_front_matter = true;
                     is_malformed = true;
@@ -479,8 +460,7 @@ impl FrontMatterUtils {
                     // Standard front matter end - keep as is
                     in_front_matter = false;
                     result.push(line.to_string());
-                } else if (MALFORMED_FRONT_MATTER_END1.is_match(line)
-                    || MALFORMED_FRONT_MATTER_END2.is_match(line))
+                } else if (MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line))
                     && is_malformed
                 {
                     // Malformed front matter end - fix it

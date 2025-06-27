@@ -176,7 +176,11 @@ Cell 1   | Cell 2   |
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3, "Content with both leading and trailing pipes should be flagged when style is trailing_only");
+    assert_eq!(
+        result.len(),
+        3,
+        "Content with both leading and trailing pipes should be flagged when style is trailing_only"
+    );
 
     // Fix should correctly convert to trailing_only style
     let ctx = LintContext::new(content);
@@ -384,11 +388,7 @@ fn test_table_detection_requires_delimiter_row() {
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        0,
-        "Properly formatted table should not be flagged"
-    );
+    assert_eq!(result.len(), 0, "Properly formatted table should not be flagged");
 
     // Test that without delimiter row, it's not considered a table
     let content = r#"
@@ -430,15 +430,8 @@ And more text with | pipes | that | aren't | tables.
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Only the actual table row should be flagged"
-    );
-    assert_eq!(
-        result[0].line, 13,
-        "The inconsistent table row should be flagged"
-    );
+    assert_eq!(result.len(), 1, "Only the actual table row should be flagged");
+    assert_eq!(result[0].line, 13, "The inconsistent table row should be flagged");
     assert!(
         result[0].message.contains("Table pipe style"),
         "Should be a table pipe style warning"

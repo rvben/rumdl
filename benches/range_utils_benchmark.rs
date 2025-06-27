@@ -4,11 +4,7 @@ use rand::Rng;
 use rumdl::utils::range_utils::LineIndex;
 
 // Naive implementation that doesn't use the optimized function
-fn naive_line_col_to_byte_range(
-    content: &str,
-    line: usize,
-    column: usize,
-) -> std::ops::Range<usize> {
+fn naive_line_col_to_byte_range(content: &str, line: usize, column: usize) -> std::ops::Range<usize> {
     let lines: Vec<&str> = content.lines().collect();
 
     // Handle out of bounds
@@ -69,11 +65,7 @@ fn bench_range_utils(c: &mut Criterion) {
             // Access the same positions
             for line in [1, 100, 1000, 5000, 9999].iter() {
                 for col in [1, 10, 20, 40].iter() {
-                    black_box(naive_line_col_to_byte_range(
-                        black_box(&content),
-                        *line,
-                        *col,
-                    ));
+                    black_box(naive_line_col_to_byte_range(black_box(&content), *line, *col));
                 }
             }
         })

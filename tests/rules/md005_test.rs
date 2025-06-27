@@ -148,5 +148,8 @@ fn test_invalid_complex_nesting() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "* Level 1\n  * Level 2\n    * Level 3\n  * Back to 2\n      1. Ordered 3\n    2. Still 3\n* Back to 1");
+    assert_eq!(
+        fixed,
+        "* Level 1\n  * Level 2\n    * Level 3\n  * Back to 2\n      1. Ordered 3\n    2. Still 3\n* Back to 1"
+    );
 }

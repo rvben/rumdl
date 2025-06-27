@@ -50,8 +50,7 @@ impl Rule for MD058BlanksAroundTables {
 
         for table_block in table_blocks {
             // Check for blank line before table
-            if table_block.start_line > 0 && !self.is_blank_line(lines[table_block.start_line - 1])
-            {
+            if table_block.start_line > 0 && !self.is_blank_line(lines[table_block.start_line - 1]) {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     message: "Missing blank line before table".to_string(),
@@ -68,9 +67,7 @@ impl Rule for MD058BlanksAroundTables {
             }
 
             // Check for blank line after table
-            if table_block.end_line < lines.len() - 1
-                && !self.is_blank_line(lines[table_block.end_line + 1])
-            {
+            if table_block.end_line < lines.len() - 1 && !self.is_blank_line(lines[table_block.end_line + 1]) {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     message: "Missing blank line after table".to_string(),
@@ -80,10 +77,8 @@ impl Rule for MD058BlanksAroundTables {
                     end_column: lines[table_block.end_line].len() + 2,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range(
-                            table_block.end_line + 1,
-                            lines[table_block.end_line].len() + 1,
-                        ),
+                        range: _line_index
+                            .line_col_to_byte_range(table_block.end_line + 1, lines[table_block.end_line].len() + 1),
                         replacement: format!("{}\n", lines[table_block.end_line]),
                     }),
                 });

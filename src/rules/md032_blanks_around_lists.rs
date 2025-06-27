@@ -90,7 +90,7 @@ pub struct MD032BlanksAroundLists {
 impl Default for MD032BlanksAroundLists {
     fn default() -> Self {
         Self {
-            allow_after_headings: true,    // More lenient by default
+            allow_after_headings: true, // More lenient by default
             allow_after_colons: true,
         }
     }
@@ -105,9 +105,15 @@ impl MD032BlanksAroundLists {
     }
 
     /// Check if a blank line should be required before a list based on the previous line context
-    fn should_require_blank_line_before(&self, prev_line: &str, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure, prev_line_num: usize) -> bool {
+    fn should_require_blank_line_before(
+        &self,
+        prev_line: &str,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+        prev_line_num: usize,
+    ) -> bool {
         let trimmed_prev = prev_line.trim();
-        
+
         // Always require blank lines after code blocks, front matter, etc.
         if structure.is_in_code_block(prev_line_num) || structure.is_in_front_matter(prev_line_num) {
             return true;
@@ -136,24 +142,20 @@ impl MD032BlanksAroundLists {
         }
     }
 
-
     // Convert centralized list blocks to the format expected by perform_checks
-    fn convert_list_blocks(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-    ) -> Vec<(usize, usize, String)> {
+    fn convert_list_blocks(&self, ctx: &crate::lint_context::LintContext) -> Vec<(usize, usize, String)> {
         let mut blocks: Vec<(usize, usize, String)> = Vec::new();
-        
+
         for block in &ctx.list_blocks {
             // For MD032, we need to check if there are code blocks that should
             // split the list into separate segments
-            
+
             // Simple approach: if there's a fenced code block between list items,
             // split at that point
             let mut segments: Vec<(usize, usize)> = Vec::new();
             let mut current_start = block.start_line;
             let mut prev_item_line = 0;
-            
+
             for &item_line in &block.item_lines {
                 if prev_item_line > 0 {
                     // Check if there's a fenced code block between prev_item_line and item_line
@@ -161,13 +163,15 @@ impl MD032BlanksAroundLists {
                     for check_line in (prev_item_line + 1)..item_line {
                         if check_line - 1 < ctx.lines.len() {
                             let line = &ctx.lines[check_line - 1];
-                            if line.in_code_block && (line.content.trim().starts_with("```") || line.content.trim().starts_with("~~~")) {
+                            if line.in_code_block
+                                && (line.content.trim().starts_with("```") || line.content.trim().starts_with("~~~"))
+                            {
                                 has_code_fence = true;
                                 break;
                             }
                         }
                     }
-                    
+
                     if has_code_fence {
                         // End current segment before this item
                         segments.push((current_start, prev_item_line));
@@ -176,84 +180,88 @@ impl MD032BlanksAroundLists {
                 }
                 prev_item_line = item_line;
             }
-            
+
             // Add the final segment
             // For the last segment, end at the last list item (not the full block end)
             if prev_item_line > 0 {
                 segments.push((current_start, prev_item_line));
             }
-            
+
             // Check if this list block was split by code fences
             let has_code_fence_splits = segments.len() > 1 && {
                 // Check if any segments were created due to code fences
                 let mut found_fence = false;
-                for i in 0..segments.len()-1 {
+                for i in 0..segments.len() - 1 {
                     let seg_end = segments[i].1;
-                    let next_start = segments[i+1].0;
+                    let next_start = segments[i + 1].0;
                     // Check if there's a code fence between these segments
                     for check_line in (seg_end + 1)..next_start {
                         if check_line - 1 < ctx.lines.len() {
                             let line = &ctx.lines[check_line - 1];
-                            if line.in_code_block && (line.content.trim().starts_with("```") || line.content.trim().starts_with("~~~")) {
+                            if line.in_code_block
+                                && (line.content.trim().starts_with("```") || line.content.trim().starts_with("~~~"))
+                            {
                                 found_fence = true;
                                 break;
                             }
                         }
                     }
-                    if found_fence { break; }
+                    if found_fence {
+                        break;
+                    }
                 }
                 found_fence
             };
-            
+
             // Convert segments to blocks
             for (_idx, (start, end)) in segments.iter().enumerate() {
                 // Extend the end to include any continuation lines immediately after the last item
                 let mut actual_end = *end;
-                
+
                 // If this list was split by code fences, don't extend any segments
                 // They should remain as individual list items for MD032 purposes
                 if !has_code_fence_splits && *end < block.end_line {
-                        for check_line in (*end + 1)..=block.end_line {
-                            if check_line - 1 < ctx.lines.len() {
-                                let line = &ctx.lines[check_line - 1];
-                                // Stop at next list item or non-continuation content
-                                if block.item_lines.contains(&check_line) || line.heading.is_some() {
-                                    break;
-                                }
-                                // Don't extend through code blocks
-                                if line.in_code_block {
-                                    break;
-                                }
-                                // Include indented continuation
-                                if line.indent >= 2 {
+                    for check_line in (*end + 1)..=block.end_line {
+                        if check_line - 1 < ctx.lines.len() {
+                            let line = &ctx.lines[check_line - 1];
+                            // Stop at next list item or non-continuation content
+                            if block.item_lines.contains(&check_line) || line.heading.is_some() {
+                                break;
+                            }
+                            // Don't extend through code blocks
+                            if line.in_code_block {
+                                break;
+                            }
+                            // Include indented continuation
+                            if line.indent >= 2 {
+                                actual_end = check_line;
+                            }
+                            // Include lazy continuation only if it's not a separate paragraph
+                            else if check_line == *end + 1 && !line.is_blank && !line.heading.is_some() {
+                                // Check if this looks like list continuation vs new paragraph
+                                // Simple heuristic: if it starts with uppercase and the list item ended with punctuation,
+                                // it's likely a new paragraph
+                                let is_likely_new_paragraph = {
+                                    let first_char = line.content.trim().chars().next();
+                                    first_char.map_or(false, |c| c.is_uppercase())
+                                };
+
+                                if !is_likely_new_paragraph {
                                     actual_end = check_line;
-                                }
-                                // Include lazy continuation only if it's not a separate paragraph
-                                else if check_line == *end + 1 && !line.is_blank && !line.heading.is_some() {
-                                    // Check if this looks like list continuation vs new paragraph
-                                    // Simple heuristic: if it starts with uppercase and the list item ended with punctuation,
-                                    // it's likely a new paragraph
-                                    let is_likely_new_paragraph = {
-                                        let first_char = line.content.trim().chars().next();
-                                        first_char.map_or(false, |c| c.is_uppercase())
-                                    };
-                                    
-                                    if !is_likely_new_paragraph {
-                                        actual_end = check_line;
-                                    } else {
-                                        break;
-                                    }
-                                } else if !line.is_blank {
+                                } else {
                                     break;
                                 }
+                            } else if !line.is_blank {
+                                break;
                             }
                         }
+                    }
                 }
-                
+
                 blocks.push((*start, actual_end, block.blockquote_prefix.clone()));
             }
         }
-        
+
         blocks
     }
 
@@ -283,7 +291,8 @@ impl MD032BlanksAroundLists {
 
                 // Only require blank lines for content in the same context (same blockquote level)
                 // and when the context actually requires it
-                let should_require = self.should_require_blank_line_before(prev_line_str, ctx, structure, prev_line_actual_idx_1);
+                let should_require =
+                    self.should_require_blank_line_before(prev_line_str, ctx, structure, prev_line_actual_idx_1);
                 if !is_prev_excluded && !prev_is_blank && prefixes_match && should_require {
                     // Calculate precise character range for the entire list line that needs a blank line before it
                     let (start_line, start_col, end_line, end_col) =
@@ -313,11 +322,11 @@ impl MD032BlanksAroundLists {
                 // Only exclude code fence lines if they're indented (part of list content)
                 let is_next_excluded = structure.is_in_code_block(next_line_idx_1)
                     || structure.is_in_front_matter(next_line_idx_1)
-                    || (next_line_idx_0 < ctx.lines.len() && 
-                        ctx.lines[next_line_idx_0].in_code_block &&
-                        ctx.lines[next_line_idx_0].indent >= 2 &&
-                        (ctx.lines[next_line_idx_0].content.trim().starts_with("```") || 
-                         ctx.lines[next_line_idx_0].content.trim().starts_with("~~~")));
+                    || (next_line_idx_0 < ctx.lines.len()
+                        && ctx.lines[next_line_idx_0].in_code_block
+                        && ctx.lines[next_line_idx_0].indent >= 2
+                        && (ctx.lines[next_line_idx_0].content.trim().starts_with("```")
+                            || ctx.lines[next_line_idx_0].content.trim().starts_with("~~~")));
                 let next_prefix = BLOCKQUOTE_PREFIX_RE
                     .find(next_line_str)
                     .map_or(String::new(), |m| m.as_str().to_string());
@@ -426,8 +435,7 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(ctx.content.to_string());
         }
 
-        let mut insertions: std::collections::BTreeMap<usize, String> =
-            std::collections::BTreeMap::new();
+        let mut insertions: std::collections::BTreeMap<usize, String> = std::collections::BTreeMap::new();
 
         // Phase 1: Identify needed insertions
         for &(start_line, end_line, ref prefix) in &list_blocks {
@@ -441,7 +449,12 @@ impl Rule for MD032BlanksAroundLists {
                     .find(lines[prev_line_actual_idx_0])
                     .map_or(String::new(), |m| m.as_str().to_string());
 
-                let should_require = self.should_require_blank_line_before(lines[prev_line_actual_idx_0], ctx, &structure, prev_line_actual_idx_1);
+                let should_require = self.should_require_blank_line_before(
+                    lines[prev_line_actual_idx_0],
+                    ctx,
+                    &structure,
+                    prev_line_actual_idx_1,
+                );
                 if !is_prev_excluded
                     && !is_blank_in_context(lines[prev_line_actual_idx_0])
                     && prev_prefix == *prefix
@@ -460,11 +473,11 @@ impl Rule for MD032BlanksAroundLists {
                 // Only exclude code fence lines if they're indented (part of list content)
                 let is_line_after_excluded = structure.is_in_code_block(after_block_line_idx_1)
                     || structure.is_in_front_matter(after_block_line_idx_1)
-                    || (after_block_line_idx_0 < ctx.lines.len() && 
-                        ctx.lines[after_block_line_idx_0].in_code_block &&
-                        ctx.lines[after_block_line_idx_0].indent >= 2 &&
-                        (ctx.lines[after_block_line_idx_0].content.trim().starts_with("```") || 
-                         ctx.lines[after_block_line_idx_0].content.trim().starts_with("~~~")));
+                    || (after_block_line_idx_0 < ctx.lines.len()
+                        && ctx.lines[after_block_line_idx_0].in_code_block
+                        && ctx.lines[after_block_line_idx_0].indent >= 2
+                        && (ctx.lines[after_block_line_idx_0].content.trim().starts_with("```")
+                            || ctx.lines[after_block_line_idx_0].content.trim().starts_with("~~~")));
                 let after_prefix = BLOCKQUOTE_PREFIX_RE
                     .find(line_after_block_content_str)
                     .map_or(String::new(), |m| m.as_str().to_string());
@@ -528,12 +541,10 @@ impl Rule for MD032BlanksAroundLists {
         Self: Sized,
     {
         let allow_after_headings =
-            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_headings")
-                .unwrap_or(true); // Default to true for better UX
+            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_headings").unwrap_or(true); // Default to true for better UX
 
         let allow_after_colons =
-            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_colons")
-                .unwrap_or(true);
+            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_colons").unwrap_or(true);
 
         Box::new(MD032BlanksAroundLists {
             allow_after_headings,
@@ -573,7 +584,6 @@ impl DocumentStructureExtensions for MD032BlanksAroundLists {
     }
 }
 
-
 // Checks if a line is blank, considering blockquote context
 fn is_blank_in_context(line: &str) -> bool {
     // A line is blank if it's empty or contains only whitespace,
@@ -609,11 +619,7 @@ mod tests {
     fn check_warnings_have_fixes(content: &str) {
         let warnings = lint(content);
         for warning in &warnings {
-            assert!(
-                warning.fix.is_some(),
-                "Warning should have fix: {:?}",
-                warning
-            );
+            assert!(warning.fix.is_some(), "Warning should have fix: {:?}", warning);
         }
     }
 
@@ -640,11 +646,7 @@ mod tests {
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
@@ -670,11 +672,7 @@ mod tests {
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
@@ -699,28 +697,17 @@ mod tests {
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
     fn test_correct_spacing() {
         let content = "Text 1\n\n- Item 1\n- Item 2\n\nText 2";
         let warnings = lint(content);
-        assert_eq!(
-            warnings.len(),
-            0,
-            "Expected no warnings for correctly spaced list"
-        );
+        assert_eq!(warnings.len(), 0, "Expected no warnings for correctly spaced list");
 
         let fixed_content = fix(content);
-        assert_eq!(
-            fixed_content, content,
-            "Fix should not change correctly spaced content"
-        );
+        assert_eq!(fixed_content, content, "Fix should not change correctly spaced content");
     }
 
     #[test]
@@ -753,23 +740,14 @@ mod tests {
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
     fn test_nested_list() {
         let content = "Text\n- Item 1\n  - Nested 1\n- Item 2\nText";
         let warnings = lint(content);
-        assert_eq!(
-            warnings.len(),
-            2,
-            "Nested list block warnings. Got: {:?}",
-            warnings
-        ); // Needs blank before line 2, after line 4
+        assert_eq!(warnings.len(), 2, "Nested list block warnings. Got: {:?}", warnings); // Needs blank before line 2, after line 4
         if warnings.len() == 2 {
             assert_eq!(warnings[0].line, 2);
             assert_eq!(warnings[1].line, 4);
@@ -779,18 +757,11 @@ mod tests {
         check_warnings_have_fixes(content);
 
         let fixed_content = fix(content);
-        assert_eq!(
-            fixed_content,
-            "Text\n\n- Item 1\n  - Nested 1\n- Item 2\n\nText"
-        );
+        assert_eq!(fixed_content, "Text\n\n- Item 1\n  - Nested 1\n- Item 2\n\nText");
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
@@ -819,11 +790,7 @@ mod tests {
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
@@ -839,12 +806,7 @@ mod tests {
     fn test_ignore_front_matter() {
         let content = "---\ntitle: Test\n---\n- List Item\nText";
         let warnings = lint(content);
-        assert_eq!(
-            warnings.len(),
-            1,
-            "Front matter test warnings. Got: {:?}",
-            warnings
-        );
+        assert_eq!(warnings.len(), 1, "Front matter test warnings. Got: {:?}", warnings);
         if !warnings.is_empty() {
             assert_eq!(warnings[0].line, 4); // Warning on last line of list
             assert!(warnings[0].message.contains("followed by blank line"));
@@ -858,23 +820,14 @@ mod tests {
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
     fn test_multiple_lists() {
         let content = "Text\n- List 1 Item 1\n- List 1 Item 2\nText 2\n* List 2 Item 1\nText 3";
         let warnings = lint(content);
-        assert_eq!(
-            warnings.len(),
-            4,
-            "Multiple lists warnings. Got: {:?}",
-            warnings
-        );
+        assert_eq!(warnings.len(), 4, "Multiple lists warnings. Got: {:?}", warnings);
 
         // Test that warnings have fixes
         check_warnings_have_fixes(content);
@@ -887,11 +840,7 @@ mod tests {
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
@@ -924,19 +873,14 @@ mod tests {
         let fixed_content = fix(content);
         // Check expected output preserves the space after >
         assert_eq!(
-            fixed_content,
-            "> Quote line 1\n> \n> - List item 1\n> - List item 2\n> \n> Quote line 2",
+            fixed_content, "> Quote line 1\n> \n> - List item 1\n> - List item 2\n> \n> Quote line 2",
             "Fix for blockquoted list failed. Got:\n{}",
             fixed_content
         );
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
@@ -953,11 +897,7 @@ mod tests {
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
@@ -1039,12 +979,8 @@ mod tests {
         check_warnings_have_fixes(content);
 
         let fixed_content = fix(content);
-        let expected =
-            "> Text before\n> \n> - Item 1\n>   - Nested item\n> - Item 2\n> \n> Text after";
-        assert_eq!(
-            fixed_content, expected,
-            "Fix should preserve blockquote structure"
-        );
+        let expected = "> Text before\n> \n> - Item 1\n>   - Nested item\n> - Item 2\n> \n> Text after";
+        assert_eq!(fixed_content, expected, "Fix should preserve blockquote structure");
 
         // Note: This is a complex edge case where MD032's granular approach to list detection
         // means that nested lists within blockquotes may not be perfectly handled by the fix.
@@ -1071,29 +1007,18 @@ mod tests {
 
         let fixed_content = fix(content);
         let expected = "Text\n\n- Item 1\n* Item 2\n+ Item 3\n\nText";
-        assert_eq!(
-            fixed_content, expected,
-            "Fix should handle mixed list markers"
-        );
+        assert_eq!(fixed_content, expected, "Fix should handle mixed list markers");
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
     fn test_fix_ordered_list_with_different_numbers() {
         let content = "Text\n1. First\n3. Third\n2. Second\nText";
         let warnings = lint(content);
-        assert_eq!(
-            warnings.len(),
-            2,
-            "Should warn for missing blanks around ordered list"
-        );
+        assert_eq!(warnings.len(), 2, "Should warn for missing blanks around ordered list");
 
         // Test that warnings have fixes
         check_warnings_have_fixes(content);
@@ -1107,11 +1032,7 @@ mod tests {
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
@@ -1138,17 +1059,12 @@ mod tests {
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
     fn test_fix_deeply_nested_lists() {
-        let content =
-            "Text\n- Level 1\n  - Level 2\n    - Level 3\n      - Level 4\n- Back to Level 1\nText";
+        let content = "Text\n- Level 1\n  - Level 2\n    - Level 3\n      - Level 4\n- Back to Level 1\nText";
         let warnings = lint(content);
         assert_eq!(
             warnings.len(),
@@ -1161,24 +1077,16 @@ mod tests {
 
         let fixed_content = fix(content);
         let expected = "Text\n\n- Level 1\n  - Level 2\n    - Level 3\n      - Level 4\n- Back to Level 1\n\nText";
-        assert_eq!(
-            fixed_content, expected,
-            "Fix should handle deeply nested lists"
-        );
+        assert_eq!(fixed_content, expected, "Fix should handle deeply nested lists");
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
     fn test_fix_list_with_multiline_items() {
-        let content =
-            "Text\n- Item 1\n  continues here\n  and here\n- Item 2\n  also continues\nText";
+        let content = "Text\n- Item 1\n  continues here\n  and here\n- Item 2\n  also continues\nText";
         let warnings = lint(content);
         assert_eq!(
             warnings.len(),
@@ -1190,20 +1098,12 @@ mod tests {
         check_warnings_have_fixes(content);
 
         let fixed_content = fix(content);
-        let expected =
-            "Text\n\n- Item 1\n  continues here\n  and here\n- Item 2\n  also continues\n\nText";
-        assert_eq!(
-            fixed_content, expected,
-            "Fix should handle multiline list items"
-        );
+        let expected = "Text\n\n- Item 1\n  continues here\n  and here\n- Item 2\n  also continues\n\nText";
+        assert_eq!(fixed_content, expected, "Fix should handle multiline list items");
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
@@ -1222,11 +1122,7 @@ mod tests {
         // List at very end
         let content2 = "Text\n- Item 1\n- Item 2";
         let warnings2 = lint(content2);
-        assert_eq!(
-            warnings2.len(),
-            1,
-            "List at document end should need blank before"
-        );
+        assert_eq!(warnings2.len(), 1, "List at document end should need blank before");
         check_warnings_have_fixes(content2);
         let fixed2 = fix(content2);
         assert_eq!(
@@ -1239,45 +1135,27 @@ mod tests {
     fn test_fix_preserves_existing_blank_lines() {
         let content = "Text\n\n\n- Item 1\n- Item 2\n\n\nText";
         let warnings = lint(content);
-        assert_eq!(
-            warnings.len(),
-            0,
-            "Multiple blank lines should be preserved"
-        );
+        assert_eq!(warnings.len(), 0, "Multiple blank lines should be preserved");
         let fixed_content = fix(content);
-        assert_eq!(
-            fixed_content, content,
-            "Fix should not modify already correct content"
-        );
+        assert_eq!(fixed_content, content, "Fix should not modify already correct content");
     }
 
     #[test]
     fn test_fix_handles_tabs_and_spaces() {
         let content = "Text\n\t- Item with tab\n  - Item with spaces\nText";
         let warnings = lint(content);
-        assert_eq!(
-            warnings.len(),
-            2,
-            "Should warn regardless of indentation type"
-        );
+        assert_eq!(warnings.len(), 2, "Should warn regardless of indentation type");
 
         // Test that warnings have fixes
         check_warnings_have_fixes(content);
 
         let fixed_content = fix(content);
         let expected = "Text\n\n\t- Item with tab\n  - Item with spaces\n\nText";
-        assert_eq!(
-            fixed_content, expected,
-            "Fix should preserve original indentation"
-        );
+        assert_eq!(fixed_content, expected, "Fix should preserve original indentation");
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "Fix should resolve all warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should resolve all warnings");
     }
 
     #[test]
@@ -1290,10 +1168,7 @@ mod tests {
         for warning in &warnings {
             assert!(warning.fix.is_some(), "Warning should have fix");
             let fix = warning.fix.as_ref().unwrap();
-            assert!(
-                fix.range.start <= fix.range.end,
-                "Fix range should be valid"
-            );
+            assert!(fix.range.start <= fix.range.end, "Fix range should be valid");
             assert!(
                 !fix.replacement.is_empty() || fix.range.start == fix.range.end,
                 "Fix should have replacement or be insertion"
@@ -1315,22 +1190,14 @@ mod tests {
 
         // No warnings after fix
         let warnings_after_fix = lint(&fixed_once);
-        assert_eq!(
-            warnings_after_fix.len(),
-            0,
-            "No warnings should remain after fix"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "No warnings should remain after fix");
     }
 
     #[test]
     fn test_fix_with_windows_line_endings() {
         let content = "Text\r\n- Item 1\r\n- Item 2\r\nText";
         let warnings = lint(content);
-        assert_eq!(
-            warnings.len(),
-            2,
-            "Should detect issues with Windows line endings"
-        );
+        assert_eq!(warnings.len(), 2, "Should detect issues with Windows line endings");
 
         // Test that warnings have fixes
         check_warnings_have_fixes(content);
@@ -1338,10 +1205,7 @@ mod tests {
         let fixed_content = fix(content);
         // Note: Our fix uses \n, which is standard for Rust string processing
         let expected = "Text\n\n- Item 1\n- Item 2\n\nText";
-        assert_eq!(
-            fixed_content, expected,
-            "Fix should handle Windows line endings"
-        );
+        assert_eq!(fixed_content, expected, "Fix should handle Windows line endings");
     }
 
     #[test]

@@ -2,9 +2,9 @@
 ///
 /// See [docs/md013.md](../../docs/md013.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::calculate_excess_range;
-use crate::rule_config_serde::RuleConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -42,13 +42,7 @@ impl Default for MD013LineLength {
 }
 
 impl MD013LineLength {
-    pub fn new(
-        line_length: usize,
-        code_blocks: bool,
-        tables: bool,
-        headings: bool,
-        strict: bool,
-    ) -> Self {
+    pub fn new(line_length: usize, code_blocks: bool, tables: bool, headings: bool, strict: bool) -> Self {
         Self {
             config: MD013Config {
                 line_length,
@@ -59,7 +53,7 @@ impl MD013LineLength {
             },
         }
     }
-    
+
     pub fn from_config_struct(config: MD013Config) -> Self {
         Self { config }
     }
@@ -75,9 +69,7 @@ impl MD013LineLength {
         if current_line > 0 && current_line + 1 < lines.len() {
             let prev = lines[current_line - 1].trim();
             let next = lines[current_line + 1].trim();
-            if (prev.starts_with('|') || prev.starts_with("|-"))
-                && (next.starts_with('|') || next.starts_with("|-"))
-            {
+            if (prev.starts_with('|') || prev.starts_with("|-")) && (next.starts_with('|') || next.starts_with("|-")) {
                 return true;
             }
         }
@@ -99,23 +91,17 @@ impl MD013LineLength {
         let trimmed = line.trim();
 
         // Only skip if the entire line is a URL (quick check first)
-        if (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
-            && URL_PATTERN.is_match(trimmed)
-        {
+        if (trimmed.starts_with("http://") || trimmed.starts_with("https://")) && URL_PATTERN.is_match(trimmed) {
             return true;
         }
 
         // Only skip if the entire line is an image reference (quick check first)
-        if trimmed.starts_with("![")
-            && trimmed.ends_with(']')
-            && IMAGE_REF_PATTERN.is_match(trimmed)
-        {
+        if trimmed.starts_with("![") && trimmed.ends_with(']') && IMAGE_REF_PATTERN.is_match(trimmed) {
             return true;
         }
 
         // Only skip if the entire line is a link reference (quick check first)
-        if trimmed.starts_with('[') && trimmed.contains("]:") && LINK_REF_PATTERN.is_match(trimmed)
-        {
+        if trimmed.starts_with('[') && trimmed.contains("]:") && LINK_REF_PATTERN.is_match(trimmed) {
             return true;
         }
 
@@ -173,8 +159,7 @@ impl Rule for MD013LineLength {
         let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
 
         // Create a quick lookup set for heading lines
-        let heading_lines_set: std::collections::HashSet<usize> =
-            structure.heading_lines.iter().cloned().collect();
+        let heading_lines_set: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
 
         // Pre-compute table lines for efficiency instead of calling is_in_table for each line
         let table_lines_set: std::collections::HashSet<usize> = if self.config.tables {
@@ -292,11 +277,7 @@ impl Rule for MD013LineLength {
         // Collect all fixes and sort by range start (descending) to apply from end to beginning
         let mut fixes: Vec<_> = warnings
             .iter()
-            .filter_map(|w| {
-                w.fix
-                    .as_ref()
-                    .map(|f| (f.range.start, f.range.end, &f.replacement))
-            })
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
             .collect();
         fixes.sort_by(|a, b| b.0.cmp(&a.0));
 
@@ -327,7 +308,7 @@ impl Rule for MD013LineLength {
         let default_config = MD013Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;
         let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-        
+
         if let toml::Value::Table(table) = toml_value {
             if !table.is_empty() {
                 Some((MD013Config::RULE_NAME.to_string(), toml::Value::Table(table)))
@@ -345,7 +326,8 @@ impl Rule for MD013LineLength {
     {
         let mut rule_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
         // Special handling for line_length from global config
-        if rule_config.line_length == 80 { // default value
+        if rule_config.line_length == 80 {
+            // default value
             rule_config.line_length = config.global.line_length as usize;
         }
         Box::new(Self::from_config_struct(rule_config))
@@ -354,12 +336,7 @@ impl Rule for MD013LineLength {
 
 impl MD013LineLength {
     /// Check if a line should be skipped for fixing
-    fn should_skip_line_for_fix(
-        &self,
-        line: &str,
-        line_num: usize,
-        structure: &DocumentStructure,
-    ) -> bool {
+    fn should_skip_line_for_fix(&self, line: &str, line_num: usize, structure: &DocumentStructure) -> bool {
         let line_number = line_num + 1; // 1-based
 
         // Skip code blocks

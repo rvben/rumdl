@@ -41,10 +41,7 @@ Here's some `inline code` and a [link](https://example.com).
     let warnings = rumdl::lint(content, &rules, false).unwrap();
 
     // Should find some issues in this content
-    assert!(
-        !warnings.is_empty(),
-        "Expected to find linting issues in test content"
-    );
+    assert!(!warnings.is_empty(), "Expected to find linting issues in test content");
 
     // Test converting warnings to LSP diagnostics
     for warning in &warnings {
@@ -119,10 +116,7 @@ async fn test_error_recovery() {
     let result = rumdl::lint(invalid_content, &rules, false);
 
     // Should not panic or fail catastrophically
-    assert!(
-        result.is_ok(),
-        "Linting should handle edge cases gracefully"
-    );
+    assert!(result.is_ok(), "Linting should handle edge cases gracefully");
 }
 
 /// Test performance with larger documents
@@ -235,11 +229,7 @@ async fn test_workspace_scenarios() {
             assert!(diagnostic.source == Some("rumdl".to_string()));
         }
 
-        println!(
-            "File {} processed with {} warnings",
-            filepath,
-            warnings.len()
-        );
+        println!("File {} processed with {} warnings", filepath, warnings.len());
     }
 
     println!(

@@ -34,7 +34,6 @@ impl MD039NoSpaceInLinks {
         LINK_PATTERN.is_match(content)
     }
 
-
     #[inline]
     fn trim_link_text_preserve_escapes(text: &str) -> &str {
         // Optimized trimming that preserves escapes
@@ -120,7 +119,7 @@ impl Rule for MD039NoSpaceInLinks {
             if link.is_reference {
                 continue;
             }
-            
+
             // Fast check if trimming is needed
             if !self.needs_trimming(&link.text) {
                 continue;
@@ -176,7 +175,7 @@ impl Rule for MD039NoSpaceInLinks {
             if image.is_reference {
                 continue;
             }
-            
+
             // Fast check if trimming is needed
             if !self.needs_trimming(&image.alt_text) {
                 continue;
@@ -239,13 +238,13 @@ impl Rule for MD039NoSpaceInLinks {
             if link.is_reference {
                 continue;
             }
-            
+
             if !self.needs_trimming(&link.text) {
                 continue;
             }
 
             let unescaped = self.unescape_fast(&link.text);
-            
+
             let needs_fix = if ALL_WHITESPACE.is_match(&unescaped) {
                 true
             } else {
@@ -270,7 +269,7 @@ impl Rule for MD039NoSpaceInLinks {
                     let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
                     format!("[{}]{}", trimmed, url_part)
                 };
-                
+
                 fixes.push((link.byte_offset, link.byte_end, replacement));
             }
         }
@@ -281,13 +280,13 @@ impl Rule for MD039NoSpaceInLinks {
             if image.is_reference {
                 continue;
             }
-            
+
             if !self.needs_trimming(&image.alt_text) {
                 continue;
             }
 
             let unescaped = self.unescape_fast(&image.alt_text);
-            
+
             let needs_fix = if ALL_WHITESPACE.is_match(&unescaped) {
                 true
             } else {
@@ -312,7 +311,7 @@ impl Rule for MD039NoSpaceInLinks {
                     let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
                     format!("![{}]{}", trimmed, url_part)
                 };
-                
+
                 fixes.push((image.byte_offset, image.byte_end, replacement));
             }
         }
@@ -332,7 +331,7 @@ impl Rule for MD039NoSpaceInLinks {
             if start < last_pos {
                 // This should not happen if fixes are properly sorted and non-overlapping
                 return Err(LintError::FixFailed(format!(
-                    "Overlapping fixes detected: last_pos={}, start={}", 
+                    "Overlapping fixes detected: last_pos={}, start={}",
                     last_pos, start
                 )));
             }
@@ -512,10 +511,19 @@ mod tests {
 
         // Add valid links (should be fast to skip)
         for i in 0..500 {
-            content.push_str(&format!("Line {} with [valid link {}](url{}) and text.\n", i + 500, i, i));
+            content.push_str(&format!(
+                "Line {} with [valid link {}](url{}) and text.\n",
+                i + 500,
+                i,
+                i
+            ));
         }
 
-        println!("MD039 Performance Test - Content: {} bytes, {} lines", content.len(), content.lines().count());
+        println!(
+            "MD039 Performance Test - Content: {} bytes, {} lines",
+            content.len(),
+            content.lines().count()
+        );
 
         let ctx = crate::lint_context::LintContext::new(&content);
 
@@ -537,13 +545,27 @@ mod tests {
         let avg_check_duration = total_duration / runs;
 
         println!("MD039 Optimized Performance:");
-        println!("- Average check time: {:?} ({:.2} ms)", avg_check_duration, avg_check_duration.as_secs_f64() * 1000.0);
+        println!(
+            "- Average check time: {:?} ({:.2} ms)",
+            avg_check_duration,
+            avg_check_duration.as_secs_f64() * 1000.0
+        );
         println!("- Found {} warnings", warnings_count);
-        println!("- Lines per second: {:.0}", content.lines().count() as f64 / avg_check_duration.as_secs_f64());
-        println!("- Microseconds per line: {:.2}", avg_check_duration.as_micros() as f64 / content.lines().count() as f64);
+        println!(
+            "- Lines per second: {:.0}",
+            content.lines().count() as f64 / avg_check_duration.as_secs_f64()
+        );
+        println!(
+            "- Microseconds per line: {:.2}",
+            avg_check_duration.as_micros() as f64 / content.lines().count() as f64
+        );
 
         // Performance assertion - should complete reasonably fast
-        assert!(avg_check_duration.as_millis() < 200, "MD039 check should complete in under 200ms, took {}ms", avg_check_duration.as_millis());
+        assert!(
+            avg_check_duration.as_millis() < 200,
+            "MD039 check should complete in under 200ms, took {}ms",
+            avg_check_duration.as_millis()
+        );
 
         // Verify we're finding the expected number of warnings (500 links with spaces)
         assert_eq!(warnings_count, 500, "Should find 500 warnings for links with spaces");

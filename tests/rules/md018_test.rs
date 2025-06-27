@@ -55,10 +55,7 @@ fn test_fix_mixed_atx_headings() {
     let content = "# Heading 1\n##Heading 2\n### Heading 3\n####Heading 4";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        result,
-        "# Heading 1\n## Heading 2\n### Heading 3\n#### Heading 4"
-    );
+    assert_eq!(result, "# Heading 1\n## Heading 2\n### Heading 3\n#### Heading 4");
 }
 
 #[test]
@@ -67,10 +64,7 @@ fn test_preserve_code_blocks() {
     let content = "# Real Heading\n```\n#Not a heading\n```\n# Another Heading";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        result,
-        "# Real Heading\n```\n#Not a heading\n```\n# Another Heading"
-    );
+    assert_eq!(result, "# Real Heading\n```\n#Not a heading\n```\n# Another Heading");
 }
 
 #[test]
@@ -80,10 +74,7 @@ fn test_heading_with_multiple_hashes() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(
-        result[0].message,
-        "No space after ###### in heading"
-    );
+    assert_eq!(result[0].message, "No space after ###### in heading");
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "###### Heading 6");
 }

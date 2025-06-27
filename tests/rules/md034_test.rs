@@ -33,10 +33,7 @@ fn test_multiple_urls() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Bare URLs should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "Visit <https://example.com> and <http://another.com>"
-    );
+    assert_eq!(fixed, "Visit <https://example.com> and <http://another.com>");
 }
 
 #[test]
@@ -49,16 +46,9 @@ https://outside.com";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // Only https://outside.com should be flagged (URL in code block is ignored)
-    assert_eq!(
-        result.len(),
-        1,
-        "Bare URL outside code block should be flagged"
-    );
+    assert_eq!(result.len(), 1, "Bare URL outside code block should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "```\nhttps://example.com\n```\n<https://outside.com>"
-    );
+    assert_eq!(fixed, "```\nhttps://example.com\n```\n<https://outside.com>");
 }
 
 #[test]
@@ -68,11 +58,7 @@ fn test_urls_in_inline_code() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // https://outside.com should be flagged (URL in inline code is ignored)
-    assert_eq!(
-        result.len(),
-        1,
-        "Bare URL outside inline code should be flagged"
-    );
+    assert_eq!(result.len(), 1, "Bare URL outside inline code should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "`https://example.com`\n<https://outside.com>");
 }
@@ -108,10 +94,7 @@ fn test_complex_urls() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Bare URL should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "Visit <https://example.com/path?param=value#fragment>"
-    );
+    assert_eq!(fixed, "Visit <https://example.com/path?param=value#fragment>");
 }
 
 #[test]
@@ -127,10 +110,7 @@ fn test_multiple_protocols() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "All bare URLs should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "<http://example.com>\n<https://secure.com>\n<ftp://files.com>"
-    );
+    assert_eq!(fixed, "<http://example.com>\n<https://secure.com>\n<ftp://files.com>");
 }
 
 #[test]
@@ -164,13 +144,11 @@ fn test_not_urls() {
 #[test]
 fn test_badge_links_not_flagged() {
     let rule = MD034NoBareUrls;
-    let content = "[![npm version](https://img.shields.io/npm/v/react.svg?style=flat)](https://www.npmjs.com/package/react)";
+    let content =
+        "[![npm version](https://img.shields.io/npm/v/react.svg?style=flat)](https://www.npmjs.com/package/react)";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Badge links should not be flagged as bare URLs"
-    );
+    assert!(result.is_empty(), "Badge links should not be flagged as bare URLs");
 }
 
 #[test]
@@ -194,10 +172,7 @@ fn test_multiple_badges_and_links_on_one_line() {
 fn debug_ast_multiple_urls() {
     let content = "Visit https://example.com and http://another.com";
     let ctx = LintContext::new(content);
-    let debug_str = format!(
-        "MD034 test content: {}\nMD034 full AST: {:#?}\n",
-        content, ctx.ast
-    );
+    let debug_str = format!("MD034 test content: {}\nMD034 full AST: {:#?}\n", content, ctx.ast);
     match write("/tmp/md034_ast_debug.txt", debug_str) {
         Ok(_) => (),
         Err(e) => panic!("Failed to write AST debug file: {}", e),
@@ -260,11 +235,7 @@ fn test_md034_edge_cases() {
 
         // If we expect warnings, the fix should change the content
         if *expected > 0 {
-            assert_ne!(
-                fixed, *content,
-                "Fix should change content with warnings: {}",
-                content
-            );
+            assert_ne!(fixed, *content, "Fix should change content with warnings: {}", content);
             // The fixed version should have no warnings
             let ctx_fixed = LintContext::new(&fixed);
             let result_fixed = rule.check(&ctx_fixed).unwrap();
@@ -408,11 +379,7 @@ fn test_bare_email_addresses() {
     let content = "Contact us at support@example.com or admin@test.org";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        2,
-        "Bare email addresses should be flagged as bare URLs"
-    );
+    assert_eq!(result.len(), 2, "Bare email addresses should be flagged as bare URLs");
     assert_eq!(result[0].line, 1);
     assert_eq!(result[1].line, 1);
 
@@ -424,10 +391,7 @@ fn test_bare_email_addresses() {
         .contains("Email address without angle brackets or link formatting"));
 
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "Contact us at <support@example.com> or <admin@test.org>"
-    );
+    assert_eq!(fixed, "Contact us at <support@example.com> or <admin@test.org>");
 }
 
 #[test]
@@ -450,33 +414,20 @@ fn test_email_addresses_various_formats() {
             1,
             "Email with hyphens: <user-name@sub-domain.example-site.org>",
         ),
-        (
-            "Short TLD: user@example.co",
-            1,
-            "Short TLD: <user@example.co>",
-        ),
-        (
-            "Long TLD: user@example.museum",
-            1,
-            "Long TLD: <user@example.museum>",
-        ),
+        ("Short TLD: user@example.co", 1, "Short TLD: <user@example.co>"),
+        ("Long TLD: user@example.museum", 1, "Long TLD: <user@example.museum>"),
     ];
 
     for (content, expected_count, expected_fix) in test_cases.iter() {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            *expected_count,
-            "Failed for content: {}",
-            content
-        );
+        assert_eq!(result.len(), *expected_count, "Failed for content: {}", content);
 
         if *expected_count > 0 {
             assert!(
-                result
-                    .iter()
-                    .any(|w| w.message.contains("Email address without angle brackets or link formatting")),
+                result.iter().any(|w| w
+                    .message
+                    .contains("Email address without angle brackets or link formatting")),
                 "Email detection failed for: {}",
                 content
             );
@@ -506,12 +457,7 @@ fn test_email_exclusions() {
     for (content, expected_count) in test_cases.iter() {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            *expected_count,
-            "Failed for content: {}",
-            content
-        );
+        assert_eq!(result.len(), *expected_count, "Failed for content: {}", content);
     }
 }
 
@@ -525,21 +471,16 @@ fn test_localhost_urls() {
     let content = "Visit http://localhost:3000 and https://localhost:8080/api";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        2,
-        "Localhost URLs should be flagged as bare URLs"
-    );
+    assert_eq!(result.len(), 2, "Localhost URLs should be flagged as bare URLs");
     assert!(
-        result.iter().any(|w| w.message.contains("URL without angle brackets or link formatting")),
+        result
+            .iter()
+            .any(|w| w.message.contains("URL without angle brackets or link formatting")),
         "Localhost URL detection failed"
     );
 
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "Visit <http://localhost:3000> and <https://localhost:8080/api>"
-    );
+    assert_eq!(fixed, "Visit <http://localhost:3000> and <https://localhost:8080/api>");
 }
 
 #[test]
@@ -551,23 +492,14 @@ fn test_localhost_variations() {
         ("http://localhost:8080", 1, "<http://localhost:8080>"),
         ("https://localhost:3000", 1, "<https://localhost:3000>"),
         ("http://localhost/path", 1, "<http://localhost/path>"),
-        (
-            "https://localhost:9090/api/v1",
-            1,
-            "<https://localhost:9090/api/v1>",
-        ),
+        ("https://localhost:9090/api/v1", 1, "<https://localhost:9090/api/v1>"),
         ("ftp://localhost", 1, "<ftp://localhost>"), // FTP is also supported
     ];
 
     for (content, expected_count, expected_fix) in test_cases.iter() {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            *expected_count,
-            "Failed for content: {}",
-            content
-        );
+        assert_eq!(result.len(), *expected_count, "Failed for content: {}", content);
 
         if *expected_count > 0 {
             assert!(
@@ -590,16 +522,9 @@ fn test_ip_address_urls() {
     let content = "Connect to http://127.0.0.1:8080 or https://192.168.1.100";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        2,
-        "IP address URLs should be flagged as bare URLs"
-    );
+    assert_eq!(result.len(), 2, "IP address URLs should be flagged as bare URLs");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "Connect to <http://127.0.0.1:8080> or <https://192.168.1.100>"
-    );
+    assert_eq!(fixed, "Connect to <http://127.0.0.1:8080> or <https://192.168.1.100>");
 }
 
 #[test]
@@ -608,11 +533,7 @@ fn test_combined_emails_and_localhost() {
     let content = "Contact admin@localhost.com or visit http://localhost:9090\nAlso try user@example.org and https://192.168.1.1:3000";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        4,
-        "Should detect both emails and localhost URLs"
-    );
+    assert_eq!(result.len(), 4, "Should detect both emails and localhost URLs");
 
     let fixed = rule.fix(&ctx).unwrap();
     let expected = "Contact <admin@localhost.com> or visit <http://localhost:9090>\nAlso try <user@example.org> and <https://192.168.1.1:3000>";
@@ -666,7 +587,9 @@ fn test_mixed_multiline_links_and_bare_urls() {
 
     // Verify the flagged URL is the correct one
     assert!(
-        result[0].message.contains("URL without angle brackets or link formatting"),
+        result[0]
+            .message
+            .contains("URL without angle brackets or link formatting"),
         "Should flag bare URL with correct message"
     );
 

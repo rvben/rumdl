@@ -4,17 +4,11 @@ use rumdl::rules::blockquote_utils::BlockquoteUtils;
 fn test_is_blockquote_detection() {
     // Basic blockquote detection
     assert!(BlockquoteUtils::is_blockquote("> This is a blockquote"));
-    assert!(BlockquoteUtils::is_blockquote(
-        ">This is a blockquote without space"
-    ));
+    assert!(BlockquoteUtils::is_blockquote(">This is a blockquote without space"));
 
     // Indented blockquotes
-    assert!(BlockquoteUtils::is_blockquote(
-        "  > This is an indented blockquote"
-    ));
-    assert!(BlockquoteUtils::is_blockquote(
-        "    > This is more indented"
-    ));
+    assert!(BlockquoteUtils::is_blockquote("  > This is an indented blockquote"));
+    assert!(BlockquoteUtils::is_blockquote("    > This is more indented"));
 
     // Nested blockquotes
     assert!(BlockquoteUtils::is_blockquote("> > Nested blockquote"));
@@ -24,9 +18,7 @@ fn test_is_blockquote_detection() {
     assert!(!BlockquoteUtils::is_blockquote("This is not a blockquote"));
     assert!(!BlockquoteUtils::is_blockquote(""));
     assert!(!BlockquoteUtils::is_blockquote("   "));
-    assert!(!BlockquoteUtils::is_blockquote(
-        "\\> Escaped blockquote marker"
-    ));
+    assert!(!BlockquoteUtils::is_blockquote("\\> Escaped blockquote marker"));
 
     // Edge cases
     assert!(BlockquoteUtils::is_blockquote(">"));
@@ -63,8 +55,7 @@ fn test_has_blank_between_blockquotes() {
 
     // Multiple blockquotes with regular blank lines between them
     // (method only detects blank blockquote lines, not general blank lines)
-    let multiple =
-        "> First blockquote\n\n> Second blockquote\n> Still second\n\n> Third blockquote";
+    let multiple = "> First blockquote\n\n> Second blockquote\n> Still second\n\n> Third blockquote";
     let blank_line_numbers = BlockquoteUtils::has_blank_between_blockquotes(multiple);
     assert!(blank_line_numbers.is_empty());
 
@@ -127,29 +118,15 @@ fn test_blockquote_sections() {
     let content = "Normal text\n> Blockquote line 1\n> Blockquote line 2\n\nNormal text again\n> Another blockquote\nNormal ending";
 
     // Test for specific lines being blockquotes
-    assert!(BlockquoteUtils::is_blockquote(
-        content.lines().nth(1).unwrap()
-    ));
-    assert!(BlockquoteUtils::is_blockquote(
-        content.lines().nth(2).unwrap()
-    ));
-    assert!(BlockquoteUtils::is_blockquote(
-        content.lines().nth(5).unwrap()
-    ));
+    assert!(BlockquoteUtils::is_blockquote(content.lines().nth(1).unwrap()));
+    assert!(BlockquoteUtils::is_blockquote(content.lines().nth(2).unwrap()));
+    assert!(BlockquoteUtils::is_blockquote(content.lines().nth(5).unwrap()));
 
     // Test for lines that are not blockquotes
-    assert!(!BlockquoteUtils::is_blockquote(
-        content.lines().next().unwrap()
-    ));
-    assert!(!BlockquoteUtils::is_blockquote(
-        content.lines().nth(3).unwrap()
-    ));
-    assert!(!BlockquoteUtils::is_blockquote(
-        content.lines().nth(4).unwrap()
-    ));
-    assert!(!BlockquoteUtils::is_blockquote(
-        content.lines().nth(6).unwrap()
-    ));
+    assert!(!BlockquoteUtils::is_blockquote(content.lines().next().unwrap()));
+    assert!(!BlockquoteUtils::is_blockquote(content.lines().nth(3).unwrap()));
+    assert!(!BlockquoteUtils::is_blockquote(content.lines().nth(4).unwrap()));
+    assert!(!BlockquoteUtils::is_blockquote(content.lines().nth(6).unwrap()));
 
     // Edge cases - out of bounds should return false
     assert!(content.lines().nth(100).is_none()); // Out of bounds
@@ -164,14 +141,8 @@ fn test_get_nesting_level() {
 
     // Single level
     assert_eq!(BlockquoteUtils::get_nesting_level("> Level 1"), 1);
-    assert_eq!(
-        BlockquoteUtils::get_nesting_level(">Level 1 without space"),
-        1
-    );
-    assert_eq!(
-        BlockquoteUtils::get_nesting_level("  > Indented level 1"),
-        1
-    );
+    assert_eq!(BlockquoteUtils::get_nesting_level(">Level 1 without space"), 1);
+    assert_eq!(BlockquoteUtils::get_nesting_level("  > Indented level 1"), 1);
 
     // Multiple levels - the implementation counts > characters directly
     // The implementation counts '>' characters at the beginning, after trimming
@@ -181,16 +152,10 @@ fn test_get_nesting_level() {
 
     // Content doesn't change level
     assert_eq!(BlockquoteUtils::get_nesting_level("> > Text at level 2"), 1); // Implementation actually returns 1 here
-    assert_eq!(
-        BlockquoteUtils::get_nesting_level("> > > Text at level 3"),
-        1
-    ); // Implementation actually returns 1 here
+    assert_eq!(BlockquoteUtils::get_nesting_level("> > > Text at level 3"), 1); // Implementation actually returns 1 here
 
     // Special cases with markers in content
-    assert_eq!(
-        BlockquoteUtils::get_nesting_level("> Quote with > inside text"),
-        1
-    );
+    assert_eq!(BlockquoteUtils::get_nesting_level("> Quote with > inside text"), 1);
     assert_eq!(
         BlockquoteUtils::get_nesting_level("> > Quote with > inside at level 2"),
         1
@@ -210,8 +175,7 @@ fn test_blockquote_with_lists() {
 
 #[test]
 fn test_blockquote_with_code() {
-    let content_with_code =
-        "> Blockquote with code:\n> ```\n> function example() {\n>   return 'test';\n> }\n> ```";
+    let content_with_code = "> Blockquote with code:\n> ```\n> function example() {\n>   return 'test';\n> }\n> ```";
 
     // Test that each line is a blockquote
     for line in content_with_code.lines() {
@@ -239,12 +203,8 @@ fn test_nested_blockquotes() {
 #[test]
 fn test_formatting_inside_blockquotes() {
     // Test with Markdown formatting inside blockquotes
-    assert!(BlockquoteUtils::is_blockquote(
-        "> **Bold text** in blockquote"
-    ));
-    assert!(BlockquoteUtils::is_blockquote(
-        "> *Italic text* in same blockquote"
-    ));
+    assert!(BlockquoteUtils::is_blockquote("> **Bold text** in blockquote"));
+    assert!(BlockquoteUtils::is_blockquote("> *Italic text* in same blockquote"));
 
     // Test with links inside blockquotes
     assert!(BlockquoteUtils::is_blockquote(
@@ -252,23 +212,15 @@ fn test_formatting_inside_blockquotes() {
     ));
 
     // Test with HTML tags inside blockquotes
-    assert!(BlockquoteUtils::is_blockquote(
-        "> <strong>HTML</strong> in blockquote"
-    ));
+    assert!(BlockquoteUtils::is_blockquote("> <strong>HTML</strong> in blockquote"));
 
     // Test with code spans inside blockquotes
-    assert!(BlockquoteUtils::is_blockquote(
-        "> `Code span` in blockquote"
-    ));
+    assert!(BlockquoteUtils::is_blockquote("> `Code span` in blockquote"));
 
     // Test with additional spacing
-    assert!(BlockquoteUtils::is_blockquote(
-        ">    Text with additional spaces"
-    ));
+    assert!(BlockquoteUtils::is_blockquote(">    Text with additional spaces"));
     assert!(BlockquoteUtils::is_blockquote(">    Text with a tab"));
 
     // Test with Unicode characters
-    assert!(BlockquoteUtils::is_blockquote(
-        "> Unicode: 你好, Привет, こんにちは"
-    ));
+    assert!(BlockquoteUtils::is_blockquote("> Unicode: 你好, Привет, こんにちは"));
 }

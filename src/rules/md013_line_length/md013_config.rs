@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for MD013 (Line length)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -8,19 +8,19 @@ pub struct MD013Config {
     /// Maximum line length (default: 80)
     #[serde(default = "default_line_length")]
     pub line_length: usize,
-    
+
     /// Apply rule to code blocks (default: true)
     #[serde(default = "default_code_blocks")]
     pub code_blocks: bool,
-    
-    /// Apply rule to tables (default: true) 
+
+    /// Apply rule to tables (default: true)
     #[serde(default = "default_tables")]
     pub tables: bool,
-    
+
     /// Apply rule to headings (default: true)
     #[serde(default = "default_headings")]
     pub headings: bool,
-    
+
     /// Strict mode - disables exceptions for URLs, etc. (default: false)
     #[serde(default)]
     pub strict: bool,

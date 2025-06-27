@@ -20,21 +20,21 @@ impl MD048CodeFenceStyle {
             config: MD048Config { style },
         }
     }
-    
+
     pub fn from_config_struct(config: MD048Config) -> Self {
         Self { config }
     }
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<CodeFenceStyle> {
         // Find the first code fence by looking for opening fences
-        
+
         for line in ctx.content.lines() {
             let trimmed = line.trim_start();
-            
+
             // Check for code fence markers
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
-                
+
                 // This is an opening fence - return its style immediately
                 if fence_char == '`' {
                     return Some(CodeFenceStyle::Backtick);
@@ -63,36 +63,33 @@ impl Rule for MD048CodeFenceStyle {
         let mut warnings = Vec::new();
 
         let target_style = match self.config.style {
-            CodeFenceStyle::Consistent => self
-                .detect_style(ctx)
-                .unwrap_or(CodeFenceStyle::Backtick),
+            CodeFenceStyle::Consistent => self.detect_style(ctx).unwrap_or(CodeFenceStyle::Backtick),
             _ => self.config.style,
         };
-        
+
         // Track if we're inside a code block
         let mut in_code_block = false;
         let mut code_block_fence = String::new();
 
         for (line_num, line) in content.lines().enumerate() {
             let trimmed = line.trim_start();
-            
+
             // Check for code fence markers
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
                 let fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
                 let current_fence = fence_char.to_string().repeat(fence_length);
-                
+
                 if !in_code_block {
                     // Entering a code block
                     in_code_block = true;
                     code_block_fence = current_fence.clone();
-                    
+
                     // Check this opening fence
                     if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
                         // Find the position and length of the backtick fence
                         let fence_start = line.len() - trimmed.len();
-                        let fence_end =
-                            fence_start + trimmed.find(|c: char| c != '`').unwrap_or(trimmed.len());
+                        let fence_end = fence_start + trimmed.find(|c: char| c != '`').unwrap_or(trimmed.len());
 
                         // Calculate precise character range for the entire fence
                         let (start_line, start_col, end_line, end_col) =
@@ -114,8 +111,7 @@ impl Rule for MD048CodeFenceStyle {
                     } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
                         // Find the position and length of the tilde fence
                         let fence_start = line.len() - trimmed.len();
-                        let fence_end =
-                            fence_start + trimmed.find(|c: char| c != '~').unwrap_or(trimmed.len());
+                        let fence_end = fence_start + trimmed.find(|c: char| c != '~').unwrap_or(trimmed.len());
 
                         // Calculate precise character range for the entire fence
                         let (start_line, start_col, end_line, end_col) =
@@ -135,14 +131,13 @@ impl Rule for MD048CodeFenceStyle {
                             }),
                         });
                     }
-                } else if trimmed.starts_with(&code_block_fence) && 
-                          trimmed[code_block_fence.len()..].trim().is_empty() {
+                } else if trimmed.starts_with(&code_block_fence) && trimmed[code_block_fence.len()..].trim().is_empty()
+                {
                     // Exiting the code block - check this closing fence too
                     if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
                         // Find the position and length of the backtick fence
                         let fence_start = line.len() - trimmed.len();
-                        let fence_end =
-                            fence_start + trimmed.find(|c: char| c != '`').unwrap_or(trimmed.len());
+                        let fence_end = fence_start + trimmed.find(|c: char| c != '`').unwrap_or(trimmed.len());
 
                         // Calculate precise character range for the entire fence
                         let (start_line, start_col, end_line, end_col) =
@@ -164,8 +159,7 @@ impl Rule for MD048CodeFenceStyle {
                     } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
                         // Find the position and length of the tilde fence
                         let fence_start = line.len() - trimmed.len();
-                        let fence_end =
-                            fence_start + trimmed.find(|c: char| c != '~').unwrap_or(trimmed.len());
+                        let fence_end = fence_start + trimmed.find(|c: char| c != '~').unwrap_or(trimmed.len());
 
                         // Calculate precise character range for the entire fence
                         let (start_line, start_col, end_line, end_col) =
@@ -185,7 +179,7 @@ impl Rule for MD048CodeFenceStyle {
                             }),
                         });
                     }
-                    
+
                     in_code_block = false;
                     code_block_fence.clear();
                 }
@@ -200,30 +194,28 @@ impl Rule for MD048CodeFenceStyle {
         let content = ctx.content;
 
         let target_style = match self.config.style {
-            CodeFenceStyle::Consistent => self
-                .detect_style(ctx)
-                .unwrap_or(CodeFenceStyle::Backtick),
+            CodeFenceStyle::Consistent => self.detect_style(ctx).unwrap_or(CodeFenceStyle::Backtick),
             _ => self.config.style,
         };
 
         let mut result = String::new();
         let mut in_code_block = false;
         let mut code_block_fence = String::new();
-        
+
         for line in content.lines() {
             let trimmed = line.trim_start();
-            
+
             // Check for code fence markers
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
                 let fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
                 let current_fence = fence_char.to_string().repeat(fence_length);
-                
+
                 if !in_code_block {
                     // Entering a code block
                     in_code_block = true;
                     code_block_fence = current_fence.clone();
-                    
+
                     // Fix this opening fence
                     if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
                         // Replace all backticks with tildes, preserving the count
@@ -242,8 +234,8 @@ impl Rule for MD048CodeFenceStyle {
                     } else {
                         result.push_str(line);
                     }
-                } else if trimmed.starts_with(&code_block_fence) && 
-                          trimmed[code_block_fence.len()..].trim().is_empty() {
+                } else if trimmed.starts_with(&code_block_fence) && trimmed[code_block_fence.len()..].trim().is_empty()
+                {
                     // Exiting the code block - fix this closing fence too
                     if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
                         // Replace all backticks with tildes, preserving the count
@@ -264,7 +256,7 @@ impl Rule for MD048CodeFenceStyle {
                     } else {
                         result.push_str(line);
                     }
-                    
+
                     in_code_block = false;
                     code_block_fence.clear();
                 } else {
@@ -276,7 +268,7 @@ impl Rule for MD048CodeFenceStyle {
             }
             result.push('\n');
         }
-        
+
         // Remove the last newline if the original content didn't end with one
         if !content.ends_with('\n') && result.ends_with('\n') {
             result.pop();

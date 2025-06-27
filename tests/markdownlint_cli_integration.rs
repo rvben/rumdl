@@ -166,11 +166,7 @@ fn test_invalid_markdownlint_json_prints_helpful_error() {
         .expect("Failed to run rumdl CLI");
 
     // Should exit with code 1 (config load/parse error)
-    assert_eq!(
-        output.status.code(),
-        Some(1),
-        "Expected exit code 1 for parse error"
-    );
+    assert_eq!(output.status.code(), Some(1), "Expected exit code 1 for parse error");
     let stderr = String::from_utf8_lossy(&output.stderr);
     // Accept any error message that contains 'Failed to parse JSON' and the filename
     assert!(

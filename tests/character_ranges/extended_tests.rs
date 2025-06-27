@@ -8,11 +8,7 @@ use super::{multi_warning_test, simple_test, test_character_ranges, ExpectedWarn
 // MD006 - Start bullets at beginning of line
 #[test]
 fn test_md006_start_bullets() {
-    let test = simple_test(
-        "MD006",
-        "  - Indented bullet",
-        ExpectedWarning::new(1, 1, 1, 5, "  - "),
-    );
+    let test = simple_test("MD006", "  - Indented bullet", ExpectedWarning::new(1, 1, 1, 5, "  - "));
     test_character_ranges(test);
 }
 
@@ -52,11 +48,7 @@ fn test_md011_reversed_links() {
 // MD023 - Headings must start at the beginning of the line
 #[test]
 fn test_md023_heading_start_left() {
-    let test = simple_test(
-        "MD023",
-        "  # Indented heading",
-        ExpectedWarning::new(1, 1, 1, 3, "  "),
-    );
+    let test = simple_test("MD023", "  # Indented heading", ExpectedWarning::new(1, 1, 1, 3, "  "));
     test_character_ranges(test);
 }
 
@@ -85,11 +77,7 @@ fn test_md025_single_title() {
 // MD027 - Multiple spaces after blockquote symbol
 #[test]
 fn test_md027_multiple_space_blockquote() {
-    let test = simple_test(
-        "MD027",
-        ">  Multiple spaces",
-        ExpectedWarning::new(1, 3, 1, 4, " "),
-    );
+    let test = simple_test("MD027", ">  Multiple spaces", ExpectedWarning::new(1, 3, 1, 4, " "));
     test_character_ranges(test);
 }
 
@@ -118,11 +106,7 @@ fn test_md028_no_blank_line_blockquote() {
 // MD030 - Spaces after list markers
 #[test]
 fn test_md030_list_marker_space() {
-    let test = simple_test(
-        "MD030",
-        "-  Two spaces",
-        ExpectedWarning::new(1, 2, 1, 4, "  "),
-    );
+    let test = simple_test("MD030", "-  Two spaces", ExpectedWarning::new(1, 2, 1, 4, "  "));
     test_character_ranges(test);
 }
 
@@ -182,11 +166,7 @@ fn test_md034_no_bare_urls() {
 // MD035 - Horizontal rule style
 #[test]
 fn test_md035_hr_style() {
-    let test = simple_test(
-        "MD035",
-        "---\n\n***",
-        ExpectedWarning::new(3, 1, 3, 4, "***"),
-    );
+    let test = simple_test("MD035", "---\n\n***", ExpectedWarning::new(3, 1, 3, 4, "***"));
     test_character_ranges(test);
 }
 

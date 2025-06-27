@@ -4,8 +4,8 @@
 //! See [docs/md014.md](../../docs/md014.md) for full documentation, configuration, and examples.
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::{calculate_match_range, LineIndex};
 use crate::rule_config_serde::RuleConfig;
+use crate::utils::range_utils::{calculate_match_range, LineIndex};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -15,8 +15,7 @@ use md014_config::MD014Config;
 
 lazy_static! {
     static ref COMMAND_PATTERN: Regex = Regex::new(r"^\s*[$>]\s+\S+").unwrap();
-    static ref SHELL_LANG_PATTERN: Regex =
-        Regex::new(r"^(?i)(bash|sh|shell|console|terminal)").unwrap();
+    static ref SHELL_LANG_PATTERN: Regex = Regex::new(r"^(?i)(bash|sh|shell|console|terminal)").unwrap();
     static ref DOLLAR_PROMPT_PATTERN: Regex = Regex::new(r"^\s*([$>])").unwrap();
 }
 
@@ -43,7 +42,7 @@ impl MD014CommandsShowOutput {
             config: MD014Config { show_output },
         }
     }
-    
+
     pub fn from_config_struct(config: MD014Config) -> Self {
         Self { config }
     }
@@ -58,10 +57,7 @@ impl MD014CommandsShowOutput {
 
     fn is_output_line(&self, line: &str) -> bool {
         let trimmed = line.trim();
-        !trimmed.is_empty()
-            && !trimmed.starts_with('$')
-            && !trimmed.starts_with('>')
-            && !trimmed.starts_with('#')
+        !trimmed.is_empty() && !trimmed.starts_with('$') && !trimmed.starts_with('>') && !trimmed.starts_with('#')
     }
 
     fn is_no_output_command(&self, cmd: &str) -> bool {
@@ -115,12 +111,7 @@ impl MD014CommandsShowOutput {
                 let trimmed = line.trim_start();
                 if self.is_command_line(line) {
                     let spaces = line.len() - line.trim_start().len();
-                    let cmd = trimmed
-                        .chars()
-                        .skip(1)
-                        .collect::<String>()
-                        .trim_start()
-                        .to_string();
+                    let cmd = trimmed.chars().skip(1).collect::<String>().trim_start().to_string();
                     format!("{}{}", " ".repeat(spaces), cmd)
                 } else {
                     line.to_string()
@@ -179,28 +170,24 @@ impl Rule for MD014CommandsShowOutput {
                     // End of code block
                     if self.is_command_without_output(&current_block, &current_lang) {
                         // Find the first command line to highlight the dollar sign
-                        if let Some((cmd_line_idx, cmd_line)) =
-                            self.find_first_command_line(&current_block)
-                        {
+                        if let Some((cmd_line_idx, cmd_line)) = self.find_first_command_line(&current_block) {
                             let cmd_line_num = block_start_line + 1 + cmd_line_idx + 1; // +1 for fence, +1 for 1-indexed
 
                             // Find and highlight the dollar sign or prompt
                             if let Some(cap) = DOLLAR_PROMPT_PATTERN.captures(cmd_line) {
                                 let match_obj = cap.get(1).unwrap(); // The $ or > character
                                 let (start_line, start_col, end_line, end_col) =
-                                    calculate_match_range(
-                                        cmd_line_num,
-                                        cmd_line,
-                                        match_obj.start(),
-                                        match_obj.len(),
-                                    );
+                                    calculate_match_range(cmd_line_num, cmd_line, match_obj.start(), match_obj.len());
 
                                 // Get the command for a more helpful message
                                 let command = self.get_command_from_block(&current_block);
                                 let message = if command.is_empty() {
                                     "Command should show output (add example output or remove $ prompt)".to_string()
                                 } else {
-                                    format!("Command '{}' should show output (add example output or remove $ prompt)", command)
+                                    format!(
+                                        "Command '{}' should show output (add example output or remove $ prompt)",
+                                        command
+                                    )
                                 };
 
                                 warnings.push(LintWarning {
@@ -216,10 +203,13 @@ impl Rule for MD014CommandsShowOutput {
                                             // Replace the content line(s) between the fences
                                             let content_start_line = block_start_line + 1; // Line after opening fence (0-indexed)
                                             let content_end_line = line_num - 1; // Line before closing fence (0-indexed)
-                                            
+
                                             // Calculate byte range for the content lines including their newlines
-                                            let start_byte = _line_index.get_line_start_byte(content_start_line + 1).unwrap_or(0); // +1 for 1-indexed
-                                            let end_byte = _line_index.get_line_start_byte(content_end_line + 2).unwrap_or(start_byte); // +2 to include newline after last content line
+                                            let start_byte =
+                                                _line_index.get_line_start_byte(content_start_line + 1).unwrap_or(0); // +1 for 1-indexed
+                                            let end_byte = _line_index
+                                                .get_line_start_byte(content_end_line + 2)
+                                                .unwrap_or(start_byte); // +2 to include newline after last content line
                                             start_byte..end_byte
                                         },
                                         replacement: format!("{}\n", self.fix_command_block(&current_block)),
@@ -299,7 +289,7 @@ impl Rule for MD014CommandsShowOutput {
         let default_config = MD014Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;
         let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-        
+
         if let toml::Value::Table(table) = toml_value {
             if !table.is_empty() {
                 Some((MD014Config::RULE_NAME.to_string(), toml::Value::Table(table)))

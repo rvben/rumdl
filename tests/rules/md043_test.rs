@@ -3,11 +3,7 @@ use rumdl::rules::MD043RequiredHeadings;
 
 #[test]
 fn test_matching_headings() {
-    let required = vec![
-        "Introduction".to_string(),
-        "Methods".to_string(),
-        "Results".to_string(),
-    ];
+    let required = vec!["Introduction".to_string(), "Methods".to_string(), "Results".to_string()];
     let rule = MD043RequiredHeadings::new(required);
     let content = "# Introduction\n\n# Methods\n\n# Results";
     let ctx = rumdl::lint_context::LintContext::new(content);
@@ -17,11 +13,7 @@ fn test_matching_headings() {
 
 #[test]
 fn test_missing_heading() {
-    let required = vec![
-        "Introduction".to_string(),
-        "Methods".to_string(),
-        "Results".to_string(),
-    ];
+    let required = vec!["Introduction".to_string(), "Methods".to_string(), "Results".to_string()];
     let rule = MD043RequiredHeadings::new(required);
     let content = "# Introduction\n\n# Results";
     let ctx = rumdl::lint_context::LintContext::new(content);
@@ -45,11 +37,7 @@ fn test_extra_heading() {
 
 #[test]
 fn test_wrong_order() {
-    let required = vec![
-        "Introduction".to_string(),
-        "Methods".to_string(),
-        "Results".to_string(),
-    ];
+    let required = vec!["Introduction".to_string(), "Methods".to_string(), "Results".to_string()];
     let rule = MD043RequiredHeadings::new(required);
     let content = "# Introduction\n\n# Results\n\n# Methods";
     let ctx = rumdl::lint_context::LintContext::new(content);

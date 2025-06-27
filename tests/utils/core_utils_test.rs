@@ -57,14 +57,8 @@ fn test_replace_trailing_spaces() {
 
     // Mixed content
     assert_eq!("Hello world ".replace_trailing_spaces(""), "Hello world");
-    assert_eq!(
-        "  Hello world  ".replace_trailing_spaces(""),
-        "  Hello world"
-    );
-    assert_eq!(
-        "Hello  world   ".replace_trailing_spaces(""),
-        "Hello  world"
-    );
+    assert_eq!("  Hello world  ".replace_trailing_spaces(""), "  Hello world");
+    assert_eq!("Hello  world   ".replace_trailing_spaces(""), "Hello  world");
 
     // With tabs and spaces
     assert_eq!("Hello\t ".replace_trailing_spaces(""), "Hello\t"); // Space after tab is replaced
@@ -111,8 +105,7 @@ fn test_fast_hash() {
 #[test]
 fn test_complex_str_ext_usage() {
     // Mixed newlines and spaces
-    let text =
-        "Line with trailing spaces   \nAnother line  \nNo trailing spaces\n   Indented line   ";
+    let text = "Line with trailing spaces   \nAnother line  \nNo trailing spaces\n   Indented line   ";
 
     // Check each line
     let lines: Vec<&str> = text.lines().collect();
@@ -122,10 +115,7 @@ fn test_complex_str_ext_usage() {
     assert_eq!(lines[3].trailing_spaces(), 3);
 
     // Replace trailing spaces in each line
-    let fixed_lines: Vec<String> = text
-        .lines()
-        .map(|line| line.replace_trailing_spaces(""))
-        .collect();
+    let fixed_lines: Vec<String> = text.lines().map(|line| line.replace_trailing_spaces("")).collect();
 
     assert_eq!(fixed_lines[0], "Line with trailing spaces");
     assert_eq!(fixed_lines[1], "Another line");
@@ -138,10 +128,7 @@ fn test_unicode_handling() {
     // Unicode characters with trailing spaces
     let text = "Unicode: 你好, Привет, こんにちは  ";
     assert_eq!(text.trailing_spaces(), 2);
-    assert_eq!(
-        text.replace_trailing_spaces(""),
-        "Unicode: 你好, Привет, こんにちは"
-    );
+    assert_eq!(text.replace_trailing_spaces(""), "Unicode: 你好, Привет, こんにちは");
 
     // Hash of unicode strings
     let hash1 = fast_hash("Unicode: 你好");

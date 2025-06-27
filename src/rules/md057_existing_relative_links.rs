@@ -18,8 +18,7 @@ use md057_config::MD057Config;
 
 // Thread-safe cache for file existence checks to avoid redundant filesystem operations
 lazy_static! {
-    static ref FILE_EXISTENCE_CACHE: Arc<Mutex<HashMap<PathBuf, bool>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    static ref FILE_EXISTENCE_CACHE: Arc<Mutex<HashMap<PathBuf, bool>>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
 // Reset the file existence cache (typically between rule runs)
@@ -31,9 +30,7 @@ fn reset_file_existence_cache() {
 // Check if a file exists with caching
 fn file_exists_with_cache(path: &Path) -> bool {
     let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
-    *cache
-        .entry(path.to_path_buf())
-        .or_insert_with(|| path.exists())
+    *cache.entry(path.to_path_buf()).or_insert_with(|| path.exists())
 }
 
 lazy_static! {
@@ -75,7 +72,6 @@ pub struct MD057ExistingRelativeLinks {
     config: MD057Config,
 }
 
-
 impl MD057ExistingRelativeLinks {
     /// Create a new instance with default settings
     pub fn new() -> Self {
@@ -100,7 +96,7 @@ impl MD057ExistingRelativeLinks {
         self.config.skip_media_files = skip_media_files;
         self
     }
-    
+
     pub fn from_config_struct(config: MD057Config) -> Self {
         Self {
             base_path: Arc::new(Mutex::new(None)),
@@ -166,13 +162,7 @@ impl MD057ExistingRelativeLinks {
     }
 
     /// Process a single link and check if it exists
-    fn process_link(
-        &self,
-        url: &str,
-        line_num: usize,
-        column: usize,
-        warnings: &mut Vec<LintWarning>,
-    ) {
+    fn process_link(&self, url: &str, line_num: usize, column: usize, warnings: &mut Vec<LintWarning>) {
         // Skip empty URLs
         if url.is_empty() {
             return;
@@ -272,8 +262,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 base_path_guard.clone()
             } else {
                 // Try to determine the base path from the file being processed (cached)
-                static CACHED_FILE_PATH: std::sync::OnceLock<Option<PathBuf>> =
-                    std::sync::OnceLock::new();
+                static CACHED_FILE_PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
                 CACHED_FILE_PATH
                     .get_or_init(|| {
                         if let Ok(file_path) = env::var("RUMDL_FILE_PATH") {
@@ -340,12 +329,7 @@ impl Rule for MD057ExistingRelativeLinks {
                         line_positions[line_idx] + start_pos
                     } else {
                         // Fallback for edge cases
-                        content
-                            .lines()
-                            .take(line_idx)
-                            .map(|l| l.len() + 1)
-                            .sum::<usize>()
-                            + start_pos
+                        content.lines().take(line_idx).map(|l| l.len() + 1).sum::<usize>() + start_pos
                     };
 
                     // Skip if this link is in a code span
@@ -495,10 +479,7 @@ mod tests {
 
         let ctx = crate::lint_context::LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "Should have no warnings without base path"
-        );
+        assert!(result.is_empty(), "Should have no warnings without base path");
     }
 
     #[test]
@@ -509,10 +490,7 @@ mod tests {
 
         // Create an existing file
         let exists_path = base_path.join("exists.md");
-        File::create(&exists_path)
-            .unwrap()
-            .write_all(b"# Test File")
-            .unwrap();
+        File::create(&exists_path).unwrap().write_all(b"# Test File").unwrap();
 
         // Verify the file exists
         assert!(exists_path.exists(), "exists.md should exist for this test");
@@ -555,10 +533,7 @@ mod tests {
 
         // Create an existing file
         let exists_path = base_path.join("exists.md");
-        File::create(&exists_path)
-            .unwrap()
-            .write_all(b"# Test File")
-            .unwrap();
+        File::create(&exists_path).unwrap().write_all(b"# Test File").unwrap();
 
         // Create test content with angle bracket links
         let content = r#"
@@ -643,8 +618,7 @@ mod tests {
         let rule = rule.with_path(base_path);
 
         // Test with document structure
-        let content =
-            "This is a [link](nonexistent.md) and `[not a link](not-checked.md)` in code.";
+        let content = "This is a [link](nonexistent.md) and `[not a link](not-checked.md)` in code.";
         let structure = DocumentStructure::new(content);
 
         let ctx = crate::lint_context::LintContext::new(content);
@@ -687,15 +661,11 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             "Warning should be for missing.md"
         );
         assert!(
-            !result
-                .iter()
-                .any(|w| w.message.contains("another-missing.md")),
+            !result.iter().any(|w| w.message.contains("another-missing.md")),
             "Should not warn about link in code span"
         );
         assert!(
-            !result
-                .iter()
-                .any(|w| w.message.contains("yet-another-missing.md")),
+            !result.iter().any(|w| w.message.contains("yet-another-missing.md")),
             "Should not warn about link in inline code"
         );
     }

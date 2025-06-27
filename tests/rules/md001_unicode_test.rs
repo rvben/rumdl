@@ -26,10 +26,7 @@ pub fn test_md001_unicode_invalid() {
         "Skipped heading level with Unicode should trigger warning"
     );
     assert_eq!(result[0].line, 2);
-    assert_eq!(
-        result[0].message,
-        "Expected heading level 2"
-    );
+    assert_eq!(result[0].message, "Expected heading level 2");
 }
 
 #[test]
@@ -50,11 +47,7 @@ pub fn test_md001_unicode_multiple_violations() {
     let content = "# café\n### 汉字\n##### 🔥\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        2,
-        "Multiple violations with Unicode should be detected"
-    );
+    assert_eq!(result.len(), 2, "Multiple violations with Unicode should be detected");
     assert_eq!(result[0].line, 2);
     assert_eq!(result[1].line, 3);
 }

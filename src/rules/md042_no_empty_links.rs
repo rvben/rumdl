@@ -46,7 +46,7 @@ impl Rule for MD042NoEmptyLinks {
             } else {
                 link.url.clone()
             };
-            
+
             // Check for empty links
             if link.text.trim().is_empty() || effective_url.trim().is_empty() {
                 let replacement = if link.text.trim().is_empty() && effective_url.trim().is_empty() {
@@ -123,9 +123,9 @@ impl Rule for MD042NoEmptyLinks {
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: line_index.line_col_to_byte_range_with_length(
-                        link.line, 
-                        link.start_col, 
-                        (link.end_col + 1).saturating_sub(link.start_col)
+                        link.line,
+                        link.start_col,
+                        (link.end_col + 1).saturating_sub(link.start_col),
                     ),
                     replacement,
                 }),
@@ -154,7 +154,7 @@ impl Rule for MD042NoEmptyLinks {
         fixes.sort_by(|a, b| b.0.start.cmp(&a.0.start));
 
         let mut result = content.to_string();
-        
+
         // Apply fixes from end to start to maintain correct positions
         for (range, replacement) in fixes {
             result.replace_range(range, &replacement);

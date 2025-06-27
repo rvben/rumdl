@@ -121,10 +121,5 @@ fn bench_fix_vs_check(c: &mut Criterion) {
     c.bench_function("MD009 fix", |b| b.iter(|| rule.fix(black_box(&ctx))));
 }
 
-criterion_group!(
-    benches,
-    bench_common_fixes,
-    bench_string_approaches,
-    bench_fix_vs_check
-);
+criterion_group!(benches, bench_common_fixes, bench_string_approaches, bench_fix_vs_check);
 criterion_main!(benches);

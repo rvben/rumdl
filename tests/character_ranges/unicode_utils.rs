@@ -165,9 +165,7 @@ impl ZeroWidthUtils {
 
     /// Remove zero-width characters from text
     pub fn remove_zero_width(text: &str) -> String {
-        text.chars()
-            .filter(|&ch| !Self::is_zero_width(ch))
-            .collect()
+        text.chars().filter(|&ch| !Self::is_zero_width(ch)).collect()
     }
 
     /// Count visible characters (excluding zero-width)
@@ -210,10 +208,7 @@ mod tests {
         assert!(!ZeroWidthUtils::is_zero_width('a'));
 
         let text_with_zw = "hello\u{200B}world";
-        assert_eq!(
-            ZeroWidthUtils::remove_zero_width(text_with_zw),
-            "helloworld"
-        );
+        assert_eq!(ZeroWidthUtils::remove_zero_width(text_with_zw), "helloworld");
         assert_eq!(ZeroWidthUtils::visible_char_count(text_with_zw), 10);
     }
 

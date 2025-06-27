@@ -28,7 +28,7 @@ impl MD049EmphasisStyle {
             config: MD049Config { style },
         }
     }
-    
+
     pub fn from_config_struct(config: MD049Config) -> Self {
         Self { config }
     }
@@ -125,10 +125,7 @@ impl Rule for MD049EmphasisStyle {
                                 let inner_content = &ctx.content[start_offset + 1..end_offset - 1];
                                 Some(crate::rule::Fix {
                                     range: start_offset..end_offset,
-                                    replacement: format!(
-                                        "{}{}{}",
-                                        target_marker, inner_content, target_marker
-                                    ),
+                                    replacement: format!("{}{}{}", target_marker, inner_content, target_marker),
                                 })
                             } else {
                                 None
@@ -143,10 +140,7 @@ impl Rule for MD049EmphasisStyle {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!(
-                                "Emphasis should use {} instead of {}",
-                                target_marker, marker
-                            ),
+                            message: format!("Emphasis should use {} instead of {}", target_marker, marker),
                             fix,
                             severity: Severity::Warning,
                         });
@@ -187,10 +181,7 @@ impl Rule for MD049EmphasisStyle {
                                 let inner_content = &ctx.content[start_offset + 1..end_offset - 1];
                                 Some(crate::rule::Fix {
                                     range: start_offset..end_offset,
-                                    replacement: format!(
-                                        "{}{}{}",
-                                        correct_marker, inner_content, correct_marker
-                                    ),
+                                    replacement: format!("{}{}{}", correct_marker, inner_content, correct_marker),
                                 })
                             } else {
                                 None
@@ -232,11 +223,7 @@ impl Rule for MD049EmphasisStyle {
         // Collect all fixes and sort by range start (descending) to apply from end to beginning
         let mut fixes: Vec<_> = warnings
             .iter()
-            .filter_map(|w| {
-                w.fix
-                    .as_ref()
-                    .map(|f| (f.range.start, f.range.end, &f.replacement))
-            })
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
             .collect();
         fixes.sort_by(|a, b| b.0.cmp(&a.0));
 

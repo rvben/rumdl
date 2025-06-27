@@ -6,11 +6,8 @@ fn setup_test_files() -> tempfile::TempDir {
     let base_path = temp_dir.path();
 
     // Create test file for emphasis conversion
-    fs::write(
-        base_path.join("emphasis_heading.md"),
-        "**This should be a heading**",
-    )
-    .expect("Failed to write test file");
+    fs::write(base_path.join("emphasis_heading.md"), "**This should be a heading**")
+        .expect("Failed to write test file");
 
     temp_dir
 }
@@ -31,8 +28,7 @@ fn test_heading_emphasis_conversion() {
         .unwrap();
 
     // Verify the emphasis was converted to a heading
-    let fixed_content = fs::read_to_string(base_path.join("emphasis_heading.md"))
-        .expect("Could not read fixed file");
+    let fixed_content = fs::read_to_string(base_path.join("emphasis_heading.md")).expect("Could not read fixed file");
 
     // The emphasis should be converted to a heading (by MD036)
     // Level 2 for double asterisks, as that's what the rule does

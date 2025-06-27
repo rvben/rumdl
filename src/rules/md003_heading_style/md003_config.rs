@@ -1,13 +1,17 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::heading_utils::HeadingStyle;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for MD003 (Heading style)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD003Config {
     /// The heading style to enforce (default: "consistent")
-    #[serde(default = "default_style", serialize_with = "serialize_style", deserialize_with = "deserialize_style")]
+    #[serde(
+        default = "default_style",
+        serialize_with = "serialize_style",
+        deserialize_with = "deserialize_style"
+    )]
     pub style: HeadingStyle,
 }
 
@@ -27,15 +31,12 @@ where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    std::str::FromStr::from_str(&s)
-        .map_err(|_| serde::de::Error::custom(format!("Invalid heading style: {}", s)))
+    std::str::FromStr::from_str(&s).map_err(|_| serde::de::Error::custom(format!("Invalid heading style: {}", s)))
 }
 
 impl Default for MD003Config {
     fn default() -> Self {
-        Self {
-            style: default_style(),
-        }
+        Self { style: default_style() }
     }
 }
 

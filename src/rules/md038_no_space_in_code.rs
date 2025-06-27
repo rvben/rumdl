@@ -1,4 +1,3 @@
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 
 /// Rule MD038: No space inside code span markers
@@ -48,7 +47,7 @@ impl MD038NoSpaceInCode {
             allow_command_spaces: true,
         }
     }
-    
+
     pub fn strict() -> Self {
         Self {
             enabled: true,
@@ -57,7 +56,6 @@ impl MD038NoSpaceInCode {
             allow_command_spaces: false,
         }
     }
-
 
     /// Determine if spaces in a code span should be allowed based on content heuristics
     fn should_allow_spaces(&self, code_content: &str, trimmed: &str) -> bool {
@@ -91,11 +89,10 @@ impl MD038NoSpaceInCode {
     fn looks_like_command(&self, content: &str) -> bool {
         // Common command patterns
         let command_indicators = [
-            "git ", "npm ", "cargo ", "docker ", "kubectl ", "pip ", "yarn ",
-            "sudo ", "chmod ", "chown ", "ls ", "cd ", "mkdir ", "rm ",
-            "cp ", "mv ", "cat ", "grep ", "find ", "awk ", "sed ",
+            "git ", "npm ", "cargo ", "docker ", "kubectl ", "pip ", "yarn ", "sudo ", "chmod ", "chown ", "ls ",
+            "cd ", "mkdir ", "rm ", "cp ", "mv ", "cat ", "grep ", "find ", "awk ", "sed ",
         ];
-        
+
         let lower_content = content.to_lowercase();
         command_indicators.iter().any(|&indicator| lower_content.starts_with(indicator))
             || content.contains(" -") // Commands with flags
@@ -105,10 +102,11 @@ impl MD038NoSpaceInCode {
     /// Check if content looks like a variable reference or file pattern
     fn looks_like_variable_or_pattern(&self, content: &str) -> bool {
         // Variable patterns: $VAR, ${VAR}, %VAR%, etc.
-        content.starts_with('$') 
+        content.starts_with('$')
             || content.starts_with('%') && content.ends_with('%')
             || (content.contains("*") && content.len() > 3) // File patterns like *.txt (must be substantial)
-            || (content.contains("?") && content.len() > 3 && content.contains(".")) // File patterns like file?.txt
+            || (content.contains("?") && content.len() > 3 && content.contains("."))
+        // File patterns like file?.txt
     }
 
     /// Check if spaces improve readability for complex content
@@ -119,9 +117,9 @@ impl MD038NoSpaceInCode {
             || trimmed.contains("->") // Arrows or operators
             || trimmed.contains("=>") // Lambda arrows
             || trimmed.contains("&&") || trimmed.contains("||") // Boolean operators
-            || (trimmed.chars().filter(|c| c.is_ascii_punctuation()).count() as f64 / trimmed.len() as f64) > 0.4 // Higher punctuation density threshold
+            || (trimmed.chars().filter(|c| c.is_ascii_punctuation()).count() as f64 / trimmed.len() as f64) > 0.4
+        // Higher punctuation density threshold
     }
-
 }
 
 impl Rule for MD038NoSpaceInCode {
@@ -147,14 +145,14 @@ impl Rule for MD038NoSpaceInCode {
         // Use centralized code spans from LintContext
         for code_span in &ctx.code_spans {
             let code_content = &code_span.content;
-            
+
             // Skip empty code spans
             if code_content.is_empty() {
                 continue;
             }
 
             let trimmed = code_content.trim();
-            
+
             // Check if there are leading or trailing spaces
             if code_content != trimmed {
                 // Check if spaces are allowed in this context
@@ -172,7 +170,8 @@ impl Rule for MD038NoSpaceInCode {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: code_span.byte_offset..code_span.byte_end,
-                        replacement: format!("{}{}{}", 
+                        replacement: format!(
+                            "{}{}{}",
                             "`".repeat(code_span.backtick_count),
                             trimmed,
                             "`".repeat(code_span.backtick_count)
@@ -184,7 +183,6 @@ impl Rule for MD038NoSpaceInCode {
 
         Ok(warnings)
     }
-
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
@@ -203,7 +201,7 @@ impl Rule for MD038NoSpaceInCode {
             .into_iter()
             .filter_map(|w| w.fix.map(|f| (f.range, f.replacement)))
             .collect();
-        
+
         fixes.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
 
         // Apply fixes
@@ -249,23 +247,14 @@ impl Rule for MD038NoSpaceInCode {
     where
         Self: Sized,
     {
-        let allow_intentional_spaces = crate::config::get_rule_config_value::<bool>(
-            config,
-            "MD038",
-            "allow_intentional_spaces",
-        ).unwrap_or(true); // Default to true for better UX
+        let allow_intentional_spaces =
+            crate::config::get_rule_config_value::<bool>(config, "MD038", "allow_intentional_spaces").unwrap_or(true); // Default to true for better UX
 
-        let allow_single_char_spaces = crate::config::get_rule_config_value::<bool>(
-            config,
-            "MD038",
-            "allow_single_char_spaces",
-        ).unwrap_or(true);
+        let allow_single_char_spaces =
+            crate::config::get_rule_config_value::<bool>(config, "MD038", "allow_single_char_spaces").unwrap_or(true);
 
-        let allow_command_spaces = crate::config::get_rule_config_value::<bool>(
-            config,
-            "MD038",
-            "allow_command_spaces",
-        ).unwrap_or(true);
+        let allow_command_spaces =
+            crate::config::get_rule_config_value::<bool>(config, "MD038", "allow_command_spaces").unwrap_or(true);
 
         Box::new(MD038NoSpaceInCode {
             enabled: true,
@@ -305,20 +294,16 @@ mod tests {
             "Code span with `symbols: !@#$%^&*()`",
             "Empty code span `` is technically valid",
             // New cases that should be allowed with lenient settings
-            "Type ` y ` to confirm.", // Single character with spaces
+            "Type ` y ` to confirm.",                       // Single character with spaces
             "Use ` git commit -m \"message\" ` to commit.", // Command with spaces
-            "The variable ` $HOME ` contains home path.", // Variable reference
-            "The pattern ` *.txt ` matches text files.", // File pattern
+            "The variable ` $HOME ` contains home path.",   // Variable reference
+            "The pattern ` *.txt ` matches text files.",    // File pattern
             "URL example ` https://example.com/very/long/path?query=value&more=params ` here.", // Complex long URL
         ];
         for case in valid_cases {
             let ctx = crate::lint_context::LintContext::new(case);
             let result = rule.check(&ctx).unwrap();
-            assert!(
-                result.is_empty(),
-                "Valid case should not have warnings: {}",
-                case
-            );
+            assert!(result.is_empty(), "Valid case should not have warnings: {}", case);
         }
     }
 
@@ -328,18 +313,14 @@ mod tests {
         // Cases that should still be flagged even with lenient settings
         let invalid_cases = vec![
             "This is ` random word ` with unnecessary spaces.", // Not a command/variable/single char
-            "Text with ` plain text ` should be flagged.", // Just plain text with spaces
-            "Code with ` just code ` here.", // Simple code with spaces
+            "Text with ` plain text ` should be flagged.",      // Just plain text with spaces
+            "Code with ` just code ` here.",                    // Simple code with spaces
             "Multiple ` word ` spans with ` text ` in one line.", // Multiple simple cases
         ];
         for case in invalid_cases {
             let ctx = crate::lint_context::LintContext::new(case);
             let result = rule.check(&ctx).unwrap();
-            assert!(
-                !result.is_empty(),
-                "Invalid case should have warnings: {}",
-                case
-            );
+            assert!(!result.is_empty(), "Invalid case should have warnings: {}", case);
         }
     }
 
@@ -348,10 +329,10 @@ mod tests {
         let rule = MD038NoSpaceInCode::strict();
         // In strict mode, ALL spaces should be flagged
         let invalid_cases = vec![
-            "Type ` y ` to confirm.", // Single character with spaces
+            "Type ` y ` to confirm.",                       // Single character with spaces
             "Use ` git commit -m \"message\" ` to commit.", // Command with spaces
-            "The variable ` $HOME ` contains home path.", // Variable reference
-            "The pattern ` *.txt ` matches text files.", // File pattern
+            "The variable ` $HOME ` contains home path.",   // Variable reference
+            "The pattern ` *.txt ` matches text files.",    // File pattern
             "This is ` code` with leading space.",
             "This is `code ` with trailing space.",
             "This is ` code ` with both leading and trailing space.",
@@ -359,11 +340,7 @@ mod tests {
         for case in invalid_cases {
             let ctx = crate::lint_context::LintContext::new(case);
             let result = rule.check(&ctx).unwrap();
-            assert!(
-                !result.is_empty(),
-                "Strict mode should flag all spaces: {}",
-                case
-            );
+            assert!(!result.is_empty(), "Strict mode should flag all spaces: {}", case);
         }
     }
 
@@ -379,10 +356,7 @@ mod tests {
                 "This is `code ` with trailing space.",
                 "This is `code` with trailing space.",
             ),
-            (
-                "This is ` code ` with both spaces.",
-                "This is `code` with both spaces.",
-            ),
+            ("This is ` code ` with both spaces.", "This is `code` with both spaces."),
             (
                 "Multiple ` code ` and `spans ` to fix.",
                 "Multiple `code` and `spans` to fix.",
@@ -391,11 +365,7 @@ mod tests {
         for (input, expected) in test_cases {
             let ctx = crate::lint_context::LintContext::new(input);
             let result = rule.fix(&ctx).unwrap();
-            assert_eq!(
-                result, expected,
-                "Fix did not produce expected output for: {}",
-                input
-            );
+            assert_eq!(result, expected, "Fix did not produce expected output for: {}", input);
         }
     }
 

@@ -228,15 +228,13 @@ fn test_markdown_comments() {
     let rule = MD033NoInlineHtml::default();
 
     // Test with markdownlint comments
-    let content = "Some content\n<!-- markdownlint-disable -->\nIgnored content\n<!-- markdownlint-enable -->\nMore content";
+    let content =
+        "Some content\n<!-- markdownlint-disable -->\nIgnored content\n<!-- markdownlint-enable -->\nMore content";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
     // These should not be flagged as HTML tags
-    assert!(
-        result.is_empty(),
-        "Markdown comments should not be flagged as HTML"
-    );
+    assert!(result.is_empty(), "Markdown comments should not be flagged as HTML");
 
     // Test with regular HTML comments
     let content = "Some content\n<!-- This is a comment -->\nMore content";
@@ -244,10 +242,7 @@ fn test_markdown_comments() {
     let result = rule.check(&ctx).unwrap();
 
     // Comments should not be flagged
-    assert!(
-        result.is_empty(),
-        "HTML comments should not be flagged as HTML tags"
-    );
+    assert!(result.is_empty(), "HTML comments should not be flagged as HTML tags");
 }
 
 #[test]
@@ -320,8 +315,7 @@ fn test_edge_case_urls() {
     // Should flag <notaurl>, <https>, and <div> but not the real URL
     assert_eq!(result.len(), 3);
 
-    let flagged_positions: Vec<(usize, usize)> =
-        result.iter().map(|w| (w.line, w.column)).collect();
+    let flagged_positions: Vec<(usize, usize)> = result.iter().map(|w| (w.line, w.column)).collect();
 
     // <notaurl> should be flagged (line 1)
     assert!(flagged_positions.contains(&(1, 12)));
@@ -391,10 +385,10 @@ Regular HTML: <p>flagged</p>"#;
     // Should NOT flag: lines 7, 11, 15 (all properly indented)
     let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
 
-    assert!(flagged_lines.contains(&3));  // Three spaces
+    assert!(flagged_lines.contains(&3)); // Three spaces
     assert!(flagged_lines.contains(&17)); // Regular HTML
 
-    assert!(!flagged_lines.contains(&7));  // Four spaces
+    assert!(!flagged_lines.contains(&7)); // Four spaces
     assert!(!flagged_lines.contains(&11)); // Five spaces
     assert!(!flagged_lines.contains(&15)); // Tab indented
 }
@@ -421,11 +415,11 @@ Back to regular: <span>flagged</span>"#;
     // Should only flag the regular HTML outside code blocks
     let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
 
-    assert!(flagged_lines.contains(&3));  // Regular HTML
+    assert!(flagged_lines.contains(&3)); // Regular HTML
     assert!(flagged_lines.contains(&12)); // Back to regular
 
     // Should NOT flag any of the indented content
-    assert!(!flagged_lines.contains(&7));  // <div>HTML in code</div>
+    assert!(!flagged_lines.contains(&7)); // <div>HTML in code</div>
     assert!(!flagged_lines.contains(&10)); // <p>More HTML in code</p>
 }
 
@@ -452,12 +446,12 @@ Regular again: <em>flagged</em>"#;
     let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
 
     // Should flag regular HTML
-    assert!(flagged_lines.contains(&3));  // Regular
+    assert!(flagged_lines.contains(&3)); // Regular
     assert!(flagged_lines.contains(&13)); // Regular again
 
     // Should NOT flag indented HTML (even with blank lines between)
-    assert!(!flagged_lines.contains(&7));  // first block
-    assert!(!flagged_lines.contains(&9));  // second block
+    assert!(!flagged_lines.contains(&7)); // first block
+    assert!(!flagged_lines.contains(&9)); // second block
     assert!(!flagged_lines.contains(&11)); // third block
 }
 
@@ -487,12 +481,12 @@ Regular: <span>flagged</span>"#;
     let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
 
     // Should flag regular HTML
-    assert!(flagged_lines.contains(&3));  // Regular
+    assert!(flagged_lines.contains(&3)); // Regular
     assert!(flagged_lines.contains(&16)); // Regular
 
     // Should NOT flag HTML in either type of code block
-    assert!(!flagged_lines.contains(&7));  // fenced <div>
-    assert!(!flagged_lines.contains(&8));  // fenced <p>
+    assert!(!flagged_lines.contains(&7)); // fenced <div>
+    assert!(!flagged_lines.contains(&8)); // fenced <p>
     assert!(!flagged_lines.contains(&13)); // indented <div>
     assert!(!flagged_lines.contains(&14)); // indented <p>
 }
@@ -532,7 +526,7 @@ Regular: <em>flagged</em>"#;
 
     // Should flag only regular HTML, not indented HTML
     assert_eq!(warnings.len(), 5); // 2 tags on line 3, 1 on line 14, 2 on line 24
-    assert!(flagged_lines.contains(&3));  // Regular div (opening and closing)
+    assert!(flagged_lines.contains(&3)); // Regular div (opening and closing)
     assert!(flagged_lines.contains(&14)); // Self-closing br
     assert!(flagged_lines.contains(&24)); // Regular em (opening and closing)
 }
@@ -559,13 +553,13 @@ Regular: <strong>flagged</strong>"#;
     let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
 
     // Should flag regular HTML and 3-space indented
-    assert!(flagged_lines.contains(&3));  // Regular
-    assert!(flagged_lines.contains(&9));  // 3 spaces (not code block)
+    assert!(flagged_lines.contains(&3)); // Regular
+    assert!(flagged_lines.contains(&9)); // 3 spaces (not code block)
     assert!(flagged_lines.contains(&12)); // Regular
 
     // Should NOT flag 4+ space indented (code blocks)
-    assert!(!flagged_lines.contains(&7));  // 4 spaces
-    assert!(!flagged_lines.contains(&8));  // 8 spaces
+    assert!(!flagged_lines.contains(&7)); // 4 spaces
+    assert!(!flagged_lines.contains(&8)); // 8 spaces
     assert!(!flagged_lines.contains(&10)); // 4 spaces again
 }
 
@@ -595,13 +589,13 @@ Regular: <strong>flagged</strong>"#;
     let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
 
     // Should flag regular HTML and HTML in list items (not indented enough)
-    assert!(flagged_lines.contains(&3));  // Regular
+    assert!(flagged_lines.contains(&3)); // Regular
     assert!(flagged_lines.contains(&10)); // List item HTML
     assert!(flagged_lines.contains(&16)); // Regular
 
     // Should NOT flag properly indented HTML (even in lists)
-    assert!(!flagged_lines.contains(&7));  // Indented in list
-    assert!(!flagged_lines.contains(&8));  // Indented in list
+    assert!(!flagged_lines.contains(&7)); // Indented in list
+    assert!(!flagged_lines.contains(&8)); // Indented in list
     assert!(!flagged_lines.contains(&14)); // Indented in list
 }
 
@@ -636,9 +630,9 @@ Back to regular: <em>flagged</em>"#;
     let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
 
     // Regular HTML should be flagged
-    assert!(flagged_lines.contains(&4));  // <div>
-    assert!(flagged_lines.contains(&5));  // <p>
-    assert!(flagged_lines.contains(&6));  // <span>
+    assert!(flagged_lines.contains(&4)); // <div>
+    assert!(flagged_lines.contains(&5)); // <p>
+    assert!(flagged_lines.contains(&6)); // <span>
     assert!(flagged_lines.contains(&20)); // <em>
 
     // Code block HTML should NOT be flagged

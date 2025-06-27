@@ -73,11 +73,7 @@ impl MarkdownElements {
                     block_start = i;
                     in_code_block = true;
                     fence_type = captures.get(2).unwrap().as_str().to_string();
-                    language = captures
-                        .get(3)
-                        .map_or("", |m| m.as_str())
-                        .trim()
-                        .to_string();
+                    language = captures.get(3).map_or("", |m| m.as_str()).trim().to_string();
                 } else if line.trim().starts_with(&fence_type) {
                     // End of code block
                     blocks.push(MarkdownElement {
@@ -106,11 +102,7 @@ impl MarkdownElements {
                 element_type: ElementType::CodeBlock,
                 start_line: block_start,
                 end_line: line_count - 1,
-                text: content
-                    .lines()
-                    .skip(block_start)
-                    .collect::<Vec<&str>>()
-                    .join("\n"),
+                text: content.lines().skip(block_start).collect::<Vec<&str>>().join("\n"),
                 metadata: Some(language),
                 quality: ElementQuality::Malformed, // Unclosed code block is malformed
             });
@@ -186,11 +178,7 @@ impl MarkdownElements {
             if let Some(captures) = ATX_HEADING.captures(line) {
                 let hashes = captures.get(2).unwrap().as_str();
                 let level = hashes.len().to_string();
-                let text = captures
-                    .get(4)
-                    .map_or("", |m| m.as_str())
-                    .trim()
-                    .to_string();
+                let text = captures.get(4).map_or("", |m| m.as_str()).trim().to_string();
                 let spaces_after_hash = captures.get(3).map_or("", |m| m.as_str()).len();
 
                 // Determine if heading is well-formed (must have space after #)
@@ -216,11 +204,7 @@ impl MarkdownElements {
             if let Some(captures) = ATX_HEADING_NO_SPACE.captures(line) {
                 let hashes = captures.get(2).unwrap().as_str();
                 let level = hashes.len().to_string();
-                let text = captures
-                    .get(3)
-                    .map_or("", |m| m.as_str())
-                    .trim()
-                    .to_string();
+                let text = captures.get(3).map_or("", |m| m.as_str()).trim().to_string();
 
                 headings.push(MarkdownElement {
                     element_type: ElementType::Heading,
@@ -275,10 +259,7 @@ impl MarkdownElements {
             return None;
         }
 
-        element
-            .metadata
-            .as_ref()
-            .and_then(|level| level.parse::<u32>().ok())
+        element.metadata.as_ref().and_then(|level| level.parse::<u32>().ok())
     }
 
     /// Detect all list items in the content
@@ -296,8 +277,7 @@ impl MarkdownElements {
 
         // Pattern to match horizontal rule or front matter markers
         lazy_static! {
-            static ref HORIZONTAL_RULE: Regex =
-                Regex::new(r"^(\s*)(-{3,}|\*{3,}|_{3,})(\s*)$").unwrap();
+            static ref HORIZONTAL_RULE: Regex = Regex::new(r"^(\s*)(-{3,}|\*{3,}|_{3,})(\s*)$").unwrap();
         }
 
         for (i, line) in lines.iter().enumerate() {
@@ -525,10 +505,7 @@ mod tests {
 
     #[test]
     fn test_heading_to_fragment() {
-        assert_eq!(
-            MarkdownElements::heading_to_fragment("Hello World!"),
-            "hello-world"
-        );
+        assert_eq!(MarkdownElements::heading_to_fragment("Hello World!"), "hello-world");
         assert_eq!(
             MarkdownElements::heading_to_fragment("Complex: (Header) 123"),
             "complex-header-123"

@@ -29,14 +29,14 @@ impl MD050StrongStyle {
             config: MD050Config { style },
         }
     }
-    
+
     pub fn from_config_struct(config: MD050Config) -> Self {
         Self { config }
     }
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
         let content = ctx.content;
-        
+
         // Find the first occurrence of either style that's not in a code block
         let mut first_asterisk = None;
         for m in ASTERISK_PATTERN.find_iter(content) {
@@ -113,7 +113,7 @@ impl Rule for MD050StrongStyle {
             StrongStyle::Underscore => &*ASTERISK_PATTERN,
             StrongStyle::Consistent => unreachable!(),
         };
-        
+
         // Track byte position for each line
         let mut byte_pos = 0;
 
@@ -121,12 +121,12 @@ impl Rule for MD050StrongStyle {
             for m in strong_regex.find_iter(line) {
                 // Calculate the byte position of this match in the document
                 let match_byte_pos = byte_pos + m.start();
-                
+
                 // Skip if this strong text is inside a code block or code span
                 if ctx.is_in_code_block_or_span(match_byte_pos) {
                     continue;
                 }
-                
+
                 if !self.is_escaped(line, m.start()) {
                     let text = &line[m.start() + 2..m.end() - 2];
                     let message = match target_style {
@@ -162,7 +162,7 @@ impl Rule for MD050StrongStyle {
                     });
                 }
             }
-            
+
             // Update byte position for next line
             byte_pos += line.len() + 1; // +1 for newline
         }

@@ -100,7 +100,7 @@ impl Rule for MD029OrderedListPrefix {
         let mut indent_stack: Vec<(usize, usize)> = Vec::new(); // (indent, index)
         let lines: Vec<&str> = content.lines().collect();
         let mut byte_pos = 0;
-        
+
         for line in lines.iter() {
             // Skip if in code block
             if ctx.is_in_code_block_or_span(byte_pos) {
@@ -150,10 +150,11 @@ impl Rule for MD029OrderedListPrefix {
                 } else {
                     // Check if the line is indented enough to be part of a list item
                     let line_indent = line.chars().take_while(|c| c.is_whitespace()).count();
-                    let is_continuation = indent_stack.last()
+                    let is_continuation = indent_stack
+                        .last()
                         .map(|&(list_indent, _)| line_indent >= list_indent + 3)
                         .unwrap_or(false);
-                    
+
                     if is_continuation {
                         // This line is part of the list item (indented continuation)
                         result.push_str(line);
@@ -170,7 +171,7 @@ impl Rule for MD029OrderedListPrefix {
                 result.push_str(line);
                 result.push('\n');
             }
-            
+
             byte_pos += line.len() + 1;
         }
         // Remove trailing newline if the original content didn't have one
@@ -194,9 +195,7 @@ impl Rule for MD029OrderedListPrefix {
         }
 
         // Quick check if there are no ordered lists
-        if !content.contains('1')
-            || (!content.contains("1.") && !content.contains("2.") && !content.contains("0."))
-        {
+        if !content.contains('1') || (!content.contains("1.") && !content.contains("2.") && !content.contains("0.")) {
             return Ok(Vec::new());
         }
 
@@ -294,11 +293,7 @@ impl Rule for MD029OrderedListPrefix {
 }
 
 impl DocumentStructureExtensions for MD029OrderedListPrefix {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
+    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
         let content = ctx.content;
         // This rule is only relevant if there are list items AND they might be ordered lists
         !doc_structure.list_lines.is_empty()
@@ -309,15 +304,11 @@ impl DocumentStructureExtensions for MD029OrderedListPrefix {
 impl MD029OrderedListPrefix {
     fn check_list_section(&self, items: &[(usize, String)], warnings: &mut Vec<LintWarning>, content: &str) {
         // Group items by indentation level and process each level independently
-        let mut level_groups: std::collections::HashMap<usize, Vec<(usize, String)>> =
-            std::collections::HashMap::new();
+        let mut level_groups: std::collections::HashMap<usize, Vec<(usize, String)>> = std::collections::HashMap::new();
 
         for (line_num, line) in items {
             let indent = line.chars().take_while(|c| c.is_whitespace()).count();
-            level_groups
-                .entry(indent)
-                .or_default()
-                .push((*line_num, line.clone()));
+            level_groups.entry(indent).or_default().push((*line_num, line.clone()));
         }
 
         // Process each indentation level separately
@@ -333,11 +324,11 @@ impl MD029OrderedListPrefix {
                     if actual_num != expected_num {
                         // Create a LineIndex for the actual content
                         let line_index = LineIndex::new(content.to_string());
-                        
+
                         // Find the number position in the line for precise replacement
                         let number_start = line.find(char::is_numeric).unwrap_or(0);
                         let number_len = actual_num.to_string().len();
-                        
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             message: format!(
@@ -350,7 +341,11 @@ impl MD029OrderedListPrefix {
                             end_column: number_start + number_len + 1,
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(line_num + 1, number_start + 1, number_len),
+                                range: line_index.line_col_to_byte_range_with_length(
+                                    line_num + 1,
+                                    number_start + 1,
+                                    number_len,
+                                ),
                                 replacement: expected_num.to_string(),
                             }),
                         });

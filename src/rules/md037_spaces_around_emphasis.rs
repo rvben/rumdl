@@ -60,9 +60,9 @@ fn replace_inline_code(line: &str) -> String {
 /// Represents an emphasis marker found in text (optimized with smaller size)
 #[derive(Debug, Clone, PartialEq)]
 struct EmphasisMarker {
-    marker_type: u8,    // b'*' or b'_' for faster comparison
-    count: u8,          // 1 for single, 2 for double (u8 is sufficient)
-    start_pos: usize,   // Position in the line
+    marker_type: u8,  // b'*' or b'_' for faster comparison
+    count: u8,        // 1 for single, 2 for double (u8 is sufficient)
+    start_pos: usize, // Position in the line
 }
 
 impl EmphasisMarker {
@@ -106,10 +106,7 @@ fn find_emphasis_markers(line: &str) -> Vec<EmphasisMarker> {
             let mut count = 1u8;
 
             // Count consecutive markers (limit to avoid overflow)
-            while i + (count as usize) < bytes.len()
-                && bytes[i + (count as usize)] == byte
-                && count < 3
-            {
+            while i + (count as usize) < bytes.len() && bytes[i + (count as usize)] == byte && count < 3 {
                 count += 1;
             }
 
@@ -166,13 +163,11 @@ fn find_emphasis_spans(line: &str, markers: Vec<EmphasisMarker>) -> Vec<Emphasis
                     let content = &line[content_start..content_end];
 
                     // Optimized validation checks
-                    if is_valid_emphasis_content_fast(content)
-                        && is_valid_emphasis_span_fast(line, opening, closing)
-                    {
+                    if is_valid_emphasis_content_fast(content) && is_valid_emphasis_span_fast(line, opening, closing) {
                         // Quick check for crossing markers
-                        let crosses_markers = markers[i+1..j].iter().any(|marker| {
-                            marker.marker_type == opening.marker_type
-                        });
+                        let crosses_markers = markers[i + 1..j]
+                            .iter()
+                            .any(|marker| marker.marker_type == opening.marker_type);
 
                         if !crosses_markers {
                             let has_leading_space = content.starts_with(' ') || content.starts_with('\t');
@@ -221,13 +216,37 @@ fn is_valid_emphasis_span_fast(line: &str, opening: &EmphasisMarker, closing: &E
 
     // Opening should be at start or after valid character
     let valid_opening = opening.start_pos == 0
-        || matches!(bytes.get(opening.start_pos.saturating_sub(1)),
-                   Some(&b' ') | Some(&b'\t') | Some(&b'(') | Some(&b'[') | Some(&b'{') | Some(&b'"') | Some(&b'\'') | Some(&b'>'));
+        || matches!(
+            bytes.get(opening.start_pos.saturating_sub(1)),
+            Some(&b' ')
+                | Some(&b'\t')
+                | Some(&b'(')
+                | Some(&b'[')
+                | Some(&b'{')
+                | Some(&b'"')
+                | Some(&b'\'')
+                | Some(&b'>')
+        );
 
     // Closing should be at end or before valid character
     let valid_closing = closing.end_pos() >= bytes.len()
-        || matches!(bytes.get(closing.end_pos()),
-                   Some(&b' ') | Some(&b'\t') | Some(&b')') | Some(&b']') | Some(&b'}') | Some(&b'"') | Some(&b'\'') | Some(&b'.') | Some(&b',') | Some(&b'!') | Some(&b'?') | Some(&b';') | Some(&b':') | Some(&b'<'));
+        || matches!(
+            bytes.get(closing.end_pos()),
+            Some(&b' ')
+                | Some(&b'\t')
+                | Some(&b')')
+                | Some(&b']')
+                | Some(&b'}')
+                | Some(&b'"')
+                | Some(&b'\'')
+                | Some(&b'.')
+                | Some(&b',')
+                | Some(&b'!')
+                | Some(&b'?')
+                | Some(&b';')
+                | Some(&b':')
+                | Some(&b'<')
+        );
 
     valid_opening && valid_closing && !content.contains('\n')
 }
@@ -297,9 +316,7 @@ impl Rule for MD037NoSpaceInEmphasis {
         // Process the content line by line using the document structure
         for (line_num, line) in content.lines().enumerate() {
             // Skip if in code block or front matter
-            if structure.is_in_code_block(line_num + 1)
-                || structure.is_in_front_matter(line_num + 1)
-            {
+            if structure.is_in_code_block(line_num + 1) || structure.is_in_front_matter(line_num + 1) {
                 continue;
             }
 
@@ -370,8 +387,7 @@ impl Rule for MD037NoSpaceInEmphasis {
                     // Replace the text
                     result.replace_range(actual_start..actual_end, &fix.replacement);
                     // Update offset for future replacements
-                    offset +=
-                        fix.replacement.len() as isize - (fix.range.end - fix.range.start) as isize;
+                    offset += fix.replacement.len() as isize - (fix.range.end - fix.range.start) as isize;
                 }
             }
         }
@@ -420,12 +436,7 @@ impl DocumentStructureExtensions for MD037NoSpaceInEmphasis {
 impl MD037NoSpaceInEmphasis {
     /// Optimized line checking for emphasis spacing issues
     #[inline]
-    fn check_line_for_emphasis_issues_fast(
-        &self,
-        line: &str,
-        line_num: usize,
-        warnings: &mut Vec<LintWarning>,
-    ) {
+    fn check_line_for_emphasis_issues_fast(&self, line: &str, line_num: usize, warnings: &mut Vec<LintWarning>) {
         // Quick documentation pattern checks using pre-compiled regex
         if (QUICK_DOC_CHECK.is_match(line) || QUICK_BOLD_CHECK.is_match(line))
             && (DOC_METADATA_PATTERN.is_match(line) || BOLD_TEXT_PATTERN.is_match(line))
@@ -444,7 +455,12 @@ impl MD037NoSpaceInEmphasis {
                         let remaining_content = &line[list_marker_end..];
 
                         if self.is_likely_list_item_fast(remaining_content) {
-                            self.check_line_content_for_emphasis_fast(remaining_content, line_num, list_marker_end, warnings);
+                            self.check_line_content_for_emphasis_fast(
+                                remaining_content,
+                                line_num,
+                                list_marker_end,
+                                warnings,
+                            );
                         } else {
                             self.check_line_content_for_emphasis_fast(line, line_num, 0, warnings);
                         }
@@ -586,20 +602,14 @@ mod tests {
         let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert!(
-            result.is_empty(),
-            "No warnings expected for correct emphasis"
-        );
+        assert!(result.is_empty(), "No warnings expected for correct emphasis");
 
         // Test with actual spaces inside emphasis - use content that should warn
         let content = "This is * text with spaces * and more content";
         let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
-        assert!(
-            !result.is_empty(),
-            "Expected warnings for spaces in emphasis"
-        );
+        assert!(!result.is_empty(), "Expected warnings for spaces in emphasis");
 
         // Test with code blocks - emphasis in code should be ignored
         let content = "This is *correct* emphasis\n```\n* incorrect * in code block\n```\nOutside block with * spaces in emphasis *";

@@ -1,0 +1,17 @@
+# Rustfmt configuration for rumdl
+
+# Set maximum line width to 120 characters
+max_width = 120
+
+# Reorder imports and module declarations
+reorder_imports = true
+reorder_modules = true
+
+# Use field initialize shorthand when possible
+use_field_init_shorthand = true
+
+# Use try shorthand (? operator)
+use_try_shorthand = true
+
+# Edition
+edition = "2021"

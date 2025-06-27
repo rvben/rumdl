@@ -4,9 +4,7 @@ use rumdl::rules::MD051LinkFragments;
 
 #[test]
 fn test_valid_link_fragment() {
-    let ctx = LintContext::new(
-        "# Test Heading\n\nThis is a [link](somepath#test-heading) to the heading.",
-    );
+    let ctx = LintContext::new("# Test Heading\n\nThis is a [link](somepath#test-heading) to the heading.");
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -14,9 +12,7 @@ fn test_valid_link_fragment() {
 
 #[test]
 fn test_invalid_link_fragment() {
-    let ctx = LintContext::new(
-        "# Test Heading\n\nThis is a [link](somepath#wrong-heading) to the heading.",
-    );
+    let ctx = LintContext::new("# Test Heading\n\nThis is a [link](somepath#wrong-heading) to the heading.");
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -24,7 +20,9 @@ fn test_invalid_link_fragment() {
 
 #[test]
 fn test_multiple_headings() {
-    let ctx = LintContext::new("# First Heading\n\n## Second Heading\n\n[Link 1](somepath#first-heading)\n[Link 2](somepath#second-heading)");
+    let ctx = LintContext::new(
+        "# First Heading\n\n## Second Heading\n\n[Link 1](somepath#first-heading)\n[Link 2](somepath#second-heading)",
+    );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -32,9 +30,7 @@ fn test_multiple_headings() {
 
 #[test]
 fn test_special_characters() {
-    let ctx = LintContext::new(
-        "# Test & Heading!\n\nThis is a [link](somepath#test-heading) to the heading.",
-    );
+    let ctx = LintContext::new("# Test & Heading!\n\nThis is a [link](somepath#test-heading) to the heading.");
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -42,9 +38,7 @@ fn test_special_characters() {
 
 #[test]
 fn test_no_fragments() {
-    let ctx = LintContext::new(
-        "# Test Heading\n\nThis is a [link](https://example.com) without fragment.",
-    );
+    let ctx = LintContext::new("# Test Heading\n\nThis is a [link](https://example.com) without fragment.");
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -60,8 +54,7 @@ fn test_empty_content() {
 
 #[test]
 fn test_multiple_invalid_fragments() {
-    let ctx =
-        LintContext::new("# Test Heading\n\n[Link 1](somepath#wrong1)\n[Link 2](somepath#wrong2)");
+    let ctx = LintContext::new("# Test Heading\n\n[Link 1](somepath#wrong1)\n[Link 2](somepath#wrong2)");
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
@@ -132,9 +125,7 @@ fn test_heading_id_generation() {
 
 #[test]
 fn test_heading_to_fragment_edge_cases() {
-    let ctx = LintContext::new(
-        "# Heading\n\n# Heading\n\n[Link 1](somepath#heading)\n[Link 2](somepath#heading-1)",
-    );
+    let ctx = LintContext::new("# Heading\n\n# Heading\n\n[Link 1](somepath#heading)\n[Link 2](somepath#heading-1)");
     let rule = MD051LinkFragments::new();
 
     let result = rule.check(&ctx).unwrap();
@@ -146,9 +137,7 @@ fn test_heading_to_fragment_edge_cases() {
     assert_eq!(result.len(), 0);
 
     // Test mixed internal/external links
-    let ctx = LintContext::new(
-        "# Heading\n\n[Internal](somepath#heading)\n[External](https://example.com#heading)",
-    );
+    let ctx = LintContext::new("# Heading\n\n[Internal](somepath#heading)\n[External](https://example.com#heading)");
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -161,10 +150,7 @@ fn test_fragment_in_code_blocks() {
     let result = rule.check(&ctx).unwrap();
     println!("Result has {} warnings", result.len());
     for (i, warning) in result.iter().enumerate() {
-        println!(
-            "Warning {}: line {}, message: {}",
-            i, warning.line, warning.message
-        );
+        println!("Warning {}: line {}, message: {}", i, warning.line, warning.message);
     }
 
     // With our improved implementation, code blocks are ignored
@@ -175,10 +161,7 @@ fn test_fragment_in_code_blocks() {
     let result = rule.check(&ctx).unwrap();
     println!("Second test has {} warnings", result.len());
     for (i, warning) in result.iter().enumerate() {
-        println!(
-            "Warning {}: line {}, message: {}",
-            i, warning.line, warning.message
-        );
+        println!("Warning {}: line {}, message: {}", i, warning.line, warning.message);
     }
 
     // Headings in code blocks should be ignored and the link should fail
@@ -271,11 +254,7 @@ fn test_complex_nested_formatting() {
     let warnings = result.unwrap();
 
     // Test that complex mixed formatting is handled correctly
-    assert_eq!(
-        0,
-        warnings.len(),
-        "Link should match heading with complex formatting"
-    );
+    assert_eq!(0, warnings.len(), "Link should match heading with complex formatting");
 }
 
 #[test]
@@ -327,16 +306,9 @@ fn test_performance_md051() {
     // Add 100 links, some valid, some invalid
     for i in 0..100 {
         if i % 3 == 0 {
-            content.push_str(&format!(
-                "[Link to invalid heading](somepath#heading-{})\n",
-                i + 100
-            ));
+            content.push_str(&format!("[Link to invalid heading](somepath#heading-{})\n", i + 100));
         } else {
-            content.push_str(&format!(
-                "[Link to heading {}](somepath#heading-{})\n",
-                i % 50,
-                i % 50
-            ));
+            content.push_str(&format!("[Link to heading {}](somepath#heading-{})\n", i % 50, i % 50));
         }
     }
 
@@ -367,35 +339,29 @@ fn test_inline_code_spans() {
     let result = rule.check(&ctx).unwrap();
 
     // We should only have 0 warnings - the link in inline code should be ignored
-    assert_eq!(
-        result.len(),
-        0,
-        "Link in inline code span should be ignored"
-    );
+    assert_eq!(result.len(), 0, "Link in inline code span should be ignored");
 
     // Test with multiple code spans and mix of valid and invalid links
-    let ctx = LintContext::new("# Heading One\n\n`[Invalid](#missing)` and [Valid](#heading-one) and `[Another Invalid](#nowhere)`");
+    let ctx = LintContext::new(
+        "# Heading One\n\n`[Invalid](#missing)` and [Valid](#heading-one) and `[Another Invalid](#nowhere)`",
+    );
     let result = rule.check(&ctx).unwrap();
 
     // Only the valid link should be checked, the ones in code spans should be ignored
-    assert_eq!(
-        result.len(),
-        0,
-        "Only links outside code spans should be checked"
-    );
+    assert_eq!(result.len(), 0, "Only links outside code spans should be checked");
 
     // Test with a fragment link in inline code followed by a real invalid link
-    let ctx = LintContext::new(
-        "# Heading One\n\n`[Example](#missing-section)` and [Invalid Link](#section-two)",
-    );
+    let ctx = LintContext::new("# Heading One\n\n`[Example](#missing-section)` and [Invalid Link](#section-two)");
 
     // Debug: Let's check what the LintContext contains
     println!("=== Test 3 Debug ===");
     println!("Content: {:?}", ctx.content);
     println!("Line count: {}", ctx.lines.len());
     for (i, line_info) in ctx.lines.iter().enumerate() {
-        println!("Line {}: content='{}', in_code_block={}, byte_offset={}",
-                 i, line_info.content, line_info.in_code_block, line_info.byte_offset);
+        println!(
+            "Line {}: content='{}', in_code_block={}, byte_offset={}",
+            i, line_info.content, line_info.in_code_block, line_info.byte_offset
+        );
         if let Some(heading) = &line_info.heading {
             println!("  Has heading: level={}, text='{}'", heading.level, heading.text);
         }
@@ -406,7 +372,10 @@ fn test_inline_code_spans() {
     // Debug output
     println!("Test 3 - Result count: {}", result.len());
     for (i, warning) in result.iter().enumerate() {
-        println!("Warning {}: line {}, col {}, message: {}", i, warning.line, warning.column, warning.message);
+        println!(
+            "Warning {}: line {}, col {}, message: {}",
+            i, warning.line, warning.column, warning.message
+        );
     }
 
     // Only the real invalid link should be caught
@@ -435,10 +404,7 @@ fn test_readme_fragments_debug() {
     println!("\nRunning MD051 check on README-like content:");
     let result = rule.check(&ctx).unwrap();
     for warning in &result {
-        println!(
-            "Warning: line {}, message: {}",
-            warning.line, warning.message
-        );
+        println!("Warning: line {}, message: {}", warning.line, warning.message);
     }
 
     if result.is_empty() {
@@ -465,13 +431,11 @@ fn test_md051_fragment_generation_regression() {
         ("Simple Heading", "simple-heading"),
         ("1. Numbered Heading", "1-numbered-heading"),
         ("Heading with Spaces", "heading-with-spaces"),
-
         // Ampersand cases (the main bug)
         ("Test & Example", "test--example"),
         ("A&B", "a--b"),
         ("A & B", "a--b"),
         ("Multiple & Ampersands & Here", "multiple--ampersands--here"),
-
         // Special characters
         ("Test. Period", "test-period"),
         ("Test: Colon", "test-colon"),
@@ -479,13 +443,17 @@ fn test_md051_fragment_generation_regression() {
         ("Test? Question", "test-question"),
         ("Test (Parentheses)", "test-parentheses"),
         ("Test [Brackets]", "test-brackets"),
-
         // Complex cases
         ("1. Heading with Numbers & Symbols!", "1-heading-with-numbers--symbols"),
-        ("Multiple!!! Exclamations & Symbols???", "multiple-exclamations--symbols"),
-        ("Heading with (Parentheses) & [Brackets]", "heading-with-parentheses--brackets"),
+        (
+            "Multiple!!! Exclamations & Symbols???",
+            "multiple-exclamations--symbols",
+        ),
+        (
+            "Heading with (Parentheses) & [Brackets]",
+            "heading-with-parentheses--brackets",
+        ),
         ("Special Characters: @#$%^&*()", "special-characters"),
-
         // Edge cases
         ("Only!!! Symbols!!!", "only-symbols"),
         ("   Spaces   ", "spaces"), // Leading/trailing spaces
@@ -538,7 +506,8 @@ fn test_md051_real_world_scenarios() {
 
     // All links should be valid with the fixed algorithm
     assert_eq!(
-        result.len(), 0,
+        result.len(),
+        0,
         "Expected no warnings, but got: {:?}",
         result.iter().map(|w| &w.message).collect::<Vec<_>>()
     );
@@ -571,7 +540,8 @@ fn test_md051_ampersand_variations() {
 
     // All ampersand cases should be handled correctly
     assert_eq!(
-        result.len(), 0,
+        result.len(),
+        0,
         "Expected no warnings for ampersand cases, but got: {:?}",
         result.iter().map(|w| &w.message).collect::<Vec<_>>()
     );
@@ -609,7 +579,11 @@ And some cross-file links that should be ignored by MD051:
     let result = rule.check(&ctx).unwrap();
 
     // Should only have one warning for the missing internal fragment
-    assert_eq!(result.len(), 1, "Expected exactly 1 warning for missing internal fragment");
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected exactly 1 warning for missing internal fragment"
+    );
 
     // Verify it's the correct warning
     assert!(
@@ -621,10 +595,10 @@ And some cross-file links that should be ignored by MD051:
     // Verify that cross-file links are not flagged
     for warning in &result {
         assert!(
-            !warning.message.contains("installation") &&
-            !warning.message.contains("bug-reports") &&
-            !warning.message.contains("triage-section") &&
-            !warning.message.contains("settings"),
+            !warning.message.contains("installation")
+                && !warning.message.contains("bug-reports")
+                && !warning.message.contains("triage-section")
+                && !warning.message.contains("settings"),
             "Cross-file fragment should not be flagged: {}",
             warning.message
         );
@@ -653,7 +627,11 @@ Test various link types:
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the invalid fragment-only link
-    assert_eq!(result.len(), 1, "Expected exactly 1 warning for invalid fragment-only link");
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected exactly 1 warning for invalid fragment-only link"
+    );
 
     assert!(
         result[0].message.contains("nonexistent-heading"),
@@ -700,7 +678,11 @@ Fragment-only links (should be validated):
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the invalid fragment-only link
-    assert_eq!(result.len(), 1, "Expected exactly 1 warning for invalid fragment-only link");
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected exactly 1 warning for invalid fragment-only link"
+    );
     assert!(
         result[0].message.contains("missing-section"),
         "Warning should be about missing-section, got: {}",
@@ -744,7 +726,11 @@ Fragment-only tests:
     let result = rule.check(&ctx).unwrap();
 
     // Should flag the invalid fragment-only link plus the ambiguous paths without extensions
-    assert_eq!(result.len(), 4, "Expected 4 warnings: 1 invalid fragment + 3 ambiguous paths");
+    assert_eq!(
+        result.len(),
+        4,
+        "Expected 4 warnings: 1 invalid fragment + 3 ambiguous paths"
+    );
 
     // Check that we get warnings for the ambiguous paths and invalid fragment
     let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
@@ -786,7 +772,11 @@ Fragment-only (should be validated):
     let result = rule.check(&ctx).unwrap();
 
     // Should flag ambiguous paths without extensions plus the invalid fragment
-    assert_eq!(result.len(), 5, "Expected 5 warnings: 4 ambiguous paths + 1 invalid fragment");
+    assert_eq!(
+        result.len(),
+        5,
+        "Expected 5 warnings: 4 ambiguous paths + 1 invalid fragment"
+    );
 
     // Verify we get warnings for the expected fragments
     let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
@@ -895,9 +885,13 @@ Fragment tests:
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-        // Should flag ambiguous paths + invalid fragments = 5 warnings
+    // Should flag ambiguous paths + invalid fragments = 5 warnings
     // 3 ambiguous paths (#section) + 1 invalid unicode fragment + 1 missing fragment
-    assert_eq!(result.len(), 5, "Expected 5 warnings: 3 ambiguous paths + 2 invalid fragments");
+    assert_eq!(
+        result.len(),
+        5,
+        "Expected 5 warnings: 3 ambiguous paths + 2 invalid fragments"
+    );
 
     let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
     let contains_section = warning_messages.iter().filter(|msg| msg.contains("section")).count();
@@ -906,7 +900,10 @@ Fragment tests:
 
     assert_eq!(contains_section, 3, "Should have 3 warnings about #section fragment");
     assert!(contains_missing, "Should warn about #missing-heading fragment");
-    assert!(contains_cafe, "Should warn about #café-restaurant fragment (doesn't match heading)");
+    assert!(
+        contains_cafe,
+        "Should warn about #café-restaurant fragment (doesn't match heading)"
+    );
 }
 
 #[test]
@@ -946,7 +943,7 @@ Fragment-only validation tests:
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-        // Should flag only 1 invalid fragment - ambiguous paths are now treated as cross-file links
+    // Should flag only 1 invalid fragment - ambiguous paths are now treated as cross-file links
     // because they have valid-looking extensions ("file" and "custom")
     assert_eq!(result.len(), 1, "Expected 1 warning: 1 invalid fragment");
 
@@ -1015,11 +1012,13 @@ Fragment tests with normalization:
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-        // Should flag the invalid fragment variations (case-insensitive matching is correct)
+    // Should flag the invalid fragment variations (case-insensitive matching is correct)
     assert_eq!(result.len(), 2, "Expected 2 warnings for invalid fragment variations");
 
     let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
-    let contains_symbols = warning_messages.iter().any(|msg| msg.contains("special-characters-&-symbols"));
+    let contains_symbols = warning_messages
+        .iter()
+        .any(|msg| msg.contains("special-characters-&-symbols"));
     let contains_spacing = warning_messages.iter().any(|msg| msg.contains("multiple   spaces"));
 
     assert!(contains_symbols, "Should warn about symbol fragment");
@@ -1122,7 +1121,15 @@ fn test_performance_with_many_links() {
     );
 
     // Performance should be reasonable (less than 100ms for 100+ links)
-    assert!(duration.as_millis() < 100, "Performance test failed: took {}ms", duration.as_millis());
+    assert!(
+        duration.as_millis() < 100,
+        "Performance test failed: took {}ms",
+        duration.as_millis()
+    );
 
-    println!("MD051 performance test: {}ms for {} links", duration.as_millis(), ctx.links.len());
+    println!(
+        "MD051 performance test: {}ms for {} links",
+        duration.as_millis(),
+        ctx.links.len()
+    );
 }

@@ -1,19 +1,21 @@
-use serde::{Deserialize, Serialize};
-use serde::ser::Serializer;
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::strong_style::StrongStyle;
+use serde::ser::Serializer;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MD050Config {
-    #[serde(default = "default_style", serialize_with = "serialize_style", deserialize_with = "deserialize_style")]
+    #[serde(
+        default = "default_style",
+        serialize_with = "serialize_style",
+        deserialize_with = "deserialize_style"
+    )]
     pub style: StrongStyle,
 }
 
 impl Default for MD050Config {
     fn default() -> Self {
-        Self {
-            style: default_style(),
-        }
+        Self { style: default_style() }
     }
 }
 

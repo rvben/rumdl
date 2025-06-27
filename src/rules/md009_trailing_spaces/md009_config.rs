@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for MD009 (Trailing spaces)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -8,7 +8,7 @@ pub struct MD009Config {
     /// Number of spaces for line breaks (default: 2)
     #[serde(default = "default_br_spaces")]
     pub br_spaces: usize,
-    
+
     /// Strict mode - remove all trailing spaces (default: false)
     #[serde(default)]
     pub strict: bool,

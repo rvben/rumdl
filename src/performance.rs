@@ -115,8 +115,7 @@ impl ContentGenerator {
     pub fn large_content() -> String {
         let mut content = String::new();
         content.push_str("# Large Test Document\n\n");
-        content
-            .push_str("This is a comprehensive test document with extensive markdown content.\n\n");
+        content.push_str("This is a comprehensive test document with extensive markdown content.\n\n");
 
         // Add table of contents
         content.push_str("## Table of Contents\n\n");
@@ -128,10 +127,7 @@ impl ContentGenerator {
         // Add many sections with various content
         for i in 1..=50 {
             content.push_str(&format!("## Section {}\n\n", i));
-            content.push_str(&format!(
-                "This is section {} with comprehensive content.\n\n",
-                i
-            ));
+            content.push_str(&format!("This is section {} with comprehensive content.\n\n", i));
 
             // Add subsections
             for j in 1..=3 {
@@ -141,9 +137,7 @@ impl ContentGenerator {
                     i, j
                 ));
                 content.push_str("Lorem ipsum dolor sit amet, consectetur adipiscing elit. ");
-                content.push_str(
-                    "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\n",
-                );
+                content.push_str("Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\n");
 
                 // Add lists with multiple levels
                 content.push_str("#### Lists\n\n");
@@ -152,8 +146,7 @@ impl ContentGenerator {
                     if k % 2 == 0 {
                         content.push_str(&format!("  - Nested item {}.{}.{}\n", i, j, k));
                         if k % 4 == 0 {
-                            content
-                                .push_str(&format!("    - Deep nested item {}.{}.{}\n", i, j, k));
+                            content.push_str(&format!("    - Deep nested item {}.{}.{}\n", i, j, k));
                         }
                     }
                 }
@@ -204,10 +197,7 @@ impl ContentGenerator {
                     "- [API reference](https://api.example.com/v{}/section{})\n",
                     j, i
                 ));
-                content.push_str(&format!(
-                    "- Bare URL: https://example{}.com/path/{}\n",
-                    i, j
-                ));
+                content.push_str(&format!("- Bare URL: https://example{}.com/path/{}\n", i, j));
                 content.push_str(&format!("- Contact: section{}@example{}.com\n", i, j));
                 content.push('\n');
             }
@@ -375,9 +365,8 @@ impl PerformanceBenchmark {
 
             println!("   Top 10 slowest rules:");
             for (i, rule_result) in sorted_rules.iter().take(10).enumerate() {
-                let percentage = (rule_result.execution_time.as_secs_f64()
-                    / result.total_execution_time.as_secs_f64())
-                    * 100.0;
+                let percentage =
+                    (rule_result.execution_time.as_secs_f64() / result.total_execution_time.as_secs_f64()) * 100.0;
                 println!(
                     "     {}. {} - {:.3}ms ({:.1}%) - {} warnings",
                     i + 1,
@@ -394,8 +383,7 @@ impl PerformanceBenchmark {
         println!("📈 Performance Scaling Summary:");
         if let (Some(small), Some(large)) = (results.get("small"), results.get("large")) {
             let size_ratio = large.content_size_bytes as f64 / small.content_size_bytes as f64;
-            let time_ratio =
-                large.total_execution_time.as_secs_f64() / small.total_execution_time.as_secs_f64();
+            let time_ratio = large.total_execution_time.as_secs_f64() / small.total_execution_time.as_secs_f64();
             println!("   Content size ratio (large/small): {:.1}x", size_ratio);
             println!("   Execution time ratio (large/small): {:.1}x", time_ratio);
             println!(

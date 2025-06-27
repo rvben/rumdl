@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize, Serializer, Deserializer};
-use crate::rule_config_serde::RuleConfig;
 use super::UnorderedListStyle;
+use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Configuration for MD004 (Unordered list style)
 #[derive(Debug, Clone, PartialEq)]
@@ -42,7 +42,7 @@ impl<'de> Deserialize<'de> for MD004Config {
             #[serde(default = "default_style_str")]
             style: String,
         }
-        
+
         let helper = Helper::deserialize(deserializer)?;
         let style = match helper.style.as_str() {
             "asterisk" => UnorderedListStyle::Asterisk,
@@ -50,11 +50,8 @@ impl<'de> Deserialize<'de> for MD004Config {
             "plus" => UnorderedListStyle::Plus,
             "consistent" | _ => UnorderedListStyle::Consistent,
         };
-        
-        Ok(MD004Config {
-            style,
-            after_marker: 1,
-        })
+
+        Ok(MD004Config { style, after_marker: 1 })
     }
 }
 

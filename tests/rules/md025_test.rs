@@ -36,10 +36,7 @@ fn test_md025_with_front_matter() {
     let content = "---\ntitle: Document Title\n---\n# Title\n## Heading 2\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Should not flag a single title after front matter"
-    );
+    assert!(result.is_empty(), "Should not flag a single title after front matter");
 }
 
 #[test]

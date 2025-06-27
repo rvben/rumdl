@@ -159,9 +159,7 @@ impl ElementCache {
 
     /// Get list item at line
     pub fn get_list_item(&self, line_num: usize) -> Option<&ListItem> {
-        self.list_items
-            .iter()
-            .find(|item| item.line_number == line_num)
+        self.list_items.iter().find(|item| item.line_number == line_num)
     }
 
     /// Get all list items
@@ -195,8 +193,8 @@ impl ElementCache {
 
                     if line.trim().starts_with(&fence_marker) {
                         // End of code block
-                        let start_pos = lines[0..block_start_line].join("\n").len()
-                            + if block_start_line > 0 { 1 } else { 0 };
+                        let start_pos =
+                            lines[0..block_start_line].join("\n").len() + if block_start_line > 0 { 1 } else { 0 };
                         let end_pos = lines[0..=i].join("\n").len();
 
                         self.code_blocks.push(CodeBlock {
@@ -253,8 +251,7 @@ impl ElementCache {
 
             // Handle unclosed code block
             if in_fenced_block {
-                let start_pos = lines[0..block_start_line].join("\n").len()
-                    + if block_start_line > 0 { 1 } else { 0 };
+                let start_pos = lines[0..block_start_line].join("\n").len() + if block_start_line > 0 { 1 } else { 0 };
                 let end_pos = content.len();
 
                 self.code_blocks.push(CodeBlock {
@@ -311,8 +308,7 @@ impl ElementCache {
                     continue;
                 }
                 // Parse and strip blockquote prefix
-                let (blockquote_depth, blockquote_prefix, rest) =
-                    Self::parse_blockquote_prefix(line);
+                let (blockquote_depth, blockquote_prefix, rest) = Self::parse_blockquote_prefix(line);
                 // Always call parse_list_item and always push if Some
                 if let Some(item) = self.parse_list_item(
                     rest,
@@ -364,10 +360,8 @@ impl ElementCache {
         let mut nesting_level = 0;
 
         // Only consider previous items with the same blockquote depth
-        if let Some(&(_last_bq, last_indent, last_level)) = prev_items
-            .iter()
-            .rev()
-            .find(|(bq, _, _)| *bq == blockquote_depth)
+        if let Some(&(_last_bq, last_indent, last_level)) =
+            prev_items.iter().rev().find(|(bq, _, _)| *bq == blockquote_depth)
         {
             use std::cmp::Ordering;
             match indent.cmp(&last_indent) {
@@ -398,11 +392,9 @@ impl ElementCache {
                         let diff = (indent as i32 - last_indent as i32).abs();
                         if diff <= 2 && indent <= 8 && last_indent <= 8 {
                             // Check if there's a recent item at a lower indentation level
-                            let has_lower_indent =
-                                prev_items.iter().rev().take(3).any(|(bq, prev_indent, _)| {
-                                    *bq == blockquote_depth
-                                        && *prev_indent < indent.min(last_indent)
-                                });
+                            let has_lower_indent = prev_items.iter().rev().take(3).any(|(bq, prev_indent, _)| {
+                                *bq == blockquote_depth && *prev_indent < indent.min(last_indent)
+                            });
                             if has_lower_indent {
                                 found_level = Some(last_level);
                             }
@@ -446,10 +438,7 @@ impl ElementCache {
     ) -> Option<ListItem> {
         match UNORDERED_LIST_REGEX.captures(line) {
             Ok(Some(captures)) => {
-                let indent_str = captures
-                    .name("indent")
-                    .map_or("", |m| m.as_str())
-                    .to_string();
+                let indent_str = captures.name("indent").map_or("", |m| m.as_str()).to_string();
                 let indentation = Self::calculate_indentation_width_default(&indent_str);
                 let marker = captures.name("marker").unwrap().as_str();
                 let after = captures.name("after").map_or("", |m| m.as_str());
@@ -462,8 +451,7 @@ impl ElementCache {
                     "-" => ListMarkerType::Minus,
                     _ => unreachable!(),
                 };
-                let nesting_level =
-                    self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
+                let nesting_level = self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
                 // Find parent: most recent previous item with lower nesting_level and same blockquote depth
                 let parent_line_number = prev_items
                     .iter()
@@ -491,10 +479,7 @@ impl ElementCache {
         }
         match ORDERED_LIST_REGEX.captures(line) {
             Ok(Some(captures)) => {
-                let indent_str = captures
-                    .name("indent")
-                    .map_or("", |m| m.as_str())
-                    .to_string();
+                let indent_str = captures.name("indent").map_or("", |m| m.as_str()).to_string();
                 let indentation = Self::calculate_indentation_width_default(&indent_str);
                 let marker = captures.name("marker").unwrap().as_str();
                 let spaces = captures.name("after").map_or(0, |m| m.as_str().len());
@@ -503,8 +488,7 @@ impl ElementCache {
                     .map_or("", |m| m.as_str())
                     .trim_start()
                     .to_string();
-                let nesting_level =
-                    self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
+                let nesting_level = self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
                 // Find parent: most recent previous item with lower nesting_level and same blockquote depth
                 let parent_line_number = prev_items
                     .iter()
@@ -577,8 +561,7 @@ mod tests {
 
     #[test]
     fn test_code_block_detection() {
-        let content =
-            "Regular text\n\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n\nMore text";
+        let content = "Regular text\n\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n\nMore text";
         let cache = ElementCache::new(content);
 
         assert_eq!(cache.code_blocks.len(), 1);
@@ -600,7 +583,8 @@ mod tests {
 
     #[test]
     fn test_list_item_detection_simple() {
-        let content = "# Heading\n\n- First item\n  - Nested item\n- Second item\n\n1. Ordered item\n   1. Nested ordered\n";
+        let content =
+            "# Heading\n\n- First item\n  - Nested item\n- Second item\n\n1. Ordered item\n   1. Nested ordered\n";
         let cache = ElementCache::new(content);
         assert_eq!(cache.list_items.len(), 5);
         // Check the first item
@@ -654,11 +638,7 @@ mod tests {
         assert_eq!(cache.list_items[9].marker, "+");
         assert_eq!(cache.list_items[9].nesting_level, 4);
         let expected_nesting = vec![0, 1, 2, 1, 0, 0, 1, 2, 3, 4];
-        let actual_nesting: Vec<_> = cache
-            .list_items
-            .iter()
-            .map(|item| item.nesting_level)
-            .collect();
+        let actual_nesting: Vec<_> = cache.list_items.iter().map(|item| item.nesting_level).collect();
         assert_eq!(
             actual_nesting, expected_nesting,
             "Nesting levels should match expected values"
@@ -677,11 +657,7 @@ mod tests {
         // + Nested 2 (indent=2) -> level 1 (nested under Item 1)
         // * Item 2 (indent=0) -> level 0
         let expected_nesting = vec![0, 1, 1, 0];
-        let actual_nesting: Vec<_> = cache
-            .list_items
-            .iter()
-            .map(|item| item.nesting_level)
-            .collect();
+        let actual_nesting: Vec<_> = cache.list_items.iter().map(|item| item.nesting_level).collect();
         assert_eq!(
             actual_nesting, expected_nesting,
             "Nesting levels should be calculated based on indentation, not reset by blank lines"
@@ -754,11 +730,7 @@ mod tests {
             "8 spaces indented", // Content after marker
             "After excessive indent",
         ];
-        let actual_content: Vec<_> = cache
-            .list_items
-            .iter()
-            .map(|item| item.content.clone())
-            .collect();
+        let actual_content: Vec<_> = cache.list_items.iter().map(|item| item.content.clone()).collect();
         assert_eq!(
             actual_content, expected_content,
             "List item contents should match expected values"
@@ -766,11 +738,7 @@ mod tests {
         // Updated expected nesting levels based on correct CommonMark behavior:
         // Blank lines should NOT reset nesting context
         let expected_nesting = vec![0, 1, 2, 3, 4, 5, 0, 1, 1, 1, 2, 0];
-        let actual_nesting: Vec<_> = cache
-            .list_items
-            .iter()
-            .map(|item| item.nesting_level)
-            .collect();
+        let actual_nesting: Vec<_> = cache.list_items.iter().map(|item| item.nesting_level).collect();
         assert_eq!(
             actual_nesting, expected_nesting,
             "Nesting levels should match expected values"
@@ -879,10 +847,8 @@ mod tests {
         assert_eq!(ElementCache::calculate_indentation_width_default("\t\t"), 8);
         assert_eq!(ElementCache::calculate_indentation_width_default("\t  "), 6); // tab to 4, then 2 spaces = 6
         assert_eq!(ElementCache::calculate_indentation_width_default("  \t"), 4); // 2 spaces, then tab to next stop (4)
-        assert_eq!(
-            ElementCache::calculate_indentation_width_default("\t\t  "),
-            10
-        ); // 2 tabs = 8, then 2 spaces = 10
+        assert_eq!(ElementCache::calculate_indentation_width_default("\t\t  "), 10);
+        // 2 tabs = 8, then 2 spaces = 10
     }
 
     #[test]
@@ -902,9 +868,7 @@ mod tests {
         // Test the specific indentation strings
         assert_eq!(ElementCache::calculate_indentation_width_default("\t  "), 6); // tab + 2 spaces
         assert_eq!(ElementCache::calculate_indentation_width_default("  \t"), 4); // 2 spaces + tab
-        assert_eq!(
-            ElementCache::calculate_indentation_width_default("\t\t  "),
-            10
-        ); // 2 tabs + 2 spaces
+        assert_eq!(ElementCache::calculate_indentation_width_default("\t\t  "), 10);
+        // 2 tabs + 2 spaces
     }
 }

@@ -56,10 +56,7 @@ fn test_emphasis_not_list_marker_simple() {
         1,
         "Should only detect one warning for the list missing blank line before"
     );
-    assert_eq!(
-        result[0].line, 2,
-        "Warning should be on line 2 (first list item)"
-    );
+    assert_eq!(result[0].line, 2, "Warning should be on line 2 (first list item)");
     assert!(result[0].message.contains("preceded by blank line"));
 }
 
@@ -67,7 +64,8 @@ fn test_emphasis_not_list_marker_simple() {
 fn test_emphasis_not_list_marker_multiple_stars() {
     // Test various emphasis patterns that should NOT be detected as lists
     let rule = MD032BlanksAroundLists::default();
-    let content = "**Bold text here**\n*Italic text*\n***Bold italic***\n\n- Actual list item\n- Another item\n\nMore text";
+    let content =
+        "**Bold text here**\n*Italic text*\n***Bold italic***\n\n- Actual list item\n- Another item\n\nMore text";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
@@ -146,10 +144,7 @@ fn test_nested_lists() {
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
     let _ctx_fixed = LintContext::new(&fixed);
-    assert_eq!(
-        fixed,
-        "Text\n\n* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2\n\nText"
-    );
+    assert_eq!(fixed, "Text\n\n* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2\n\nText");
 }
 
 #[test]
@@ -186,9 +181,7 @@ fn test_list_with_content() {
     let mut current_block_start_debug: Option<usize> = None;
     for i_debug in 0..num_lines_vec {
         let current_line_idx_1_debug = i_debug + 1;
-        let is_list_related_debug = temp_structure
-            .list_lines
-            .contains(&current_line_idx_1_debug);
+        let is_list_related_debug = temp_structure.list_lines.contains(&current_line_idx_1_debug);
         let is_excluded_debug = temp_structure.is_in_code_block(current_line_idx_1_debug)
             || temp_structure.is_in_front_matter(current_line_idx_1_debug);
         if is_list_related_debug && !is_excluded_debug {
@@ -215,10 +208,7 @@ fn test_list_with_content() {
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
     let _ctx_fixed = LintContext::new(&fixed);
-    assert_eq!(
-        fixed,
-        "Text\n\n* Item 1\n  Content\n* Item 2\n  More content\n\nText"
-    );
+    assert_eq!(fixed, "Text\n\n* Item 1\n  Content\n* Item 2\n  More content\n\nText");
 }
 
 #[test]
@@ -293,11 +283,7 @@ fn test_list_followed_by_heading_invalid() {
     let content = "* Item 1\n* Item 2\n## Next Section";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Should warn for missing blank line before heading"
-    );
+    assert_eq!(result.len(), 1, "Should warn for missing blank line before heading");
     assert!(result[0].message.contains("followed by blank line"));
 }
 
@@ -307,11 +293,7 @@ fn test_list_followed_by_code_block_invalid() {
     let content = "* Item 1\n* Item 2\n```\ncode\n```";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Should warn for missing blank line before code block"
-    );
+    assert_eq!(result.len(), 1, "Should warn for missing blank line before code block");
     assert!(result[0].message.contains("followed by blank line"));
 }
 
@@ -321,10 +303,7 @@ fn test_list_followed_by_blank_then_code_block_valid() {
     let content = "* Item 1\n* Item 2\n\n```\ncode\n```";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Should not warn when blank line precedes code block"
-    );
+    assert!(result.is_empty(), "Should not warn when blank line precedes code block");
 }
 
 // New tests for lenient behavior
@@ -332,7 +311,7 @@ fn test_list_followed_by_blank_then_code_block_valid() {
 #[test]
 fn test_allow_list_after_heading() {
     let rule = MD032BlanksAroundLists::default(); // Has allow_after_headings = true
-    
+
     // Test cases that should NOT be flagged with lenient settings
     let valid_cases = vec![
         "# Items to consider:\n* Item 1\n* Item 2\n\nMore text",
@@ -343,18 +322,14 @@ fn test_allow_list_after_heading() {
     for case in valid_cases {
         let ctx = LintContext::new(case);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "Should not flag lists after headings in: {}",
-            case
-        );
+        assert!(result.is_empty(), "Should not flag lists after headings in: {}", case);
     }
 }
 
 #[test]
 fn test_allow_list_after_colon() {
     let rule = MD032BlanksAroundLists::default(); // Has allow_after_colons = true
-    
+
     // Test cases that should NOT be flagged with lenient settings
     let valid_cases = vec![
         "Here are the steps:\n1. First step\n2. Second step\n\nFollowing text",
@@ -365,18 +340,14 @@ fn test_allow_list_after_colon() {
     for case in valid_cases {
         let ctx = LintContext::new(case);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "Should not flag lists after colons in: {}",
-            case
-        );
+        assert!(result.is_empty(), "Should not flag lists after colons in: {}", case);
     }
 }
 
 #[test]
 fn test_strict_mode_flags_all() {
     let rule = MD032BlanksAroundLists::strict(); // All allowances disabled
-    
+
     // Even valid cases should be flagged in strict mode
     let cases = vec![
         "# Items to consider:\n* Item 1\n* Item 2\n\nMore text",
@@ -386,18 +357,14 @@ fn test_strict_mode_flags_all() {
     for case in cases {
         let ctx = LintContext::new(case);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            !result.is_empty(),
-            "Strict mode should flag lists in: {}",
-            case
-        );
+        assert!(!result.is_empty(), "Strict mode should flag lists in: {}", case);
     }
 }
 
 #[test]
 fn test_still_flags_inappropriate_cases() {
     let rule = MD032BlanksAroundLists::default();
-    
+
     // These should still be flagged even with lenient settings
     let invalid_cases = vec![
         "Some random text\n* Item 1\n* Item 2\n\nMore text", // No colon, not a heading
@@ -407,10 +374,6 @@ fn test_still_flags_inappropriate_cases() {
     for case in invalid_cases {
         let ctx = LintContext::new(case);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            !result.is_empty(),
-            "Should still flag inappropriate cases: {}",
-            case
-        );
+        assert!(!result.is_empty(), "Should still flag inappropriate cases: {}", case);
     }
 }

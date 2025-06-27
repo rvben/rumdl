@@ -179,10 +179,7 @@ fn test_nested_emphasis() {
     let content = "**This is *nested* emphasis**";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    println!(
-        "Nested emphasis test - expected 1 issue, found {} issues",
-        result.len()
-    );
+    println!("Nested emphasis test - expected 1 issue, found {} issues", result.len());
     for warning in &result {
         println!(
             "  Warning at line {}:{} - {}",
@@ -200,10 +197,7 @@ fn test_emphasis_in_lists() {
     let content = "- Item with *emphasis*\n- Item with **strong**";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    println!(
-        "\nValid list items - expected 0 issues, found {} issues",
-        result.len()
-    );
+    println!("\nValid list items - expected 0 issues, found {} issues", result.len());
     for warning in &result {
         println!(
             "  Warning at line {}:{} - {}",
@@ -215,10 +209,7 @@ fn test_emphasis_in_lists() {
     let content = "- Item with * emphasis *\n- Item with ** strong **";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    println!(
-        "\nInvalid list items - expected 1 issue, found {} issues",
-        result.len()
-    );
+    println!("\nInvalid list items - expected 1 issue, found {} issues", result.len());
     for warning in &result {
         println!(
             "  Warning at line {}:{} - {}",
@@ -369,9 +360,13 @@ fn test_false_positive_punctuation_after_emphasis() {
         }
 
         // These should have NO warnings as they are valid emphasis
-        assert_eq!(result.len(), 0,
+        assert_eq!(
+            result.len(),
+            0,
             "False positive detected in: '{}'. Found {} warnings when expecting 0",
-            content, result.len());
+            content,
+            result.len()
+        );
     }
 }
 
@@ -399,9 +394,13 @@ fn test_false_positive_nested_emphasis() {
         }
 
         // These should have NO warnings as they are valid nested emphasis
-        assert_eq!(result.len(), 0,
+        assert_eq!(
+            result.len(),
+            0,
             "False positive detected in nested emphasis: '{}'. Found {} warnings when expecting 0",
-            content, result.len());
+            content,
+            result.len()
+        );
     }
 }
 
@@ -429,9 +428,13 @@ fn test_false_positive_multiple_emphasis_same_line() {
         }
 
         // These should have NO warnings as they are valid multiple emphasis
-        assert_eq!(result.len(), 0,
+        assert_eq!(
+            result.len(),
+            0,
             "False positive detected in multiple emphasis: '{}'. Found {} warnings when expecting 0",
-            content, result.len());
+            content,
+            result.len()
+        );
     }
 }
 
@@ -460,9 +463,14 @@ fn test_true_positive_spaces_in_emphasis() {
         }
 
         // These should have warnings as they have actual spacing issues
-        assert_eq!(result.len(), expected_warnings,
+        assert_eq!(
+            result.len(),
+            expected_warnings,
             "Expected {} warnings for: '{}', but found {}",
-            expected_warnings, content, result.len());
+            expected_warnings,
+            content,
+            result.len()
+        );
     }
 }
 
@@ -483,7 +491,6 @@ fn test_emphasis_boundary_detection() {
         ("(*word*)", 0),
         ("[*word*]", 0),
         ("\"*word*\"", 0),
-
         // Invalid cases that SHOULD be flagged
         ("* word *", 1),
         ("*word *", 1),
@@ -494,15 +501,24 @@ fn test_emphasis_boundary_detection() {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
-        println!("Testing boundary case: '{}' - expected {}, got {}",
-                content, expected_warnings, result.len());
+        println!(
+            "Testing boundary case: '{}' - expected {}, got {}",
+            content,
+            expected_warnings,
+            result.len()
+        );
         for warning in &result {
             println!("  Warning: {}", warning.message);
         }
 
-        assert_eq!(result.len(), expected_warnings,
+        assert_eq!(
+            result.len(),
+            expected_warnings,
             "Boundary test failed for: '{}'. Expected {} warnings, got {}",
-            content, expected_warnings, result.len());
+            content,
+            expected_warnings,
+            result.len()
+        );
     }
 }
 
@@ -530,8 +546,12 @@ fn test_math_expressions_not_flagged() {
         }
 
         // Math expressions should not be flagged as emphasis issues
-        assert_eq!(result.len(), 0,
+        assert_eq!(
+            result.len(),
+            0,
             "Math expression incorrectly flagged: '{}'. Found {} warnings when expecting 0",
-            content, result.len());
+            content,
+            result.len()
+        );
     }
 }

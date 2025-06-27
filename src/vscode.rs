@@ -53,13 +53,13 @@ impl VsCodeExtension {
 
         // Fallback to finding the first available command
         let commands = ["code", "cursor", "windsurf"];
-        
+
         for cmd in &commands {
             if Self::command_exists(cmd) {
                 return Ok(cmd.to_string());
             }
         }
-        
+
         Err(format!(
             "VS Code (or compatible editor) not found. Please ensure one of the following commands is available: {}",
             commands.join(", ")
@@ -68,12 +68,8 @@ impl VsCodeExtension {
 
     /// Find all available VS Code-compatible editors
     pub fn find_all_editors() -> Vec<(&'static str, &'static str)> {
-        let editors = [
-            ("code", "VS Code"),
-            ("cursor", "Cursor"),
-            ("windsurf", "Windsurf"),
-        ];
-        
+        let editors = [("code", "VS Code"), ("cursor", "Cursor"), ("windsurf", "Windsurf")];
+
         editors
             .into_iter()
             .filter(|(cmd, _)| Self::command_exists(cmd))
@@ -119,7 +115,7 @@ impl VsCodeExtension {
         }
 
         println!("Installing {} extension...", EXTENSION_NAME.cyan());
-        
+
         let output = Command::new(&self.code_command)
             .args(&["--install-extension", EXTENSION_ID])
             .output()
@@ -127,12 +123,12 @@ impl VsCodeExtension {
 
         if output.status.success() {
             println!("{}", "✓ Successfully installed Rumdl VS Code extension!".green());
-            
+
             // Try to get the installed version
             if let Ok(version) = self.get_installed_version() {
                 println!("  Installed version: {}", version.cyan());
             }
-            
+
             Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -182,7 +178,7 @@ impl VsCodeExtension {
     pub fn show_status(&self) -> Result<(), String> {
         if self.is_installed()? {
             println!("{}", "✓ Rumdl VS Code extension is installed".green());
-            
+
             // Try to get version info
             if let Ok(version) = self.get_installed_version() {
                 println!("  Version: {}", version.dimmed());
@@ -197,7 +193,7 @@ impl VsCodeExtension {
 
 pub fn handle_vscode_command(force: bool, status: bool) -> Result<(), String> {
     let vscode = VsCodeExtension::new()?;
-    
+
     if status {
         vscode.show_status()
     } else {

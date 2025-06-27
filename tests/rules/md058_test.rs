@@ -83,12 +83,8 @@ Some text after the table.
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
-    assert!(result
-        .iter()
-        .any(|w| w.message == "Missing blank line before table"));
-    assert!(result
-        .iter()
-        .any(|w| w.message == "Missing blank line after table"));
+    assert!(result.iter().any(|w| w.message == "Missing blank line before table"));
+    assert!(result.iter().any(|w| w.message == "Missing blank line after table"));
 }
 
 #[test]

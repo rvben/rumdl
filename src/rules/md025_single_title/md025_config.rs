@@ -1,18 +1,18 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD025Config {
     #[serde(default = "default_level")]
     pub level: usize,
-    
+
     #[serde(default = "default_front_matter_title")]
     pub front_matter_title: String,
-    
+
     #[serde(default = "default_allow_document_sections")]
     pub allow_document_sections: bool,
-    
+
     #[serde(default = "default_allow_with_separators")]
     pub allow_with_separators: bool,
 }

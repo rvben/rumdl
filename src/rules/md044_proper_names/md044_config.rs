@@ -1,11 +1,11 @@
-use serde::{Deserialize, Serialize};
 use crate::rule_config_serde::RuleConfig;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MD044Config {
     #[serde(default)]
     pub names: Vec<String>,
-    
+
     #[serde(default = "default_code_blocks")]
     pub code_blocks: bool,
 }

@@ -76,10 +76,7 @@ fn create_test_content_legacy() -> String {
     // Add reference usages
     content.push_str("\n## Content with References\n\n");
     for i in 0..100 {
-        content.push_str(&format!(
-            "This is a paragraph with a [link][ref{}] reference.\n",
-            i
-        ));
+        content.push_str(&format!("This is a paragraph with a [link][ref{}] reference.\n", i));
     }
 
     content

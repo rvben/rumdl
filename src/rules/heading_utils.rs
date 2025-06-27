@@ -97,9 +97,7 @@ impl HeadingUtils {
                 let first_chars: Vec<char> = trimmed.chars().take(3).collect();
                 if first_chars.iter().all(|&c| c == '`' || c == '~') {
                     if let Some(current_fence) = fence_char {
-                        if first_chars[0] == current_fence
-                            && first_chars.iter().all(|&c| c == current_fence)
-                        {
+                        if first_chars[0] == current_fence && first_chars.iter().all(|&c| c == current_fence) {
                             in_code_block = false;
                             fence_char = None;
                         }
@@ -160,10 +158,7 @@ impl HeadingUtils {
         // Check for Setext style headings
         if line_num < lines.len() {
             let next_line = lines[line_num];
-            let line_indentation = line
-                .chars()
-                .take_while(|c| c.is_whitespace())
-                .collect::<String>();
+            let line_indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
 
             // Skip empty lines - don't consider them as potential Setext headings
             if line.trim().is_empty() {
@@ -237,12 +232,7 @@ impl HeadingUtils {
 
         match style {
             HeadingStyle::Atx => {
-                format!(
-                    "{}{} {}",
-                    indentation,
-                    "#".repeat(level as usize),
-                    text_content
-                )
+                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
             }
             HeadingStyle::AtxClosed => {
                 format!(
@@ -256,12 +246,7 @@ impl HeadingUtils {
             HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
                 if level > 2 {
                     // Fall back to ATX style for levels > 2
-                    format!(
-                        "{}{} {}",
-                        indentation,
-                        "#".repeat(level as usize),
-                        text_content
-                    )
+                    format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
                 } else {
                     let underline_char = if level == 1 || style == HeadingStyle::Setext1 {
                         '='
@@ -281,25 +266,16 @@ impl HeadingUtils {
             }
             HeadingStyle::Consistent => {
                 // For Consistent style, default to ATX as it's the most commonly used
-                format!(
-                    "{}{} {}",
-                    indentation,
-                    "#".repeat(level as usize),
-                    text_content
-                )
+                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
             }
         }
     }
 
     /// Get the text content of a heading line
     pub fn get_heading_text(line: &str) -> Option<String> {
-        ATX_PATTERN.captures(line).map(|captures| {
-            captures
-                .get(4)
-                .map_or("", |m| m.as_str())
-                .trim()
-                .to_string()
-        })
+        ATX_PATTERN
+            .captures(line)
+            .map(|captures| captures.get(4).map_or("", |m| m.as_str()).trim().to_string())
     }
 
     /// Detect emphasis-only lines
@@ -337,16 +313,10 @@ impl HeadingUtils {
     /// Convert emphasis to heading
     pub fn convert_emphasis_to_heading(line: &str) -> Option<String> {
         // Preserve the original indentation
-        let indentation = line
-            .chars()
-            .take_while(|c| c.is_whitespace())
-            .collect::<String>();
+        let indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
         // Preserve trailing spaces at the end of the line
         let trailing = if line.ends_with(" ") {
-            line.chars()
-                .rev()
-                .take_while(|c| c.is_whitespace())
-                .collect::<String>()
+            line.chars().rev().take_while(|c| c.is_whitespace()).collect::<String>()
         } else {
             String::new()
         };
@@ -522,20 +492,13 @@ pub fn extract_heading_text(lines: &[&str], index: usize) -> String {
 
     // Extract from ATX heading
     if let Some(captures) = ATX_PATTERN.captures(line) {
-        return captures
-            .get(4)
-            .map_or("", |m| m.as_str())
-            .trim()
-            .to_string();
+        return captures.get(4).map_or("", |m| m.as_str()).trim().to_string();
     }
 
     // Extract from setext heading
     if index < lines.len() - 1 {
         let next_line = lines[index + 1];
-        let line_indentation = line
-            .chars()
-            .take_while(|c| c.is_whitespace())
-            .collect::<String>();
+        let line_indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
 
         if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
             let underline_indent = captures.get(1).map_or("", |m| m.as_str());
@@ -589,9 +552,7 @@ pub fn remove_trailing_hashes(text: &str) -> String {
             .chars()
             .all(|c| c == '#' || c.is_whitespace())
         {
-            result = trimmed[..trimmed.rfind('#').unwrap()]
-                .trim_end()
-                .to_string();
+            result = trimmed[..trimmed.rfind('#').unwrap()].trim_end().to_string();
         }
     }
 
@@ -601,10 +562,7 @@ pub fn remove_trailing_hashes(text: &str) -> String {
 /// Normalize a heading to the specified level
 #[inline]
 pub fn normalize_heading(line: &str, level: u32) -> String {
-    let indentation = line
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .collect::<String>();
+    let indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
     let trimmed = line.trim_start();
 
     if trimmed.starts_with('#') {

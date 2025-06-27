@@ -13,10 +13,7 @@ fn test_missing_links() {
 
     // Create an existing file
     let exists_path = base_path.join("exists.md");
-    File::create(&exists_path)
-        .unwrap()
-        .write_all(b"# Test File")
-        .unwrap();
+    File::create(&exists_path).unwrap().write_all(b"# Test File").unwrap();
 
     // Create test content with both existing and missing links
     let content = r#"
@@ -158,10 +155,7 @@ fn test_complex_paths() {
 
     // Create some existing files
     let exists_path = nested_dir.join("exists.md");
-    File::create(&exists_path)
-        .unwrap()
-        .write_all(b"# Test File")
-        .unwrap();
+    File::create(&exists_path).unwrap().write_all(b"# Test File").unwrap();
 
     // Create test content with various path formats
     let content = r#"
@@ -185,9 +179,7 @@ fn test_complex_paths() {
 
     // Check for specific warnings
     let has_missing_nested = result.iter().any(|w| w.message.contains("docs/missing.md"));
-    let has_missing_dir = result
-        .iter()
-        .any(|w| w.message.contains("missing-dir/file.md"));
+    let has_missing_dir = result.iter().any(|w| w.message.contains("missing-dir/file.md"));
     let has_parent_dir = result.iter().any(|w| w.message.contains("../file.md"));
 
     assert!(has_missing_nested, "Missing warning for 'docs/missing.md'");
@@ -290,10 +282,7 @@ fn test_combined_links() {
 
     // Create an existing file and a missing file with fragments
     let exists_path = base_path.join("exists.md");
-    File::create(&exists_path)
-        .unwrap()
-        .write_all(b"# Test File")
-        .unwrap();
+    File::create(&exists_path).unwrap().write_all(b"# Test File").unwrap();
 
     // Create content with combined file and fragment links
     let content = r#"

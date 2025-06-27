@@ -4,7 +4,15 @@ use tempfile::TempDir;
 
 fn run_rumdl_check(dir: &Path) -> String {
     let output = std::process::Command::new("cargo")
-        .args(&["run", "--release", "--bin", "rumdl", "--", "check", dir.to_str().unwrap()])
+        .args(&[
+            "run",
+            "--release",
+            "--bin",
+            "rumdl",
+            "--",
+            "check",
+            dir.to_str().unwrap(),
+        ])
         .output()
         .expect("Failed to execute rumdl");
 
@@ -70,7 +78,7 @@ test-*.md
     fs::create_dir_all(dir_path.join("docs/sub")).unwrap();
     fs::write(dir_path.join("docs/readme.md"), bad_content).unwrap();
     fs::write(dir_path.join("docs/sub/guide.md"), bad_content).unwrap();
-    
+
     // This should NOT be ignored (negation pattern)
     fs::write(dir_path.join("docs/important.md"), bad_content).unwrap();
 
@@ -83,7 +91,7 @@ test-*.md
     // Should find issues only in normal.md and docs/important.md
     assert!(output.contains("normal.md"));
     assert!(output.contains("important.md"));
-    
+
     // Should not find issues in ignored files
     assert!(!output.contains("file.tmp.md"));
     assert!(!output.contains("test-file.md"));
