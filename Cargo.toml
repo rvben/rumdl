@@ -42,6 +42,12 @@ harness = false
 name = "range_utils_benchmark"
 harness = false
 
+[profile.release]
+lto = true           # Enable Link-Time Optimization
+strip = true         # Strip symbols from binary
+opt-level = "z"      # Optimize for size (alternative: "s" for small, "3" for speed)
+codegen-units = 1    # Better optimization but slower compile times
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 colored = "3.0.0"
