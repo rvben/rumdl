@@ -50,18 +50,22 @@ mod vscode_tests {
         let original = std::env::var("TERM_PROGRAM").ok();
 
         // Test with VS Code
-        std::env::set_var("TERM_PROGRAM", "vscode");
+        unsafe {
+            std::env::set_var("TERM_PROGRAM", "vscode");
+        }
         let _result = VsCodeExtension::current_editor_from_env();
         // Result depends on whether VS Code is actually installed
 
         // Test with unknown terminal
-        std::env::set_var("TERM_PROGRAM", "unknown");
+        unsafe {
+            std::env::set_var("TERM_PROGRAM", "unknown");
+        }
         assert!(VsCodeExtension::current_editor_from_env().is_none());
 
         // Restore original
         match original {
-            Some(val) => std::env::set_var("TERM_PROGRAM", val),
-            None => std::env::remove_var("TERM_PROGRAM"),
+            Some(val) => unsafe { std::env::set_var("TERM_PROGRAM", val) },
+            None => unsafe { std::env::remove_var("TERM_PROGRAM") },
         }
     }
 
