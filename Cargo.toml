@@ -1,7 +1,7 @@
 [package]
 name = "rumdl"
 version = "0.0.87"
-edition = "2021"
+edition = "2024"
 rust-version = "1.87.0"
 description = "A fast Markdown linter written in Rust (Ru(st) MarkDown Linter)"
 authors = ["Ruben J. Jongejan <ruben.jongejan@gmail.com>"]
@@ -52,7 +52,6 @@ codegen-units = 1    # Better optimization but slower compile times
 clap = { version = "4.5", features = ["derive"] }
 colored = "3.0.0"
 fancy-regex = "0.14.0"
-glob = "0.3.2"
 ignore = "0.4.23"
 itertools = "0.14"
 lazy_static = "1.5.0"
@@ -98,7 +97,6 @@ structure_preprocessing = []
 assert_cmd = "2.0.17"
 predicates = "3.1.3"
 tempfile = "3.19.1"
-glob = "0.3.2"
 proptest = "1.6.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 rand = "0.9.1"

@@ -1191,6 +1191,16 @@ build-backend = \"setuptools.build_meta\"
                                         toml::Value::Boolean(final_config.global.respect_gitignore),
                                         sourced.global.respect_gitignore.source,
                                     )),
+                                    "output-format" | "output_format" => {
+                                        if let Some(ref output_format) = final_config.global.output_format {
+                                            Some((
+                                                toml::Value::String(output_format.clone()),
+                                                sourced.global.output_format.as_ref().map(|v| v.source).unwrap_or(ConfigSource::Default),
+                                            ))
+                                        } else {
+                                            None
+                                        }
+                                    }
                                     _ => None,
                                 };
 
@@ -2224,13 +2234,17 @@ fn process_file_inner(
     let lint_start = Instant::now();
     // Set the environment variable for the file path
     // This allows rules like MD057 to know which file is being processed
-    std::env::set_var("RUMDL_FILE_PATH", file_path);
+    unsafe {
+        std::env::set_var("RUMDL_FILE_PATH", file_path);
+    }
 
     // Use the standard lint function
     let warnings_result = rumdl::lint(&content, rules, verbose);
 
     // Clear the environment variable after processing
-    std::env::remove_var("RUMDL_FILE_PATH");
+    unsafe {
+        std::env::remove_var("RUMDL_FILE_PATH");
+    }
 
     // Combine all warnings
     let mut all_warnings = warnings_result.unwrap_or_default();
@@ -2355,9 +2369,13 @@ fn process_file_collect_warnings(
         }
     };
 
-    std::env::set_var("RUMDL_FILE_PATH", file_path);
+    unsafe {
+        std::env::set_var("RUMDL_FILE_PATH", file_path);
+    }
     let warnings_result = rumdl::lint(&content, rules, verbose);
-    std::env::remove_var("RUMDL_FILE_PATH");
+    unsafe {
+        std::env::remove_var("RUMDL_FILE_PATH");
+    }
     let mut all_warnings = warnings_result.unwrap_or_default();
     all_warnings.sort_by(|a, b| {
         if a.line == b.line {
