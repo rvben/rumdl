@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.88] - 2025-06-28
+
+### Added
+- 11 new output formatters for enhanced compatibility:
+  - `grouped` - Groups violations by file
+  - `pylint` - Pylint-compatible format
+  - `azure` - Azure Pipeline logging format
+  - `concise` - Minimal file:line:col format
+  - `github` - GitHub Actions annotation format
+  - `gitlab` - GitLab Code Quality report format
+  - `json` - Machine-readable JSON format
+  - `json_lines` - JSONL format (one JSON object per line)
+  - `junit` - JUnit XML format for CI integration
+  - `sarif` - SARIF format for security tools
+  - `text` - Default human-readable format with colors
+
+### Changed
+- **BREAKING**: Upgraded to Rust 2024 edition (requires Rust 1.87.0+)
+- Improved code quality by fixing all 283 clippy warnings
+
+### Fixed
+- Config `output_format` field now properly merges from configuration files
+- Pylint formatter now outputs correct `CMD` codes instead of generic `C` codes
+
+### Optimized
+- Removed unused dependencies (`glob`, `walkdir`)
+- Reduced binary size with aggressive compilation flags (LTO, strip, opt-level=z)
+- Improved performance through better regex compilation and caching
+
 ## [0.0.87] - 2025-06-16
 
 ## [0.0.86] - 2025-06-14
