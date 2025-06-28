@@ -247,6 +247,7 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `--respect-gitignore`: Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)
 - `-v, --verbose`: Show detailed output
 - `--profile`: Show profiling information
+- `--statistics`: Show rule violation statistics summary
 - `-q, --quiet`: Quiet mode
 - `-o, --output <format>`: Output format: `text` (default) or `json`
 - `--stdin`: Read from stdin instead of files
@@ -362,6 +363,9 @@ echo "# My Heading" | rumdl check --stdin
 
 # Get JSON output for integration with other tools
 rumdl check --output json README.md
+
+# Show statistics summary of rule violations
+rumdl check --statistics .
 
 # Disable colors in output
 rumdl check --color never README.md

@@ -280,6 +280,10 @@ struct CheckArgs {
     #[arg(long)]
     profile: bool,
 
+    /// Show statistics summary of rule violations
+    #[arg(long)]
+    statistics: bool,
+
     /// Quiet mode
     #[arg(short, long)]
     quiet: bool,
@@ -1672,6 +1676,7 @@ build-backend = \"setuptools.build_meta\"
                         respect_gitignore: cli.respect_gitignore,
                         verbose: cli.verbose,
                         profile: cli.profile,
+                        statistics: false, // Default to false for legacy mode
                         quiet: cli.quiet,
                         output: "text".to_string(),
                         output_format: None,
@@ -1968,6 +1973,9 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     // Choose processing strategy based on file count and fix mode
     let use_parallel = file_paths.len() > 1 && !args._fix; // Don't parallelize fixes due to file I/O conflicts
 
+    // Collect all warnings for statistics if requested
+    let mut all_warnings_for_stats = Vec::new();
+    
     let (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed) =
         if use_parallel {
             // Parallel processing for multiple files without fixes
@@ -1996,7 +2004,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
             let mut total_fixable_issues = 0;
             let total_files_processed = results.len();
 
-            for (file_has_issues, issues_found, issues_fixed, fixable_issues) in results {
+            for (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings) in results {
                 total_issues_fixed += issues_fixed;
                 total_fixable_issues += fixable_issues;
 
@@ -2004,6 +2012,10 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
                     has_issues = true;
                     files_with_issues += 1;
                     total_issues += issues_found;
+                }
+                
+                if args.statistics {
+                    all_warnings_for_stats.extend(warnings);
                 }
             }
 
@@ -2025,7 +2037,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
             let mut total_files_processed = 0;
 
             for file_path in &file_paths {
-                let (file_has_issues, issues_found, issues_fixed, fixable_issues) = process_file_with_formatter(
+                let (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings) = process_file_with_formatter(
                     file_path,
                     &enabled_rules,
                     args._fix,
@@ -2043,6 +2055,10 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
                     has_issues = true;
                     files_with_issues += 1;
                     total_issues += issues_found;
+                }
+                
+                if args.statistics {
+                    all_warnings_for_stats.extend(warnings);
                 }
             }
 
@@ -2073,6 +2089,11 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
         });
     }
 
+    // Print statistics if enabled and not in quiet mode
+    if args.statistics && !quiet && !all_warnings_for_stats.is_empty() {
+        print_statistics(&all_warnings_for_stats);
+    }
+    
     // Print profiling information if enabled and not in quiet mode
     if args.profile && !quiet {
         match std::panic::catch_unwind(rumdl::profiling::get_report) {
@@ -2091,6 +2112,59 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     }
 }
 
+// Print statistics summary
+fn print_statistics(warnings: &[rumdl::rule::LintWarning]) {
+    use std::collections::HashMap;
+    
+    // Group warnings by rule name
+    let mut rule_counts: HashMap<&str, usize> = HashMap::new();
+    let mut fixable_counts: HashMap<&str, usize> = HashMap::new();
+    
+    for warning in warnings {
+        let rule_name = warning.rule_name.unwrap_or("unknown");
+        *rule_counts.entry(rule_name).or_insert(0) += 1;
+        
+        if warning.fix.is_some() {
+            *fixable_counts.entry(rule_name).or_insert(0) += 1;
+        }
+    }
+    
+    // Sort rules by count (descending)
+    let mut sorted_rules: Vec<_> = rule_counts.iter().collect();
+    sorted_rules.sort_by(|a, b| b.1.cmp(a.1));
+    
+    println!("\n{}", "Rule Violation Statistics:".bold().underline());
+    println!("{:<8} {:<12} {:<8} {}", "Rule", "Violations", "Fixable", "Percentage");
+    println!("{}", "-".repeat(50));
+    
+    let total_warnings = warnings.len();
+    for (rule, count) in sorted_rules {
+        let fixable = fixable_counts.get(rule).unwrap_or(&0);
+        let percentage = (*count as f64 / total_warnings as f64) * 100.0;
+        
+        println!(
+            "{:<8} {:<12} {:<8} {:>6.1}%",
+            rule,
+            count,
+            if *fixable > 0 { 
+                format!("{}", fixable) 
+            } else { 
+                "-".to_string() 
+            },
+            percentage
+        );
+    }
+    
+    println!("{}", "-".repeat(50));
+    println!(
+        "{:<8} {:<12} {:<8} {:>6.1}%",
+        "Total",
+        total_warnings,
+        fixable_counts.values().sum::<usize>(),
+        100.0
+    );
+}
+
 // Process file with output formatter
 fn process_file_with_formatter(
     file_path: &str,
@@ -2100,7 +2174,7 @@ fn process_file_with_formatter(
     quiet: bool,
     output_format: &rumdl::output::OutputFormat,
     output_writer: &rumdl::output::OutputWriter,
-) -> (bool, usize, usize, usize) {
+) -> (bool, usize, usize, usize, Vec<rumdl::rule::LintWarning>) {
     let formatter = output_format.create_formatter();
 
     // Call the original process_file_inner to get warnings
@@ -2108,7 +2182,7 @@ fn process_file_with_formatter(
         process_file_inner(file_path, rules, verbose, quiet);
 
     if total_warnings == 0 {
-        return (false, 0, 0, 0);
+        return (false, 0, 0, 0, Vec::new());
     }
 
     // Format and output warnings
@@ -2175,7 +2249,7 @@ fn process_file_with_formatter(
         }
     }
 
-    (true, total_warnings, warnings_fixed, fixable_warnings)
+    (true, total_warnings, warnings_fixed, fixable_warnings, all_warnings)
 }
 
 
