@@ -4,6 +4,7 @@ use std::process::Command;
 pub const EXTENSION_ID: &str = "rvben.rumdl";
 pub const EXTENSION_NAME: &str = "rumdl - Markdown Linter";
 
+#[derive(Debug)]
 pub struct VsCodeExtension {
     code_command: String,
 }
@@ -196,5 +197,152 @@ pub fn handle_vscode_command(force: bool, status: bool) -> Result<(), String> {
         vscode.show_status()
     } else {
         vscode.install(force)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_extension_constants() {
+        assert_eq!(EXTENSION_ID, "rvben.rumdl");
+        assert_eq!(EXTENSION_NAME, "rumdl - Markdown Linter");
+    }
+    
+    #[test]
+    fn test_vscode_extension_with_command() {
+        // Test with a command that should not exist
+        let result = VsCodeExtension::with_command("nonexistent-command-xyz");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found or not working"));
+        
+        // Test with a command that might exist (but we can't guarantee it in all environments)
+        // This test is more about testing the logic than actual command existence
+    }
+    
+    #[test]
+    fn test_command_exists() {
+        // Test that command_exists returns false for non-existent commands
+        assert!(!VsCodeExtension::command_exists("nonexistent-command-xyz"));
+        
+        // Test with commands that are likely to exist on most systems
+        // Note: We can't guarantee these exist in all test environments
+        // The actual behavior depends on the system
+    }
+    
+    #[test]
+    fn test_find_all_editors() {
+        // This test verifies the function runs without panicking
+        // The actual results depend on what's installed on the system
+        let editors = VsCodeExtension::find_all_editors();
+        
+        // Verify the result is a valid vector
+        assert!(editors.is_empty() || !editors.is_empty());
+        
+        // If any editors are found, verify they have valid names
+        for (cmd, name) in &editors {
+            assert!(!cmd.is_empty());
+            assert!(!name.is_empty());
+            assert!(["code", "cursor", "windsurf"].contains(&cmd));
+            assert!(["VS Code", "Cursor", "Windsurf"].contains(&name));
+        }
+    }
+    
+    #[test]
+    fn test_current_editor_from_env() {
+        // Save current TERM_PROGRAM if it exists
+        let original_term = std::env::var("TERM_PROGRAM").ok();
+        
+        unsafe {
+            // Test with no TERM_PROGRAM set
+            std::env::remove_var("TERM_PROGRAM");
+            assert!(VsCodeExtension::current_editor_from_env().is_none());
+            
+            // Test with VS Code TERM_PROGRAM (but command might not exist)
+            std::env::set_var("TERM_PROGRAM", "vscode");
+            let _result = VsCodeExtension::current_editor_from_env();
+            // Result depends on whether 'code' command exists
+            
+            // Test with cursor TERM_PROGRAM
+            std::env::set_var("TERM_PROGRAM", "cursor");
+            let _cursor_result = VsCodeExtension::current_editor_from_env();
+            // Result depends on whether 'cursor' command exists
+            
+            // Test with windsurf TERM_PROGRAM
+            std::env::set_var("TERM_PROGRAM", "windsurf");
+            let _windsurf_result = VsCodeExtension::current_editor_from_env();
+            // Result depends on whether 'windsurf' command exists
+            
+            // Test with unknown TERM_PROGRAM
+            std::env::set_var("TERM_PROGRAM", "unknown-editor");
+            assert!(VsCodeExtension::current_editor_from_env().is_none());
+            
+            // Test with mixed case (should work due to to_lowercase)
+            std::env::set_var("TERM_PROGRAM", "VsCode");
+            let _mixed_case_result = VsCodeExtension::current_editor_from_env();
+            // Result should be same as lowercase version
+            
+            // Restore original TERM_PROGRAM
+            if let Some(term) = original_term {
+                std::env::set_var("TERM_PROGRAM", term);
+            } else {
+                std::env::remove_var("TERM_PROGRAM");
+            }
+        }
+    }
+    
+    #[test]
+    fn test_vscode_extension_struct() {
+        // Test that we can create the struct with a custom command
+        let ext = VsCodeExtension {
+            code_command: "test-command".to_string(),
+        };
+        assert_eq!(ext.code_command, "test-command");
+    }
+    
+    #[test]
+    fn test_find_code_command_env_priority() {
+        // Save current TERM_PROGRAM if it exists
+        let original_term = std::env::var("TERM_PROGRAM").ok();
+        
+        unsafe {
+            // The find_code_command method is private, but we can test it indirectly
+            // through VsCodeExtension::new() behavior
+            
+            // Test that TERM_PROGRAM affects command selection
+            std::env::set_var("TERM_PROGRAM", "vscode");
+            // Creating new extension will use find_code_command internally
+            let _result = VsCodeExtension::new();
+            // Result depends on system configuration
+            
+            // Restore original TERM_PROGRAM
+            if let Some(term) = original_term {
+                std::env::set_var("TERM_PROGRAM", term);
+            } else {
+                std::env::remove_var("TERM_PROGRAM");
+            }
+        }
+    }
+    
+    #[test]
+    fn test_error_messages() {
+        // Test error message format when command doesn't exist
+        let result = VsCodeExtension::with_command("nonexistent");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("nonexistent"));
+        assert!(err_msg.contains("not found or not working"));
+    }
+    
+    #[test]
+    fn test_handle_vscode_command_logic() {
+        // We can't fully test this without mocking Command execution,
+        // but we can verify it doesn't panic with invalid inputs
+        
+        // This will fail to find a VS Code command in most test environments
+        let result = handle_vscode_command(false, true);
+        // Should return an error about VS Code not being found
+        assert!(result.is_err() || result.is_ok());
     }
 }

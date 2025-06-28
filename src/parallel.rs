@@ -166,6 +166,19 @@ mod tests {
         let config = ParallelConfig::default();
         assert!(config.enabled);
         assert_eq!(config.min_file_count, 2);
+        assert!(config.thread_count.is_none());
+    }
+
+    #[test]
+    fn test_parallel_config_custom() {
+        let config = ParallelConfig {
+            enabled: false,
+            thread_count: Some(4),
+            min_file_count: 5,
+        };
+        assert!(!config.enabled);
+        assert_eq!(config.thread_count, Some(4));
+        assert_eq!(config.min_file_count, 5);
     }
 
     #[test]
@@ -182,6 +195,23 @@ mod tests {
             ("test2.md".to_string(), "# Test 2".to_string()),
         ];
         assert!(processor.should_use_parallel(&multiple_files));
+
+        // Test with disabled parallel
+        let disabled_config = ParallelConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        let disabled_processor = FileParallelProcessor::new(disabled_config);
+        assert!(!disabled_processor.should_use_parallel(&multiple_files));
+
+        // Test with high min_file_count
+        let high_threshold_config = ParallelConfig {
+            enabled: true,
+            min_file_count: 10,
+            ..Default::default()
+        };
+        let high_threshold_processor = FileParallelProcessor::new(high_threshold_config);
+        assert!(!high_threshold_processor.should_use_parallel(&multiple_files));
     }
 
     #[test]
@@ -201,6 +231,231 @@ mod tests {
         // Verify all results are Ok
         for (_, result) in results {
             assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_empty_files_handling() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+        let processor = FileParallelProcessor::with_default_config();
+
+        let empty_files: Vec<(String, String)> = vec![];
+        let results = processor.process_files(&empty_files, &rules).unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_large_file_count() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+        let processor = FileParallelProcessor::with_default_config();
+
+        // Create many files to test parallel processing scalability
+        let test_files: Vec<(String, String)> = (0..100)
+            .map(|i| (
+                format!("test{}.md", i),
+                format!("# Test {}\n\nContent with trailing spaces   \n", i)
+            ))
+            .collect();
+
+        let results = processor.process_files(&test_files, &rules).unwrap();
+        assert_eq!(results.len(), 100);
+
+        // Verify all results are Ok and have expected warnings
+        for (path, result) in &results {
+            assert!(result.is_ok(), "Failed processing {}", path);
+            let warnings = result.as_ref().unwrap();
+            // Should have at least one warning for trailing spaces
+            assert!(!warnings.is_empty(), "Expected warnings for {}", path);
+        }
+    }
+
+    #[test]
+    fn test_error_propagation() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+        let processor = FileParallelProcessor::with_default_config();
+
+        // Include files with various edge cases that might trigger errors
+        let test_files = vec![
+            ("empty.md".to_string(), "".to_string()),
+            ("unicode.md".to_string(), "# 测试标题\n\n这是中文内容。".to_string()),
+            ("emoji.md".to_string(), "# Title with 🚀 emoji\n\n🎉 Content!".to_string()),
+            ("very_long_line.md".to_string(), "a".repeat(10000)), // Very long single line
+            ("many_lines.md".to_string(), "Line\n".repeat(10000)), // Many lines
+        ];
+
+        let results = processor.process_files(&test_files, &rules).unwrap();
+        assert_eq!(results.len(), 5);
+
+        // All should process successfully even with edge cases
+        for (path, result) in &results {
+            assert!(result.is_ok(), "Failed processing {}", path);
+        }
+    }
+
+    #[test]
+    fn test_thread_count_configuration() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+
+        // Test with specific thread count
+        let parallel_config = ParallelConfig {
+            enabled: true,
+            thread_count: Some(2),
+            min_file_count: 2,
+        };
+        let processor = FileParallelProcessor::new(parallel_config);
+
+        let test_files = vec![
+            ("test1.md".to_string(), "# Test 1".to_string()),
+            ("test2.md".to_string(), "# Test 2".to_string()),
+            ("test3.md".to_string(), "# Test 3".to_string()),
+            ("test4.md".to_string(), "# Test 4".to_string()),
+        ];
+
+        let results = processor.process_files(&test_files, &rules).unwrap();
+        assert_eq!(results.len(), 4);
+    }
+
+    #[test]
+    fn test_result_ordering_preservation() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+        let processor = FileParallelProcessor::with_default_config();
+
+        let test_files: Vec<(String, String)> = (0..20)
+            .map(|i| (format!("test{:02}.md", i), format!("# Test {}", i)))
+            .collect();
+
+        let results = processor.process_files(&test_files, &rules).unwrap();
+
+        // Verify results maintain the same order as input
+        for (i, (path, _)) in results.iter().enumerate() {
+            assert_eq!(path, &format!("test{:02}.md", i));
+        }
+    }
+
+    #[test]
+    fn test_concurrent_rule_execution_safety() {
+        // This test ensures rules can be safely executed concurrently
+        let config = Config::default();
+        let rules = all_rules(&config);
+        let processor = FileParallelProcessor::with_default_config();
+
+        // Create files that will trigger the same rules
+        let test_files: Vec<(String, String)> = (0..10)
+            .map(|i| (
+                format!("test{}.md", i),
+                "# Heading\n\n- List item\n- Another item\n\n[link](url)\n`code`".to_string()
+            ))
+            .collect();
+
+        let results = processor.process_files(&test_files, &rules).unwrap();
+        assert_eq!(results.len(), 10);
+
+        // All files should produce the same warnings
+        let first_warnings = &results[0].1.as_ref().unwrap();
+        for (_, result) in results.iter().skip(1) {
+            let warnings = result.as_ref().unwrap();
+            assert_eq!(warnings.len(), first_warnings.len());
+        }
+    }
+
+    #[test]
+    fn test_performance_comparison() {
+        let seq_time = std::time::Duration::from_millis(1000);
+        let par_time = std::time::Duration::from_millis(400);
+        
+        let comparison = ParallelPerformanceComparison::new(seq_time, par_time);
+        
+        assert_eq!(comparison.sequential_time, seq_time);
+        assert_eq!(comparison.parallel_time, par_time);
+        assert!((comparison.speedup_factor - 2.5).abs() < 0.01);
+        assert_eq!(comparison.parallel_overhead, std::time::Duration::ZERO);
+    }
+
+    #[test]
+    fn test_performance_comparison_with_overhead() {
+        let seq_time = std::time::Duration::from_millis(100);
+        let par_time = std::time::Duration::from_millis(150);
+        
+        let comparison = ParallelPerformanceComparison::new(seq_time, par_time);
+        
+        assert!((comparison.speedup_factor - 0.667).abs() < 0.01);
+        assert_eq!(comparison.parallel_overhead, std::time::Duration::from_millis(50));
+    }
+
+    #[test]
+    fn test_fallback_to_sequential() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+        
+        // Force sequential processing
+        let sequential_config = ParallelConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        let processor = FileParallelProcessor::new(sequential_config);
+
+        let test_files = vec![
+            ("test1.md".to_string(), "# Test 1".to_string()),
+            ("test2.md".to_string(), "# Test 2".to_string()),
+        ];
+
+        let results = processor.process_files(&test_files, &rules).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_mixed_content_types() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+        let processor = FileParallelProcessor::with_default_config();
+
+        let test_files = vec![
+            ("plain.md".to_string(), "Just plain text".to_string()),
+            ("code.md".to_string(), "```rust\nfn main() {}\n```".to_string()),
+            ("table.md".to_string(), "| A | B |\n|---|---|\n| 1 | 2 |".to_string()),
+            ("front_matter.md".to_string(), "---\ntitle: Test\n---\n# Content".to_string()),
+        ];
+
+        let results = processor.process_files(&test_files, &rules).unwrap();
+        assert_eq!(results.len(), 4);
+        
+        for (_, result) in results {
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_deterministic_results() {
+        // Ensure parallel processing produces the same results every time
+        let config = Config::default();
+        let rules = all_rules(&config);
+        let processor = FileParallelProcessor::with_default_config();
+
+        let test_files: Vec<(String, String)> = (0..10)
+            .map(|i| (
+                format!("test{}.md", i),
+                format!("# Heading {}\n\nTrailing spaces   \n", i)
+            ))
+            .collect();
+
+        // Run multiple times
+        let results1 = processor.process_files(&test_files, &rules).unwrap();
+        let results2 = processor.process_files(&test_files, &rules).unwrap();
+        let results3 = processor.process_files(&test_files, &rules).unwrap();
+
+        // Compare warning counts for each file
+        for i in 0..test_files.len() {
+            let warnings1 = results1[i].1.as_ref().unwrap();
+            let warnings2 = results2[i].1.as_ref().unwrap();
+            let warnings3 = results3[i].1.as_ref().unwrap();
+            
+            assert_eq!(warnings1.len(), warnings2.len());
+            assert_eq!(warnings2.len(), warnings3.len());
         }
     }
 }

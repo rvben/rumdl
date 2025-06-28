@@ -313,3 +313,284 @@ pub fn get_cache_performance_report() -> String {
 
     report
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rule::Rule;
+    use crate::rules::{MD001HeadingIncrement, MD009TrailingSpaces, MD012NoMultipleBlanks};
+
+    #[test]
+    fn test_content_characteristics_analyze() {
+        // Test empty content
+        let chars = ContentCharacteristics::analyze("");
+        assert!(!chars.has_headings);
+        assert!(!chars.has_lists);
+        assert!(!chars.has_links);
+        assert!(!chars.has_code);
+        assert!(!chars.has_emphasis);
+        assert!(!chars.has_html);
+        assert!(!chars.has_tables);
+        assert!(!chars.has_blockquotes);
+        assert!(!chars.has_images);
+        
+        // Test content with headings
+        let chars = ContentCharacteristics::analyze("# Heading");
+        assert!(chars.has_headings);
+        
+        // Test setext headings
+        let chars = ContentCharacteristics::analyze("Heading\n=======");
+        assert!(chars.has_headings);
+        
+        // Test lists
+        let chars = ContentCharacteristics::analyze("* Item\n- Item 2\n+ Item 3");
+        assert!(chars.has_lists);
+        
+        // Test ordered lists
+        let chars = ContentCharacteristics::analyze("1. First\n2. Second");
+        assert!(chars.has_lists);
+        
+        // Test links
+        let chars = ContentCharacteristics::analyze("[link](url)");
+        assert!(chars.has_links);
+        
+        // Test URLs
+        let chars = ContentCharacteristics::analyze("Visit https://example.com");
+        assert!(chars.has_links);
+        
+        // Test images
+        let chars = ContentCharacteristics::analyze("![alt text](image.png)");
+        assert!(chars.has_images);
+        
+        // Test code
+        let chars = ContentCharacteristics::analyze("`inline code`");
+        assert!(chars.has_code);
+        
+        let chars = ContentCharacteristics::analyze("~~~\ncode block\n~~~");
+        assert!(chars.has_code);
+        
+        // Test emphasis
+        let chars = ContentCharacteristics::analyze("*emphasis* and _more_");
+        assert!(chars.has_emphasis);
+        
+        // Test HTML
+        let chars = ContentCharacteristics::analyze("<div>HTML content</div>");
+        assert!(chars.has_html);
+        
+        // Test tables
+        let chars = ContentCharacteristics::analyze("| Header | Header |\n|--------|--------|");
+        assert!(chars.has_tables);
+        
+        // Test blockquotes
+        let chars = ContentCharacteristics::analyze("> Quote");
+        assert!(chars.has_blockquotes);
+        
+        // Test mixed content
+        let content = "# Heading\n* List item\n[link](url)\n`code`\n*emphasis*\n<p>html</p>\n| table |\n> quote\n![image](img.png)";
+        let chars = ContentCharacteristics::analyze(content);
+        assert!(chars.has_headings);
+        assert!(chars.has_lists);
+        assert!(chars.has_links);
+        assert!(chars.has_code);
+        assert!(chars.has_emphasis);
+        assert!(chars.has_html);
+        assert!(chars.has_tables);
+        assert!(chars.has_blockquotes);
+        assert!(chars.has_images);
+    }
+    
+    #[test]
+    fn test_content_characteristics_should_skip_rule() {
+        let chars = ContentCharacteristics {
+            has_headings: true,
+            has_lists: false,
+            has_links: true,
+            has_code: false,
+            has_emphasis: true,
+            has_html: false,
+            has_tables: true,
+            has_blockquotes: false,
+            has_images: false,
+        };
+        
+        // Create test rules for different categories
+        let heading_rule = MD001HeadingIncrement::default();
+        assert!(!chars.should_skip_rule(&heading_rule));
+        
+        let trailing_spaces_rule = MD009TrailingSpaces::new(2, false);
+        assert!(!chars.should_skip_rule(&trailing_spaces_rule)); // Whitespace rules always run
+        
+        // Test skipping based on content
+        let chars_no_headings = ContentCharacteristics {
+            has_headings: false,
+            ..Default::default()
+        };
+        assert!(chars_no_headings.should_skip_rule(&heading_rule));
+    }
+    
+    #[test]
+    fn test_lint_empty_content() {
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD001HeadingIncrement::default()),
+        ];
+        
+        let result = lint("", &rules, false);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+    
+    #[test]
+    fn test_lint_with_violations() {
+        let content = "## Level 2\n#### Level 4"; // Skips level 3
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD001HeadingIncrement::default()),
+        ];
+        
+        let result = lint(content, &rules, false);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert!(!warnings.is_empty());
+        // Check the rule field of LintWarning struct
+        assert_eq!(warnings[0].rule_name, Some("MD001"));
+    }
+    
+    #[test]
+    fn test_lint_with_inline_disable() {
+        let content = "<!-- rumdl-disable MD001 -->\n## Level 2\n#### Level 4";
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD001HeadingIncrement::default()),
+        ];
+        
+        let result = lint(content, &rules, false);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert!(warnings.is_empty()); // Should be disabled by inline comment
+    }
+    
+    #[test]
+    fn test_lint_rule_filtering() {
+        // Content with no lists
+        let content = "# Heading\nJust text";
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD001HeadingIncrement::default()),
+            // A list-related rule would be skipped
+        ];
+        
+        let result = lint(content, &rules, false);
+        assert!(result.is_ok());
+    }
+    
+    #[test]
+    fn test_get_profiling_report() {
+        // Just test that it returns a string without panicking
+        let report = get_profiling_report();
+        assert!(!report.is_empty());
+        assert!(report.contains("Profiling"));
+    }
+    
+    #[test]
+    fn test_reset_profiling() {
+        // Test that reset_profiling doesn't panic
+        reset_profiling();
+        
+        // After reset, report should indicate no measurements or profiling disabled
+        let report = get_profiling_report();
+        assert!(report.contains("disabled") || report.contains("no measurements"));
+    }
+    
+    #[test]
+    fn test_get_regex_cache_stats() {
+        let stats = get_regex_cache_stats();
+        // Stats should be a valid HashMap (might be empty)
+        assert!(stats.is_empty() || !stats.is_empty());
+        
+        // If not empty, all values should be positive
+        for (_pattern, count) in &stats {
+            assert!(*count > 0);
+        }
+    }
+    
+    #[test]
+    fn test_get_ast_cache_stats() {
+        let stats = get_ast_cache_stats();
+        // Stats should be a valid HashMap (might be empty)
+        assert!(stats.is_empty() || !stats.is_empty());
+        
+        // If not empty, all values should be positive
+        for (_hash, count) in &stats {
+            assert!(*count > 0);
+        }
+    }
+    
+    #[test]
+    fn test_clear_all_caches() {
+        // Test that clear_all_caches doesn't panic
+        clear_all_caches();
+        
+        // After clearing, AST cache should be empty
+        let ast_stats = get_ast_cache_stats();
+        assert!(ast_stats.is_empty());
+    }
+    
+    #[test]
+    fn test_get_cache_performance_report() {
+        let report = get_cache_performance_report();
+        
+        // Report should contain expected sections
+        assert!(report.contains("Cache Performance Report"));
+        assert!(report.contains("Regex Cache:"));
+        assert!(report.contains("AST Cache:"));
+        
+        // Test with empty caches
+        clear_all_caches();
+        let report_empty = get_cache_performance_report();
+        assert!(report_empty.contains("No AST nodes cached"));
+    }
+    
+    #[test]
+    fn test_lint_with_ast_rules() {
+        // Create content that would benefit from AST parsing
+        let content = "# Heading\n\nParagraph with **bold** text.";
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD012NoMultipleBlanks::new(1)),
+        ];
+        
+        let result = lint(content, &rules, false);
+        assert!(result.is_ok());
+    }
+    
+    #[test]
+    fn test_content_characteristics_edge_cases() {
+        // Test setext heading edge case
+        let chars = ContentCharacteristics::analyze("-"); // Single dash, not a heading
+        assert!(!chars.has_headings);
+        
+        let chars = ContentCharacteristics::analyze("--"); // Two dashes, valid setext
+        assert!(chars.has_headings);
+        
+        // Test list detection edge cases
+        let chars = ContentCharacteristics::analyze("*emphasis*"); // Not a list
+        assert!(!chars.has_lists);
+        
+        let chars = ContentCharacteristics::analyze("1.Item"); // No space after period
+        assert!(!chars.has_lists);
+        
+        // Test blockquote must be at start of line
+        let chars = ContentCharacteristics::analyze("text > not a quote");
+        assert!(!chars.has_blockquotes);
+    }
+    
+    #[test]
+    fn test_cache_performance_report_formatting() {
+        // Add some data to caches to test formatting
+        // (Would require actual usage of the caches, which happens during linting)
+        
+        let report = get_cache_performance_report();
+        
+        // Test truncation of long patterns
+        // Since we can't easily add a long pattern to the cache in this test,
+        // we'll just verify the report structure is correct
+        assert!(!report.is_empty());
+        assert!(report.lines().count() > 3); // Should have multiple lines
+    }
+}

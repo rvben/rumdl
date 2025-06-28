@@ -532,9 +532,9 @@ impl Rule for MD034NoBareUrls {
         }
 
         // Get all warnings first - only fix URLs that are actually flagged
-        // Use AST-based detection to match the main linting path (since uses_ast() returns true)
-        let ast = crate::utils::ast_utils::get_cached_ast(content);
-        let warnings = self.check_with_ast(ctx, &ast)?;
+        // Use structure-based detection to match the main linting path (since uses_document_structure() returns true)
+        let structure = crate::utils::document_structure::DocumentStructure::new(content);
+        let warnings = self.check_with_structure(ctx, &structure)?;
         if warnings.is_empty() {
             return Ok(content.to_string());
         }

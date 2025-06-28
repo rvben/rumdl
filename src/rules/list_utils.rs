@@ -42,6 +42,14 @@ pub struct ListItem {
 pub struct ListUtils;
 
 impl ListUtils {
+    /// Calculate indentation level, counting tabs as 4 spaces per CommonMark spec
+    pub fn calculate_indentation(s: &str) -> usize {
+        s.chars()
+            .take_while(|c| c.is_whitespace())
+            .map(|c| if c == '\t' { 4 } else { 1 })
+            .sum()
+    }
+
     /// Check if a line is a list item
     pub fn is_list_item(line: &str) -> bool {
         // Fast path for common cases
@@ -175,10 +183,11 @@ impl ListUtils {
     pub fn parse_list_item(line: &str) -> Option<ListItem> {
         // First try to match unordered list pattern
         if let Some(captures) = UNORDERED_LIST_PATTERN.captures(line) {
-            let indentation = captures.get(1).map_or(0, |m| m.as_str().len());
+            let indentation = captures.get(1).map_or(0, |m| Self::calculate_indentation(m.as_str()));
             let marker = captures.get(2).unwrap().as_str();
             let spaces = captures.get(3).map_or(0, |m| m.as_str().len());
-            let content_start = indentation + marker.len() + spaces;
+            let raw_indentation = captures.get(1).map_or(0, |m| m.as_str().len());
+            let content_start = raw_indentation + marker.len() + spaces;
             let content = if content_start < line.len() {
                 line[content_start..].to_string()
             } else {
@@ -203,10 +212,11 @@ impl ListUtils {
 
         // Then try to match ordered list pattern
         if let Some(captures) = ORDERED_LIST_PATTERN.captures(line) {
-            let indentation = captures.get(1).map_or(0, |m| m.as_str().len());
+            let indentation = captures.get(1).map_or(0, |m| Self::calculate_indentation(m.as_str()));
             let marker = captures.get(2).unwrap().as_str();
             let spaces = captures.get(3).map_or(0, |m| m.as_str().len());
-            let content_start = indentation + marker.len() + spaces;
+            let raw_indentation = captures.get(1).map_or(0, |m| m.as_str().len());
+            let content_start = raw_indentation + marker.len() + spaces;
             let content = if content_start < line.len() {
                 line[content_start..].to_string()
             } else {
@@ -231,8 +241,8 @@ impl ListUtils {
             return false;
         }
 
-        // Quick check for indentation level
-        let indentation = line.chars().take_while(|c| c.is_whitespace()).count();
+        // Calculate indentation level properly (tabs = 4 spaces)
+        let indentation = Self::calculate_indentation(line);
 
         // Continuation should be indented at least as much as the content of the previous item
         let min_indent = prev_list_item.indentation + prev_list_item.marker.len() + prev_list_item.spaces_after_marker;
@@ -337,8 +347,8 @@ pub fn is_multi_line_item(lines: &[&str], current_idx: usize) -> bool {
     if is_list_item(next_line).is_some() {
         return false;
     }
-    let curr_indent = lines[current_idx].chars().take_while(|c| c.is_whitespace()).count();
-    let next_indent = lines[current_idx + 1].chars().take_while(|c| c.is_whitespace()).count();
+    let curr_indent = ListUtils::calculate_indentation(lines[current_idx]);
+    let next_indent = ListUtils::calculate_indentation(lines[current_idx + 1]);
     next_indent > curr_indent
 }
 
@@ -406,5 +416,313 @@ mod tests {
         assert!(!ListUtils::is_list_item("# Heading"));
         assert!(!ListUtils::is_list_item("**Bold text**"));
         assert!(!ListUtils::is_list_item("| Cell 1 | Cell 2 |"));
+    }
+
+    #[test]
+    fn test_complex_nested_lists() {
+        // Various indentation levels
+        assert!(ListUtils::is_list_item("- Level 1"));
+        assert!(ListUtils::is_list_item("  - Level 2"));
+        assert!(ListUtils::is_list_item("    - Level 3"));
+        assert!(ListUtils::is_list_item("      - Level 4"));
+        assert!(ListUtils::is_list_item("        - Level 5"));
+        
+        // Mixed markers in nested lists
+        assert!(ListUtils::is_list_item("* Main item"));
+        assert!(ListUtils::is_list_item("  - Sub item"));
+        assert!(ListUtils::is_list_item("    + Sub-sub item"));
+        assert!(ListUtils::is_list_item("      * Deep item"));
+        
+        // Ordered lists nested in unordered
+        assert!(ListUtils::is_list_item("- Unordered"));
+        assert!(ListUtils::is_list_item("  1. First ordered"));
+        assert!(ListUtils::is_list_item("  2. Second ordered"));
+        assert!(ListUtils::is_list_item("    - Back to unordered"));
+        
+        // Tab indentation
+        assert!(ListUtils::is_list_item("\t- Tab indented"));
+        assert!(ListUtils::is_list_item("\t\t- Double tab"));
+        assert!(ListUtils::is_list_item("\t  - Tab plus spaces"));
+        assert!(ListUtils::is_list_item("  \t- Spaces plus tab"));
+    }
+
+    #[test]
+    fn test_parse_list_item_edge_cases() {
+        // Unicode content
+        let unicode_item = ListUtils::parse_list_item("- 测试项目 🚀").unwrap();
+        assert_eq!(unicode_item.content, "测试项目 🚀");
+        
+        // Empty content after marker
+        let empty_item = ListUtils::parse_list_item("- ").unwrap();
+        assert_eq!(empty_item.content, "");
+        
+        // Multiple spaces after marker
+        let multi_space = ListUtils::parse_list_item("-   Multiple spaces").unwrap();
+        assert_eq!(multi_space.spaces_after_marker, 3);
+        assert_eq!(multi_space.content, "Multiple spaces");
+        
+        // Very long ordered list numbers
+        let long_number = ListUtils::parse_list_item("999999. Item").unwrap();
+        assert_eq!(long_number.marker, "999999.");
+        assert_eq!(long_number.marker_type, ListMarkerType::Ordered);
+        
+        // List with only marker - might not parse as valid list
+        if let Some(marker_only) = ListUtils::parse_list_item("*") {
+            assert_eq!(marker_only.content, "");
+            assert_eq!(marker_only.spaces_after_marker, 0);
+        }
+    }
+
+    #[test]
+    fn test_nested_list_detection() {
+        // Test detection of list items at various nesting levels
+        let lines = vec![
+            ("- Item 1", 0),
+            ("  - Item 1.1", 2),
+            ("    - Item 1.1.1", 4),
+            ("      - Item 1.1.1.1", 6),
+            ("    - Item 1.1.2", 4),
+            ("  - Item 1.2", 2),
+            ("- Item 2", 0),
+        ];
+        
+        for (line, expected_indent) in lines {
+            let item = ListUtils::parse_list_item(line).unwrap();
+            assert_eq!(item.indentation, expected_indent, "Failed for line: {}", line);
+        }
+    }
+
+    #[test]
+    fn test_mixed_list_markers() {
+        // Test different marker types
+        let markers = vec![
+            ("* Asterisk", ListMarkerType::Asterisk),
+            ("+ Plus", ListMarkerType::Plus),
+            ("- Minus", ListMarkerType::Minus),
+            ("1. Ordered", ListMarkerType::Ordered),
+            ("42. Ordered", ListMarkerType::Ordered),
+        ];
+        
+        for (line, expected_type) in markers {
+            let item = ListUtils::parse_list_item(line).unwrap();
+            assert_eq!(item.marker_type, expected_type, "Failed for line: {}", line);
+        }
+    }
+
+    #[test]
+    fn test_list_item_without_space_edge_cases() {
+        // Edge cases for missing spaces
+        assert!(ListUtils::is_list_item_without_space("*a"));
+        assert!(ListUtils::is_list_item_without_space("+b"));
+        assert!(ListUtils::is_list_item_without_space("-c"));
+        assert!(ListUtils::is_list_item_without_space("1.d"));
+        
+        // Single character lines
+        assert!(!ListUtils::is_list_item_without_space("*"));
+        assert!(!ListUtils::is_list_item_without_space("+"));
+        assert!(!ListUtils::is_list_item_without_space("-"));
+        
+        // Markers at end of line
+        assert!(!ListUtils::is_list_item_without_space("Text ends with -"));
+        assert!(!ListUtils::is_list_item_without_space("Text ends with *"));
+        assert!(!ListUtils::is_list_item_without_space("Number ends with 1."));
+    }
+
+    #[test]
+    fn test_list_item_with_multiple_spaces() {
+        // Test detection of multiple spaces after marker
+        assert!(ListUtils::is_list_item_with_multiple_spaces("-  Two spaces"));
+        assert!(ListUtils::is_list_item_with_multiple_spaces("*   Three spaces"));
+        assert!(ListUtils::is_list_item_with_multiple_spaces("+    Four spaces"));
+        assert!(ListUtils::is_list_item_with_multiple_spaces("1.  Two spaces"));
+        
+        // Should not match single space
+        assert!(!ListUtils::is_list_item_with_multiple_spaces("- One space"));
+        assert!(!ListUtils::is_list_item_with_multiple_spaces("* One space"));
+        assert!(!ListUtils::is_list_item_with_multiple_spaces("+ One space"));
+        assert!(!ListUtils::is_list_item_with_multiple_spaces("1. One space"));
+    }
+
+    #[test]
+    fn test_complex_content_in_lists() {
+        // List items with inline formatting
+        let bold_item = ListUtils::parse_list_item("- **Bold** content").unwrap();
+        assert_eq!(bold_item.content, "**Bold** content");
+        
+        let link_item = ListUtils::parse_list_item("* [Link](url) in list").unwrap();
+        assert_eq!(link_item.content, "[Link](url) in list");
+        
+        let code_item = ListUtils::parse_list_item("+ Item with `code`").unwrap();
+        assert_eq!(code_item.content, "Item with `code`");
+        
+        // List with inline HTML
+        let html_item = ListUtils::parse_list_item("- Item with <span>HTML</span>").unwrap();
+        assert_eq!(html_item.content, "Item with <span>HTML</span>");
+        
+        // List with emoji
+        let emoji_item = ListUtils::parse_list_item("1. 🎉 Party time!").unwrap();
+        assert_eq!(emoji_item.content, "🎉 Party time!");
+    }
+
+    #[test]
+    fn test_ambiguous_list_markers() {
+        // Test cases that might be ambiguous
+        
+        // Arithmetic expressions should not be lists
+        assert!(!ListUtils::is_list_item("2 + 2 = 4"));
+        assert!(!ListUtils::is_list_item("5 - 3 = 2"));
+        assert!(!ListUtils::is_list_item("3 * 3 = 9"));
+        
+        // Emphasis markers should not be lists
+        assert!(!ListUtils::is_list_item("*emphasis*"));
+        assert!(!ListUtils::is_list_item("**strong**"));
+        assert!(!ListUtils::is_list_item("***strong emphasis***"));
+        
+        // Date ranges
+        assert!(!ListUtils::is_list_item("2023-01-01 - 2023-12-31"));
+        
+        // But these should be lists
+        assert!(ListUtils::is_list_item("- 2023-01-01 - 2023-12-31"));
+        assert!(ListUtils::is_list_item("* emphasis text here"));
+    }
+
+    #[test]
+    fn test_deeply_nested_complex_lists() {
+        let complex_doc = vec![
+            "- Top level item",
+            "  - Second level with **bold**",
+            "    1. Ordered item with `code`",
+            "    2. Another ordered item",
+            "      - Back to unordered [link](url)",
+            "        * Different marker",
+            "          + Yet another marker",
+            "            - Maximum nesting?",
+            "              1. Can we go deeper?",
+            "                - Apparently yes!",
+        ];
+        
+        for line in complex_doc {
+            assert!(ListUtils::is_list_item(line), "Failed to recognize: {}", line);
+            let item = ListUtils::parse_list_item(line).unwrap();
+            assert!(!item.content.is_empty() || line.trim().ends_with('-') || line.trim().ends_with('*') || line.trim().ends_with('+'));
+        }
+    }
+
+    #[test]
+    fn test_parse_list_item_comprehensive() {
+        // Test the comprehensive parsing with expected values
+        let test_cases = vec![
+            ("- Simple item", 0, ListMarkerType::Minus, "-", "Simple item"),
+            ("  * Indented", 2, ListMarkerType::Asterisk, "*", "Indented"),
+            ("    1. Ordered", 4, ListMarkerType::Ordered, "1.", "Ordered"),
+            ("\t+ Tab indent", 4, ListMarkerType::Plus, "+", "Tab indent"), // Tab counts as 4 spaces per CommonMark
+        ];
+        
+        for (line, expected_indent, expected_type, expected_marker, expected_content) in test_cases {
+            let item = ListUtils::parse_list_item(line);
+            assert!(item.is_some(), "Failed to parse: {}", line);
+            let item = item.unwrap();
+            assert_eq!(item.indentation, expected_indent, "Wrong indentation for: {}", line);
+            assert_eq!(item.marker_type, expected_type, "Wrong marker type for: {}", line);
+            assert_eq!(item.marker, expected_marker, "Wrong marker for: {}", line);
+            assert_eq!(item.content, expected_content, "Wrong content for: {}", line);
+        }
+    }
+
+    #[test]
+    fn test_special_characters_in_lists() {
+        // Test with special characters that might break regex
+        let special_cases = vec![
+            "- Item with $ dollar sign",
+            "* Item with ^ caret",
+            "+ Item with \\ backslash",
+            "- Item with | pipe",
+            "1. Item with ( ) parentheses",
+            "2. Item with [ ] brackets",
+            "3. Item with { } braces",
+        ];
+        
+        for line in special_cases {
+            assert!(ListUtils::is_list_item(line), "Failed for: {}", line);
+            let item = ListUtils::parse_list_item(line);
+            assert!(item.is_some(), "Failed to parse: {}", line);
+        }
+    }
+
+    #[test]
+    fn test_list_continuations() {
+        // Lists that continue on multiple lines (not directly supported but shouldn't crash)
+        let continuation = "- This is a very long list item that \
+                           continues on the next line";
+        assert!(ListUtils::is_list_item(continuation));
+        
+        // Indented continuation
+        let indented_cont = "  - Another long item that \
+                               continues with proper indentation";
+        assert!(ListUtils::is_list_item(indented_cont));
+    }
+
+    #[test]
+    fn test_performance_edge_cases() {
+        // Very long lines
+        let long_content = "x".repeat(10000);
+        let long_line = format!("- {}", long_content);
+        assert!(ListUtils::is_list_item(&long_line));
+        
+        // Many spaces
+        let many_spaces = " ".repeat(100);
+        let spaced_line = format!("{}- Item", many_spaces);
+        assert!(ListUtils::is_list_item(&spaced_line));
+        
+        // Large ordered number
+        let big_number = format!("{}. Item", "9".repeat(20));
+        assert!(ListUtils::is_list_item(&big_number));
+    }
+
+    #[test]
+    fn test_is_unordered_list_item() {
+        // Valid unordered list items
+        assert!(ListUtils::is_unordered_list_item("- Item"));
+        assert!(ListUtils::is_unordered_list_item("* Item"));
+        assert!(ListUtils::is_unordered_list_item("+ Item"));
+        
+        // Invalid - ordered lists
+        assert!(!ListUtils::is_unordered_list_item("1. Item"));
+        assert!(!ListUtils::is_unordered_list_item("99. Item"));
+        
+        // Invalid - no space after marker
+        assert!(!ListUtils::is_unordered_list_item("-Item"));
+        assert!(!ListUtils::is_unordered_list_item("*Item"));
+        assert!(!ListUtils::is_unordered_list_item("+Item"));
+    }
+
+    #[test]
+    fn test_calculate_indentation() {
+        // Test that tabs are counted as 4 spaces
+        assert_eq!(ListUtils::calculate_indentation(""), 0);
+        assert_eq!(ListUtils::calculate_indentation("    "), 4);
+        assert_eq!(ListUtils::calculate_indentation("\t"), 4);
+        assert_eq!(ListUtils::calculate_indentation("\t\t"), 8);
+        assert_eq!(ListUtils::calculate_indentation("  \t"), 6); // 2 spaces + 1 tab
+        assert_eq!(ListUtils::calculate_indentation("\t  "), 6); // 1 tab + 2 spaces
+        assert_eq!(ListUtils::calculate_indentation("\t\t  "), 10); // 2 tabs + 2 spaces
+        assert_eq!(ListUtils::calculate_indentation("  \t  \t"), 12); // 2 spaces + tab + 2 spaces + tab
+    }
+
+    #[test]
+    fn test_is_ordered_list_item() {
+        // Valid ordered list items
+        assert!(ListUtils::is_ordered_list_item("1. Item"));
+        assert!(ListUtils::is_ordered_list_item("99. Item"));
+        assert!(ListUtils::is_ordered_list_item("1234567890. Item"));
+        
+        // Invalid - unordered lists
+        assert!(!ListUtils::is_ordered_list_item("- Item"));
+        assert!(!ListUtils::is_ordered_list_item("* Item"));
+        assert!(!ListUtils::is_ordered_list_item("+ Item"));
+        
+        // Invalid - no space after period
+        assert!(!ListUtils::is_ordered_list_item("1.Item"));
+        assert!(!ListUtils::is_ordered_list_item("99.Item"));
     }
 }

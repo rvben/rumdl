@@ -320,7 +320,7 @@ impl DocumentStructure {
         }
 
         // Check for URLs only if needed
-        if content.contains("http://") || content.contains("https://") || content.contains("ftp://") {
+        if crate::utils::early_returns::has_urls(content) {
             self.has_urls = true;
         }
 
