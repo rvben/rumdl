@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements 50+ rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements 54 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -19,6 +19,15 @@ For information on global configuration settings (file selection, rule enablemen
 - [Link and Image Rules](#link-and-image-rules) - Rules for links, references, and images
 - [Table Rules](#table-rules) - Rules for table formatting and structure
 - [Other Rules](#other-rules) - Miscellaneous rules that don't fit the other categories
+
+## Note on Missing Rule Numbers
+
+Some rule numbers are not implemented in rumdl:
+
+- **MD008** - Originally intended for "Unordered list spacing" but not implemented in modern markdownlint
+- **MD015, MD016, MD017** - These rule numbers were never assigned in either the Ruby or Node.js versions of markdownlint
+
+These gaps in numbering are maintained for compatibility with markdownlint rule numbering.
 
 ## Heading Rules
 
@@ -47,7 +56,6 @@ For information on global configuration settings (file selection, rule enablemen
 | [MD005](md005.md) | List indent | Inconsistent indentation for list items at the same level |
 | [MD006](md006.md) | Start bullets | Consider starting bulleted lists at the beginning of the line |
 | [MD007](md007.md) | UL indent | Unordered list indentation |
-| [MD008](md008.md) | UL space | Unordered list spacing |
 | [MD029](md029.md) | OL prefix | Ordered list item prefix |
 | [MD030](md030.md) | List marker space | Spaces after list markers |
 | [MD032](md032.md) | Blanks around lists | Lists should be surrounded by blank lines |
