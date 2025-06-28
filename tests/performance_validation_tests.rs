@@ -26,9 +26,9 @@ fn test_performance_with_large_content() {
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD011NoReversedLinks::default()),
+        Box::new(MD011NoReversedLinks),
         // Skip MD022 in performance test due to complex edge cases with large content
-        Box::new(MD031BlanksAroundFences::default()),
+        Box::new(MD031BlanksAroundFences),
     ];
 
     for rule in &rules {
@@ -104,9 +104,9 @@ fn test_deeply_nested_structures() {
     }
 
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD027MultipleSpacesBlockquote::default()),
+        Box::new(MD027MultipleSpacesBlockquote),
         Box::new(MD007ULIndent::new(2)),
-        Box::new(MD005ListIndent::default()),
+        Box::new(MD005ListIndent),
     ];
 
     for rule in &rules {
@@ -225,10 +225,10 @@ More content
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD011NoReversedLinks::default()),
-        Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD040FencedCodeLanguage::default()),
-        Box::new(MD031BlanksAroundFences::default()),
+        Box::new(MD011NoReversedLinks),
+        Box::new(MD022BlanksAroundHeadings::default()),
+        Box::new(MD040FencedCodeLanguage),
+        Box::new(MD031BlanksAroundFences),
     ];
 
     // Test each rule individually first

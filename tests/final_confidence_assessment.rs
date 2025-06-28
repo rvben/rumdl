@@ -48,12 +48,12 @@ Another paragraph.
 "#;
 
     let critical_rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD001HeadingIncrement::default()),
+        Box::new(MD001HeadingIncrement),
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD018NoMissingSpaceAtx::default()),
-        Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD040FencedCodeLanguage::default()),
+        Box::new(MD018NoMissingSpaceAtx),
+        Box::new(MD022BlanksAroundHeadings::default()),
+        Box::new(MD031BlanksAroundFences),
+        Box::new(MD040FencedCodeLanguage),
     ];
 
     let ctx = LintContext::new(test_content);
@@ -104,8 +104,8 @@ fn validate_cli_lsp_consistency() {
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD018NoMissingSpaceAtx::default()),
-        Box::new(MD022BlanksAroundHeadings::new()),
+        Box::new(MD018NoMissingSpaceAtx),
+        Box::new(MD022BlanksAroundHeadings::default()),
     ];
 
     let mut consistency_checks = 0;
@@ -146,8 +146,8 @@ fn validate_performance_characteristics() {
     let typical_content = create_typical_document();
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD031BlanksAroundFences::default()),
+        Box::new(MD022BlanksAroundHeadings::default()),
+        Box::new(MD031BlanksAroundFences),
     ];
 
     let start_time = Instant::now();
@@ -261,11 +261,11 @@ fn validate_integration_scenarios() {
     ];
 
     let comprehensive_rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD001HeadingIncrement::default()),
+        Box::new(MD001HeadingIncrement),
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD011NoReversedLinks::default()),
-        Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD031BlanksAroundFences::default()),
+        Box::new(MD011NoReversedLinks),
+        Box::new(MD022BlanksAroundHeadings::default()),
+        Box::new(MD031BlanksAroundFences),
     ];
 
     for (scenario_name, content) in &integration_tests {

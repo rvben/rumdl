@@ -14,11 +14,11 @@ fn test_large_repository_simulation() {
     ];
 
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD001HeadingIncrement::default()),
+        Box::new(MD001HeadingIncrement),
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD011NoReversedLinks::default()),
-        Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD031BlanksAroundFences::default()),
+        Box::new(MD011NoReversedLinks),
+        Box::new(MD022BlanksAroundHeadings::default()),
+        Box::new(MD031BlanksAroundFences),
         Box::new(MD032BlanksAroundLists::default()),
     ];
 
@@ -419,7 +419,7 @@ fn test_memory_usage_with_large_content() {
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD022BlanksAroundHeadings::new()),
+        Box::new(MD022BlanksAroundHeadings::default()),
     ];
 
     for rule in &rules {

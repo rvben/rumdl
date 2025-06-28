@@ -23,7 +23,7 @@ fn test_pattern_1_empty_byte_ranges_prevention() {
         // MD031: Should insert only newlines, not duplicate content
         (
             "```rust\ncode\n```\nText",
-            Box::new(MD031BlanksAroundFences::default()) as Box<dyn Rule>,
+            Box::new(MD031BlanksAroundFences) as Box<dyn Rule>,
         ),
         // MD032: Should insert blank lines around lists
         (
@@ -38,14 +38,14 @@ fn test_pattern_1_empty_byte_ranges_prevention() {
         // MD042: Should calculate proper length for link replacement
         (
             "[](empty-link)",
-            Box::new(MD042NoEmptyLinks::default()) as Box<dyn Rule>,
+            Box::new(MD042NoEmptyLinks) as Box<dyn Rule>,
         ),
         // MD045: Should use regex capture group for URL
         ("![](no-alt-text.jpg)", Box::new(MD045NoAltText::new()) as Box<dyn Rule>),
         // MD047: Should handle trailing newline logic properly
         (
             "Text without trailing newline",
-            Box::new(MD047SingleTrailingNewline::default()) as Box<dyn Rule>,
+            Box::new(MD047SingleTrailingNewline) as Box<dyn Rule>,
         ),
         // MD048: Should preserve original trailing newline behavior
         (
@@ -109,7 +109,7 @@ fn test_pattern_2_content_duplication_prevention() {
         // MD011: Should swap text and URL correctly
         (
             "(https://example.com)[Click here]",
-            Box::new(MD011NoReversedLinks::default()) as Box<dyn Rule>,
+            Box::new(MD011NoReversedLinks) as Box<dyn Rule>,
         ),
         // MD021: Should replace entire line instead of partial fixes
         (
@@ -221,17 +221,17 @@ fn test_pattern_3_missing_lsp_implementations_prevention() {
 #[test]
 fn test_byte_range_boundaries() {
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD011NoReversedLinks::default()),
+        Box::new(MD011NoReversedLinks),
         Box::new(MD014CommandsShowOutput::new()),
         Box::new(MD021NoMultipleSpaceClosedAtx::new()),
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)),
-        Box::new(MD031BlanksAroundFences::default()),
+        Box::new(MD031BlanksAroundFences),
         Box::new(MD032BlanksAroundLists::strict()),
         Box::new(MD041FirstLineHeading::new(1, false)),
-        Box::new(MD042NoEmptyLinks::default()),
+        Box::new(MD042NoEmptyLinks),
         Box::new(MD045NoAltText::new()),
-        Box::new(MD047SingleTrailingNewline::default()),
+        Box::new(MD047SingleTrailingNewline),
         Box::new(MD048CodeFenceStyle::new(
             rumdl::rules::code_fence_utils::CodeFenceStyle::Backtick,
         )),
@@ -300,11 +300,11 @@ fn test_byte_range_boundaries() {
 #[test]
 fn test_fix_application_idempotency() {
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD011NoReversedLinks::default()),
+        Box::new(MD011NoReversedLinks),
         Box::new(MD021NoMultipleSpaceClosedAtx::new()),
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)),
-        Box::new(MD042NoEmptyLinks::default()),
+        Box::new(MD042NoEmptyLinks),
     ];
 
     let test_contents = vec![
@@ -346,13 +346,13 @@ fn test_fix_application_idempotency() {
 #[test]
 fn test_warning_fix_quality() {
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD011NoReversedLinks::default()),
+        Box::new(MD011NoReversedLinks),
         Box::new(MD014CommandsShowOutput::new()),
         Box::new(MD021NoMultipleSpaceClosedAtx::new()),
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)),
-        Box::new(MD042NoEmptyLinks::default()),
-        Box::new(MD047SingleTrailingNewline::default()),
+        Box::new(MD042NoEmptyLinks),
+        Box::new(MD047SingleTrailingNewline),
     ];
 
     let problematic_contents = vec![

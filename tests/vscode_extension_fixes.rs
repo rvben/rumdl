@@ -73,7 +73,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
     match rule_name {
         "MD001" => Some((
             "# H1\n### H3 (should be H2)",
-            Box::new(MD001HeadingIncrement::default()),
+            Box::new(MD001HeadingIncrement),
         )),
         "MD002" => Some(("## H2 (should start with H1)", Box::new(MD002FirstHeadingH1::default()))),
         "MD003" => Some(("# ATX\nSetext\n======", Box::new(MD003HeadingStyle::default()))),
@@ -83,7 +83,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         )),
         "MD005" => Some((
             "* Item 1\n   * Item with 3 spaces (should be 2)",
-            Box::new(MD005ListIndent::default()),
+            Box::new(MD005ListIndent),
         )),
         "MD006" => Some((
             "  * Indented list item that should trigger MD006",
@@ -94,7 +94,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         "MD010" => Some(("Line with\ttab", Box::new(MD010NoHardTabs::default()))),
         "MD011" => Some((
             "(http://example.com)[Example]",
-            Box::new(MD011NoReversedLinks::default()),
+            Box::new(MD011NoReversedLinks),
         )),
         "MD012" => Some((
             "Content\n\n\n\nToo many blanks",
@@ -105,15 +105,15 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             Box::new(MD013LineLength::default()),
         )),
         "MD014" => Some(("```bash\n$ command\n```", Box::new(MD014CommandsShowOutput::default()))),
-        "MD018" => Some(("#Missing space", Box::new(MD018NoMissingSpaceAtx::default()))),
+        "MD018" => Some(("#Missing space", Box::new(MD018NoMissingSpaceAtx))),
         "MD019" => Some(("##  Multiple spaces", Box::new(MD019NoMultipleSpaceAtx::new()))),
         "MD020" => Some((
             "##No space in closed##",
-            Box::new(MD020NoMissingSpaceClosedAtx::default()),
+            Box::new(MD020NoMissingSpaceClosedAtx),
         )),
         "MD021" => Some((
             "##  Multiple  spaces  ##",
-            Box::new(MD021NoMultipleSpaceClosedAtx::default()),
+            Box::new(MD021NoMultipleSpaceClosedAtx),
         )),
         "MD022" => Some((
             "Text\n# Heading\nMore text",
@@ -127,7 +127,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             ">  Multiple spaces in blockquote",
             Box::new(MD027MultipleSpacesBlockquote),
         )),
-        "MD028" => Some(("> Quote\n>\n> More quote", Box::new(MD028NoBlanksBlockquote::default()))),
+        "MD028" => Some(("> Quote\n>\n> More quote", Box::new(MD028NoBlanksBlockquote))),
         "MD029" => Some((
             "1. First\n3. Third",
             Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)),
@@ -138,11 +138,11 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         )),
         "MD031" => Some((
             "Text\n```\ncode\n```\nText",
-            Box::new(MD031BlanksAroundFences::default()),
+            Box::new(MD031BlanksAroundFences),
         )),
         "MD032" => Some(("Text\n* List item\nText", Box::new(MD032BlanksAroundLists::default()))),
         "MD033" => Some(("Text with <div>HTML</div>", Box::new(MD033NoInlineHtml::default()))),
-        "MD034" => Some(("Visit https://example.com", Box::new(MD034NoBareUrls::default()))),
+        "MD034" => Some(("Visit https://example.com", Box::new(MD034NoBareUrls))),
         "MD035" => Some(("Text\n***\nText", Box::new(MD035HRStyle::default()))),
         "MD036" => Some((
             "**Bold text as heading**",
@@ -150,16 +150,16 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         )),
         "MD037" => Some((
             "Text with * spaces around * emphasis",
-            Box::new(MD037NoSpaceInEmphasis::default()),
+            Box::new(MD037NoSpaceInEmphasis),
         )),
         "MD038" => Some(("`code `", Box::new(MD038NoSpaceInCode::default()))),
-        "MD039" => Some(("[link text ]( url )", Box::new(MD039NoSpaceInLinks::default()))),
+        "MD039" => Some(("[link text ]( url )", Box::new(MD039NoSpaceInLinks))),
         "MD040" => Some((
             "```\ncode without language\n```",
-            Box::new(MD040FencedCodeLanguage::default()),
+            Box::new(MD040FencedCodeLanguage),
         )),
         "MD041" => Some(("Not a heading", Box::new(MD041FirstLineHeading::default()))),
-        "MD042" => Some(("[]()", Box::new(MD042NoEmptyLinks::default()))),
+        "MD042" => Some(("[]()", Box::new(MD042NoEmptyLinks))),
         "MD043" => Some((
             "# Wrong heading",
             Box::new(MD043RequiredHeadings::new(vec!["Introduction".to_string()])),
@@ -168,14 +168,14 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             "javascript instead of JavaScript",
             Box::new(MD044ProperNames::new(vec!["JavaScript".to_string()], false)),
         )),
-        "MD045" => Some(("![](image.png)", Box::new(MD045NoAltText::default()))),
+        "MD045" => Some(("![](image.png)", Box::new(MD045NoAltText))),
         "MD046" => Some((
             "    indented code",
             Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Fenced)),
         )),
         "MD047" => Some((
             "File without trailing newline",
-            Box::new(MD047SingleTrailingNewline::default()),
+            Box::new(MD047SingleTrailingNewline),
         )),
         "MD048" => Some((
             "~~~\ncode\n~~~",
@@ -186,17 +186,17 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             "Text __strong__ text",
             Box::new(MD050StrongStyle::new(StrongStyle::Underscore)),
         )),
-        "MD051" => Some(("[link](#nonexistent)", Box::new(MD051LinkFragments::default()))),
-        "MD052" => Some(("[ref link][ref]", Box::new(MD052ReferenceLinkImages::default()))),
+        "MD051" => Some(("[link](#nonexistent)", Box::new(MD051LinkFragments))),
+        "MD052" => Some(("[ref link][ref]", Box::new(MD052ReferenceLinkImages))),
         "MD053" => Some((
             "[ref]: https://example.com",
             Box::new(MD053LinkImageReferenceDefinitions::default()),
         )),
         "MD054" => Some(("![image](url)", Box::new(MD054LinkImageStyle::default()))),
         "MD055" => Some(("|col1|col2|\n|--|--|\n|a|b|", Box::new(MD055TablePipeStyle::default()))),
-        "MD056" => Some(("|col1|col2|\n|--|--|\n|a|", Box::new(MD056TableColumnCount::default()))),
+        "MD056" => Some(("|col1|col2|\n|--|--|\n|a|", Box::new(MD056TableColumnCount))),
         "MD057" => Some(("[link](missing.md)", Box::new(MD057ExistingRelativeLinks::default()))),
-        "MD058" => Some(("Text\n|table|\nText", Box::new(MD058BlanksAroundTables::default()))),
+        "MD058" => Some(("Text\n|table|\nText", Box::new(MD058BlanksAroundTables))),
         _ => None,
     }
 }

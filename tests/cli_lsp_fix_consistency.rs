@@ -91,7 +91,7 @@ fn test_md030_list_marker_space_consistency() {
 
 #[test]
 fn test_md019_multiple_space_atx_consistency() {
-    let rule = MD019NoMultipleSpaceAtx::new();
+    let rule = MD019NoMultipleSpaceAtx;
 
     let test_cases = vec![
         ("#  Heading with extra space", "H1 with extra space"),
@@ -138,7 +138,7 @@ fn test_md010_hard_tabs_consistency() {
 
 #[test]
 fn test_md018_missing_space_atx_consistency() {
-    let rule = MD018NoMissingSpaceAtx::default();
+    let rule = MD018NoMissingSpaceAtx;
 
     let test_cases = vec![
         ("#Missing space", "H1 missing space"),
@@ -202,7 +202,7 @@ fn test_md038_no_space_in_code_consistency() {
 
 #[test]
 fn test_md039_no_space_in_links_consistency() {
-    let rule = MD039NoSpaceInLinks::default();
+    let rule = MD039NoSpaceInLinks;
 
     let test_cases = vec![
         ("[link text ]( url )", "Link with spaces around URL"),
@@ -289,13 +289,13 @@ fn test_comprehensive_rule_consistency() {
             "1.  Multiple spaces",
             "MD030",
         ),
-        (Box::new(MD019NoMultipleSpaceAtx::new()), "##  Multiple spaces", "MD019"),
+        (Box::new(MD019NoMultipleSpaceAtx), "##  Multiple spaces", "MD019"),
         (Box::new(MD009TrailingSpaces::default()), "Trailing spaces   ", "MD009"),
-        (Box::new(MD018NoMissingSpaceAtx::default()), "#Missing space", "MD018"),
+        (Box::new(MD018NoMissingSpaceAtx), "#Missing space", "MD018"),
         (Box::new(MD023HeadingStartLeft), "  # Indented", "MD023"),
         (Box::new(MD026NoTrailingPunctuation::default()), "# Heading!", "MD026"),
         (Box::new(MD038NoSpaceInCode::default()), "`code `", "MD038"),
-        (Box::new(MD039NoSpaceInLinks::default()), "[text ]( url )", "MD039"),
+        (Box::new(MD039NoSpaceInLinks), "[text ]( url )", "MD039"),
     ];
 
     let mut tested_count = 0;

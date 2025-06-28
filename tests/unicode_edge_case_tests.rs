@@ -15,10 +15,10 @@ Here is some `中文代码` in inline code
     // Test key rules with Unicode content
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD011NoReversedLinks::default()),
+        Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD034NoBareUrls::default()),
-        Box::new(MD047SingleTrailingNewline::default()),
+        Box::new(MD034NoBareUrls),
+        Box::new(MD047SingleTrailingNewline),
     ];
 
     for rule in &rules {
@@ -96,7 +96,7 @@ fn test_complex_unicode_scenarios() {
         ("∑ᵢ₌₁ⁿ xᵢ = total", "Math symbols with subscripts/superscripts"),
     ];
 
-    let rule = MD047SingleTrailingNewline::default();
+    let rule = MD047SingleTrailingNewline;
 
     for (content, description) in test_cases {
         let ctx = LintContext::new(content);
@@ -150,8 +150,8 @@ fn test_unicode_byte_boundary_validation() {
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD047SingleTrailingNewline::default()),
+        Box::new(MD031BlanksAroundFences),
+        Box::new(MD047SingleTrailingNewline),
     ];
 
     for rule in &rules {

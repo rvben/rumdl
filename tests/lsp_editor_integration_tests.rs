@@ -98,12 +98,12 @@ code block without language
 Final paragraph."#;
 
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD018NoMissingSpaceAtx::default()),
+        Box::new(MD018NoMissingSpaceAtx),
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD004UnorderedListStyle::new(
             rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Consistent,
         )),
-        Box::new(MD040FencedCodeLanguage::default()),
+        Box::new(MD040FencedCodeLanguage),
     ];
 
     // Phase 1: Initial check (editor save trigger)
@@ -200,7 +200,7 @@ fn test_partial_document_editing() {
         ("End edit", large_document.len() - 200, large_document.len()),
     ];
 
-    let rule = MD022BlanksAroundHeadings::new();
+    let rule = MD022BlanksAroundHeadings::default();
 
     for (scenario_name, start_pos, end_pos) in edit_scenarios {
         // Extract the edited section
