@@ -545,18 +545,31 @@ pub fn is_front_matter_delimiter(line: &str) -> bool {
 #[inline]
 pub fn remove_trailing_hashes(text: &str) -> String {
     let trimmed = text.trim_end();
-    let mut result = trimmed.to_string();
-
+    
+    // Find the last hash
     if let Some(last_hash_index) = trimmed.rfind('#') {
+        // Check if everything after this position is only hashes and whitespace
         if trimmed[last_hash_index..]
             .chars()
             .all(|c| c == '#' || c.is_whitespace())
         {
-            result = trimmed[..trimmed.rfind('#').unwrap()].trim_end().to_string();
+            // Find the start of the trailing hash sequence
+            let mut first_hash_index = last_hash_index;
+            while first_hash_index > 0 {
+                let prev_index = first_hash_index - 1;
+                if trimmed.chars().nth(prev_index) == Some('#') {
+                    first_hash_index = prev_index;
+                } else {
+                    break;
+                }
+            }
+            
+            // Remove the trailing hashes
+            return trimmed[..first_hash_index].trim_end().to_string();
         }
     }
-
-    result
+    
+    trimmed.to_string()
 }
 
 /// Normalize a heading to the specified level
@@ -644,5 +657,372 @@ mod tests {
             None,
             "Empty line followed by horizontal rule should not be detected as a heading"
         );
+    }
+
+    #[test]
+    fn test_is_atx_heading() {
+        assert!(HeadingUtils::is_atx_heading("# Heading"));
+        assert!(HeadingUtils::is_atx_heading("## Heading"));
+        assert!(HeadingUtils::is_atx_heading("### Heading"));
+        assert!(HeadingUtils::is_atx_heading("#### Heading"));
+        assert!(HeadingUtils::is_atx_heading("##### Heading"));
+        assert!(HeadingUtils::is_atx_heading("###### Heading"));
+        assert!(HeadingUtils::is_atx_heading("  # Indented"));
+        assert!(HeadingUtils::is_atx_heading("# Heading #"));
+        assert!(HeadingUtils::is_atx_heading("## Heading ###"));
+        
+        assert!(!HeadingUtils::is_atx_heading("####### Too many"));
+        assert!(!HeadingUtils::is_atx_heading("Not a heading"));
+        assert!(HeadingUtils::is_atx_heading("#")); // Single # is a valid heading
+        assert!(!HeadingUtils::is_atx_heading(""));
+    }
+
+    #[test]
+    fn test_heading_edge_cases() {
+        // Test invalid line numbers
+        let content = "# Heading";
+        assert!(HeadingUtils::parse_heading(content, 0).is_none());
+        assert!(HeadingUtils::parse_heading(content, 10).is_none());
+        
+        // Test headings in code blocks
+        let content = "```\n# Not a heading\n```";
+        assert!(HeadingUtils::parse_heading(content, 2).is_none());
+        
+        // Test with tildes for code blocks
+        let content = "~~~\n# Not a heading\n~~~";
+        assert!(HeadingUtils::is_in_code_block(content, 2));
+        
+        // Test mixed fence characters
+        let content = "```\n# Content\n~~~"; // Mismatched fences
+        assert!(HeadingUtils::is_in_code_block(content, 2));
+    }
+
+    #[test]
+    fn test_atx_closed_heading_variations() {
+        let content = "# Heading #\n## Heading ##\n### Heading ####\n#### Heading ##";
+        let h1 = HeadingUtils::parse_heading(content, 1).unwrap();
+        assert_eq!(h1.style, HeadingStyle::AtxClosed);
+        assert_eq!(h1.text, "Heading");
+        
+        let h2 = HeadingUtils::parse_heading(content, 2).unwrap();
+        assert_eq!(h2.style, HeadingStyle::AtxClosed);
+        
+        // Mismatched closing hashes - still ATX but not closed
+        let h3 = HeadingUtils::parse_heading(content, 3).unwrap();
+        assert_eq!(h3.style, HeadingStyle::Atx);
+        
+        let h4 = HeadingUtils::parse_heading(content, 4).unwrap();
+        assert_eq!(h4.style, HeadingStyle::Atx);
+    }
+
+    #[test]
+    fn test_setext_heading_edge_cases() {
+        // List item followed by dashes should not be a heading
+        let content = "- List item\n---------";
+        assert!(HeadingUtils::parse_heading(content, 1).is_none());
+        
+        // Front matter should not be a heading
+        let content = "---\ntitle: test\n---";
+        assert!(HeadingUtils::parse_heading(content, 1).is_none());
+        
+        // Indented setext headings
+        let content = "  Indented\n  ========";
+        let heading = HeadingUtils::parse_heading(content, 1).unwrap();
+        assert_eq!(heading.indentation, "  ");
+        assert_eq!(heading.text, "Indented");
+        
+        // Mismatched indentation should not be a heading
+        let content = "  Text\n========"; // No indent on underline
+        assert!(HeadingUtils::parse_heading(content, 1).is_none());
+    }
+
+    #[test]
+    fn test_get_indentation() {
+        assert_eq!(HeadingUtils::get_indentation("# Heading"), 0);
+        assert_eq!(HeadingUtils::get_indentation("  # Heading"), 2);
+        assert_eq!(HeadingUtils::get_indentation("    # Heading"), 4);
+        assert_eq!(HeadingUtils::get_indentation("\t# Heading"), 1);
+        assert_eq!(HeadingUtils::get_indentation(""), 0);
+    }
+
+    #[test]
+    fn test_convert_heading_style_edge_cases() {
+        // Empty text
+        assert_eq!(HeadingUtils::convert_heading_style("", 1, HeadingStyle::Atx), "");
+        assert_eq!(HeadingUtils::convert_heading_style("   ", 1, HeadingStyle::Atx), "");
+        
+        // Level clamping
+        assert_eq!(
+            HeadingUtils::convert_heading_style("Text", 0, HeadingStyle::Atx),
+            "# Text"
+        );
+        assert_eq!(
+            HeadingUtils::convert_heading_style("Text", 10, HeadingStyle::Atx),
+            "###### Text"
+        );
+        
+        // Setext with level > 2 falls back to ATX
+        assert_eq!(
+            HeadingUtils::convert_heading_style("Text", 3, HeadingStyle::Setext1),
+            "### Text"
+        );
+        
+        // Preserve indentation
+        assert_eq!(
+            HeadingUtils::convert_heading_style("  Text", 1, HeadingStyle::Atx),
+            "  # Text"
+        );
+        
+        // Very short text for setext
+        assert_eq!(
+            HeadingUtils::convert_heading_style("Hi", 1, HeadingStyle::Setext1),
+            "Hi\n==="
+        );
+    }
+
+    #[test]
+    fn test_get_heading_text() {
+        assert_eq!(HeadingUtils::get_heading_text("# Heading"), Some("Heading".to_string()));
+        assert_eq!(HeadingUtils::get_heading_text("## Heading ##"), Some("Heading".to_string()));
+        assert_eq!(HeadingUtils::get_heading_text("###   Spaces   "), Some("Spaces".to_string()));
+        assert_eq!(HeadingUtils::get_heading_text("Not a heading"), None);
+        assert_eq!(HeadingUtils::get_heading_text(""), None);
+    }
+
+    #[test]
+    fn test_emphasis_detection() {
+        assert!(HeadingUtils::is_emphasis_only_line("*emphasis*"));
+        assert!(HeadingUtils::is_emphasis_only_line("_emphasis_"));
+        assert!(HeadingUtils::is_emphasis_only_line("**strong**"));
+        assert!(HeadingUtils::is_emphasis_only_line("__strong__"));
+        assert!(HeadingUtils::is_emphasis_only_line("  *emphasis*  "));
+        
+        assert!(!HeadingUtils::is_emphasis_only_line("*not* emphasis"));
+        assert!(!HeadingUtils::is_emphasis_only_line("text *emphasis*"));
+        assert!(!HeadingUtils::is_emphasis_only_line("**"));
+        assert!(!HeadingUtils::is_emphasis_only_line(""));
+    }
+
+    #[test]
+    fn test_extract_emphasis_text() {
+        assert_eq!(
+            HeadingUtils::extract_emphasis_text("*text*"),
+            Some(("text".to_string(), 1))
+        );
+        assert_eq!(
+            HeadingUtils::extract_emphasis_text("_text_"),
+            Some(("text".to_string(), 1))
+        );
+        assert_eq!(
+            HeadingUtils::extract_emphasis_text("**text**"),
+            Some(("text".to_string(), 2))
+        );
+        assert_eq!(
+            HeadingUtils::extract_emphasis_text("__text__"),
+            Some(("text".to_string(), 2))
+        );
+        assert_eq!(
+            HeadingUtils::extract_emphasis_text("  *spaced*  "),
+            Some(("spaced".to_string(), 1))
+        );
+        
+        assert_eq!(HeadingUtils::extract_emphasis_text("not emphasis"), None);
+        assert_eq!(HeadingUtils::extract_emphasis_text("*not* complete"), None);
+    }
+
+    #[test]
+    fn test_convert_emphasis_to_heading() {
+        assert_eq!(
+            HeadingUtils::convert_emphasis_to_heading("*text*"),
+            Some("# text".to_string())
+        );
+        assert_eq!(
+            HeadingUtils::convert_emphasis_to_heading("**text**"),
+            Some("## text".to_string())
+        );
+        assert_eq!(
+            HeadingUtils::convert_emphasis_to_heading("  *text*"),
+            Some("  # text".to_string())
+        );
+        assert_eq!(
+            HeadingUtils::convert_emphasis_to_heading("*text* "),
+            Some("# text ".to_string())
+        );
+        
+        assert_eq!(HeadingUtils::convert_emphasis_to_heading("not emphasis"), None);
+    }
+
+    #[test]
+    fn test_heading_to_fragment() {
+        assert_eq!(HeadingUtils::heading_to_fragment("Simple Heading"), "simple-heading");
+        assert_eq!(HeadingUtils::heading_to_fragment("Heading with Numbers 123"), "heading-with-numbers-123");
+        assert_eq!(HeadingUtils::heading_to_fragment("Special!@#$%Characters"), "special-characters");
+        assert_eq!(HeadingUtils::heading_to_fragment("  Trimmed  "), "trimmed");
+        assert_eq!(HeadingUtils::heading_to_fragment("Multiple   Spaces"), "multiple-spaces");
+        assert_eq!(HeadingUtils::heading_to_fragment("Heading <em>with HTML</em>"), "heading-with-html");
+        assert_eq!(HeadingUtils::heading_to_fragment("---Leading-Dashes---"), "leading-dashes");
+        assert_eq!(HeadingUtils::heading_to_fragment(""), "");
+    }
+
+    #[test]
+    fn test_is_in_front_matter() {
+        let content = "---\ntitle: Test\n---\n# Content";
+        assert!(HeadingUtils::is_in_front_matter(content, 1));
+        assert!(!HeadingUtils::is_in_front_matter(content, 2)); // Closing delimiter is not considered in front matter
+        assert!(!HeadingUtils::is_in_front_matter(content, 3));
+        assert!(!HeadingUtils::is_in_front_matter(content, 4));
+        
+        // No front matter
+        let content = "# Just content";
+        assert!(!HeadingUtils::is_in_front_matter(content, 0));
+        
+        // Unclosed front matter
+        let content = "---\ntitle: Test\n# No closing";
+        assert!(HeadingUtils::is_in_front_matter(content, 1));
+        assert!(HeadingUtils::is_in_front_matter(content, 2)); // Still in unclosed front matter
+        
+        // Front matter not at start
+        let content = "# Heading\n---\ntitle: Test\n---";
+        assert!(!HeadingUtils::is_in_front_matter(content, 2));
+    }
+
+    #[test]
+    fn test_module_level_functions() {
+        // Test is_heading
+        assert!(is_heading("# Heading"));
+        assert!(is_heading("  ## Indented"));
+        assert!(!is_heading("Not a heading"));
+        assert!(!is_heading(""));
+        
+        // Test is_setext_heading_marker
+        assert!(is_setext_heading_marker("========"));
+        assert!(is_setext_heading_marker("--------"));
+        assert!(is_setext_heading_marker("  ======"));
+        assert!(!is_setext_heading_marker("# Heading"));
+        assert!(is_setext_heading_marker("---")); // Three dashes is valid
+        
+        // Test is_setext_heading
+        let lines = vec!["Title", "====="];
+        assert!(is_setext_heading(&lines, 0));
+        
+        let lines = vec!["", "====="];
+        assert!(!is_setext_heading(&lines, 0));
+        
+        // Test get_heading_level
+        let lines = vec!["# H1", "## H2", "### H3"];
+        assert_eq!(get_heading_level(&lines, 0), 1);
+        assert_eq!(get_heading_level(&lines, 1), 2);
+        assert_eq!(get_heading_level(&lines, 2), 3);
+        assert_eq!(get_heading_level(&lines, 10), 0);
+        
+        // Test extract_heading_text
+        let lines = vec!["# Heading Text", "## Another ###"];
+        assert_eq!(extract_heading_text(&lines, 0), "Heading Text");
+        assert_eq!(extract_heading_text(&lines, 1), "Another");
+        
+        // Test get_heading_indentation
+        let lines = vec!["# No indent", "  ## Two spaces", "    ### Four spaces"];
+        assert_eq!(get_heading_indentation(&lines, 0), 0);
+        assert_eq!(get_heading_indentation(&lines, 1), 2);
+        assert_eq!(get_heading_indentation(&lines, 2), 4);
+    }
+
+    #[test]
+    fn test_is_code_block_delimiter() {
+        assert!(is_code_block_delimiter("```"));
+        assert!(is_code_block_delimiter("~~~"));
+        assert!(is_code_block_delimiter("````"));
+        assert!(is_code_block_delimiter("```rust"));
+        assert!(is_code_block_delimiter("  ```"));
+        
+        assert!(!is_code_block_delimiter("``")); // Too short
+        assert!(!is_code_block_delimiter("# Heading"));
+    }
+
+    #[test]
+    fn test_is_front_matter_delimiter() {
+        assert!(is_front_matter_delimiter("---"));
+        assert!(is_front_matter_delimiter("---  "));
+        
+        assert!(!is_front_matter_delimiter("----"));
+        assert!(!is_front_matter_delimiter("--"));
+        assert!(!is_front_matter_delimiter("# ---"));
+    }
+
+    #[test]
+    fn test_remove_trailing_hashes() {
+        assert_eq!(remove_trailing_hashes("Heading ###"), "Heading");
+        assert_eq!(remove_trailing_hashes("Heading ## "), "Heading");
+        assert_eq!(remove_trailing_hashes("Heading #not trailing"), "Heading #not trailing");
+        assert_eq!(remove_trailing_hashes("No hashes"), "No hashes");
+        assert_eq!(remove_trailing_hashes(""), "");
+        
+        // Test the specific case that was failing
+        assert_eq!(remove_trailing_hashes("Heading ##"), "Heading");
+        assert_eq!(remove_trailing_hashes("Heading #"), "Heading");
+        assert_eq!(remove_trailing_hashes("Heading ####"), "Heading");
+        
+        // Edge cases
+        assert_eq!(remove_trailing_hashes("#"), "");
+        assert_eq!(remove_trailing_hashes("##"), "");
+        assert_eq!(remove_trailing_hashes("###"), "");
+        assert_eq!(remove_trailing_hashes("Text#"), "Text");
+        assert_eq!(remove_trailing_hashes("Text ##"), "Text");
+    }
+
+    #[test]
+    fn test_normalize_heading() {
+        assert_eq!(normalize_heading("# Old Level", 3), "### Old Level");
+        assert_eq!(normalize_heading("## Heading ##", 1), "# Heading");
+        assert_eq!(normalize_heading("  # Indented", 2), "  ## Indented");
+        assert_eq!(normalize_heading("Plain text", 1), "# Plain text");
+    }
+
+    #[test]
+    fn test_heading_style_from_str() {
+        assert_eq!(HeadingStyle::from_str("atx"), Ok(HeadingStyle::Atx));
+        assert_eq!(HeadingStyle::from_str("ATX"), Ok(HeadingStyle::Atx));
+        assert_eq!(HeadingStyle::from_str("atx_closed"), Ok(HeadingStyle::AtxClosed));
+        assert_eq!(HeadingStyle::from_str("setext1"), Ok(HeadingStyle::Setext1));
+        assert_eq!(HeadingStyle::from_str("setext"), Ok(HeadingStyle::Setext1));
+        assert_eq!(HeadingStyle::from_str("setext2"), Ok(HeadingStyle::Setext2));
+        assert_eq!(HeadingStyle::from_str("consistent"), Ok(HeadingStyle::Consistent));
+        assert_eq!(HeadingStyle::from_str("invalid"), Err(()));
+    }
+
+    #[test]
+    fn test_heading_style_display() {
+        assert_eq!(HeadingStyle::Atx.to_string(), "atx");
+        assert_eq!(HeadingStyle::AtxClosed.to_string(), "atx_closed");
+        assert_eq!(HeadingStyle::Setext1.to_string(), "setext1");
+        assert_eq!(HeadingStyle::Setext2.to_string(), "setext2");
+        assert_eq!(HeadingStyle::Consistent.to_string(), "consistent");
+    }
+
+    #[test]
+    fn test_unicode_headings() {
+        let content = "# 你好世界\n## Ñoño\n### 🚀 Emoji";
+        assert_eq!(HeadingUtils::parse_heading(content, 1).unwrap().text, "你好世界");
+        assert_eq!(HeadingUtils::parse_heading(content, 2).unwrap().text, "Ñoño");
+        assert_eq!(HeadingUtils::parse_heading(content, 3).unwrap().text, "🚀 Emoji");
+        
+        // Test fragment generation with unicode
+        assert_eq!(HeadingUtils::heading_to_fragment("你好世界"), "你好世界");
+        assert_eq!(HeadingUtils::heading_to_fragment("Café René"), "café-rené");
+    }
+
+    #[test]
+    fn test_complex_nested_structures() {
+        // Code block inside front matter (edge case)
+        // The function doesn't handle YAML multi-line strings, so ``` inside front matter 
+        // is treated as a code block start
+        let content = "---\ncode: |\n  ```\n  # Not a heading\n  ```\n---\n# Real heading";
+        assert!(HeadingUtils::is_in_code_block(content, 4)); // Inside code block
+        assert!(HeadingUtils::parse_heading(content, 7).is_some());
+        
+        // Multiple code blocks
+        let content = "```\ncode\n```\n# Heading\n~~~\nmore code\n~~~";
+        assert!(!HeadingUtils::is_in_code_block(content, 4));
+        assert!(HeadingUtils::parse_heading(content, 4).is_some());
     }
 }

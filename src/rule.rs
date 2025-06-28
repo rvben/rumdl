@@ -190,6 +190,11 @@ pub fn is_rule_disabled_at_line(content: &str, rule_name: &str, line_num: usize)
             break;
         }
 
+        // Skip comments that are inside code blocks
+        if crate::rules::code_block_utils::CodeBlockUtils::is_in_code_block(content, i) {
+            continue;
+        }
+
         let line = line.trim();
 
         // Check for disable comments (both global and rule-specific)
@@ -451,5 +456,411 @@ Final line"#;
 
         // Test rule that's never disabled
         assert!(!is_rule_disabled_at_line(content, "MD001", 5));
+    }
+
+    #[test]
+    fn test_parse_disable_comment_edge_cases() {
+        // Test with no space before closing
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable-->"), Some(vec![]));
+        
+        // Test with multiple spaces - the implementation doesn't handle leading spaces in comment
+        assert_eq!(
+            parse_disable_comment("<!--   rumdl-disable   MD001   MD002   -->"),
+            None
+        );
+        
+        // Test with tabs
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable\tMD001\tMD002 -->"),
+            Some(vec!["MD001", "MD002"])
+        );
+        
+        // Test comment not at start of line
+        assert_eq!(
+            parse_disable_comment("Some text <!-- rumdl-disable MD001 --> more text"),
+            Some(vec!["MD001"])
+        );
+        
+        // Test malformed comment (no closing)
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable MD001"), None);
+        
+        // Test malformed comment (no opening)
+        assert_eq!(parse_disable_comment("rumdl-disable MD001 -->"), None);
+        
+        // Test case sensitivity
+        assert_eq!(parse_disable_comment("<!-- RUMDL-DISABLE -->"), None);
+        assert_eq!(parse_disable_comment("<!-- RuMdL-DiSaBlE -->"), None);
+        
+        // Test with newlines - implementation finds the comment
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable\nMD001 -->"), Some(vec!["MD001"]));
+        
+        // Test empty rule list
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable   -->"), Some(vec![]));
+        
+        // Test duplicate rules
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable MD001 MD001 MD002 -->"),
+            Some(vec!["MD001", "MD001", "MD002"])
+        );
+    }
+
+    #[test]
+    fn test_parse_enable_comment_edge_cases() {
+        // Test with no space before closing
+        assert_eq!(parse_enable_comment("<!-- rumdl-enable-->"), Some(vec![]));
+        
+        // Test with multiple spaces - the implementation doesn't handle leading spaces in comment
+        assert_eq!(
+            parse_enable_comment("<!--   rumdl-enable   MD001   MD002   -->"),
+            None
+        );
+        
+        // Test with tabs
+        assert_eq!(
+            parse_enable_comment("<!-- rumdl-enable\tMD001\tMD002 -->"),
+            Some(vec!["MD001", "MD002"])
+        );
+        
+        // Test comment not at start of line
+        assert_eq!(
+            parse_enable_comment("Some text <!-- rumdl-enable MD001 --> more text"),
+            Some(vec!["MD001"])
+        );
+        
+        // Test malformed comment (no closing)
+        assert_eq!(parse_enable_comment("<!-- rumdl-enable MD001"), None);
+        
+        // Test malformed comment (no opening)
+        assert_eq!(parse_enable_comment("rumdl-enable MD001 -->"), None);
+        
+        // Test case sensitivity
+        assert_eq!(parse_enable_comment("<!-- RUMDL-ENABLE -->"), None);
+        assert_eq!(parse_enable_comment("<!-- RuMdL-EnAbLe -->"), None);
+        
+        // Test with newlines - implementation finds the comment
+        assert_eq!(parse_enable_comment("<!-- rumdl-enable\nMD001 -->"), Some(vec!["MD001"]));
+        
+        // Test empty rule list
+        assert_eq!(parse_enable_comment("<!-- rumdl-enable   -->"), Some(vec![]));
+        
+        // Test duplicate rules
+        assert_eq!(
+            parse_enable_comment("<!-- rumdl-enable MD001 MD001 MD002 -->"),
+            Some(vec!["MD001", "MD001", "MD002"])
+        );
+    }
+
+    #[test]
+    fn test_nested_disable_enable_comments() {
+        let content = r#"# Document
+<!-- rumdl-disable -->
+All rules disabled here
+<!-- rumdl-disable MD001 -->
+Still all disabled (redundant)
+<!-- rumdl-enable MD001 -->
+Only MD001 enabled, others still disabled
+<!-- rumdl-enable -->
+All rules enabled again"#;
+
+        // Line 2: All rules disabled
+        assert!(is_rule_disabled_at_line(content, "MD001", 2));
+        assert!(is_rule_disabled_at_line(content, "MD002", 2));
+        
+        // Line 4: Still all disabled
+        assert!(is_rule_disabled_at_line(content, "MD001", 4));
+        assert!(is_rule_disabled_at_line(content, "MD002", 4));
+        
+        // Line 6: Only MD001 enabled
+        assert!(!is_rule_disabled_at_line(content, "MD001", 6));
+        assert!(is_rule_disabled_at_line(content, "MD002", 6));
+        
+        // Line 8: All enabled
+        assert!(!is_rule_disabled_at_line(content, "MD001", 8));
+        assert!(!is_rule_disabled_at_line(content, "MD002", 8));
+    }
+
+    #[test]
+    fn test_mixed_comment_styles() {
+        let content = r#"# Document
+<!-- markdownlint-disable MD001 -->
+MD001 disabled via markdownlint
+<!-- rumdl-enable MD001 -->
+MD001 enabled via rumdl
+<!-- rumdl-disable -->
+All disabled via rumdl
+<!-- markdownlint-enable -->
+All enabled via markdownlint"#;
+
+        // Line 2: MD001 disabled
+        assert!(is_rule_disabled_at_line(content, "MD001", 2));
+        assert!(!is_rule_disabled_at_line(content, "MD002", 2));
+        
+        // Line 4: MD001 enabled
+        assert!(!is_rule_disabled_at_line(content, "MD001", 4));
+        assert!(!is_rule_disabled_at_line(content, "MD002", 4));
+        
+        // Line 6: All disabled
+        assert!(is_rule_disabled_at_line(content, "MD001", 6));
+        assert!(is_rule_disabled_at_line(content, "MD002", 6));
+        
+        // Line 8: All enabled
+        assert!(!is_rule_disabled_at_line(content, "MD001", 8));
+        assert!(!is_rule_disabled_at_line(content, "MD002", 8));
+    }
+
+    #[test]
+    fn test_comments_in_code_blocks() {
+        let content = r#"# Document
+```markdown
+<!-- rumdl-disable MD001 -->
+This is in a code block, should not affect rules
+```
+MD001 should still be enabled here"#;
+
+        // Comments inside code blocks should be ignored
+        assert!(!is_rule_disabled_at_line(content, "MD001", 5));
+        
+        // Test with indented code blocks too
+        let indented_content = r#"# Document
+
+    <!-- rumdl-disable MD001 -->
+    This is in an indented code block
+    
+MD001 should still be enabled here"#;
+        
+        assert!(!is_rule_disabled_at_line(indented_content, "MD001", 5));
+    }
+
+    #[test]
+    fn test_comments_with_unicode() {
+        // Test with unicode in comments
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable MD001 --> 你好"),
+            Some(vec!["MD001"])
+        );
+        
+        assert_eq!(
+            parse_disable_comment("🚀 <!-- rumdl-disable MD001 --> 🎉"),
+            Some(vec!["MD001"])
+        );
+    }
+
+    #[test]
+    fn test_rule_disabled_at_specific_lines() {
+        let content = r#"Line 0
+<!-- rumdl-disable MD001 MD002 -->
+Line 2
+Line 3
+<!-- rumdl-enable MD001 -->
+Line 5
+<!-- rumdl-disable -->
+Line 7
+<!-- rumdl-enable MD002 -->
+Line 9"#;
+
+        // Test each line's state
+        assert!(!is_rule_disabled_at_line(content, "MD001", 0));
+        assert!(!is_rule_disabled_at_line(content, "MD002", 0));
+        
+        assert!(is_rule_disabled_at_line(content, "MD001", 2));
+        assert!(is_rule_disabled_at_line(content, "MD002", 2));
+        
+        assert!(is_rule_disabled_at_line(content, "MD001", 3));
+        assert!(is_rule_disabled_at_line(content, "MD002", 3));
+        
+        assert!(!is_rule_disabled_at_line(content, "MD001", 5));
+        assert!(is_rule_disabled_at_line(content, "MD002", 5));
+        
+        assert!(is_rule_disabled_at_line(content, "MD001", 7));
+        assert!(is_rule_disabled_at_line(content, "MD002", 7));
+        
+        assert!(is_rule_disabled_at_line(content, "MD001", 9));
+        assert!(!is_rule_disabled_at_line(content, "MD002", 9));
+    }
+
+    #[test]
+    fn test_is_rule_disabled_by_comment() {
+        let content = r#"# Document
+<!-- rumdl-disable MD001 -->
+Content here"#;
+
+        assert!(is_rule_disabled_by_comment(content, "MD001"));
+        assert!(!is_rule_disabled_by_comment(content, "MD002"));
+        
+        let content2 = r#"# Document
+<!-- rumdl-disable -->
+Content here"#;
+
+        assert!(is_rule_disabled_by_comment(content2, "MD001"));
+        assert!(is_rule_disabled_by_comment(content2, "MD002"));
+    }
+
+    #[test]
+    fn test_comment_at_end_of_file() {
+        let content = "# Document\nContent\n<!-- rumdl-disable MD001 -->";
+        
+        // Rule should be disabled for the entire file
+        assert!(is_rule_disabled_by_comment(content, "MD001"));
+        // Line indexing - the comment is at line 2 (0-indexed), so line 1 isn't affected
+        assert!(!is_rule_disabled_at_line(content, "MD001", 1));
+        // But it is disabled at line 2
+        assert!(is_rule_disabled_at_line(content, "MD001", 2));
+    }
+
+    #[test]
+    fn test_multiple_comments_same_line() {
+        // Only the first comment should be processed
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable MD001 --> <!-- rumdl-disable MD002 -->"),
+            Some(vec!["MD001"])
+        );
+        
+        assert_eq!(
+            parse_enable_comment("<!-- rumdl-enable MD001 --> <!-- rumdl-enable MD002 -->"),
+            Some(vec!["MD001"])
+        );
+    }
+
+    #[test]
+    fn test_severity_serialization() {
+        let warning = LintWarning {
+            message: "Test warning".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 10,
+            severity: Severity::Warning,
+            fix: None,
+            rule_name: Some("MD001"),
+        };
+        
+        let serialized = serde_json::to_string(&warning).unwrap();
+        assert!(serialized.contains("\"severity\":\"Warning\""));
+        
+        let error = LintWarning {
+            severity: Severity::Error,
+            ..warning
+        };
+        
+        let serialized = serde_json::to_string(&error).unwrap();
+        assert!(serialized.contains("\"severity\":\"Error\""));
+    }
+
+    #[test]
+    fn test_fix_serialization() {
+        let fix = Fix {
+            range: 0..10,
+            replacement: "fixed text".to_string(),
+        };
+        
+        let warning = LintWarning {
+            message: "Test warning".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 10,
+            severity: Severity::Warning,
+            fix: Some(fix),
+            rule_name: Some("MD001"),
+        };
+        
+        let serialized = serde_json::to_string(&warning).unwrap();
+        assert!(serialized.contains("\"fix\""));
+        assert!(serialized.contains("\"replacement\":\"fixed text\""));
+    }
+
+    #[test]
+    fn test_rule_category_equality() {
+        assert_eq!(RuleCategory::Heading, RuleCategory::Heading);
+        assert_ne!(RuleCategory::Heading, RuleCategory::List);
+        
+        // Test all categories are distinct
+        let categories = vec![
+            RuleCategory::Heading,
+            RuleCategory::List,
+            RuleCategory::CodeBlock,
+            RuleCategory::Link,
+            RuleCategory::Image,
+            RuleCategory::Html,
+            RuleCategory::Emphasis,
+            RuleCategory::Whitespace,
+            RuleCategory::Blockquote,
+            RuleCategory::Table,
+            RuleCategory::FrontMatter,
+            RuleCategory::Other,
+        ];
+        
+        for (i, cat1) in categories.iter().enumerate() {
+            for (j, cat2) in categories.iter().enumerate() {
+                if i == j {
+                    assert_eq!(cat1, cat2);
+                } else {
+                    assert_ne!(cat1, cat2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_lint_error_conversions() {
+        use std::io;
+        
+        // Test From<io::Error>
+        let io_error = io::Error::new(io::ErrorKind::NotFound, "file not found");
+        let lint_error: LintError = io_error.into();
+        match lint_error {
+            LintError::IoError(_) => {},
+            _ => panic!("Expected IoError variant"),
+        }
+        
+        // Test Display trait
+        let invalid_input = LintError::InvalidInput("bad input".to_string());
+        assert_eq!(invalid_input.to_string(), "Invalid input: bad input");
+        
+        let fix_failed = LintError::FixFailed("couldn't fix".to_string());
+        assert_eq!(fix_failed.to_string(), "Fix failed: couldn't fix");
+        
+        let parsing_error = LintError::ParsingError("parse error".to_string());
+        assert_eq!(parsing_error.to_string(), "Parsing error: parse error");
+    }
+
+    #[test]
+    fn test_empty_content_edge_cases() {
+        assert!(!is_rule_disabled_at_line("", "MD001", 0));
+        assert!(!is_rule_disabled_by_comment("", "MD001"));
+        
+        // Single line with just comment
+        let single_comment = "<!-- rumdl-disable -->";
+        assert!(is_rule_disabled_at_line(single_comment, "MD001", 0));
+        assert!(is_rule_disabled_by_comment(single_comment, "MD001"));
+    }
+
+    #[test]
+    fn test_very_long_rule_list() {
+        let many_rules = (1..=100).map(|i| format!("MD{:03}", i)).collect::<Vec<_>>().join(" ");
+        let comment = format!("<!-- rumdl-disable {} -->", many_rules);
+        
+        let parsed = parse_disable_comment(&comment);
+        assert!(parsed.is_some());
+        assert_eq!(parsed.unwrap().len(), 100);
+    }
+
+    #[test]
+    fn test_comment_with_special_characters() {
+        // Test with various special characters that might appear
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable MD001-test -->"),
+            Some(vec!["MD001-test"])
+        );
+        
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable MD_001 -->"),
+            Some(vec!["MD_001"])
+        );
+        
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable MD.001 -->"),
+            Some(vec!["MD.001"])
+        );
     }
 }

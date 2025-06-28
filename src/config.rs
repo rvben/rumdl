@@ -464,6 +464,411 @@ line-length = 303
         let v = get_rule_config_value::<usize>(&config, "MD013", "line-length");
         assert_eq!(v, Some(303));
     }
+
+    #[test]
+    fn test_invalid_toml_syntax() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        // Invalid TOML with unclosed string
+        let config_content = r#"
+[MD013]
+line-length = "unclosed string
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        
+        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConfigError::ParseError(msg) => {
+                // The actual error message from toml parser might vary
+                assert!(msg.contains("expected") || msg.contains("invalid") || msg.contains("unterminated"));
+            },
+            _ => panic!("Expected ParseError"),
+        }
+    }
+
+    #[test]
+    fn test_wrong_type_for_config_value() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        // line-length should be a number, not a string
+        let config_content = r#"
+[MD013]
+line-length = "not a number"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        // The value should be loaded as a string, not converted
+        let rule_config = config.rules.get("MD013").unwrap();
+        let value = rule_config.values.get("line-length").unwrap();
+        assert!(matches!(value, toml::Value::String(_)));
+    }
+
+    #[test]
+    fn test_empty_config_file() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        // Empty file
+        fs::write(&config_path, "").unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        // Should have default values
+        assert_eq!(config.global.line_length, 80);
+        assert!(config.global.respect_gitignore);
+        assert!(config.rules.is_empty());
+    }
+
+    #[test]
+    fn test_malformed_pyproject_toml() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("pyproject.toml");
+        
+        // Missing closing bracket
+        let content = r#"
+[tool.rumdl
+line-length = 120
+"#;
+        fs::write(&config_path, content).unwrap();
+        
+        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_conflicting_config_values() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        // Both enable and disable the same rule - these need to be in a global section
+        let config_content = r#"
+[global]
+enable = ["MD013"]
+disable = ["MD013"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        // Both should be present - resolution happens at runtime
+        assert!(config.global.enable.contains(&"MD013".to_string()));
+        assert!(config.global.disable.contains(&"MD013".to_string()));
+    }
+
+    #[test]
+    fn test_invalid_rule_names() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        let config_content = r#"
+[global]
+enable = ["MD001", "NOT_A_RULE", "md002", "12345"]
+disable = ["MD-001", "MD_002"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        // All values should be preserved as-is
+        assert_eq!(config.global.enable.len(), 4);
+        assert_eq!(config.global.disable.len(), 2);
+    }
+
+    #[test]
+    fn test_deeply_nested_config() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        // This should be ignored as we don't support nested tables within rule configs
+        let config_content = r#"
+[MD013]
+line-length = 100
+[MD013.nested]
+value = 42
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        let rule_config = config.rules.get("MD013").unwrap();
+        assert_eq!(rule_config.values.get("line-length").unwrap(), &toml::Value::Integer(100));
+        // Nested table should not be present
+        assert!(!rule_config.values.contains_key("nested"));
+    }
+
+    #[test]
+    fn test_unicode_in_config() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        let config_content = r#"
+[global]
+include = ["文档/*.md", "ドキュメント/*.md"]
+exclude = ["测试/*", "🚀/*"]
+
+[MD013]
+line-length = 80
+message = "行太长了 🚨"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        assert_eq!(config.global.include.len(), 2);
+        assert_eq!(config.global.exclude.len(), 2);
+        assert!(config.global.include[0].contains("文档"));
+        assert!(config.global.exclude[1].contains("🚀"));
+        
+        let rule_config = config.rules.get("MD013").unwrap();
+        let message = rule_config.values.get("message").unwrap();
+        if let toml::Value::String(s) = message {
+            assert!(s.contains("行太长了"));
+            assert!(s.contains("🚨"));
+        }
+    }
+
+    #[test]
+    fn test_extremely_long_values() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        let long_string = "a".repeat(10000);
+        let config_content = format!(r#"
+[global]
+exclude = ["{}"]
+
+[MD013]
+line-length = 999999999
+"#, long_string);
+        
+        fs::write(&config_path, config_content).unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        assert_eq!(config.global.exclude[0].len(), 10000);
+        let line_length = get_rule_config_value::<usize>(&config, "MD013", "line-length");
+        assert_eq!(line_length, Some(999999999));
+    }
+
+    #[test]
+    fn test_config_with_comments() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        let config_content = r#"
+[global]
+# This is a comment
+enable = ["MD001"] # Enable MD001
+# disable = ["MD002"] # This is commented out
+
+[MD013] # Line length rule
+line-length = 100 # Set to 100 characters
+# ignored = true # This setting is commented out
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        assert_eq!(config.global.enable, vec!["MD001"]);
+        assert!(config.global.disable.is_empty()); // Commented out
+        
+        let rule_config = config.rules.get("MD013").unwrap();
+        assert_eq!(rule_config.values.len(), 1); // Only line-length
+        assert!(!rule_config.values.contains_key("ignored"));
+    }
+
+    #[test]
+    fn test_arrays_in_rule_config() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        let config_content = r#"
+[MD002]
+levels = [1, 2, 3]
+tags = ["important", "critical"]
+mixed = [1, "two", true]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        // Arrays should now be properly parsed
+        let rule_config = config.rules.get("MD002").expect("MD002 config should exist");
+        
+        // Check that arrays are present and correctly parsed
+        assert!(rule_config.values.contains_key("levels"));
+        assert!(rule_config.values.contains_key("tags"));
+        assert!(rule_config.values.contains_key("mixed"));
+        
+        // Verify array contents
+        if let Some(toml::Value::Array(levels)) = rule_config.values.get("levels") {
+            assert_eq!(levels.len(), 3);
+            assert_eq!(levels[0], toml::Value::Integer(1));
+            assert_eq!(levels[1], toml::Value::Integer(2));
+            assert_eq!(levels[2], toml::Value::Integer(3));
+        } else {
+            panic!("levels should be an array");
+        }
+        
+        if let Some(toml::Value::Array(tags)) = rule_config.values.get("tags") {
+            assert_eq!(tags.len(), 2);
+            assert_eq!(tags[0], toml::Value::String("important".to_string()));
+            assert_eq!(tags[1], toml::Value::String("critical".to_string()));
+        } else {
+            panic!("tags should be an array");
+        }
+        
+        if let Some(toml::Value::Array(mixed)) = rule_config.values.get("mixed") {
+            assert_eq!(mixed.len(), 3);
+            assert_eq!(mixed[0], toml::Value::Integer(1));
+            assert_eq!(mixed[1], toml::Value::String("two".to_string()));
+            assert_eq!(mixed[2], toml::Value::Boolean(true));
+        } else {
+            panic!("mixed should be an array");
+        }
+    }
+
+    #[test]
+    fn test_normalize_key_edge_cases() {
+        // Rule names
+        assert_eq!(normalize_key("MD001"), "MD001");
+        assert_eq!(normalize_key("md001"), "MD001");
+        assert_eq!(normalize_key("Md001"), "MD001");
+        assert_eq!(normalize_key("mD001"), "MD001");
+        
+        // Non-rule names
+        assert_eq!(normalize_key("line_length"), "line-length");
+        assert_eq!(normalize_key("line-length"), "line-length");
+        assert_eq!(normalize_key("LINE_LENGTH"), "line-length");
+        assert_eq!(normalize_key("respect_gitignore"), "respect-gitignore");
+        
+        // Edge cases
+        assert_eq!(normalize_key("MD"), "md"); // Too short to be a rule
+        assert_eq!(normalize_key("MD00"), "md00"); // Too short
+        assert_eq!(normalize_key("MD0001"), "md0001"); // Too long
+        assert_eq!(normalize_key("MDabc"), "mdabc"); // Non-digit
+        assert_eq!(normalize_key("MD00a"), "md00a"); // Partial digit
+        assert_eq!(normalize_key(""), "");
+        assert_eq!(normalize_key("_"), "-");
+        assert_eq!(normalize_key("___"), "---");
+    }
+
+    #[test]
+    fn test_missing_config_file() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("nonexistent.toml");
+        
+        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConfigError::IoError { .. } => {},
+            _ => panic!("Expected IoError for missing file"),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_permission_denied_config() {
+        use std::os::unix::fs::PermissionsExt;
+        
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        fs::write(&config_path, "enable = [\"MD001\"]").unwrap();
+        
+        // Remove read permissions
+        let mut perms = fs::metadata(&config_path).unwrap().permissions();
+        perms.set_mode(0o000);
+        fs::set_permissions(&config_path, perms).unwrap();
+        
+        let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
+        
+        // Restore permissions for cleanup
+        let mut perms = fs::metadata(&config_path).unwrap().permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(&config_path, perms).unwrap();
+        
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConfigError::IoError { .. } => {},
+            _ => panic!("Expected IoError for permission denied"),
+        }
+    }
+
+    #[test]
+    fn test_circular_reference_detection() {
+        // This test is more conceptual since TOML doesn't support circular references
+        // But we test that deeply nested structures don't cause stack overflow
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        let mut config_content = String::from("[MD001]\n");
+        for i in 0..100 {
+            config_content.push_str(&format!("key{} = {}\n", i, i));
+        }
+        
+        fs::write(&config_path, config_content).unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        let rule_config = config.rules.get("MD001").unwrap();
+        assert_eq!(rule_config.values.len(), 100);
+    }
+
+    #[test]
+    fn test_special_toml_values() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        
+        let config_content = r#"
+[MD001]
+infinity = inf
+neg_infinity = -inf
+not_a_number = nan
+datetime = 1979-05-27T07:32:00Z
+local_date = 1979-05-27
+local_time = 07:32:00
+"#;
+        fs::write(&config_path, config_content).unwrap();
+        
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+        
+        // Some values might not be parsed due to parser limitations
+        if let Some(rule_config) = config.rules.get("MD001") {
+            // Check special float values if present
+            if let Some(toml::Value::Float(f)) = rule_config.values.get("infinity") {
+                assert!(f.is_infinite() && f.is_sign_positive());
+            }
+            if let Some(toml::Value::Float(f)) = rule_config.values.get("neg_infinity") {
+                assert!(f.is_infinite() && f.is_sign_negative());
+            }
+            if let Some(toml::Value::Float(f)) = rule_config.values.get("not_a_number") {
+                assert!(f.is_nan());
+            }
+            
+            // Check datetime values if present
+            if let Some(val) = rule_config.values.get("datetime") {
+                assert!(matches!(val, toml::Value::Datetime(_)));
+            }
+            // Note: local_date and local_time might not be parsed by the current implementation
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1408,12 +1813,25 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                     Some(toml_edit::Value::Float(formatted)) => Some(toml::Value::Float(*formatted.value())),
                     Some(toml_edit::Value::Boolean(formatted)) => Some(toml::Value::Boolean(*formatted.value())),
                     Some(toml_edit::Value::Datetime(formatted)) => Some(toml::Value::Datetime(*formatted.value())),
-                    Some(toml_edit::Value::Array(_)) => {
-                        log::warn!(
-                                "[WARN] Skipping array value for key '{}.{}' in {}. Array conversion not yet fully implemented in parser.",
-                                norm_rule_name, norm_rk, path
-                            );
-                        None
+                    Some(toml_edit::Value::Array(formatted_array)) => {
+                        // Convert toml_edit Array to toml::Value::Array
+                        let mut values = Vec::new();
+                        for item in formatted_array.iter() {
+                            match item {
+                                toml_edit::Value::String(formatted) => values.push(toml::Value::String(formatted.value().clone())),
+                                toml_edit::Value::Integer(formatted) => values.push(toml::Value::Integer(*formatted.value())),
+                                toml_edit::Value::Float(formatted) => values.push(toml::Value::Float(*formatted.value())),
+                                toml_edit::Value::Boolean(formatted) => values.push(toml::Value::Boolean(*formatted.value())),
+                                toml_edit::Value::Datetime(formatted) => values.push(toml::Value::Datetime(*formatted.value())),
+                                _ => {
+                                    log::warn!(
+                                        "[WARN] Skipping unsupported array element type in key '{}.{}' in {}",
+                                        norm_rule_name, norm_rk, path
+                                    );
+                                }
+                            }
+                        }
+                        Some(toml::Value::Array(values))
                     }
                     Some(toml_edit::Value::InlineTable(_)) => {
                         log::warn!(

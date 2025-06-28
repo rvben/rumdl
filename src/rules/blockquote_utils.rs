@@ -150,20 +150,40 @@ impl BlockquoteUtils {
 
     /// Fix nested blockquotes to ensure each level has exactly one space after the > marker
     pub fn fix_nested_blockquote_spacing(line: &str) -> String {
-        if !Self::is_nested_blockquote(line) {
+        if !Self::is_blockquote(line) {
             return line.to_string();
         }
 
-        let level = Self::get_nesting_level(line);
-        let content = Self::extract_content(line);
-        let indent = Self::extract_indentation(line);
-
-        let mut result = indent;
-        for _ in 0..level {
-            result.push_str("> ");
+        let trimmed = line.trim_start();
+        let indent = &line[..line.len() - trimmed.len()];
+        
+        // Parse through the blockquote markers
+        let mut remaining = trimmed;
+        let mut markers = Vec::new();
+        
+        while remaining.starts_with('>') {
+            markers.push('>');
+            remaining = &remaining[1..];
+            
+            // Skip any spaces between markers
+            remaining = remaining.trim_start();
         }
-        result.push_str(&content);
-
+        
+        // Build the result with proper spacing
+        let mut result = indent.to_string();
+        for (i, _) in markers.iter().enumerate() {
+            if i > 0 {
+                result.push(' ');
+            }
+            result.push('>');
+        }
+        
+        // Add the content with a single space before it (if there's content)
+        if !remaining.is_empty() {
+            result.push(' ');
+            result.push_str(remaining);
+        }
+        
         result
     }
 
@@ -227,5 +247,255 @@ impl BlockquoteUtils {
     /// Get the content after the blockquote marker
     pub fn get_blockquote_content(line: &str) -> String {
         Self::extract_content(line)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_blockquote() {
+        // Valid blockquotes
+        assert!(BlockquoteUtils::is_blockquote("> Quote"));
+        assert!(BlockquoteUtils::is_blockquote(">Quote"));
+        assert!(BlockquoteUtils::is_blockquote("  > Indented quote"));
+        assert!(BlockquoteUtils::is_blockquote(">> Nested quote"));
+        assert!(BlockquoteUtils::is_blockquote(">"));
+        assert!(BlockquoteUtils::is_blockquote("> "));
+        
+        // Not blockquotes
+        assert!(!BlockquoteUtils::is_blockquote(""));
+        assert!(!BlockquoteUtils::is_blockquote("Plain text"));
+        assert!(!BlockquoteUtils::is_blockquote("a > b"));
+        assert!(!BlockquoteUtils::is_blockquote("# > Not a quote"));
+    }
+
+    #[test]
+    fn test_is_empty_blockquote() {
+        // Empty blockquotes
+        assert!(BlockquoteUtils::is_empty_blockquote(">"));
+        assert!(BlockquoteUtils::is_empty_blockquote("> "));
+        assert!(BlockquoteUtils::is_empty_blockquote(">   "));
+        assert!(BlockquoteUtils::is_empty_blockquote(">>"));
+        assert!(BlockquoteUtils::is_empty_blockquote("  >  "));
+        
+        // Not empty blockquotes
+        assert!(!BlockquoteUtils::is_empty_blockquote("> Content"));
+        assert!(!BlockquoteUtils::is_empty_blockquote(">Text"));
+        assert!(!BlockquoteUtils::is_empty_blockquote(""));
+        assert!(!BlockquoteUtils::is_empty_blockquote("Plain text"));
+    }
+
+    #[test]
+    fn test_needs_md028_fix() {
+        // Needs fixing (no space after >)
+        assert!(BlockquoteUtils::needs_md028_fix(">"));
+        assert!(BlockquoteUtils::needs_md028_fix(">>"));
+        assert!(BlockquoteUtils::needs_md028_fix("  >"));
+        
+        // Does not need fixing
+        assert!(!BlockquoteUtils::needs_md028_fix("> "));
+        assert!(!BlockquoteUtils::needs_md028_fix("> Content"));
+        assert!(!BlockquoteUtils::needs_md028_fix(""));
+        assert!(!BlockquoteUtils::needs_md028_fix("Plain text"));
+    }
+
+    #[test]
+    fn test_has_no_space_after_marker() {
+        assert!(BlockquoteUtils::has_no_space_after_marker(">Content"));
+        assert!(BlockquoteUtils::has_no_space_after_marker("  >Text"));
+        
+        assert!(!BlockquoteUtils::has_no_space_after_marker("> Content"));
+        assert!(!BlockquoteUtils::has_no_space_after_marker(">  Content"));
+        assert!(!BlockquoteUtils::has_no_space_after_marker(">"));
+        assert!(!BlockquoteUtils::has_no_space_after_marker(""));
+    }
+
+    #[test]
+    fn test_has_multiple_spaces_after_marker() {
+        assert!(BlockquoteUtils::has_multiple_spaces_after_marker(">  Content"));
+        assert!(BlockquoteUtils::has_multiple_spaces_after_marker(">   Text"));
+        assert!(BlockquoteUtils::has_multiple_spaces_after_marker("  >    Quote"));
+        
+        assert!(!BlockquoteUtils::has_multiple_spaces_after_marker("> Content"));
+        assert!(!BlockquoteUtils::has_multiple_spaces_after_marker(">Content"));
+        assert!(!BlockquoteUtils::has_multiple_spaces_after_marker(">"));
+        assert!(!BlockquoteUtils::has_multiple_spaces_after_marker(""));
+    }
+
+    #[test]
+    fn test_is_nested_blockquote() {
+        assert!(BlockquoteUtils::is_nested_blockquote(">> Nested"));
+        assert!(BlockquoteUtils::is_nested_blockquote(">>> Triple nested"));
+        assert!(BlockquoteUtils::is_nested_blockquote("> > Spaced nested"));
+        assert!(BlockquoteUtils::is_nested_blockquote("  > >> Indented nested"));
+        
+        assert!(!BlockquoteUtils::is_nested_blockquote("> Single level"));
+        assert!(!BlockquoteUtils::is_nested_blockquote(">Single"));
+        assert!(!BlockquoteUtils::is_nested_blockquote(""));
+        assert!(!BlockquoteUtils::is_nested_blockquote("Plain text"));
+    }
+
+    #[test]
+    fn test_get_nesting_level() {
+        assert_eq!(BlockquoteUtils::get_nesting_level(""), 0);
+        assert_eq!(BlockquoteUtils::get_nesting_level("Plain text"), 0);
+        assert_eq!(BlockquoteUtils::get_nesting_level("> Quote"), 1);
+        assert_eq!(BlockquoteUtils::get_nesting_level(">> Nested"), 2);
+        assert_eq!(BlockquoteUtils::get_nesting_level(">>> Triple"), 3);
+        assert_eq!(BlockquoteUtils::get_nesting_level("  > Indented"), 1);
+        assert_eq!(BlockquoteUtils::get_nesting_level("  >> Indented nested"), 2);
+        assert_eq!(BlockquoteUtils::get_nesting_level(">>>> Four levels"), 4);
+    }
+
+    #[test]
+    fn test_extract_content() {
+        assert_eq!(BlockquoteUtils::extract_content("> Content"), "Content");
+        assert_eq!(BlockquoteUtils::extract_content(">Content"), "Content");
+        assert_eq!(BlockquoteUtils::extract_content(">  Content"), " Content");
+        assert_eq!(BlockquoteUtils::extract_content("> "), "");
+        assert_eq!(BlockquoteUtils::extract_content(">"), "");
+        assert_eq!(BlockquoteUtils::extract_content("  > Indented content"), "Indented content");
+        assert_eq!(BlockquoteUtils::extract_content(""), "");
+        assert_eq!(BlockquoteUtils::extract_content("Plain text"), "");
+    }
+
+    #[test]
+    fn test_extract_indentation() {
+        assert_eq!(BlockquoteUtils::extract_indentation("> Content"), "");
+        assert_eq!(BlockquoteUtils::extract_indentation("  > Content"), "  ");
+        assert_eq!(BlockquoteUtils::extract_indentation("    > Content"), "    ");
+        assert_eq!(BlockquoteUtils::extract_indentation("\t> Content"), "\t");
+        assert_eq!(BlockquoteUtils::extract_indentation(">Content"), "");
+        assert_eq!(BlockquoteUtils::extract_indentation(""), "");
+        assert_eq!(BlockquoteUtils::extract_indentation("Plain text"), "");
+    }
+
+    #[test]
+    fn test_fix_blockquote_spacing() {
+        // Fix missing space
+        assert_eq!(BlockquoteUtils::fix_blockquote_spacing(">Content"), "> Content");
+        assert_eq!(BlockquoteUtils::fix_blockquote_spacing("  >Text"), "  > Text");
+        
+        // Fix multiple spaces
+        assert_eq!(BlockquoteUtils::fix_blockquote_spacing(">  Content"), "> Content");
+        assert_eq!(BlockquoteUtils::fix_blockquote_spacing(">   Text"), "> Text");
+        
+        // Already correct
+        assert_eq!(BlockquoteUtils::fix_blockquote_spacing("> Content"), "> Content");
+        assert_eq!(BlockquoteUtils::fix_blockquote_spacing("  > Text"), "  > Text");
+        
+        // Not blockquotes
+        assert_eq!(BlockquoteUtils::fix_blockquote_spacing(""), "");
+        assert_eq!(BlockquoteUtils::fix_blockquote_spacing("Plain text"), "Plain text");
+    }
+
+    #[test]
+    fn test_fix_nested_blockquote_spacing() {
+        // Fix missing spaces between markers
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing(">>Content"), "> > Content");
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing(">>>Text"), "> > > Text");
+        
+        // Fix inconsistent spacing
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing("> >Content"), "> > Content");
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing(">  >Content"), "> > Content");
+        
+        // Already correct
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing("> > Content"), "> > Content");
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing("> > > Text"), "> > > Text");
+        
+        // Single level
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing("> Content"), "> Content");
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing(">Content"), "> Content");
+        
+        // Empty blockquotes
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing(">"), ">");
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing(">>"), "> >");
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing(">>>"), "> > >");
+        
+        // With indentation
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing("  >>Content"), "  > > Content");
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing("\t> > Content"), "\t> > Content");
+        
+        // Not blockquotes
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing(""), "");
+        assert_eq!(BlockquoteUtils::fix_nested_blockquote_spacing("Plain text"), "Plain text");
+    }
+
+    #[test]
+    fn test_has_blank_between_blockquotes() {
+        let content1 = "> Quote 1\n> Quote 2";
+        assert_eq!(BlockquoteUtils::has_blank_between_blockquotes(content1), Vec::<usize>::new());
+        
+        let content2 = "> Quote 1\n>\n> Quote 2";
+        assert_eq!(BlockquoteUtils::has_blank_between_blockquotes(content2), vec![2]);
+        
+        let content3 = "> Quote 1\n> \n> Quote 2";
+        assert_eq!(BlockquoteUtils::has_blank_between_blockquotes(content3), vec![2]);
+        
+        let content4 = "> Line 1\n>\n>\n> Line 4";
+        assert_eq!(BlockquoteUtils::has_blank_between_blockquotes(content4), vec![2, 3]);
+        
+        let content5 = "Plain text\n> Quote";
+        assert_eq!(BlockquoteUtils::has_blank_between_blockquotes(content5), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn test_fix_blank_between_blockquotes() {
+        let content1 = "> Quote 1\n> Quote 2";
+        assert_eq!(BlockquoteUtils::fix_blank_between_blockquotes(content1), "> Quote 1\n> Quote 2");
+        
+        let content2 = "> Quote 1\n\n> Quote 2";
+        assert_eq!(BlockquoteUtils::fix_blank_between_blockquotes(content2), "> Quote 1\n> Quote 2");
+        
+        // Multiple blank lines - the function keeps them all except when between blockquotes
+        let content3 = "> Quote 1\n\n\n> Quote 2";
+        assert_eq!(BlockquoteUtils::fix_blank_between_blockquotes(content3), "> Quote 1\n\n\n> Quote 2");
+        
+        let content4 = "Text\n\n> Quote";
+        assert_eq!(BlockquoteUtils::fix_blank_between_blockquotes(content4), "Text\n\n> Quote");
+    }
+
+    #[test]
+    fn test_get_blockquote_start_col() {
+        assert_eq!(BlockquoteUtils::get_blockquote_start_col("> Content"), 1);
+        assert_eq!(BlockquoteUtils::get_blockquote_start_col("  > Content"), 3);
+        assert_eq!(BlockquoteUtils::get_blockquote_start_col("    > Content"), 5);
+        assert_eq!(BlockquoteUtils::get_blockquote_start_col(">Content"), 1);
+    }
+
+    #[test]
+    fn test_get_blockquote_content() {
+        assert_eq!(BlockquoteUtils::get_blockquote_content("> Content"), "Content");
+        assert_eq!(BlockquoteUtils::get_blockquote_content(">Content"), "Content");
+        assert_eq!(BlockquoteUtils::get_blockquote_content("> "), "");
+        assert_eq!(BlockquoteUtils::get_blockquote_content(""), "");
+    }
+
+    #[test]
+    fn test_unicode_content() {
+        assert!(BlockquoteUtils::is_blockquote("> 你好"));
+        assert_eq!(BlockquoteUtils::extract_content("> émphasis"), "émphasis");
+        assert_eq!(BlockquoteUtils::fix_blockquote_spacing(">🌟"), "> 🌟");
+        assert_eq!(BlockquoteUtils::get_nesting_level(">> 日本語"), 2);
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        // Empty string
+        assert!(!BlockquoteUtils::is_blockquote(""));
+        assert_eq!(BlockquoteUtils::extract_content(""), "");
+        assert_eq!(BlockquoteUtils::get_nesting_level(""), 0);
+        
+        // Just ">" character in middle of line
+        assert!(!BlockquoteUtils::is_blockquote("a > b"));
+        
+        // Tabs
+        assert!(BlockquoteUtils::is_blockquote("\t> Tab indent"));
+        assert_eq!(BlockquoteUtils::extract_indentation("\t> Content"), "\t");
+        
+        // Mixed indentation
+        assert_eq!(BlockquoteUtils::fix_blockquote_spacing(" \t>Content"), " \t> Content");
     }
 }

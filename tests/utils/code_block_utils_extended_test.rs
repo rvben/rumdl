@@ -50,7 +50,7 @@ fn test_is_indented_code_block() {
     assert!(CodeBlockUtils::is_indented_code_block("    code"));
     assert!(CodeBlockUtils::is_indented_code_block("     code with more indent"));
     assert!(CodeBlockUtils::is_indented_code_block("      still indented"));
-    assert!(!CodeBlockUtils::is_indented_code_block("\tcode with tab"));
+    assert!(CodeBlockUtils::is_indented_code_block("\tcode with tab")); // Tabs are treated as 4 spaces
 
     // Test invalid indented code blocks
     assert!(!CodeBlockUtils::is_indented_code_block("code"));
