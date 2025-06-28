@@ -19,9 +19,50 @@ impl JunitFormatter {
 }
 
 impl OutputFormatter for JunitFormatter {
-    fn format_warnings(&self, _warnings: &[LintWarning], _file_path: &str) -> String {
-        // JUnit needs to collect all results and output as a single XML document
-        String::new()
+    fn format_warnings(&self, warnings: &[LintWarning], file_path: &str) -> String {
+        // Format warnings for a single file as a minimal JUnit XML document
+        let mut xml = String::new();
+        xml.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+        xml.push('\n');
+        
+        let escaped_file = xml_escape(file_path);
+        
+        xml.push_str(&format!(
+            r#"<testsuites name="rumdl" tests="1" failures="{}" errors="0" time="0.000">"#,
+            warnings.len()
+        ));
+        xml.push('\n');
+        
+        xml.push_str(&format!(
+            r#"  <testsuite name="{}" tests="1" failures="{}" errors="0" time="0.000">"#,
+            escaped_file,
+            warnings.len()
+        ));
+        xml.push('\n');
+        
+        xml.push_str(&format!(
+            r#"    <testcase name="Lint {}" classname="rumdl" time="0.000">"#,
+            escaped_file
+        ));
+        xml.push('\n');
+        
+        // Add failures for each warning
+        for warning in warnings {
+            let rule_name = warning.rule_name.unwrap_or("unknown");
+            let message = xml_escape(&warning.message);
+            
+            xml.push_str(&format!(
+                r#"      <failure type="{}" message="{}">{} at line {}, column {}</failure>"#,
+                rule_name, message, message, warning.line, warning.column
+            ));
+            xml.push('\n');
+        }
+        
+        xml.push_str("    </testcase>\n");
+        xml.push_str("  </testsuite>\n");
+        xml.push_str("</testsuites>\n");
+        
+        xml
     }
 }
 
