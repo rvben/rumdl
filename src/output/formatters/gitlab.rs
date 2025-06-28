@@ -21,10 +21,27 @@ impl GitLabFormatter {
 }
 
 impl OutputFormatter for GitLabFormatter {
-    fn format_warnings(&self, _warnings: &[LintWarning], _file_path: &str) -> String {
-        // GitLab format needs to collect all issues and output as a single JSON array
-        // For now, return empty string and handle collection separately
-        String::new()
+    fn format_warnings(&self, warnings: &[LintWarning], file_path: &str) -> String {
+        // Format warnings for a single file as GitLab Code Quality issues
+        let issues: Vec<_> = warnings.iter().map(|warning| {
+            let rule_name = warning.rule_name.unwrap_or("unknown");
+            let fingerprint = format!("{}-{}-{}-{}", file_path, warning.line, warning.column, rule_name);
+            
+            json!({
+                "description": warning.message,
+                "check_name": rule_name,
+                "fingerprint": fingerprint,
+                "severity": "minor",
+                "location": {
+                    "path": file_path,
+                    "lines": {
+                        "begin": warning.line
+                    }
+                }
+            })
+        }).collect();
+        
+        serde_json::to_string_pretty(&issues).unwrap_or_else(|_| "[]".to_string())
     }
 }
 

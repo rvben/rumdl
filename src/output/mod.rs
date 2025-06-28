@@ -153,3 +153,270 @@ impl OutputWriter {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rule::{Severity, Fix};
+
+    fn create_test_warning(line: usize, message: &str) -> LintWarning {
+        LintWarning {
+            line,
+            column: 5,
+            end_line: line,
+            end_column: 10,
+            rule_name: Some("MD001"),
+            message: message.to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        }
+    }
+
+    fn create_test_warning_with_fix(line: usize, message: &str, fix_text: &str) -> LintWarning {
+        LintWarning {
+            line,
+            column: 5,
+            end_line: line,
+            end_column: 10,
+            rule_name: Some("MD001"),
+            message: message.to_string(),
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: 0..5,
+                replacement: fix_text.to_string(),
+            }),
+        }
+    }
+
+    #[test]
+    fn test_output_format_from_str() {
+        // Valid formats
+        assert_eq!(OutputFormat::from_str("text").unwrap(), OutputFormat::Text);
+        assert_eq!(OutputFormat::from_str("full").unwrap(), OutputFormat::Text);
+        assert_eq!(OutputFormat::from_str("concise").unwrap(), OutputFormat::Concise);
+        assert_eq!(OutputFormat::from_str("grouped").unwrap(), OutputFormat::Grouped);
+        assert_eq!(OutputFormat::from_str("json").unwrap(), OutputFormat::Json);
+        assert_eq!(OutputFormat::from_str("json-lines").unwrap(), OutputFormat::JsonLines);
+        assert_eq!(OutputFormat::from_str("jsonlines").unwrap(), OutputFormat::JsonLines);
+        assert_eq!(OutputFormat::from_str("github").unwrap(), OutputFormat::GitHub);
+        assert_eq!(OutputFormat::from_str("gitlab").unwrap(), OutputFormat::GitLab);
+        assert_eq!(OutputFormat::from_str("pylint").unwrap(), OutputFormat::Pylint);
+        assert_eq!(OutputFormat::from_str("azure").unwrap(), OutputFormat::Azure);
+        assert_eq!(OutputFormat::from_str("sarif").unwrap(), OutputFormat::Sarif);
+        assert_eq!(OutputFormat::from_str("junit").unwrap(), OutputFormat::Junit);
+        
+        // Case insensitive
+        assert_eq!(OutputFormat::from_str("TEXT").unwrap(), OutputFormat::Text);
+        assert_eq!(OutputFormat::from_str("GitHub").unwrap(), OutputFormat::GitHub);
+        assert_eq!(OutputFormat::from_str("JSON-LINES").unwrap(), OutputFormat::JsonLines);
+        
+        // Invalid format
+        assert!(OutputFormat::from_str("invalid").is_err());
+        assert!(OutputFormat::from_str("").is_err());
+        assert!(OutputFormat::from_str("xml").is_err());
+    }
+
+    #[test]
+    fn test_output_format_create_formatter() {
+        // Test that each format creates the correct formatter
+        let formats = [
+            OutputFormat::Text,
+            OutputFormat::Concise,
+            OutputFormat::Grouped,
+            OutputFormat::Json,
+            OutputFormat::JsonLines,
+            OutputFormat::GitHub,
+            OutputFormat::GitLab,
+            OutputFormat::Pylint,
+            OutputFormat::Azure,
+            OutputFormat::Sarif,
+            OutputFormat::Junit,
+        ];
+        
+        for format in &formats {
+            let formatter = format.create_formatter();
+            // Test that formatter can format warnings
+            let warnings = vec![create_test_warning(1, "Test warning")];
+            let output = formatter.format_warnings(&warnings, "test.md");
+            assert!(!output.is_empty(), "Formatter {:?} should produce output", format);
+        }
+    }
+
+    #[test]
+    fn test_output_writer_new() {
+        let writer1 = OutputWriter::new(false, false, false);
+        assert!(!writer1.use_stderr);
+        assert!(!writer1._quiet);
+        assert!(!writer1.silent);
+        
+        let writer2 = OutputWriter::new(true, true, false);
+        assert!(writer2.use_stderr);
+        assert!(writer2._quiet);
+        assert!(!writer2.silent);
+        
+        let writer3 = OutputWriter::new(false, false, true);
+        assert!(!writer3.use_stderr);
+        assert!(!writer3._quiet);
+        assert!(writer3.silent);
+    }
+
+    #[test]
+    fn test_output_writer_silent_mode() {
+        let writer = OutputWriter::new(false, false, true);
+        
+        // All write methods should succeed but not produce output when silent
+        assert!(writer.write("test").is_ok());
+        assert!(writer.writeln("test").is_ok());
+        assert!(writer.write_error("test").is_ok());
+    }
+
+    #[test]
+    fn test_output_writer_write_methods() {
+        // Test non-silent mode
+        let writer = OutputWriter::new(false, false, false);
+        
+        // These should succeed (we can't easily test the actual output)
+        assert!(writer.write("test").is_ok());
+        assert!(writer.writeln("test line").is_ok());
+        assert!(writer.write_error("error message").is_ok());
+    }
+
+    #[test]
+    fn test_output_writer_stderr_mode() {
+        let writer = OutputWriter::new(true, false, false);
+        
+        // Should write to stderr instead of stdout
+        assert!(writer.write("stderr test").is_ok());
+        assert!(writer.writeln("stderr line").is_ok());
+        
+        // write_error always goes to stderr
+        assert!(writer.write_error("error").is_ok());
+    }
+
+    #[test]
+    fn test_formatter_trait_default_summary() {
+        // Create a simple test formatter
+        struct TestFormatter;
+        impl OutputFormatter for TestFormatter {
+            fn format_warnings(&self, _warnings: &[LintWarning], _file_path: &str) -> String {
+                "test".to_string()
+            }
+        }
+        
+        let formatter = TestFormatter;
+        assert_eq!(formatter.format_summary(10, 5, 1000), None);
+        assert!(!formatter.use_colors());
+    }
+
+    #[test]
+    fn test_formatter_with_multiple_warnings() {
+        let warnings = vec![
+            create_test_warning(1, "First warning"),
+            create_test_warning(5, "Second warning"),
+            create_test_warning_with_fix(10, "Third warning with fix", "fixed content"),
+        ];
+        
+        // Test with different formatters
+        let text_formatter = TextFormatter::new();
+        let output = text_formatter.format_warnings(&warnings, "test.md");
+        assert!(output.contains("First warning"));
+        assert!(output.contains("Second warning"));
+        assert!(output.contains("Third warning with fix"));
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        // Empty warnings
+        let empty_warnings: Vec<LintWarning> = vec![];
+        let formatter = TextFormatter::new();
+        let output = formatter.format_warnings(&empty_warnings, "test.md");
+        // Most formatters should handle empty warnings gracefully
+        assert!(output.is_empty() || output.trim().is_empty());
+        
+        // Very long file path
+        let long_path = "a/".repeat(100) + "file.md";
+        let warnings = vec![create_test_warning(1, "Test")];
+        let output = formatter.format_warnings(&warnings, &long_path);
+        assert!(!output.is_empty());
+        
+        // Unicode in messages
+        let unicode_warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 10,
+            rule_name: Some("MD001"),
+            message: "Unicode test: 你好 🌟 émphasis".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+        let output = formatter.format_warnings(&[unicode_warning], "test.md");
+        assert!(output.contains("Unicode test"));
+    }
+
+    #[test]
+    fn test_severity_variations() {
+        let severities = [Severity::Error, Severity::Warning];
+        
+        for severity in &severities {
+            let warning = LintWarning {
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 5,
+                rule_name: Some("MD001"),
+                message: format!("Test {} message", match severity {
+                    Severity::Error => "error",
+                    Severity::Warning => "warning",
+                }),
+                severity: *severity,
+                fix: None,
+            };
+            
+            let formatter = TextFormatter::new();
+            let output = formatter.format_warnings(&[warning], "test.md");
+            assert!(!output.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_output_format_equality() {
+        assert_eq!(OutputFormat::Text, OutputFormat::Text);
+        assert_ne!(OutputFormat::Text, OutputFormat::Json);
+        assert_ne!(OutputFormat::Concise, OutputFormat::Grouped);
+    }
+
+    #[test]
+    fn test_all_formats_handle_no_rule_name() {
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            rule_name: None, // No rule name
+            message: "Generic warning".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+        
+        let formats = [
+            OutputFormat::Text,
+            OutputFormat::Concise,
+            OutputFormat::Grouped,
+            OutputFormat::Json,
+            OutputFormat::JsonLines,
+            OutputFormat::GitHub,
+            OutputFormat::GitLab,
+            OutputFormat::Pylint,
+            OutputFormat::Azure,
+            OutputFormat::Sarif,
+            OutputFormat::Junit,
+        ];
+        
+        for format in &formats {
+            let formatter = format.create_formatter();
+            let output = formatter.format_warnings(&[warning.clone()], "test.md");
+            assert!(!output.is_empty(), "Format {:?} should handle warnings without rule names", format);
+        }
+    }
+}

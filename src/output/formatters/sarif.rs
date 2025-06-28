@@ -20,9 +20,46 @@ impl SarifFormatter {
 }
 
 impl OutputFormatter for SarifFormatter {
-    fn format_warnings(&self, _warnings: &[LintWarning], _file_path: &str) -> String {
-        // SARIF needs to collect all results and output as a single document
-        String::new()
+    fn format_warnings(&self, warnings: &[LintWarning], file_path: &str) -> String {
+        // Format warnings for a single file as a minimal SARIF document
+        let results: Vec<_> = warnings.iter().map(|warning| {
+            let rule_id = warning.rule_name.unwrap_or("unknown");
+            json!({
+                "ruleId": rule_id,
+                "level": "warning",
+                "message": {
+                    "text": warning.message
+                },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": {
+                            "uri": file_path
+                        },
+                        "region": {
+                            "startLine": warning.line,
+                            "startColumn": warning.column
+                        }
+                    }
+                }]
+            })
+        }).collect();
+        
+        let sarif_doc = json!({
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [{
+                "tool": {
+                    "driver": {
+                        "name": "rumdl",
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "informationUri": "https://github.com/rvben/rumdl"
+                    }
+                },
+                "results": results
+            }]
+        });
+        
+        serde_json::to_string_pretty(&sarif_doc).unwrap_or_else(|_| r#"{"version":"2.1.0","runs":[]}"#.to_string())
     }
 }
 
