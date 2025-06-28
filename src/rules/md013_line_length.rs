@@ -28,17 +28,9 @@ lazy_static! {
     static ref REFERENCE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\[([^\]]*)\]").unwrap();
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD013LineLength {
     config: MD013Config,
-}
-
-impl Default for MD013LineLength {
-    fn default() -> Self {
-        Self {
-            config: MD013Config::default(),
-        }
-    }
 }
 
 impl MD013LineLength {

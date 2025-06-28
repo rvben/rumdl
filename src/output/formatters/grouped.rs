@@ -7,6 +7,12 @@ use std::collections::HashMap;
 /// Grouped formatter: groups violations by file
 pub struct GroupedFormatter;
 
+impl Default for GroupedFormatter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl GroupedFormatter {
     pub fn new() -> Self {
         Self
@@ -25,7 +31,7 @@ impl OutputFormatter for GroupedFormatter {
         let mut grouped: HashMap<&str, Vec<&LintWarning>> = HashMap::new();
         for warning in warnings {
             let rule_name = warning.rule_name.unwrap_or("unknown");
-            grouped.entry(rule_name).or_insert_with(Vec::new).push(warning);
+            grouped.entry(rule_name).or_default().push(warning);
         }
 
         // Output file header

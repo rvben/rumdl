@@ -23,17 +23,9 @@ lazy_static! {
 }
 
 /// Represents the style for horizontal rules
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD035HRStyle {
     config: MD035Config,
-}
-
-impl Default for MD035HRStyle {
-    fn default() -> Self {
-        Self {
-            config: MD035Config::default(),
-        }
-    }
 }
 
 impl MD035HRStyle {

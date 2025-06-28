@@ -10,18 +10,12 @@ use md012_config::MD012Config;
 /// Rule MD012: No multiple consecutive blank lines
 ///
 /// See [docs/md012.md](../../docs/md012.md) for full documentation, configuration, and examples.
+#[cfg(test)]
+type LineRegions = Vec<(usize, usize)>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MD012NoMultipleBlanks {
     config: MD012Config,
-}
-
-impl Default for MD012NoMultipleBlanks {
-    fn default() -> Self {
-        Self {
-            config: MD012Config::default(),
-        }
-    }
 }
 
 impl MD012NoMultipleBlanks {
@@ -36,7 +30,7 @@ impl MD012NoMultipleBlanks {
     }
 
     #[cfg(test)]
-    pub fn debug_regions(lines: &[&str]) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
+    pub fn debug_regions(lines: &[&str]) -> (LineRegions, LineRegions) {
         let code_regions = Self::compute_code_block_regions(lines);
         let front_matter_regions = Self::compute_front_matter_regions(lines);
         println!("Lines:");

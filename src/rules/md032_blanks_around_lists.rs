@@ -214,7 +214,7 @@ impl MD032BlanksAroundLists {
             };
 
             // Convert segments to blocks
-            for (_idx, (start, end)) in segments.iter().enumerate() {
+            for (start, end) in segments.iter() {
                 // Extend the end to include any continuation lines immediately after the last item
                 let mut actual_end = *end;
 
@@ -237,13 +237,13 @@ impl MD032BlanksAroundLists {
                                 actual_end = check_line;
                             }
                             // Include lazy continuation only if it's not a separate paragraph
-                            else if check_line == *end + 1 && !line.is_blank && !line.heading.is_some() {
+                            else if check_line == *end + 1 && !line.is_blank && line.heading.is_none() {
                                 // Check if this looks like list continuation vs new paragraph
                                 // Simple heuristic: if it starts with uppercase and the list item ended with punctuation,
                                 // it's likely a new paragraph
                                 let is_likely_new_paragraph = {
                                     let first_char = line.content.trim().chars().next();
-                                    first_char.map_or(false, |c| c.is_uppercase())
+                                    first_char.is_some_and(|c| c.is_uppercase())
                                 };
 
                                 if !is_likely_new_paragraph {

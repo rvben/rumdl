@@ -65,7 +65,7 @@ impl ContentCharacteristics {
             if !chars.has_lists && (line.contains("* ") || line.contains("- ") || line.contains("+ ")) {
                 chars.has_lists = true;
             }
-            if !chars.has_lists && line.chars().next().map_or(false, |c| c.is_ascii_digit()) && line.contains(". ") {
+            if !chars.has_lists && line.chars().next().is_some_and(|c| c.is_ascii_digit()) && line.contains(". ") {
                 chars.has_lists = true;
             }
             if !chars.has_links

@@ -57,14 +57,12 @@ impl Rule for MD042NoEmptyLinks {
                     } else {
                         format!("[Link text]({})", effective_url)
                     }
+                } else if link.is_reference {
+                    // Keep the reference format
+                    let ref_part = &ctx.content[link.byte_offset + link.text.len() + 2..link.byte_end];
+                    format!("[{}]{}", link.text, ref_part)
                 } else {
-                    if link.is_reference {
-                        // Keep the reference format
-                        let ref_part = &ctx.content[link.byte_offset + link.text.len() + 2..link.byte_end];
-                        format!("[{}]{}", link.text, ref_part)
-                    } else {
-                        format!("[{}](https://example.com)", link.text)
-                    }
+                    format!("[{}](https://example.com)", link.text)
                 };
 
                 warnings.push(LintWarning {

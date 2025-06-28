@@ -5,6 +5,7 @@
 
 use crate::rule::LintWarning;
 use std::io::{self, Write};
+use std::str::FromStr;
 
 pub mod formatters;
 
@@ -55,9 +56,10 @@ pub enum OutputFormat {
     Junit,
 }
 
-impl OutputFormat {
-    /// Parse output format from string
-    pub fn from_str(s: &str) -> Result<Self, String> {
+impl FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "text" | "full" => Ok(OutputFormat::Text),
             "concise" => Ok(OutputFormat::Concise),
@@ -73,6 +75,9 @@ impl OutputFormat {
             _ => Err(format!("Unknown output format: {}", s)),
         }
     }
+}
+
+impl OutputFormat {
 
     /// Create a formatter instance for this format
     pub fn create_formatter(&self) -> Box<dyn OutputFormatter> {

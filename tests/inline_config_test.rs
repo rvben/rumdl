@@ -20,7 +20,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
     // Find MD013 warnings
     let md013_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
         .collect();
 
     // Should have exactly one MD013 warning (line 7)
@@ -43,7 +43,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
     // Find MD013 warnings
     let md013_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
         .collect();
 
     // Should have exactly one MD013 warning (line 5, not line 3)
@@ -67,7 +67,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
     // Find MD013 warnings
     let md013_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
         .collect();
 
     // Should have exactly one MD013 warning (line 6, not line 4)
@@ -97,15 +97,15 @@ This is another very long line that exceeds 80 characters and should not trigger
     // Find warnings by rule
     let md013_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
         .collect();
     let md025_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD025"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD025"))
         .collect();
     let md009_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD009"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD009"))
         .collect();
 
     // MD013 should be disabled throughout
@@ -150,7 +150,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
     // Should have at least one MD013 warning on line 11
     let md013_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
         .collect();
     assert!(!md013_warnings.is_empty());
 }
@@ -175,11 +175,11 @@ Trailing spaces should now trigger MD009
     // Find warnings by rule
     let md013_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
         .collect();
     let md009_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD009"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD009"))
         .collect();
 
     // MD013 warning on line 7
@@ -221,7 +221,7 @@ This is a very long line that exceeds 80 characters but is disabled by the previ
     // Find MD013 warnings
     let md013_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD013"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
         .collect();
 
     // Should have exactly one MD013 warning (line 7)
@@ -271,7 +271,7 @@ fn test_md009_simple() {
 
     let md009_warnings: Vec<_> = warnings
         .iter()
-        .filter(|w| w.rule_name.as_ref().map_or(false, |n| *n == "MD009"))
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD009"))
         .collect();
 
     assert_eq!(

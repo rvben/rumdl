@@ -345,10 +345,7 @@ impl Rule for MD037NoSpaceInEmphasis {
         }
 
         // First check for issues and get all warnings with fixes
-        let warnings = match self.check(ctx) {
-            Ok(warnings) => warnings,
-            Err(e) => return Err(e),
-        };
+        let warnings = self.check(ctx)?;
 
         // If no warnings, return original content
         if warnings.is_empty() {

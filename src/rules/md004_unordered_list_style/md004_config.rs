@@ -48,7 +48,8 @@ impl<'de> Deserialize<'de> for MD004Config {
             "asterisk" => UnorderedListStyle::Asterisk,
             "dash" => UnorderedListStyle::Dash,
             "plus" => UnorderedListStyle::Plus,
-            "consistent" | _ => UnorderedListStyle::Consistent,
+            "consistent" => UnorderedListStyle::Consistent,
+            _ => UnorderedListStyle::Consistent,
         };
 
         Ok(MD004Config { style, after_marker: 1 })

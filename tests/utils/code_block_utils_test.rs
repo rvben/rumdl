@@ -220,7 +220,7 @@ fn test_list_continuation_with_code() {
 2. Next item"#;
     let ctx = rumdl::lint_context::LintContext::new(content);
     // Should find the fenced code block in the list
-    assert!(ctx.code_blocks.len() >= 1, "Should find the fenced code block");
+    assert!(!ctx.code_blocks.is_empty(), "Should find the fenced code block");
 }
 
 #[test]

@@ -4,7 +4,7 @@ use tempfile::TempDir;
 
 fn run_rumdl_check(dir: &Path) -> String {
     let output = std::process::Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--release",
             "--bin",

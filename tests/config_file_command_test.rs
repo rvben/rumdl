@@ -20,7 +20,7 @@ style = "asterisk"
 
     // Run the config file command with explicit config
     let output = Command::new(rumdl_exe)
-        .args(&["config", "file", "--config"])
+        .args(["config", "file", "--config"])
         .arg(&config_path)
         .output()
         .expect("Failed to execute command");
@@ -37,7 +37,7 @@ fn test_config_file_command_with_no_config() {
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
     let output = Command::new(rumdl_exe)
-        .args(&["config", "file", "--no-config"])
+        .args(["config", "file", "--no-config"])
         .output()
         .expect("Failed to execute command");
 
@@ -52,7 +52,7 @@ fn test_config_file_command_with_nonexistent_config() {
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
     let output = Command::new(rumdl_exe)
-        .args(&["config", "file", "--config", "nonexistent.toml"])
+        .args(["config", "file", "--config", "nonexistent.toml"])
         .output()
         .expect("Failed to execute command");
 
@@ -79,7 +79,7 @@ disable = ["MD013"]
     // Run the config file command (should auto-discover .rumdl.toml)
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
     let output = Command::new(rumdl_exe)
-        .args(&["config", "file"])
+        .args(["config", "file"])
         .current_dir(&temp_dir)
         .output()
         .expect("Failed to execute command");
@@ -113,7 +113,7 @@ disable = ["MD013"]
     // Run the config file command (should find both files)
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
     let output = Command::new(rumdl_exe)
-        .args(&["config", "file"])
+        .args(["config", "file"])
         .current_dir(&temp_dir)
         .output()
         .expect("Failed to execute command");

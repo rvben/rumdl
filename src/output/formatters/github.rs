@@ -7,6 +7,12 @@ use crate::rule::LintWarning;
 /// Outputs in the format: ::error file=<file>,line=<line>,col=<col>,title=<rule>::<message>
 pub struct GitHubFormatter;
 
+impl Default for GitHubFormatter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl GitHubFormatter {
     pub fn new() -> Self {
         Self

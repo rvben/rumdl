@@ -717,7 +717,7 @@ impl<'a> LintContext<'a> {
                     let content = caps.get(2).unwrap().as_str();
                     (content, prefix.len())
                 } else {
-                    (line.as_ref(), 0)
+                    (&**line, 0)
                 };
 
                 if let Some(caps) = unordered_regex.captures(line_for_list_check) {
@@ -743,7 +743,7 @@ impl<'a> LintContext<'a> {
                         {
                             // Likely horizontal rule like *** or ---
                             None
-                        } else if content.len() > 0 && content.chars().next().unwrap().is_alphabetic() {
+                        } else if !content.is_empty() && content.chars().next().unwrap().is_alphabetic() {
                             // Single word starting with marker, likely not intended as list
                             // This matches markdownlint behavior
                             None
@@ -777,7 +777,7 @@ impl<'a> LintContext<'a> {
                     let content_column = marker_column + marker.len() + spacing.len();
 
                     // Check if this is likely not a list item
-                    if spacing.is_empty() && content.len() > 0 && content.chars().next().unwrap().is_alphabetic() {
+                    if spacing.is_empty() && !content.is_empty() && content.chars().next().unwrap().is_alphabetic() {
                         // No space after marker and starts with alphabetic, likely not intended as list
                         // This matches markdownlint behavior
                         None
@@ -928,7 +928,7 @@ impl<'a> LintContext<'a> {
                 let next_line = content_lines[i + 1];
                 if !lines[i + 1].in_code_block && setext_underline_regex.is_match(next_line) {
                     // Skip if next line is front matter delimiter
-                    if in_front_matter && i + 1 <= front_matter_end {
+                    if in_front_matter && i < front_matter_end {
                         continue;
                     }
 
@@ -1144,11 +1144,9 @@ impl<'a> LintContext<'a> {
                         block.item_lines.push(line_num);
 
                         // Update marker consistency for unordered lists
-                        if !block.is_ordered && block.marker.is_some() {
-                            if block.marker.as_ref() != Some(&list_item.marker) {
-                                // Mixed markers, clear the marker field
-                                block.marker = None;
-                            }
+                        if !block.is_ordered && block.marker.is_some() && block.marker.as_ref() != Some(&list_item.marker) {
+                            // Mixed markers, clear the marker field
+                            block.marker = None;
                         }
                     } else {
                         // End current block and start a new one
@@ -1242,7 +1240,7 @@ impl<'a> LintContext<'a> {
                 } else {
                     // Check for lazy continuation - non-indented line immediately after a list item
                     let is_lazy_continuation =
-                        last_list_item_line == line_num - 1 && !line_info.heading.is_some() && !line_info.is_blank;
+                        last_list_item_line == line_num - 1 && line_info.heading.is_none() && !line_info.is_blank;
 
                     if is_lazy_continuation {
                         // Additional check: if the line starts with uppercase and looks like a new sentence,
@@ -1258,7 +1256,7 @@ impl<'a> LintContext<'a> {
                             line_info.content.trim()
                         };
 
-                        let starts_with_uppercase = content_to_check.chars().next().map_or(false, |c| c.is_uppercase());
+                        let starts_with_uppercase = content_to_check.chars().next().is_some_and(|c| c.is_uppercase());
 
                         // If it starts with uppercase and the previous line ended with punctuation,
                         // it's likely a new paragraph, not a continuation
@@ -1403,8 +1401,8 @@ impl<'a> LintContext<'a> {
                 content.get(url_start - 1..url_start)
             };
             let after = content.get(url_end..url_end + 1);
-            let is_valid_boundary = before.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
-                && after.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
+            let is_valid_boundary = before.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
+                && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
             if !is_valid_boundary {
                 continue;
             }
@@ -1464,9 +1462,9 @@ impl<'a> LintContext<'a> {
                 content.get(email_start - 1..email_start)
             };
             let after = content.get(email_end..email_end + 1);
-            let is_valid_boundary = before.map_or(true, |c| {
+            let is_valid_boundary = before.is_none_or(|c| {
                 !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-            }) && after.map_or(true, |c| {
+            }) && after.is_none_or(|c| {
                 !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
             });
             if !is_valid_boundary {
@@ -1530,10 +1528,8 @@ fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
             current.item_lines.extend_from_slice(&next.item_lines);
 
             // Update marker consistency
-            if !current.is_ordered && current.marker.is_some() && next.marker.is_some() {
-                if current.marker != next.marker {
-                    current.marker = None; // Mixed markers
-                }
+            if !current.is_ordered && current.marker.is_some() && next.marker.is_some() && current.marker != next.marker {
+                current.marker = None; // Mixed markers
             }
         } else {
             // Save current and start new

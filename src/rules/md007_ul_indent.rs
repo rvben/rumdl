@@ -12,17 +12,13 @@ use toml;
 mod md007_config;
 use md007_config::MD007Config;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MD007ULIndent {
     config: MD007Config,
 }
 
-impl Default for MD007ULIndent {
-    fn default() -> Self {
-        Self {
-            config: MD007Config::default(),
-        }
-    }
+lazy_static! {
+    static ref LIST_ITEM_PATTERN: Regex = Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
 }
 
 impl MD007ULIndent {
@@ -106,8 +102,7 @@ impl Rule for MD007ULIndent {
                         let lines: Vec<&str> = content.lines().collect();
                         if let Some(line) = lines.get(item.line_number - 1) {
                             // Extract the marker and content
-                            let re = regex::Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
-                            if re.captures(line).is_some() {
+                            if LIST_ITEM_PATTERN.captures(line).is_some() {
                                 let correct_indent = " ".repeat(expected_indent);
 
                                 // Fix range should match warning range - only the problematic indentation
@@ -193,8 +188,7 @@ impl Rule for MD007ULIndent {
                         let lines: Vec<&str> = content.lines().collect();
                         if let Some(line) = lines.get(item.line_number - 1) {
                             // Extract the marker and content
-                            let re = regex::Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
-                            if re.captures(line).is_some() {
+                            if LIST_ITEM_PATTERN.captures(line).is_some() {
                                 let correct_indent = " ".repeat(expected_indent);
 
                                 // Fix range should match warning range - only the problematic indentation

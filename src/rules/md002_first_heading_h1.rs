@@ -82,17 +82,9 @@ use md002_config::MD002Config;
 /// a logical structure. This follows semantic HTML principles where each page should have
 /// a single `<h1>` element that defines its main subject.
 ///
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MD002FirstHeadingH1 {
     config: MD002Config,
-}
-
-impl Default for MD002FirstHeadingH1 {
-    fn default() -> Self {
-        Self {
-            config: MD002Config::default(),
-        }
-    }
 }
 
 impl MD002FirstHeadingH1 {

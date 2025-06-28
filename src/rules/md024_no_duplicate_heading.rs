@@ -8,17 +8,9 @@ use std::collections::{HashMap, HashSet};
 mod md024_config;
 use md024_config::MD024Config;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct MD024NoDuplicateHeading {
     config: MD024Config,
-}
-
-impl Default for MD024NoDuplicateHeading {
-    fn default() -> Self {
-        Self {
-            config: MD024Config::default(),
-        }
-    }
 }
 
 impl MD024NoDuplicateHeading {

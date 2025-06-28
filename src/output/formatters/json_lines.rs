@@ -7,6 +7,12 @@ use serde_json::json;
 /// JSON Lines formatter - one JSON object per line
 pub struct JsonLinesFormatter;
 
+impl Default for JsonLinesFormatter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl JsonLinesFormatter {
     pub fn new() -> Self {
         Self

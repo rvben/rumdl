@@ -119,7 +119,7 @@ impl LineIndex {
 
     /// Check if the line is a code fence marker (``` or ~~~)
     pub fn is_code_fence(&self, line: usize) -> bool {
-        self.content.lines().nth(line).map_or(false, |l| {
+        self.content.lines().nth(line).is_some_and(|l| {
             let trimmed = l.trim();
             trimmed.starts_with("```") || trimmed.starts_with("~~~")
         })
@@ -130,7 +130,7 @@ impl LineIndex {
         self.content
             .lines()
             .nth(line)
-            .map_or(false, |l| l.trim().starts_with("~~~"))
+            .is_some_and(|l| l.trim().starts_with("~~~"))
     }
 
     /// Get a reference to the content

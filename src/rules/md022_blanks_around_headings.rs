@@ -80,17 +80,9 @@ use md022_config::MD022Config;
 /// - Proper handling of front matter
 /// - Smart code block detection
 ///
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD022BlanksAroundHeadings {
     config: MD022Config,
-}
-
-impl Default for MD022BlanksAroundHeadings {
-    fn default() -> Self {
-        Self {
-            config: MD022Config::default(),
-        }
-    }
 }
 
 impl MD022BlanksAroundHeadings {
@@ -221,7 +213,7 @@ impl MD022BlanksAroundHeadings {
                                         && trimmed
                                             .chars()
                                             .nth(3)
-                                            .map_or(false, |c| c.is_whitespace() || c.is_alphabetic())))
+                                            .is_some_and(|c| c.is_whitespace() || c.is_alphabetic())))
                         }
                     } else {
                         false
@@ -258,7 +250,7 @@ impl MD022BlanksAroundHeadings {
                                         && trimmed
                                             .chars()
                                             .nth(3)
-                                            .map_or(false, |c| c.is_whitespace() || c.is_alphabetic())))
+                                            .is_some_and(|c| c.is_whitespace() || c.is_alphabetic())))
                         }
                     } else {
                         false
@@ -402,7 +394,7 @@ impl Rule for MD022BlanksAroundHeadings {
                                 && next_trimmed
                                     .chars()
                                     .nth(3)
-                                    .map_or(false, |c| c.is_whitespace() || c.is_alphabetic())));
+                                    .is_some_and(|c| c.is_whitespace() || c.is_alphabetic())));
 
                     // Check for list item
                     let is_list_item = next_line.list_item.is_some();
@@ -443,7 +435,7 @@ impl Rule for MD022BlanksAroundHeadings {
                 ),
                 "below" => {
                     // For Setext headings, insert after the underline
-                    let insert_after = if line_info.heading.as_ref().map_or(false, |h| {
+                    let insert_after = if line_info.heading.as_ref().is_some_and(|h| {
                         matches!(
                             h.style,
                             crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2

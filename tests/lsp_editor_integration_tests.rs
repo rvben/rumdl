@@ -15,7 +15,7 @@ This is the first paragraph.
 ## Section 1
 Some content here."#;
 
-    let editing_steps = vec![
+    let editing_steps = [
         // Step 1: User adds trailing spaces (common typing scenario)
         r#"# My Document
 This is the first paragraph.   
@@ -253,7 +253,7 @@ Content goes here.
 ## Section Two
 More content."#;
 
-    let rapid_edits = vec![
+    let rapid_edits = [
         "# Document Title\n\n## Section One\nContent goes here.   \n\n## Section Two\nMore content.",
         "# Document Title\n\n## Section One\nContent goes here.\n\n## Section Two\nMore content.   ",
         "# Document Title\n\n## Section One   \nContent goes here.\n\n## Section Two\nMore content.",

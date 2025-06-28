@@ -99,14 +99,14 @@ fn test_indentation_edge_cases() {
     let unordered_count = lists
         .iter()
         .filter(|l| {
-            l.metadata.as_ref().map_or(false, |m| {
+            l.metadata.as_ref().is_some_and(|m| {
                 m.contains("minus") || m.contains("asterisk") || m.contains("plus")
             })
         })
         .count();
     let ordered_count = lists
         .iter()
-        .filter(|l| l.metadata.as_ref().map_or(false, |m| m.contains("ordered")))
+        .filter(|l| l.metadata.as_ref().is_some_and(|m| m.contains("ordered")))
         .count();
 
     assert_eq!(unordered_count, 3, "Should have 3 unordered list items");
@@ -220,7 +220,7 @@ Unclosed code block
     let malformed_ordered = lists
         .iter()
         .filter(|l| {
-            l.metadata.as_ref().map_or(false, |m| {
+            l.metadata.as_ref().is_some_and(|m| {
                 m.contains("ordered:no_space") || m.contains("ordered:wrong_marker")
             })
         })

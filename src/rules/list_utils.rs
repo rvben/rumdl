@@ -315,7 +315,7 @@ pub fn is_list_item(line: &str) -> Option<(ListType, String, usize)> {
     if let Some(cap) = LIST_REGEX.captures(line) {
         let marker = &cap[2];
         let spaces = cap[3].len();
-        let list_type = if marker.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        let list_type = if marker.chars().next().is_some_and(|c| c.is_ascii_digit()) {
             ListType::Ordered
         } else {
             ListType::Unordered

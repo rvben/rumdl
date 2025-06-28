@@ -239,7 +239,7 @@ impl MD033NoInlineHtml {
                                     column: start_col,
                                     end_line,
                                     end_column: end_col,
-                                    message: format!("HTML tag found (use Markdown syntax instead)"),
+                                    message: "HTML tag found (use Markdown syntax instead)".to_string(),
                                     severity: Severity::Warning,
                                     fix: None,
                                 });
@@ -344,7 +344,7 @@ impl Rule for MD033NoInlineHtml {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    message: format!("Inline HTML found (use Markdown syntax instead)"),
+                    message: "Inline HTML found (use Markdown syntax instead)".to_string(),
                     severity: Severity::Warning,
                     fix: None,
                 });

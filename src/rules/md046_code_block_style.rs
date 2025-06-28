@@ -128,7 +128,7 @@ impl MD046CodeBlockStyle {
         let mut has_prose_content = false;
 
         // Look at surrounding lines to see if this is part of a prose block
-        let start = if i >= 5 { i - 5 } else { 0 };
+        let start = i.saturating_sub(5);
         let end = if i + 5 < lines.len() { i + 5 } else { lines.len() };
 
         for check_line in lines.iter().take(end).skip(start) {
@@ -290,7 +290,7 @@ impl MD046CodeBlockStyle {
                             {
                                 // This is problematic - same fence character used with equal or greater length while another is open
                                 let (opening_start_line, opening_start_col, opening_end_line, opening_end_col) =
-                                    calculate_line_range(*open_line, &lines[*open_line - 1]);
+                                    calculate_line_range(*open_line, lines[*open_line - 1]);
 
                                 // Calculate the byte position to insert closing fence before this line
                                 let line_start_byte = ctx.content.lines().take(i).map(|l| l.len() + 1).sum::<usize>();
@@ -582,9 +582,11 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // Close any unclosed fenced blocks
-        if in_fenced_block && fenced_fence_type.is_some() {
-            result.push_str(fenced_fence_type.unwrap());
-            result.push('\n');
+        if let Some(fence_type) = fenced_fence_type {
+            if in_fenced_block {
+                result.push_str(fence_type);
+                result.push('\n');
+            }
         }
 
         // Remove trailing newline if original didn't have one

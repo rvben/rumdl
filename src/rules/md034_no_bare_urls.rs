@@ -69,9 +69,7 @@ impl MD034NoBareUrls {
         // Skip if content has no URLs and no email addresses
         let has_urls = early_returns::has_urls(content);
         let has_emails = content.contains('@');
-        let should_skip = !has_urls && !has_emails;
-
-        should_skip
+        !has_urls && !has_emails
     }
 
     /// Remove trailing punctuation that is likely sentence punctuation, not part of the URL
@@ -177,8 +175,8 @@ impl MD034NoBareUrls {
                 content.get(url_start - 1..url_start)
             };
             let after = content.get(url_end..url_end + 1);
-            let is_valid_boundary = before.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
-                && after.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
+            let is_valid_boundary = before.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
+                && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
             if !is_valid_boundary {
                 continue;
             }
@@ -218,7 +216,7 @@ impl MD034NoBareUrls {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!("URL without angle brackets or link formatting"),
+                message: "URL without angle brackets or link formatting".to_string(),
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: url_start..url_end,
@@ -239,9 +237,9 @@ impl MD034NoBareUrls {
                 content.get(email_start - 1..email_start)
             };
             let after = content.get(email_end..email_end + 1);
-            let is_valid_boundary = before.map_or(true, |c| {
+            let is_valid_boundary = before.is_none_or(|c| {
                 !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-            }) && after.map_or(true, |c| {
+            }) && after.is_none_or(|c| {
                 !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
             });
             if !is_valid_boundary {
@@ -280,7 +278,7 @@ impl MD034NoBareUrls {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!("Email address without angle brackets or link formatting"),
+                message: "Email address without angle brackets or link formatting".to_string(),
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: email_start..email_end,
@@ -328,8 +326,8 @@ impl MD034NoBareUrls {
                     };
                     let after = text_str.get(url_end..url_end + 1);
                     let is_valid_boundary = before
-                        .map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
-                        && after.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
+                        .is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
+                        && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
                     if !is_valid_boundary {
                         continue;
                     }
@@ -345,7 +343,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("URL without angle brackets or link formatting"),
+                            message: "URL without angle brackets or link formatting".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
@@ -365,9 +363,9 @@ impl MD034NoBareUrls {
                         text_str.get(email_start - 1..email_start)
                     };
                     let after = text_str.get(email_end..email_end + 1);
-                    let is_valid_boundary = before.map_or(true, |c| {
+                    let is_valid_boundary = before.is_none_or(|c| {
                         !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-                    }) && after.map_or(true, |c| {
+                    }) && after.is_none_or(|c| {
                         !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
                     });
                     if !is_valid_boundary {
@@ -385,9 +383,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!(
-                                "Email address without angle brackets or link formatting (wrap like: <email>)"
-                            ),
+                            message: "Email address without angle brackets or link formatting (wrap like: <email>)".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + email_text.len()),
@@ -426,8 +422,8 @@ impl MD034NoBareUrls {
                     };
                     let after = alt_str.get(url_end..url_end + 1);
                     let is_valid_boundary = before
-                        .map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
-                        && after.map_or(true, |c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
+                        .is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
+                        && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
                     if !is_valid_boundary {
                         continue;
                     }
@@ -443,7 +439,7 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("URL without angle brackets or link formatting"),
+                            message: "URL without angle brackets or link formatting".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),

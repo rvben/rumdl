@@ -111,13 +111,13 @@ impl MD055TablePipeStyle {
         let mut content_parts = Vec::new();
 
         // Extract the actual content (skip empty leading/trailing parts)
-        let start_idx = if parts.first().map_or(false, |p| p.trim().is_empty()) {
+        let start_idx = if parts.first().is_some_and(|p| p.trim().is_empty()) {
             1
         } else {
             0
         };
-        let end_idx = if parts.last().map_or(false, |p| p.trim().is_empty()) {
-            if parts.len() > 0 {
+        let end_idx = if parts.last().is_some_and(|p| p.trim().is_empty()) {
+            if !parts.is_empty() {
                 parts.len() - 1
             } else {
                 0

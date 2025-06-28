@@ -22,6 +22,12 @@ pub struct InlineConfig {
     line_disabled_rules: HashMap<usize, HashSet<String>>,
 }
 
+impl Default for InlineConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InlineConfig {
     pub fn new() -> Self {
         Self {
@@ -51,7 +57,7 @@ impl InlineConfig {
             // Check for disable-next-line first (more specific than disable)
             if let Some(rules) = parse_disable_next_line_comment(line) {
                 let next_line = line_num + 1;
-                let line_rules = config.line_disabled_rules.entry(next_line).or_insert_with(HashSet::new);
+                let line_rules = config.line_disabled_rules.entry(next_line).or_default();
                 if rules.is_empty() {
                     // Disable all rules for next line
                     line_rules.insert("*".to_string());
@@ -63,7 +69,7 @@ impl InlineConfig {
             }
             // Check for disable-line (more specific than disable)
             else if let Some(rules) = parse_disable_line_comment(line) {
-                let line_rules = config.line_disabled_rules.entry(line_num).or_insert_with(HashSet::new);
+                let line_rules = config.line_disabled_rules.entry(line_num).or_default();
                 if rules.is_empty() {
                     // Disable all rules for current line
                     line_rules.insert("*".to_string());

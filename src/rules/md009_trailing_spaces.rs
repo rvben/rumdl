@@ -13,17 +13,9 @@ lazy_static! {
     static ref TRAILING_SPACES_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"(?m) +$").unwrap();
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MD009TrailingSpaces {
     config: MD009Config,
-}
-
-impl Default for MD009TrailingSpaces {
-    fn default() -> Self {
-        Self {
-            config: MD009Config::default(),
-        }
-    }
 }
 
 impl MD009TrailingSpaces {

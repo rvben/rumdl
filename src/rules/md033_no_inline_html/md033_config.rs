@@ -2,16 +2,10 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MD033Config {
     #[serde(default, rename = "allowed_elements")]
     pub allowed: Vec<String>,
-}
-
-impl Default for MD033Config {
-    fn default() -> Self {
-        Self { allowed: Vec::new() }
-    }
 }
 
 impl MD033Config {
