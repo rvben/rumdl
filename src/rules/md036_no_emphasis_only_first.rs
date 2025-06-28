@@ -29,17 +29,9 @@ lazy_static! {
 }
 
 /// Rule MD036: Emphasis used instead of a heading
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD036NoEmphasisAsHeading {
     config: MD036Config,
-}
-
-impl Default for MD036NoEmphasisAsHeading {
-    fn default() -> Self {
-        Self {
-            config: MD036Config::default(),
-        }
-    }
 }
 
 impl MD036NoEmphasisAsHeading {

@@ -2,7 +2,6 @@
 ///
 /// This module provides optimized table detection and processing functionality
 /// that can be shared across multiple table-related rules (MD055, MD056, MD058).
-
 /// Represents a table block in the document
 #[derive(Debug, Clone)]
 pub struct TableBlock {

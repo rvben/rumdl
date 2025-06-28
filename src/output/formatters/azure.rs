@@ -7,6 +7,12 @@ use crate::rule::LintWarning;
 /// Outputs in the format: ##vso[task.logissue type=warning;sourcepath=<file>;linenumber=<line>;columnnumber=<col>;code=<rule>]<message>
 pub struct AzureFormatter;
 
+impl Default for AzureFormatter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl AzureFormatter {
     pub fn new() -> Self {
         Self

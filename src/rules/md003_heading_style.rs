@@ -20,17 +20,9 @@ lazy_static! {
 }
 
 /// Rule MD003: Heading style
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD003HeadingStyle {
     config: MD003Config,
-}
-
-impl Default for MD003HeadingStyle {
-    fn default() -> Self {
-        Self {
-            config: MD003Config::default(),
-        }
-    }
 }
 
 impl MD003HeadingStyle {

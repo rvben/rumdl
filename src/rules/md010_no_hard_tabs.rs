@@ -17,17 +17,9 @@ lazy_static! {
 }
 
 /// Rule MD010: Hard tabs
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD010NoHardTabs {
     config: MD010Config,
-}
-
-impl Default for MD010NoHardTabs {
-    fn default() -> Self {
-        Self {
-            config: MD010Config::default(),
-        }
-    }
 }
 
 impl MD010NoHardTabs {

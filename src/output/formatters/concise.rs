@@ -6,6 +6,12 @@ use crate::rule::LintWarning;
 /// Concise formatter: file:line:col: [RULE] message
 pub struct ConciseFormatter;
 
+impl Default for ConciseFormatter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl ConciseFormatter {
     pub fn new() -> Self {
         Self

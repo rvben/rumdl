@@ -8,6 +8,12 @@ use serde_json::json;
 /// Outputs in GitLab's code quality JSON format
 pub struct GitLabFormatter;
 
+impl Default for GitLabFormatter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl GitLabFormatter {
     pub fn new() -> Self {
         Self

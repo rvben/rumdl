@@ -1083,7 +1083,7 @@ Malformed and edge case links:
 
     // Should flag the invalid fragment and potentially malformed links
     // (depends on how the parser handles malformed syntax)
-    assert!(result.len() >= 1, "Expected at least 1 warning for invalid fragment");
+    assert!(!result.is_empty(), "Expected at least 1 warning for invalid fragment");
 
     let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
     let contains_missing = warning_messages.iter().any(|msg| msg.contains("missing-heading"));

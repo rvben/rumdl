@@ -60,10 +60,8 @@ pub fn json_to_toml_value(json_val: &serde_json::Value) -> Option<toml::Value> {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Some(toml::Value::Integer(i))
-            } else if let Some(f) = n.as_f64() {
-                Some(toml::Value::Float(f))
             } else {
-                None
+                n.as_f64().map(toml::Value::Float)
             }
         }
         serde_json::Value::String(s) => Some(toml::Value::String(s.clone())),

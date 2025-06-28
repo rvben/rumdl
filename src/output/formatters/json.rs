@@ -5,13 +5,14 @@ use crate::rule::LintWarning;
 use serde_json::{json, Value};
 
 /// JSON formatter for machine-readable output
+#[derive(Default)]
 pub struct JsonFormatter {
     collect_all: bool,
 }
 
 impl JsonFormatter {
     pub fn new() -> Self {
-        Self { collect_all: false }
+        Self::default()
     }
 
     /// Create a formatter that collects all warnings into a single JSON array

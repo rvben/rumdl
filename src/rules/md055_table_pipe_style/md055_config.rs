@@ -22,11 +22,11 @@ fn default_style() -> String {
     "consistent".to_string()
 }
 
-fn serialize_style<S>(style: &String, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_style<S>(style: &str, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    // Just serialize the string as-is since it's already a String
+    // Just serialize the string as-is
     serializer.serialize_str(style)
 }
 

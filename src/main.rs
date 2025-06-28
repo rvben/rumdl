@@ -10,6 +10,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -544,7 +545,7 @@ fn find_markdown_files(
     // regardless of how ignore crate overrides interacted with type filters.
     file_paths.retain(|path_str| {
         let path = Path::new(path_str);
-        path.extension().map_or(false, |ext| ext == "md" || ext == "markdown")
+        path.extension().is_some_and(|ext| ext == "md" || ext == "markdown")
     });
     // -------------------------------------
 
@@ -1304,20 +1305,18 @@ build-backend = \"setuptools.build_meta\"
 
                         // Add default configurations from all rules
                         for rule in &all_rules_reg {
-                            if let Some((rule_name, config_value)) = rule.default_config_section() {
-                                if let toml::Value::Table(table) = config_value {
-                                    let mut rule_config = rumdl_config::SourcedRuleConfig::default();
-                                    for (key, value) in table {
-                                        rule_config.values.insert(
-                                            key.clone(),
-                                            rumdl_config::SourcedValue::new(
-                                                value.clone(),
-                                                rumdl_config::ConfigSource::Default,
-                                            ),
-                                        );
-                                    }
-                                    default_sourced.rules.insert(rule_name.to_uppercase(), rule_config);
+                            if let Some((rule_name, toml::Value::Table(table))) = rule.default_config_section() {
+                                let mut rule_config = rumdl_config::SourcedRuleConfig::default();
+                                for (key, value) in table {
+                                    rule_config.values.insert(
+                                        key.clone(),
+                                        rumdl_config::SourcedValue::new(
+                                            value.clone(),
+                                            rumdl_config::ConfigSource::Default,
+                                        ),
+                                    );
                                 }
+                                default_sourced.rules.insert(rule_name.to_uppercase(), rule_config);
                             }
                         }
 
@@ -1346,12 +1345,11 @@ build-backend = \"setuptools.build_meta\"
 
                             // Add all rule default configurations
                             for rule in &all_rules_reg {
-                                if let Some((rule_name, config_value)) = rule.default_config_section() {
-                                    if let toml::Value::Table(table) = config_value {
-                                        let mut rule_config = rumdl_config::RuleConfig::default();
-                                        rule_config.values = table.into_iter().collect();
-                                        default_config.rules.insert(rule_name.to_uppercase(), rule_config);
-                                    }
+                                if let Some((rule_name, toml::Value::Table(table))) = rule.default_config_section() {
+                                    let rule_config = rumdl_config::RuleConfig {
+                                        values: table.into_iter().collect(),
+                                    };
+                                    default_config.rules.insert(rule_name.to_uppercase(), rule_config);
                                 }
                             }
 
@@ -1715,10 +1713,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     let output_format_str = args
         .output_format
         .as_deref()
-        .or_else(|| {
-            // Check config for output format
-            config.global.output_format.as_deref()
-        })
+        .or(config.global.output_format.as_deref())
         .or_else(|| {
             // Legacy support: map --output json to --output-format json
             if args.output == "json" {
@@ -1869,10 +1864,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     let output_format_str = args
         .output_format
         .as_deref()
-        .or_else(|| {
-            // Check config for output format
-            config.global.output_format.as_deref()
-        })
+        .or(config.global.output_format.as_deref())
         .or_else(|| {
             // Legacy support: map --output json to --output-format json
             if args.output == "json" {
@@ -1927,8 +1919,8 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
         let start_time = Instant::now();
         let mut all_file_warnings = Vec::new();
         let mut has_issues = false;
-        let mut files_with_issues = 0;
-        let mut total_issues = 0;
+        let mut _files_with_issues = 0;
+        let mut _total_issues = 0;
 
         for file_path in &file_paths {
             let warnings = process_file_collect_warnings(
@@ -1941,8 +1933,8 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
 
             if !warnings.is_empty() {
                 has_issues = true;
-                files_with_issues += 1;
-                total_issues += warnings.len();
+                _files_with_issues += 1;
+                _total_issues += warnings.len();
                 all_file_warnings.push((file_path.clone(), warnings));
             }
         }
@@ -2186,20 +2178,6 @@ fn process_file_with_formatter(
     (true, total_warnings, warnings_fixed, fixable_warnings)
 }
 
-// Process file operation - for legacy compatibility
-fn process_file(
-    file_path: &str,
-    rules: &[Box<dyn Rule>],
-    _fix: bool,
-    verbose: bool,
-    quiet: bool,
-) -> (bool, usize, usize, usize) {
-    // Use text formatter by default
-    let output_format = rumdl::output::OutputFormat::Text;
-    let output_writer = rumdl::output::OutputWriter::new(false, quiet, false);
-
-    process_file_with_formatter(file_path, rules, _fix, verbose, quiet, &output_format, &output_writer)
-}
 
 // Inner processing logic that returns warnings
 fn process_file_inner(

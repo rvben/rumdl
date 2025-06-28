@@ -91,7 +91,7 @@ Another paragraph.
 fn validate_cli_lsp_consistency() {
     println!("🔄 Validating CLI/LSP Consistency...");
 
-    let test_cases = vec![
+    let test_cases = [
         // Basic heading issues
         "# Heading\nContent without spacing",
         // Trailing spaces
@@ -198,7 +198,7 @@ fn validate_unicode_and_edge_cases() {
     println!("🌍 Validating Unicode and Edge Cases...");
 
     let long_line = format!("# Heading\n{}", "a".repeat(1000));
-    let edge_cases = vec![
+    let edge_cases = [
         // Unicode headings
         "# 中文标题\n内容",
         // Emoji in content

@@ -25,6 +25,9 @@ lazy_static! {
 
     // Front matter field pattern
     static ref FRONT_MATTER_FIELD: Regex = Regex::new(r"^([^:]+):\s*(.*)$").unwrap();
+    
+    // TOML field pattern
+    static ref TOML_FIELD_PATTERN: Regex = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap();
 }
 
 /// Represents the type of front matter found in a document
@@ -144,7 +147,7 @@ impl FrontMatterUtils {
             match front_matter_type {
                 FrontMatterType::Toml => {
                     // Handle TOML-style fields (key = value)
-                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap().captures(line) {
+                    if let Some(captures) = TOML_FIELD_PATTERN.captures(line) {
                         let key = captures.get(1).unwrap().as_str().trim();
                         if key == field_name {
                             let value = captures.get(2).unwrap().as_str();
@@ -211,7 +214,7 @@ impl FrontMatterUtils {
             match front_matter_type {
                 FrontMatterType::Toml => {
                     // Handle TOML-style fields
-                    if let Some(captures) = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap().captures(line) {
+                    if let Some(captures) = TOML_FIELD_PATTERN.captures(line) {
                         let key = captures.get(1).unwrap().as_str().trim();
                         let value = captures.get(2).unwrap().as_str();
                         let full_key = if current_prefix.is_empty() {

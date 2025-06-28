@@ -23,17 +23,9 @@ lazy_static! {
     static ref HR_SPACED_UNDERSCORE: Regex = Regex::new(r"^(_\s+){2,}_\s*$").unwrap();
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD025SingleTitle {
     config: MD025Config,
-}
-
-impl Default for MD025SingleTitle {
-    fn default() -> Self {
-        Self {
-            config: MD025Config::default(),
-        }
-    }
 }
 
 impl MD025SingleTitle {
@@ -335,11 +327,9 @@ impl Rule for MD025SingleTitle {
                         if matches!(
                             heading.style,
                             crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                        ) {
-                            if line_num + 1 < ctx.lines.len() {
-                                fixed_lines.push(ctx.lines[line_num + 1].content.clone());
-                                skip_next = true;
-                            }
+                        ) && line_num + 1 < ctx.lines.len() {
+                            fixed_lines.push(ctx.lines[line_num + 1].content.clone());
+                            skip_next = true;
                         }
                     } else {
                         // Check if this heading should be allowed
@@ -354,11 +344,9 @@ impl Rule for MD025SingleTitle {
                             if matches!(
                                 heading.style,
                                 crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                            ) {
-                                if line_num + 1 < ctx.lines.len() {
-                                    fixed_lines.push(ctx.lines[line_num + 1].content.clone());
-                                    skip_next = true;
-                                }
+                            ) && line_num + 1 < ctx.lines.len() {
+                                fixed_lines.push(ctx.lines[line_num + 1].content.clone());
+                                skip_next = true;
                             }
                         } else {
                             // Demote this heading to the next level
@@ -419,10 +407,8 @@ impl Rule for MD025SingleTitle {
                             if matches!(
                                 heading.style,
                                 crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                            ) {
-                                if line_num + 1 < ctx.lines.len() {
-                                    skip_next = true;
-                                }
+                            ) && line_num + 1 < ctx.lines.len() {
+                                skip_next = true;
                             }
                         }
                     }
@@ -434,11 +420,9 @@ impl Rule for MD025SingleTitle {
                     if matches!(
                         heading.style,
                         crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                    ) {
-                        if line_num + 1 < ctx.lines.len() {
-                            fixed_lines.push(ctx.lines[line_num + 1].content.clone());
-                            skip_next = true;
-                        }
+                    ) && line_num + 1 < ctx.lines.len() {
+                        fixed_lines.push(ctx.lines[line_num + 1].content.clone());
+                        skip_next = true;
                     }
                 }
             } else {

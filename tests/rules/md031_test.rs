@@ -209,7 +209,7 @@ Regular paragraph."#;
 
     // Code blocks in lists should still require blank lines
     assert!(
-        result.len() > 0,
+        !result.is_empty(),
         "Should detect missing blank lines around code blocks in lists"
     );
 

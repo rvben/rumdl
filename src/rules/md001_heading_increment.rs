@@ -125,7 +125,7 @@ impl Rule for MD001HeadingIncrement {
         let mut fixed_lines = Vec::new();
         let mut prev_level = 0;
 
-        for (_line_num, line_info) in ctx.lines.iter().enumerate() {
+        for line_info in ctx.lines.iter() {
             if let Some(heading) = &line_info.heading {
                 let level = heading.level;
                 let mut fixed_level = level;

@@ -24,17 +24,9 @@ lazy_static! {
 }
 
 /// Rule MD026: Trailing punctuation in heading
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD026NoTrailingPunctuation {
     config: MD026Config,
-}
-
-impl Default for MD026NoTrailingPunctuation {
-    fn default() -> Self {
-        Self {
-            config: MD026Config::default(),
-        }
-    }
 }
 
 impl MD026NoTrailingPunctuation {

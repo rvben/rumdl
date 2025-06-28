@@ -6,6 +6,12 @@ use crate::rule::LintWarning;
 /// JUnit XML formatter for CI systems
 pub struct JunitFormatter;
 
+impl Default for JunitFormatter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl JunitFormatter {
     pub fn new() -> Self {
         Self

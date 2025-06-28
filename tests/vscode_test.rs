@@ -15,7 +15,6 @@ mod vscode_tests {
         match VsCodeExtension::new() {
             Ok(_) => {
                 // VS Code is installed, extension should be created successfully
-                assert!(true);
             }
             Err(e) => {
                 // VS Code is not installed, check error message
@@ -28,7 +27,7 @@ mod vscode_tests {
     fn test_handle_vscode_command_status() {
         // Test status command - should not fail even if VS Code is not installed
         match rumdl::vscode::handle_vscode_command(false, true) {
-            Ok(_) => assert!(true),
+            Ok(_) => {},
             Err(e) => {
                 // Only acceptable error is VS Code not found
                 assert!(e.contains("VS Code (or compatible editor) not found"));
@@ -73,7 +72,7 @@ mod vscode_tests {
     fn test_with_command() {
         // Test with a command that should exist on all systems
         match VsCodeExtension::with_command("sh") {
-            Ok(_) => assert!(true),
+            Ok(_) => {},
             Err(e) => {
                 // On Windows, sh might not exist
                 assert!(e.contains("not found") || e.contains("not working"));

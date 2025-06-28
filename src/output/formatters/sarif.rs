@@ -7,6 +7,12 @@ use serde_json::json;
 /// SARIF (Static Analysis Results Interchange Format) formatter
 pub struct SarifFormatter;
 
+impl Default for SarifFormatter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl SarifFormatter {
     pub fn new() -> Self {
         Self

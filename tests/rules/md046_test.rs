@@ -267,7 +267,7 @@ fn test_nested_markdown_blocks_allowed() {
     let result = rule.check(&ctx).unwrap();
 
     // This test case has both nested opening AND unclosed blocks, so we get multiple warnings
-    assert!(result.len() >= 1, "Should detect at least the nested markdown opening");
+    assert!(!result.is_empty(), "Should detect at least the nested markdown opening");
     // Find the nested opening warning (should be on line 1)
     let nested_warning = result.iter().find(|w| w.line == 1);
     assert!(nested_warning.is_some(), "Should flag the opening bash block");

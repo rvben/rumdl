@@ -9,9 +9,15 @@ pub struct TextFormatter {
     use_colors: bool,
 }
 
+impl Default for TextFormatter {
+    fn default() -> Self {
+        Self { use_colors: true }
+    }
+}
+
 impl TextFormatter {
     pub fn new() -> Self {
-        Self { use_colors: true }
+        Self::default()
     }
 }
 

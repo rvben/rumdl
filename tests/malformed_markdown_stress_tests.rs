@@ -98,7 +98,7 @@ fn test_malformed_markdown_edge_cases() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    let test_cases = vec![
+    let test_cases = [
         // Unclosed code blocks
         "```rust\ncode without closing fence\n# Heading after unclosed fence",
 
@@ -245,7 +245,7 @@ fn test_unicode_boundary_conditions() {
 #[test]
 fn test_memory_intensive_scenarios() {
     // Test scenarios that could cause excessive memory usage
-    let scenarios = vec![
+    let scenarios = [
         // Many small allocations
         (0..10000).map(|i| format!("Line {}", i)).collect::<Vec<_>>().join("\n"),
         // Large single allocation
@@ -310,7 +310,7 @@ fn test_memory_intensive_scenarios() {
 #[test]
 fn test_pathological_regex_patterns() {
     // Test content that could cause regex catastrophic backtracking
-    let test_cases = vec![
+    let test_cases = [
         // Many repeated characters
         format!("# {}", "a".repeat(1000)),
         // Nested patterns

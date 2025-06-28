@@ -78,7 +78,7 @@ impl MD005ListIndent {
                 // Determine if this starts a new list
                 let is_new_list = !in_list
                     || indent == 0
-                    || (list_items.last().map_or(false, |(_, prev_indent, _)| {
+                    || (list_items.last().is_some_and(|(_, prev_indent, _)| {
                         prev_indent > &0 && indent < prev_indent / 2
                     }));
 

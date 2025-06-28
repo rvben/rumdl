@@ -117,7 +117,7 @@ impl VsCodeExtension {
         println!("Installing {} extension...", EXTENSION_NAME.cyan());
 
         let output = Command::new(&self.code_command)
-            .args(&["--install-extension", EXTENSION_ID])
+            .args(["--install-extension", EXTENSION_ID])
             .output()
             .map_err(|e| format!("Failed to run VS Code command: {}", e))?;
 
@@ -133,10 +133,8 @@ impl VsCodeExtension {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.contains("not found") {
-                Err(format!(
-                    "The rumdl VS Code extension is not yet available in the marketplace.\n\
-                    Please check https://github.com/rvben/rumdl for updates on when it will be published."
-                ))
+                Err("The rumdl VS Code extension is not yet available in the marketplace.\n\
+                    Please check https://github.com/rvben/rumdl for updates on when it will be published.".to_string())
             } else {
                 Err(format!("Failed to install extension: {}", stderr))
             }
@@ -159,7 +157,7 @@ impl VsCodeExtension {
 
     fn get_installed_version(&self) -> Result<String, String> {
         let output = Command::new(&self.code_command)
-            .args(&["--list-extensions", "--show-versions"])
+            .args(["--list-extensions", "--show-versions"])
             .output()
             .map_err(|e| format!("Failed to list extensions: {}", e))?;
 

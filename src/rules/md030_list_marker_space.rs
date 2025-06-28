@@ -13,17 +13,9 @@ use toml;
 mod md030_config;
 use md030_config::MD030Config;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD030ListMarkerSpace {
     config: MD030Config,
-}
-
-impl Default for MD030ListMarkerSpace {
-    fn default() -> Self {
-        Self {
-            config: MD030Config::default(),
-        }
-    }
 }
 
 impl MD030ListMarkerSpace {
@@ -99,12 +91,7 @@ impl Rule for MD030ListMarkerSpace {
 
                     // Calculate actual spacing after marker
                     let marker_end = list_info.marker_column + list_info.marker.len();
-                    let actual_spaces = if list_info.content_column > marker_end {
-                        list_info.content_column - marker_end
-                    } else {
-                        // No space after marker
-                        0
-                    };
+                    let actual_spaces = list_info.content_column.saturating_sub(marker_end);
 
                     let expected_spaces = self.get_expected_spaces(list_type, false);
 

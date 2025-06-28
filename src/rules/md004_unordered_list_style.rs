@@ -71,17 +71,9 @@ impl Default for UnorderedListStyle {
 }
 
 /// Rule MD004: Unordered list style
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD004UnorderedListStyle {
     config: MD004Config,
-}
-
-impl Default for MD004UnorderedListStyle {
-    fn default() -> Self {
-        Self {
-            config: MD004Config::default(),
-        }
-    }
 }
 
 impl MD004UnorderedListStyle {

@@ -139,10 +139,7 @@ impl MD006StartBullets {
 
     /// Find the most relevant previous bullet item for nesting validation
     fn find_relevant_previous_bullet(lines: &[&str], line_idx: usize) -> Option<(usize, usize)> {
-        let current_indent = match Self::is_bullet_list_item(lines[line_idx]) {
-            Some(indent) => indent,
-            None => return None, // Should not happen if called on a bullet item
-        };
+        let current_indent = Self::is_bullet_list_item(lines[line_idx])?;
 
         let mut i = line_idx;
 

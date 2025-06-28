@@ -37,7 +37,7 @@ Final content.
 
     // Start LSP server
     let mut lsp_process = Command::new("cargo")
-        .args(&["run", "--bin", "rumdl", "--", "lsp"])
+        .args(["run", "--bin", "rumdl", "--", "lsp"])
         .current_dir(project_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -52,27 +52,30 @@ Final content.
     // Initialize LSP with proper error handling
     let initialize_request =
         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":"file://"}}"#;
-    if let Err(_) = writeln!(
+    if writeln!(
         stdin,
         "Content-Length: {}\r\n\r\n{}",
         initialize_request.len(),
         initialize_request
-    ) {
+    ).is_err() {
         println!("LSP process terminated early, skipping test");
+        let _ = lsp_process.wait();
         return;
     }
 
     // Read initialization response with timeout
     let mut response = String::new();
-    if let Err(_) = reader.read_line(&mut response) {
+    if reader.read_line(&mut response).is_err() {
         println!("Failed to read LSP response, process may have terminated");
+        let _ = lsp_process.wait();
         return;
     }
 
     // Send initialized notification
     let initialized = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
-    if let Err(_) = writeln!(stdin, "Content-Length: {}\r\n\r\n{}", initialized.len(), initialized) {
+    if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", initialized.len(), initialized).is_err() {
         println!("LSP process terminated, skipping test");
+        let _ = lsp_process.wait();
         return;
     }
 
@@ -191,7 +194,7 @@ fn test_lsp_memory_stress_with_large_files() {
 
     // Start LSP server
     let mut lsp_process = Command::new("cargo")
-        .args(&["run", "--bin", "rumdl", "--", "lsp"])
+        .args(["run", "--bin", "rumdl", "--", "lsp"])
         .current_dir(project_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -213,12 +216,14 @@ fn test_lsp_memory_stress_with_large_files() {
     .is_err()
     {
         println!("LSP process terminated early, skipping test");
+        let _ = lsp_process.wait();
         return;
     }
 
     let initialized = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
     if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", initialized.len(), initialized).is_err() {
         println!("LSP process terminated early, skipping test");
+        let _ = lsp_process.wait();
         return;
     }
 
@@ -234,6 +239,7 @@ fn test_lsp_memory_stress_with_large_files() {
     );
     if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_open.len(), did_open).is_err() {
         println!("LSP process terminated, skipping test");
+        let _ = lsp_process.wait();
         return;
     }
 
@@ -309,7 +315,7 @@ fn test_lsp_concurrent_document_handling() {
 
     // Start LSP server
     let mut lsp_process = Command::new("cargo")
-        .args(&["run", "--bin", "rumdl", "--", "lsp"])
+        .args(["run", "--bin", "rumdl", "--", "lsp"])
         .current_dir(project_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -331,12 +337,14 @@ fn test_lsp_concurrent_document_handling() {
     .is_err()
     {
         println!("LSP process terminated early, skipping test");
+        let _ = lsp_process.wait();
         return;
     }
 
     let initialized = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
     if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", initialized.len(), initialized).is_err() {
         println!("LSP process terminated early, skipping test");
+        let _ = lsp_process.wait();
         return;
     }
 
@@ -400,7 +408,7 @@ fn get_process_memory(pid: u32) -> Result<u64, Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
     {
         let output = Command::new("ps")
-            .args(&["-o", "rss=", "-p", &pid.to_string()])
+            .args(["-o", "rss=", "-p", &pid.to_string()])
             .output()?;
 
         if !output.status.success() {

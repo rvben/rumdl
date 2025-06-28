@@ -19,17 +19,9 @@ lazy_static! {
     static ref DOLLAR_PROMPT_PATTERN: Regex = Regex::new(r"^\s*([$>])").unwrap();
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD014CommandsShowOutput {
     config: MD014Config,
-}
-
-impl Default for MD014CommandsShowOutput {
-    fn default() -> Self {
-        Self {
-            config: MD014Config::default(),
-        }
-    }
 }
 
 impl MD014CommandsShowOutput {

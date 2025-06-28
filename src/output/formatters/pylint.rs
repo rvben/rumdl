@@ -6,6 +6,12 @@ use crate::rule::LintWarning;
 /// Pylint-compatible formatter: file:line:column: CODE message
 pub struct PylintFormatter;
 
+impl Default for PylintFormatter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl PylintFormatter {
     pub fn new() -> Self {
         Self
@@ -21,8 +27,8 @@ impl OutputFormatter for PylintFormatter {
             
             // Convert MD prefix to CMD for pylint convention
             // Pylint uses C for Convention, so CMD = Convention + MD rule
-            let pylint_code = if rule_name.starts_with("MD") {
-                format!("CMD{}", &rule_name[2..])
+            let pylint_code = if let Some(stripped) = rule_name.strip_prefix("MD") {
+                format!("CMD{}", stripped)
             } else {
                 format!("C{}", rule_name)
             };
