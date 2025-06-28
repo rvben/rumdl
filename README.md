@@ -72,7 +72,7 @@ rumdl init
 rumdl is a high-performance Markdown linter and fixer that helps ensure consistency and best practices in your Markdown files. It offers:
 
 - ⚡️ **Built for speed** with Rust
-- 🔍 **50+ lint rules** covering common Markdown issues
+- 🔍 **54 lint rules** covering common Markdown issues
 - 🛠️ **Automatic fixing** with `--fix` for most rules
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
@@ -204,7 +204,7 @@ When you run `pre-commit install` or `pre-commit run`, pre-commit will automatic
 
 ## Rules
 
-rumdl implements over 50 lint rules for Markdown files. Here are some key rule categories:
+rumdl implements 54 lint rules for Markdown files. Here are some key rule categories:
 
 |  Category | Description | Example Rules |
 |-----------|-------------|---------------|
