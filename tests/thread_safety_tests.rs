@@ -94,9 +94,9 @@ Text with *emphasis * and **strong **.
         ("MD022".to_string(), Box::new(MD022BlanksAroundHeadings::new())),
         ("MD026".to_string(), Box::new(MD026NoTrailingPunctuation::default())),
         ("MD009".to_string(), Box::new(MD009TrailingSpaces::default())),
-        ("MD018".to_string(), Box::new(MD018NoMissingSpaceAtx::default())),
-        ("MD040".to_string(), Box::new(MD040FencedCodeLanguage::default())),
-        ("MD037".to_string(), Box::new(MD037NoSpaceInEmphasis::default())),
+        ("MD018".to_string(), Box::new(MD018NoMissingSpaceAtx)),
+        ("MD040".to_string(), Box::new(MD040FencedCodeLanguage)),
+        ("MD037".to_string(), Box::new(MD037NoSpaceInEmphasis)),
         ("MD038".to_string(), Box::new(MD038NoSpaceInCode::default())),
     ];
 
@@ -280,8 +280,8 @@ Text with *bad emphasis * here.
                 }
                 2 => {
                     // Multiple rule check
-                    let rule1 = MD040FencedCodeLanguage::default();
-                    let rule2 = MD037NoSpaceInEmphasis::default();
+                    let rule1 = MD040FencedCodeLanguage;
+                    let rule2 = MD037NoSpaceInEmphasis;
                     let warnings1 = rule1.check(&ctx_clone).unwrap();
                     let warnings2 = rule2.check(&ctx_clone).unwrap();
                     let mut results = results_clone.lock().unwrap();

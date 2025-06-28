@@ -12,7 +12,7 @@ fn test_no_empty_fix_ranges() {
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::new(2, false)),
         Box::new(MD010NoHardTabs::new(4, true)),
-        Box::new(MD011NoReversedLinks::default()),
+        Box::new(MD011NoReversedLinks),
         Box::new(MD018NoMissingSpaceAtx::new()),
         Box::new(MD019NoMultipleSpaceAtx::new()),
         Box::new(MD038NoSpaceInCode::new()),
@@ -71,7 +71,7 @@ fn test_cli_lsp_consistency() {
         ),
         (
             "(https://example.com)[Click here]",
-            Box::new(MD011NoReversedLinks::default()) as Box<dyn Rule>,
+            Box::new(MD011NoReversedLinks) as Box<dyn Rule>,
         ),
         (
             "#Missing space",
@@ -116,7 +116,7 @@ fn test_fix_ranges_within_bounds() {
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::new(2, false)),
         Box::new(MD010NoHardTabs::new(4, true)),
-        Box::new(MD011NoReversedLinks::default()),
+        Box::new(MD011NoReversedLinks),
         Box::new(MD038NoSpaceInCode::new()),
         Box::new(MD039NoSpaceInLinks::new()),
     ];
@@ -176,7 +176,7 @@ fn test_fixes_improve_content() {
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::new(2, false)),
         Box::new(MD010NoHardTabs::new(4, true)),
-        Box::new(MD011NoReversedLinks::default()),
+        Box::new(MD011NoReversedLinks),
         Box::new(MD018NoMissingSpaceAtx::new()),
         Box::new(MD019NoMultipleSpaceAtx::new()),
         Box::new(MD038NoSpaceInCode::new()),

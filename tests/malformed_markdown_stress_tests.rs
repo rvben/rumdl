@@ -54,8 +54,8 @@ fn test_deeply_nested_blockquotes() {
     }
 
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD027MultipleSpacesBlockquote::default()),
-        Box::new(MD028NoBlanksBlockquote::default()),
+        Box::new(MD027MultipleSpacesBlockquote),
+        Box::new(MD028NoBlanksBlockquote),
     ];
 
     for rule in &rules {
@@ -122,9 +122,9 @@ fn test_malformed_markdown_edge_cases() {
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD031BlanksAroundFences::default()),
+        Box::new(MD031BlanksAroundFences),
         Box::new(MD032BlanksAroundLists::default()),
-        Box::new(MD040FencedCodeLanguage::default()),
+        Box::new(MD040FencedCodeLanguage),
     ];
 
     for (i, test_content) in test_cases.iter().enumerate() {
@@ -257,11 +257,11 @@ fn test_memory_intensive_scenarios() {
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD011NoReversedLinks::default()),
+        Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD040FencedCodeLanguage::default()),
-        Box::new(MD042NoEmptyLinks::default()),
+        Box::new(MD031BlanksAroundFences),
+        Box::new(MD040FencedCodeLanguage),
+        Box::new(MD042NoEmptyLinks),
     ];
 
     for (i, content) in scenarios.iter().enumerate() {
@@ -324,10 +324,10 @@ fn test_pathological_regex_patterns() {
     ];
 
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD034NoBareUrls::default()),
-        Box::new(MD039NoSpaceInLinks::default()),
+        Box::new(MD034NoBareUrls),
+        Box::new(MD039NoSpaceInLinks),
         Box::new(MD038NoSpaceInCode::default()),
-        Box::new(MD040FencedCodeLanguage::default()),
+        Box::new(MD040FencedCodeLanguage),
     ];
 
     for (i, test_content) in test_cases.iter().enumerate() {
