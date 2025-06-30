@@ -274,3 +274,268 @@ impl Rule for MD009TrailingSpaces {
         Box::new(Self::from_config_struct(rule_config))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+    use crate::rule::Rule;
+
+    #[test]
+    fn test_no_trailing_spaces() {
+        let rule = MD009TrailingSpaces::default();
+        let content = "This is a line\nAnother line\nNo trailing spaces";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_basic_trailing_spaces() {
+        let rule = MD009TrailingSpaces::default();
+        let content = "Line with spaces   \nAnother line  \nClean line";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Default br_spaces=2, so line with 2 spaces is OK
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].message, "3 trailing spaces found");
+    }
+
+    #[test]
+    fn test_fix_basic_trailing_spaces() {
+        let rule = MD009TrailingSpaces::default();
+        let content = "Line with spaces   \nAnother line  \nClean line";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line with spaces  \nAnother line  \nClean line");
+    }
+
+    #[test]
+    fn test_strict_mode() {
+        let rule = MD009TrailingSpaces::new(2, true);
+        let content = "Line with spaces  \nCode block:  \n```  \nCode with spaces  \n```  ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // In strict mode, all trailing spaces are flagged
+        assert_eq!(result.len(), 5);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line with spaces\nCode block:\n```\nCode with spaces\n```");
+    }
+
+    #[test]
+    fn test_non_strict_mode_with_code_blocks() {
+        let rule = MD009TrailingSpaces::new(2, false);
+        let content = "Line with spaces  \n```\nCode with spaces  \n```\nOutside code  ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // In non-strict mode, code blocks are not checked
+        // Line 1 has 2 spaces (= br_spaces), so it's OK
+        // Line 5 is last line without newline, so trailing spaces are flagged
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 5);
+    }
+
+    #[test]
+    fn test_br_spaces_preservation() {
+        let rule = MD009TrailingSpaces::new(2, false);
+        let content = "Line with two spaces  \nLine with three spaces   \nLine with one space ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // br_spaces=2, so lines with exactly 2 spaces are OK
+        // Line 2 has 3 spaces (will be normalized to 2)
+        // Line 3 has 1 space and is last line without newline (will be removed)
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 2);
+        assert_eq!(result[1].line, 3);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        // Line 1: keeps 2 spaces
+        // Line 2: normalized from 3 to 2 spaces
+        // Line 3: last line without newline, spaces removed
+        assert_eq!(fixed, "Line with two spaces  \nLine with three spaces  \nLine with one space");
+    }
+
+    #[test]
+    fn test_empty_lines_with_spaces() {
+        let rule = MD009TrailingSpaces::default();
+        let content = "Normal line\n   \n  \nAnother line";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].message, "Empty line has trailing spaces");
+        assert_eq!(result[1].message, "Empty line has trailing spaces");
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Normal line\n\n\nAnother line");
+    }
+
+    #[test]
+    fn test_empty_blockquote_lines() {
+        let rule = MD009TrailingSpaces::default();
+        let content = "> Quote\n>   \n> More quote";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
+        assert_eq!(result[0].message, "Empty blockquote line needs a space after >");
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "> Quote\n> \n> More quote");
+    }
+
+    #[test]
+    fn test_last_line_handling() {
+        let rule = MD009TrailingSpaces::new(2, false);
+        
+        // Content without final newline
+        let content = "First line  \nLast line  ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Last line without newline should have trailing spaces removed
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "First line  \nLast line");
+        
+        // Content with final newline
+        let content_with_newline = "First line  \nLast line  \n";
+        let ctx = LintContext::new(content_with_newline);
+        let result = rule.check(&ctx).unwrap();
+        // Both lines should preserve br_spaces
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_single_trailing_space() {
+        let rule = MD009TrailingSpaces::new(2, false);
+        let content = "Line with one space ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Trailing space found");
+    }
+
+    #[test]
+    fn test_tabs_not_spaces() {
+        let rule = MD009TrailingSpaces::default();
+        let content = "Line with tab\t\nLine with spaces  ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Only spaces are checked, not tabs
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
+    }
+
+    #[test]
+    fn test_mixed_content() {
+        let rule = MD009TrailingSpaces::new(2, false);
+        let content = r#"# Heading  
+Normal paragraph  
+> Blockquote  
+>   
+```
+Code block  
+```
+- List item  
+"#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should flag the empty blockquote line
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 4);
+        assert_eq!(result[0].message, "Empty blockquote line needs a space after >");
+    }
+
+    #[test]
+    fn test_column_positions() {
+        let rule = MD009TrailingSpaces::default();
+        let content = "Text   ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].column, 5); // After "Text"
+        assert_eq!(result[0].end_column, 8); // After all spaces
+    }
+
+    #[test]
+    fn test_default_config() {
+        let rule = MD009TrailingSpaces::default();
+        let config = rule.default_config_section();
+        assert!(config.is_some());
+        let (name, _value) = config.unwrap();
+        assert_eq!(name, "MD009");
+    }
+
+    #[test]
+    fn test_from_config() {
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config.values.insert("br_spaces".to_string(), toml::Value::Integer(3));
+        rule_config.values.insert("strict".to_string(), toml::Value::Boolean(true));
+        config.rules.insert("MD009".to_string(), rule_config);
+        
+        let rule = MD009TrailingSpaces::from_config(&config);
+        let content = "Line   ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        
+        // In strict mode, should remove all spaces
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line");
+    }
+
+    #[test]
+    fn test_performance_large_document() {
+        let rule = MD009TrailingSpaces::default();
+        let mut content = String::new();
+        for i in 0..1000 {
+            content.push_str(&format!("Line {} with spaces  \n", i));
+        }
+        let ctx = LintContext::new(&content);
+        let result = rule.check(&ctx).unwrap();
+        // Default br_spaces=2, so all lines with 2 spaces are OK
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_preserve_content_after_fix() {
+        let rule = MD009TrailingSpaces::new(2, false);
+        let content = "**Bold** text  \n*Italic* text  \n[Link](url)  ";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "**Bold** text  \n*Italic* text  \n[Link](url)");
+    }
+
+    #[test]
+    fn test_nested_blockquotes() {
+        let rule = MD009TrailingSpaces::default();
+        let content = "> > Nested  \n> >   \n> Normal  ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Line 2 has empty blockquote, line 3 is last line without newline
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 2);
+        assert_eq!(result[1].line, 3);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        // The fix adds a single space after empty blockquote markers
+        assert_eq!(fixed, "> > Nested  \n> >  \n> Normal");
+    }
+
+    #[test]
+    fn test_windows_line_endings() {
+        let rule = MD009TrailingSpaces::default();
+        // Note: This test simulates Windows line endings behavior
+        let content = "Line with spaces  \r\nAnother line  ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Line 1 has 2 spaces (= br_spaces) so it's OK
+        // Line 2 is last line without newline, so it's flagged
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
+    }
+}

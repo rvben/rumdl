@@ -858,3 +858,230 @@ impl DocumentStructureExtensions for MD046CodeBlockStyle {
         !ctx.content.is_empty() && !structure.code_blocks.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_fenced_code_block_detection() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        assert!(rule.is_fenced_code_block_start("```"));
+        assert!(rule.is_fenced_code_block_start("```rust"));
+        assert!(rule.is_fenced_code_block_start("~~~"));
+        assert!(rule.is_fenced_code_block_start("~~~python"));
+        assert!(rule.is_fenced_code_block_start("  ```"));
+        assert!(!rule.is_fenced_code_block_start("``"));
+        assert!(!rule.is_fenced_code_block_start("~~"));
+        assert!(!rule.is_fenced_code_block_start("Regular text"));
+    }
+
+    #[test]
+    fn test_consistent_style_with_fenced_blocks() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "```\ncode\n```\n\nMore text\n\n```\nmore code\n```";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // All blocks are fenced, so consistent style should be OK
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_consistent_style_with_indented_blocks() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "Text\n\n    code\n    more code\n\nMore text\n\n    another block";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // All blocks are indented, so consistent style should be OK
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_consistent_style_mixed() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "```\nfenced code\n```\n\nText\n\n    indented code\n\nMore";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Mixed styles should be flagged
+        assert!(result.len() > 0);
+    }
+
+    #[test]
+    fn test_fenced_style_with_indented_blocks() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "Text\n\n    indented code\n    more code\n\nMore text";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Indented blocks should be flagged when fenced style is required
+        assert!(result.len() > 0);
+        assert!(result[0].message.contains("Use fenced code blocks"));
+    }
+
+    #[test]
+    fn test_indented_style_with_fenced_blocks() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = "Text\n\n```\nfenced code\n```\n\nMore text";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Fenced blocks should be flagged when indented style is required
+        assert!(result.len() > 0);
+        assert!(result[0].message.contains("Use fenced code blocks"));
+    }
+
+    #[test]
+    fn test_unclosed_code_block() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "```\ncode without closing fence";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("never closed"));
+    }
+
+    #[test]
+    fn test_nested_code_blocks() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "```\nouter\n```\n\ninner text\n\n```\ncode\n```";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // This should parse as two separate code blocks
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_fix_indented_to_fenced() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "Text\n\n    code line 1\n    code line 2\n\nMore text";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert!(fixed.contains("```\ncode line 1\ncode line 2\n```"));
+    }
+
+    #[test]
+    fn test_fix_fenced_to_indented() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = "Text\n\n```\ncode line 1\ncode line 2\n```\n\nMore text";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert!(fixed.contains("    code line 1\n    code line 2"));
+        assert!(!fixed.contains("```"));
+    }
+
+    #[test]
+    fn test_fix_unclosed_block() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "```\ncode without closing";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Should add closing fence
+        assert!(fixed.ends_with("```"));
+    }
+
+    #[test]
+    fn test_code_block_in_list() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "- List item\n    code in list\n    more code\n- Next item";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Code in lists should not be flagged
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_detect_style_fenced() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "```\ncode\n```";
+        let style = rule.detect_style(content);
+        
+        assert_eq!(style, Some(CodeBlockStyle::Fenced));
+    }
+
+    #[test]
+    fn test_detect_style_indented() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "Text\n\n    code\n\nMore";
+        let style = rule.detect_style(content);
+        
+        assert_eq!(style, Some(CodeBlockStyle::Indented));
+    }
+
+    #[test]
+    fn test_detect_style_none() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "No code blocks here";
+        let style = rule.detect_style(content);
+        
+        assert_eq!(style, None);
+    }
+
+    #[test]
+    fn test_tilde_fence() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "~~~\ncode\n~~~";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Tilde fences should be accepted as fenced blocks
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_language_specification() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "```rust\nfn main() {}\n```";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_default_config() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let (name, _config) = rule.default_config_section().unwrap();
+        assert_eq!(name, "MD046");
+    }
+
+    #[test]
+    fn test_markdown_documentation_block() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "```markdown\n# Example\n\n```\ncode\n```\n\nText\n```";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Nested code blocks in markdown documentation should be allowed
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_preserve_trailing_newline() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "```\ncode\n```\n";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, content);
+    }
+}

@@ -131,3 +131,204 @@ fn test_fix_indented_commands() {
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "```bash\n    ls -l\n    pwd\n```"); // No trailing newline in input
 }
+
+#[test]
+fn test_empty_lines_not_output() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash\n$ echo test\n\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Empty lines should not count as output");
+}
+
+#[test]
+fn test_greater_than_prompt() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash\n> echo test\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Commands with > prompt should be flagged without output");
+}
+
+#[test]
+fn test_case_insensitive_languages() {
+    let rule = MD014CommandsShowOutput::new();
+    let content1 = "```BASH\n$ echo test\n```";
+    let ctx1 = LintContext::new(content1);
+    let result1 = rule.check(&ctx1).unwrap();
+    assert_eq!(result1.len(), 1, "BASH (uppercase) should be recognized");
+    
+    let content2 = "```Shell\n$ echo test\n```";
+    let ctx2 = LintContext::new(content2);
+    let result2 = rule.check(&ctx2).unwrap();
+    assert_eq!(result2.len(), 1, "Shell (mixed case) should be recognized");
+    
+    let content3 = "```CONSOLE\n$ echo test\n```";
+    let ctx3 = LintContext::new(content3);
+    let result3 = rule.check(&ctx3).unwrap();
+    assert_eq!(result3.len(), 1, "CONSOLE (uppercase) should be recognized");
+    
+    let content4 = "```Terminal\n$ echo test\n```";
+    let ctx4 = LintContext::new(content4);
+    let result4 = rule.check(&ctx4).unwrap();
+    assert_eq!(result4.len(), 1, "Terminal (mixed case) should be recognized");
+}
+
+#[test]
+fn test_message_includes_command() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash\n$ git status\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].message.contains("git status"), "Error message should include the actual command");
+}
+
+#[test]
+fn test_no_output_commands_case_insensitive() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash\n$ CD /home\n$ MKDIR test\n$ Touch file.txt\n$ RM file.txt\n$ MV old new\n$ CP src dst\n$ EXPORT VAR=val\n$ SET -e\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "No-output commands should work case-insensitively");
+}
+
+#[test]
+fn test_commands_only_without_other_content() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash\n$ pwd\n$ ls\n$ echo test\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Block with only commands (no output) should be flagged");
+}
+
+#[test]
+fn test_fix_preserves_trailing_newline() {
+    let rule = MD014CommandsShowOutput::new();
+    let content_with_newline = "```bash\n$ echo test\n```\n";
+    let ctx1 = LintContext::new(content_with_newline);
+    let fixed1 = rule.fix(&ctx1).unwrap();
+    assert!(fixed1.ends_with('\n'), "Should preserve trailing newline");
+    
+    let content_without_newline = "```bash\n$ echo test\n```";
+    let ctx2 = LintContext::new(content_without_newline);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+    assert!(!fixed2.ends_with('\n'), "Should not add trailing newline");
+}
+
+#[test]
+fn test_complex_commands() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash\n$ echo test | grep test\ntest\n$ find . -name '*.rs' | head -5\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Block has output so should not be flagged");
+}
+
+#[test]
+fn test_only_commands_no_output() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash\n$ ls\n$ pwd\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Blocks with only commands (no output) should be flagged");
+}
+
+#[test] 
+fn test_config_from_toml() {
+    let mut config = rumdl::config::Config::default();
+    let mut rule_config = rumdl::config::RuleConfig::default();
+    rule_config.values.insert("show-output".to_string(), toml::Value::Boolean(false)); // kebab-case
+    config.rules.insert("MD014".to_string(), rule_config);
+    
+    let rule = MD014CommandsShowOutput::from_config(&config);
+    let content = "```bash\n$ echo test\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Rule should respect show_output=false from config");
+}
+
+#[test]
+fn test_fix_range_calculation() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "# Header\n\n```bash\n$ echo test\n```\n\nMore content";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1);
+    
+    // Verify the fix range is correct
+    if let Some(_fix) = &result[0].fix {
+        let fixed_content = rule.fix(&ctx).unwrap();
+        assert!(fixed_content.contains("echo test\n```"), "Fix should produce correct output");
+    }
+}
+
+#[test]
+fn test_multiple_blocks_in_document() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = r#"# Doc
+
+```bash
+$ echo "has output"
+has output
+```
+
+Some text
+
+```bash  
+$ echo "no output"
+```
+
+More text
+
+```python
+print("not shell")
+```
+
+```console
+$ pwd
+/home
+```
+"#;
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Only the bash block without output should be flagged");
+    assert_eq!(result[0].line, 11, "Should flag line 11 (the command without output)");
+}
+
+#[test]
+fn test_comments_not_treated_as_output() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash\n$ ls -la\n# This is a comment\n# Another comment\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Comments starting with # should not count as output");
+}
+
+#[test]
+fn test_whitespace_only_lines_not_output() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash\n$ echo test\n   \n\t\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Whitespace-only lines should not count as output");
+}
+
+#[test]
+fn test_language_with_attributes() {
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash {.line-numbers}\n$ echo test\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Should still recognize bash even with attributes");
+}
+
+#[test]
+fn test_default_config() {
+    let rule = MD014CommandsShowOutput::new();
+    // By default, show_output should be true
+    let content = "```bash\n$ echo test\n```";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Default config should have show_output=true");
+}

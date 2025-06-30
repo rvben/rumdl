@@ -193,3 +193,282 @@ impl DocumentStructureExtensions for MD042NoEmptyLinks {
         !doc_structure.links.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_links_with_text_should_pass() {
+        let ctx = LintContext::new("[valid link](https://example.com)");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Links with text should pass");
+
+        let ctx = LintContext::new("[another valid link](path/to/page.html)");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Links with text and relative URLs should pass");
+    }
+
+    #[test]
+    fn test_links_with_empty_text_should_fail() {
+        let ctx = LintContext::new("[](https://example.com)");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Empty link found: [](https://example.com)");
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 1);
+    }
+
+    #[test]
+    fn test_links_with_only_whitespace_should_fail() {
+        let ctx = LintContext::new("[   ](https://example.com)");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Empty link found: [   ](https://example.com)");
+
+        let ctx = LintContext::new("[\t\n](https://example.com)");
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Empty link found: [\t\n](https://example.com)");
+    }
+
+    #[test]
+    fn test_reference_links_with_empty_text() {
+        let ctx = LintContext::new("[][ref]\n\n[ref]: https://example.com");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Empty link found: [](https://example.com)");
+        assert_eq!(result[0].line, 1);
+
+        // Empty text with empty reference
+        let ctx = LintContext::new("[][]\n\n[]: https://example.com");
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_images_should_be_ignored() {
+        // Images can have empty alt text, so they should not trigger the rule
+        let ctx = LintContext::new("![](image.png)");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Images with empty alt text should be ignored");
+
+        let ctx = LintContext::new("![   ](image.png)");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Images with whitespace alt text should be ignored");
+    }
+
+    #[test]
+    fn test_links_with_nested_formatting() {
+        // Links with nested formatting but empty effective text
+        // Note: [**] contains "**" as text, which is not empty after trimming
+        let ctx = LintContext::new("[**](https://example.com)");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "[**] is not considered empty since ** is text");
+
+        let ctx = LintContext::new("[__](https://example.com)");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "[__] is not considered empty since __ is text");
+
+        // Links with truly empty formatting should fail
+        let ctx = LintContext::new("[](https://example.com)");
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+
+        // Links with nested formatting and actual text should pass
+        let ctx = LintContext::new("[**bold text**](https://example.com)");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Links with nested formatting and text should pass");
+
+        let ctx = LintContext::new("[*italic* and **bold**](https://example.com)");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Links with multiple nested formatting should pass");
+    }
+
+    #[test]
+    fn test_multiple_empty_links_on_same_line() {
+        let ctx = LintContext::new("[](url1) and [](url2) and [valid](url3)");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2, "Should detect both empty links");
+        assert_eq!(result[0].column, 1);
+        assert_eq!(result[1].column, 14);
+    }
+
+    #[test]
+    fn test_escaped_brackets() {
+        // Escaped brackets should not be treated as links
+        let ctx = LintContext::new("\\[\\](https://example.com)");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Escaped brackets should not be treated as links");
+
+        // But this should still be a link
+        let ctx = LintContext::new("[\\[\\]](https://example.com)");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Link with escaped brackets in text should pass");
+    }
+
+    #[test]
+    fn test_links_in_lists_and_blockquotes() {
+        // Empty links in lists
+        let ctx = LintContext::new("- [](https://example.com)\n- [valid](https://example.com)");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+
+        // Empty links in blockquotes
+        let ctx = LintContext::new("> [](https://example.com)\n> [valid](https://example.com)");
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+
+        // Nested structures
+        let ctx = LintContext::new("> - [](url1)\n> - [text](url2)");
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_unicode_whitespace_characters() {
+        // Non-breaking space (U+00A0) - IS considered whitespace by Rust's trim()
+        let ctx = LintContext::new("[\u{00A0}](https://example.com)");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Non-breaking space should be treated as whitespace");
+
+        // Em space (U+2003) - IS considered whitespace by Rust's trim()
+        let ctx = LintContext::new("[\u{2003}](https://example.com)");
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Em space should be treated as whitespace");
+
+        // Zero-width space (U+200B) - NOT considered whitespace by Rust's trim()
+        // This is a formatting character, not a whitespace character
+        let ctx = LintContext::new("[\u{200B}](https://example.com)");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Zero-width space is not considered whitespace by trim()");
+
+        // Test with zero-width space between spaces
+        // Since trim() doesn't consider zero-width space as whitespace, 
+        // " \u{200B} " becomes "\u{200B}" after trimming, which is NOT empty
+        let ctx = LintContext::new("[ \u{200B} ](https://example.com)");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Zero-width space remains after trim(), so link is not empty");
+    }
+
+    #[test]
+    fn test_empty_url_with_text() {
+        let ctx = LintContext::new("[some text]()");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Empty link found: [some text]()");
+    }
+
+    #[test]
+    fn test_both_empty_text_and_url() {
+        let ctx = LintContext::new("[]()");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Empty link found: []()");
+    }
+
+    #[test]
+    fn test_reference_link_with_undefined_reference() {
+        let ctx = LintContext::new("[text][undefined]");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Undefined reference should be treated as empty URL");
+    }
+
+    #[test]
+    fn test_shortcut_reference_links() {
+        // Valid shortcut reference link (implicit reference)
+        // Note: [example] by itself is not parsed as a link by the LINK_PATTERN regex
+        // It needs to be followed by [] or () to be recognized as a link
+        let ctx = LintContext::new("[example][]\n\n[example]: https://example.com");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Valid implicit reference link should pass");
+
+        // Empty implicit reference link
+        let ctx = LintContext::new("[][]\n\n[]: https://example.com");
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Empty implicit reference link should fail");
+
+        // Test actual shortcut-style links are not detected (since they don't match the pattern)
+        let ctx = LintContext::new("[example]\n\n[example]: https://example.com");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Shortcut links without [] or () are not parsed as links");
+    }
+
+    #[test]
+    fn test_fix_suggestions() {
+        let ctx = LintContext::new("[](https://example.com)");
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(result[0].fix.is_some());
+        let fix = result[0].fix.as_ref().unwrap();
+        assert_eq!(fix.replacement, "[Link text](https://example.com)");
+
+        let ctx = LintContext::new("[text]()");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result[0].fix.is_some());
+        let fix = result[0].fix.as_ref().unwrap();
+        assert_eq!(fix.replacement, "[text](https://example.com)");
+
+        let ctx = LintContext::new("[]()");
+        let result = rule.check(&ctx).unwrap();
+        assert!(result[0].fix.is_some());
+        let fix = result[0].fix.as_ref().unwrap();
+        assert_eq!(fix.replacement, "[Link text](https://example.com)");
+    }
+
+    #[test]
+    fn test_complex_markdown_document() {
+        let content = r#"# Document with various links
+
+[Valid link](https://example.com) followed by [](empty.com).
+
+## Lists with links
+- [Good link](url1)
+- [](url2)
+- Item with [inline empty]() link
+
+> Quote with [](quoted-empty.com)
+> And [valid quoted](quoted-valid.com)
+
+Code block should be ignored:
+```
+[](this-is-code)
+```
+
+[Reference style][ref1] and [][ref2]
+
+[ref1]: https://ref1.com
+[ref2]: https://ref2.com
+"#;
+        
+        let ctx = LintContext::new(content);
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        
+        // Count the empty links
+        let empty_link_lines = vec![3, 7, 8, 10, 18];
+        assert_eq!(result.len(), empty_link_lines.len(), "Should find all empty links");
+        
+        // Verify line numbers
+        for (i, &expected_line) in empty_link_lines.iter().enumerate() {
+            assert_eq!(result[i].line, expected_line, "Empty link {} should be on line {}", i, expected_line);
+        }
+    }
+}

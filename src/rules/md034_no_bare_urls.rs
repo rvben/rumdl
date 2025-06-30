@@ -623,10 +623,7 @@ mod tests {
         assert!(!URL_QUICK_CHECK.is_match("This has no URL"));
     }
 
-    // TODO: Fix complex badge link detection - currently detects URLs in nested badge structures
-    // This is a complex edge case that doesn't affect real-world parity with markdownlint
     #[test]
-    #[ignore]
     fn test_multiple_badges_and_links_on_one_line() {
         let rule = MD034NoBareUrls;
         let content = "# [React](https://react.dev/) \

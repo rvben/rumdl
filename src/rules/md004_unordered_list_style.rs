@@ -323,3 +323,285 @@ impl DocumentStructureExtensions for MD004UnorderedListStyle {
         ctx.content.contains(['*', '-', '+']) && ctx.list_blocks.iter().any(|block| !block.is_ordered)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+    use crate::rule::Rule;
+
+    #[test]
+    fn test_consistent_asterisk_style() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        let content = "* Item 1\n* Item 2\n  * Nested\n* Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_consistent_dash_style() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        let content = "- Item 1\n- Item 2\n  - Nested\n- Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_consistent_plus_style() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        let content = "+ Item 1\n+ Item 2\n  + Nested\n+ Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_inconsistent_style() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        let content = "* Item 1\n- Item 2\n+ Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 2);
+        assert_eq!(result[1].line, 3);
+    }
+
+    #[test]
+    fn test_asterisk_style_enforced() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        let content = "* Item 1\n- Item 2\n+ Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].message, "List marker '-' does not match expected style '*'");
+        assert_eq!(result[1].message, "List marker '+' does not match expected style '*'");
+    }
+
+    #[test]
+    fn test_dash_style_enforced() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+        let content = "* Item 1\n- Item 2\n+ Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].message, "List marker '*' does not match expected style '-'");
+        assert_eq!(result[1].message, "List marker '+' does not match expected style '-'");
+    }
+
+    #[test]
+    fn test_plus_style_enforced() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Plus);
+        let content = "* Item 1\n- Item 2\n+ Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].message, "List marker '*' does not match expected style '+'");
+        assert_eq!(result[1].message, "List marker '-' does not match expected style '+'");
+    }
+
+    #[test]
+    fn test_fix_consistent_style() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        let content = "* Item 1\n- Item 2\n+ Item 3";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "* Item 1\n* Item 2\n* Item 3");
+    }
+
+    #[test]
+    fn test_fix_asterisk_style() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        let content = "- Item 1\n+ Item 2\n- Item 3";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "* Item 1\n* Item 2\n* Item 3");
+    }
+
+    #[test]
+    fn test_fix_dash_style() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+        let content = "* Item 1\n+ Item 2\n* Item 3";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "- Item 1\n- Item 2\n- Item 3");
+    }
+
+    #[test]
+    fn test_fix_plus_style() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Plus);
+        let content = "* Item 1\n- Item 2\n* Item 3";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "+ Item 1\n+ Item 2\n+ Item 3");
+    }
+
+    #[test]
+    fn test_nested_lists() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        let content = "* Item 1\n  * Nested 1\n    * Double nested\n  - Wrong marker\n* Item 2";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 4);
+    }
+
+    #[test]
+    fn test_fix_nested_lists() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        let content = "* Item 1\n  - Nested 1\n    + Double nested\n  - Nested 2\n* Item 2";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "* Item 1\n  * Nested 1\n    * Double nested\n  * Nested 2\n* Item 2");
+    }
+
+    #[test]
+    fn test_with_code_blocks() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        let content = "* Item 1\n\n```\n- This is in code\n+ Not a list\n```\n\n- Item 2";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 8);
+    }
+
+    #[test]
+    fn test_with_blockquotes() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        let content = "> * Item 1\n> - Item 2\n\n* Regular item\n+ Different marker";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should detect inconsistencies both in blockquote and regular content
+        assert!(result.len() >= 2);
+    }
+
+    #[test]
+    fn test_empty_document() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        let content = "";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_no_lists() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        let content = "This is a paragraph.\n\nAnother paragraph.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_ordered_lists_ignored() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        let content = "1. Item 1\n2. Item 2\n   1. Nested\n3. Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_mixed_ordered_unordered() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        let content = "1. Ordered\n   * Unordered nested\n   - Wrong marker\n2. Another ordered";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 3);
+    }
+
+    #[test]
+    fn test_fix_preserves_content() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+        let content = "* Item with **bold** and *italic*\n+ Item with `code`\n* Item with [link](url)";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "- Item with **bold** and *italic*\n- Item with `code`\n- Item with [link](url)");
+    }
+
+    #[test]
+    fn test_fix_preserves_indentation() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        let content = "  - Indented item\n    + Nested item\n  - Another indented";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "  * Indented item\n    * Nested item\n  * Another indented");
+    }
+
+    #[test]
+    fn test_multiple_spaces_after_marker() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        let content = "*   Item 1\n-   Item 2\n+   Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "*   Item 1\n*   Item 2\n*   Item 3");
+    }
+
+    #[test]
+    fn test_tab_after_marker() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        let content = "*\tItem 1\n-\tItem 2";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "*\tItem 1\n*\tItem 2");
+    }
+
+    #[test]
+    fn test_edge_case_marker_at_end() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        let content = "*\n-\n+";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "*\n*\n*");
+    }
+
+    #[test]
+    fn test_from_config() {
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config.values.insert("style".to_string(), toml::Value::String("plus".to_string()));
+        config.rules.insert("MD004".to_string(), rule_config);
+        
+        let rule = MD004UnorderedListStyle::from_config(&config);
+        let content = "* Item 1\n- Item 2";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_default_config_section() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+        let config = rule.default_config_section();
+        assert!(config.is_some());
+        let (name, value) = config.unwrap();
+        assert_eq!(name, "MD004");
+        if let toml::Value::Table(table) = value {
+            assert_eq!(table.get("style").and_then(|v| v.as_str()), Some("dash"));
+        } else {
+            panic!("Expected table");
+        }
+    }
+
+    #[test]
+    fn test_performance_large_document() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        let mut content = String::new();
+        for i in 0..1000 {
+            content.push_str(&format!("{}Item {}\n", if i % 3 == 0 { "* " } else if i % 3 == 1 { "- " } else { "+ " }, i));
+        }
+        let ctx = LintContext::new(&content);
+        let result = rule.check(&ctx).unwrap();
+        // Should detect all non-asterisk markers
+        assert!(result.len() > 600);
+    }
+}

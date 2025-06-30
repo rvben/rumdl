@@ -121,3 +121,82 @@ pub fn fast_hash(content: &str) -> u64 {
     content.hash(&mut hasher);
     hasher.finish()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_line_ending_pure_lf() {
+        // Test content with only LF line endings
+        let content = "First line\nSecond line\nThird line\n";
+        assert_eq!(detect_line_ending(content), "\n");
+    }
+
+    #[test]
+    fn test_detect_line_ending_pure_crlf() {
+        // Test content with only CRLF line endings
+        let content = "First line\r\nSecond line\r\nThird line\r\n";
+        assert_eq!(detect_line_ending(content), "\r\n");
+    }
+
+    #[test]
+    fn test_detect_line_ending_mixed_more_lf() {
+        // Test content with mixed line endings where LF is more common
+        let content = "First line\nSecond line\r\nThird line\nFourth line\n";
+        assert_eq!(detect_line_ending(content), "\n");
+    }
+
+    #[test]
+    fn test_detect_line_ending_mixed_more_crlf() {
+        // Test content with mixed line endings where CRLF is more common
+        let content = "First line\r\nSecond line\r\nThird line\nFourth line\r\n";
+        assert_eq!(detect_line_ending(content), "\r\n");
+    }
+
+    #[test]
+    fn test_detect_line_ending_empty_string() {
+        // Test empty string - should default to LF
+        let content = "";
+        assert_eq!(detect_line_ending(content), "\n");
+    }
+
+    #[test]
+    fn test_detect_line_ending_single_line_no_ending() {
+        // Test single line without any line endings - should default to LF
+        let content = "This is a single line with no line ending";
+        assert_eq!(detect_line_ending(content), "\n");
+    }
+
+    #[test]
+    fn test_detect_line_ending_equal_lf_and_crlf() {
+        // Test edge case with equal number of CRLF and LF
+        // Since LF count is calculated as total '\n' minus CRLF count,
+        // and the algorithm uses > (not >=), it should default to LF
+        let content = "Line 1\r\nLine 2\nLine 3\r\nLine 4\n";
+        assert_eq!(detect_line_ending(content), "\n");
+    }
+
+    #[test]
+    fn test_detect_line_ending_single_lf() {
+        // Test with just a single LF
+        let content = "Line 1\n";
+        assert_eq!(detect_line_ending(content), "\n");
+    }
+
+    #[test]
+    fn test_detect_line_ending_single_crlf() {
+        // Test with just a single CRLF
+        let content = "Line 1\r\n";
+        assert_eq!(detect_line_ending(content), "\r\n");
+    }
+
+    #[test]
+    fn test_detect_line_ending_embedded_cr() {
+        // Test with CR characters that are not part of CRLF
+        // These should not affect the count
+        let content = "Line 1\rLine 2\nLine 3\r\nLine 4\n";
+        // This has 1 CRLF and 2 LF (after subtracting the CRLF)
+        assert_eq!(detect_line_ending(content), "\n");
+    }
+}

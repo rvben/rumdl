@@ -278,3 +278,252 @@ impl Rule for MD010NoHardTabs {
         Box::new(Self::from_config_struct(rule_config))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+    use crate::rule::Rule;
+
+    #[test]
+    fn test_no_tabs() {
+        let rule = MD010NoHardTabs::default();
+        let content = "This is a line\nAnother line\nNo tabs here";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_single_tab() {
+        let rule = MD010NoHardTabs::default();
+        let content = "Line with\ttab";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 10);
+        assert_eq!(result[0].message, "Found tab for alignment, use spaces instead");
+    }
+
+    #[test]
+    fn test_leading_tabs() {
+        let rule = MD010NoHardTabs::default();
+        let content = "\tIndented line\n\t\tDouble indented";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].message, "Found leading tab, use 4 spaces instead");
+        assert_eq!(result[1].line, 2);
+        assert_eq!(result[1].message, "Found 2 leading tabs, use 8 spaces instead");
+    }
+
+    #[test]
+    fn test_fix_tabs() {
+        let rule = MD010NoHardTabs::default();
+        let content = "\tIndented\nNormal\tline\nNo tabs";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "    Indented\nNormal    line\nNo tabs");
+    }
+
+    #[test]
+    fn test_custom_spaces_per_tab() {
+        let rule = MD010NoHardTabs::new(4, true);
+        let content = "\tIndented";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "    Indented");
+    }
+
+    #[test]
+    fn test_code_blocks_ignored() {
+        let rule = MD010NoHardTabs::new(2, false);
+        let content = "Normal\tline\n```\nCode\twith\ttab\n```\nAnother\tline";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should only flag tabs outside code blocks
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[1].line, 5);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Normal  line\n```\nCode\twith\ttab\n```\nAnother  line");
+    }
+
+    #[test]
+    fn test_code_blocks_checked() {
+        let rule = MD010NoHardTabs::new(2, true);
+        let content = "```\nCode\twith\ttab\n```";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should flag tabs in code blocks when code_blocks=true
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 2);
+    }
+
+    #[test]
+    fn test_html_comments_ignored() {
+        let rule = MD010NoHardTabs::default();
+        let content = "Normal\tline\n<!-- HTML\twith\ttab -->\nAnother\tline";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should not flag tabs in HTML comments
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[1].line, 3);
+    }
+
+    #[test]
+    fn test_multiline_html_comments() {
+        let rule = MD010NoHardTabs::default();
+        let content = "Before\n<!--\nMultiline\twith\ttabs\ncomment\t-->\nAfter\ttab";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should only flag the tab after the comment
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 5);
+    }
+
+    #[test]
+    fn test_empty_lines_with_tabs() {
+        let rule = MD010NoHardTabs::default();
+        let content = "Normal line\n\t\t\n\t\nAnother line";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].message, "Empty line contains 2 tabs");
+        assert_eq!(result[1].message, "Empty line contains tab");
+    }
+
+    #[test]
+    fn test_mixed_tabs_and_spaces() {
+        let rule = MD010NoHardTabs::default();
+        let content = " \tMixed indentation\n\t Mixed again";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_consecutive_tabs() {
+        let rule = MD010NoHardTabs::default();
+        let content = "Text\t\t\tthree tabs\tand\tanother";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should group consecutive tabs
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].message, "Found 3 tabs for alignment, use spaces instead");
+    }
+
+    #[test]
+    fn test_tab_positions() {
+        let tabs = MD010NoHardTabs::find_tab_positions("a\tb\tc");
+        assert_eq!(tabs, vec![1, 3]);
+        
+        let tabs = MD010NoHardTabs::find_tab_positions("\t\tabc");
+        assert_eq!(tabs, vec![0, 1]);
+        
+        let tabs = MD010NoHardTabs::find_tab_positions("no tabs");
+        assert!(tabs.is_empty());
+    }
+
+    #[test]
+    fn test_group_consecutive_tabs() {
+        let groups = MD010NoHardTabs::group_consecutive_tabs(&[0, 1, 2, 5, 6]);
+        assert_eq!(groups, vec![(0, 3), (5, 7)]);
+        
+        let groups = MD010NoHardTabs::group_consecutive_tabs(&[1, 3, 5]);
+        assert_eq!(groups, vec![(1, 2), (3, 4), (5, 6)]);
+        
+        let groups = MD010NoHardTabs::group_consecutive_tabs(&[]);
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn test_count_leading_tabs() {
+        assert_eq!(MD010NoHardTabs::count_leading_tabs("\t\tcode"), 2);
+        assert_eq!(MD010NoHardTabs::count_leading_tabs(" \tcode"), 0);
+        assert_eq!(MD010NoHardTabs::count_leading_tabs("no tabs"), 0);
+        assert_eq!(MD010NoHardTabs::count_leading_tabs("\t"), 1);
+    }
+
+    #[test]
+    fn test_default_config() {
+        let rule = MD010NoHardTabs::default();
+        let config = rule.default_config_section();
+        assert!(config.is_some());
+        let (name, _value) = config.unwrap();
+        assert_eq!(name, "MD010");
+    }
+
+    #[test]
+    fn test_from_config() {
+        // Test that custom config values are properly loaded
+        let custom_spaces = 8;
+        let rule = MD010NoHardTabs::new(custom_spaces, false);
+        let content = "\tTab";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "        Tab");
+        
+        // Also test code blocks config
+        let rule_code_blocks = MD010NoHardTabs::new(2, false);
+        let content_with_code = "```\n\tTab in code\n```";
+        let ctx = LintContext::new(content_with_code);
+        let result = rule_code_blocks.check(&ctx).unwrap();
+        // code_blocks=false means tabs in code blocks are not flagged
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_performance_large_document() {
+        let rule = MD010NoHardTabs::default();
+        let mut content = String::new();
+        for i in 0..1000 {
+            content.push_str(&format!("Line {}\twith\ttabs\n", i));
+        }
+        let ctx = LintContext::new(&content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2000);
+    }
+
+    #[test]
+    fn test_preserve_content() {
+        let rule = MD010NoHardTabs::default();
+        let content = "**Bold**\ttext\n*Italic*\ttext\n[Link](url)\ttab";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "**Bold**    text\n*Italic*    text\n[Link](url)    tab");
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        let rule = MD010NoHardTabs::default();
+        
+        // Tab at end of line
+        let content = "Text\t";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        
+        // Only tabs
+        let content = "\t\t\t";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Empty line contains 3 tabs");
+    }
+
+    #[test]
+    fn test_find_html_comment_lines() {
+        let lines = vec!["Normal", "<!-- Start", "Middle", "End -->", "After"];
+        let result = MD010NoHardTabs::find_html_comment_lines(&lines);
+        assert_eq!(result, vec![false, true, true, true, false]);
+        
+        let lines = vec!["<!-- Single line comment -->", "Normal"];
+        let result = MD010NoHardTabs::find_html_comment_lines(&lines);
+        assert_eq!(result, vec![true, false]);
+    }
+}

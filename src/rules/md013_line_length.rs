@@ -370,3 +370,308 @@ impl DocumentStructureExtensions for MD013LineLength {
         !ctx.content.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_default_config() {
+        let rule = MD013LineLength::default();
+        assert_eq!(rule.config.line_length, 80);
+        assert_eq!(rule.config.code_blocks, true);  // Default is true
+        assert_eq!(rule.config.tables, true);       // Default is true
+        assert_eq!(rule.config.headings, true);
+        assert_eq!(rule.config.strict, false);
+    }
+
+    #[test]
+    fn test_custom_config() {
+        let rule = MD013LineLength::new(100, true, true, false, true);
+        assert_eq!(rule.config.line_length, 100);
+        assert_eq!(rule.config.code_blocks, true);
+        assert_eq!(rule.config.tables, true);
+        assert_eq!(rule.config.headings, false);
+        assert_eq!(rule.config.strict, true);
+    }
+
+    #[test]
+    fn test_basic_line_length_violation() {
+        let rule = MD013LineLength::new(50, false, false, false, false);
+        let content = "This is a line that is definitely longer than fifty characters and should trigger a warning.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Line length"));
+        assert!(result[0].message.contains("exceeds 50 characters"));
+    }
+
+    #[test]
+    fn test_no_violation_under_limit() {
+        let rule = MD013LineLength::new(100, false, false, false, false);
+        let content = "Short line.\nAnother short line.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_violations() {
+        let rule = MD013LineLength::new(30, false, false, false, false);
+        let content = "This line is definitely longer than thirty chars.\nThis is also a line that exceeds the limit.\nShort line.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[1].line, 2);
+    }
+
+    #[test]
+    fn test_code_blocks_exemption() {
+        let rule = MD013LineLength::new(30, false, false, false, false);
+        let content = "```\nThis is a very long line inside a code block that should be ignored.\n```";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_code_blocks_not_exempt_when_configured() {
+        let rule = MD013LineLength::new(30, true, false, false, false);
+        let content = "```\nThis is a very long line inside a code block that should NOT be ignored.\n```";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert!(result.len() > 0);
+    }
+
+    #[test]
+    fn test_heading_exemption() {
+        let rule = MD013LineLength::new(30, false, false, true, false);
+        let content = "# This is a very long heading that would normally exceed the limit";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_heading_not_exempt_when_configured() {
+        let rule = MD013LineLength::new(30, false, false, false, false);
+        let content = "# This is a very long heading that should trigger a warning";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_table_detection() {
+        let lines = vec![
+            "| Column 1 | Column 2 |",
+            "|----------|----------|",
+            "| Value 1  | Value 2  |"
+        ];
+        
+        assert!(MD013LineLength::is_in_table(&lines, 0));
+        assert!(MD013LineLength::is_in_table(&lines, 1));
+        assert!(MD013LineLength::is_in_table(&lines, 2));
+    }
+
+    #[test]
+    fn test_table_exemption() {
+        let rule = MD013LineLength::new(30, false, true, false, false);
+        let content = "| This is a very long table header | Another long column header |\n|-----------------------------------|-------------------------------|";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_url_exemption() {
+        let rule = MD013LineLength::new(30, false, false, false, false);
+        let content = "https://example.com/this/is/a/very/long/url/that/exceeds/the/limit";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_image_reference_exemption() {
+        let rule = MD013LineLength::new(30, false, false, false, false);
+        let content = "![This is a very long image alt text that exceeds limit][reference]";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_link_reference_exemption() {
+        let rule = MD013LineLength::new(30, false, false, false, false);
+        let content = "[reference]: https://example.com/very/long/url/that/exceeds/limit";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_strict_mode() {
+        let rule = MD013LineLength::new(30, false, false, false, true);
+        let content = "https://example.com/this/is/a/very/long/url/that/exceeds/the/limit";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // In strict mode, even URLs trigger warnings
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_blockquote_exemption() {
+        let rule = MD013LineLength::new(30, false, false, false, false);
+        let content = "> This is a very long line inside a blockquote that should be ignored.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_setext_heading_underline_exemption() {
+        let rule = MD013LineLength::new(30, false, false, false, false);
+        let content = "Heading\n========================================";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // The underline should be exempt
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_trailing_whitespace_fix() {
+        let rule = MD013LineLength::new(60, false, false, false, false);
+        let content = "This line has trailing whitespace that makes it too long      ";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        // The line without spaces is 56 chars, within limit of 60
+        assert!(result[0].fix.is_some());
+        assert!(result[0].message.contains("can trim whitespace"));
+        
+        // Apply fix
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed.trim(), "This line has trailing whitespace that makes it too long");
+    }
+
+    #[test]
+    fn test_character_vs_byte_counting() {
+        let rule = MD013LineLength::new(10, false, false, false, false);
+        // Unicode characters should count as 1 character each
+        let content = "你好世界这是测试文字超过限制"; // 14 characters
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let rule = MD013LineLength::default();
+        let ctx = LintContext::new("");
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_excess_range_calculation() {
+        let rule = MD013LineLength::new(10, false, false, false, false);
+        let content = "12345678901234567890"; // 20 chars, limit is 10
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        // The warning should highlight from character 11 onwards
+        assert_eq!(result[0].column, 11);
+        assert_eq!(result[0].end_column, 21);
+    }
+
+    #[test]
+    fn test_html_block_exemption() {
+        let rule = MD013LineLength::new(30, false, false, false, false);
+        let content = "<div>\nThis is a very long line inside an HTML block that should be ignored.\n</div>";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // HTML blocks should be exempt
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_mixed_content() {
+        // code_blocks=false, tables=true, headings=true
+        let rule = MD013LineLength::new(30, false, true, true, false);
+        let content = r#"# This heading is very long but should be exempt
+
+This regular paragraph line is too long and should trigger.
+
+```
+Code block line that is very long but exempt.
+```
+
+| Table | With very long content |
+|-------|------------------------|
+
+Another long line that should trigger a warning."#;
+        
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should have warnings for the two regular paragraph lines only
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 3);
+        assert_eq!(result[1].line, 12);
+    }
+
+    #[test]
+    fn test_fix_preserves_content() {
+        let rule = MD013LineLength::new(50, false, false, false, false);
+        let content = "Line 1\nThis line has trailing spaces and is too long      \nLine 3";
+        let ctx = LintContext::new(content);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.contains("Line 1"));
+        assert!(fixed.contains("Line 3"));
+        assert!(!fixed.contains("      \n")); // Trailing spaces removed
+    }
+
+    #[test]
+    fn test_has_relevant_elements() {
+        let rule = MD013LineLength::default();
+        let structure = DocumentStructure::new("test");
+        
+        let ctx = LintContext::new("Some content");
+        assert!(rule.has_relevant_elements(&ctx, &structure));
+        
+        let empty_ctx = LintContext::new("");
+        assert!(!rule.has_relevant_elements(&empty_ctx, &structure));
+    }
+
+    #[test]
+    fn test_rule_metadata() {
+        let rule = MD013LineLength::default();
+        assert_eq!(rule.name(), "MD013");
+        assert_eq!(rule.description(), "Line length should not be excessive");
+        assert_eq!(rule.category(), RuleCategory::Whitespace);
+    }
+}

@@ -14,10 +14,10 @@ mod md035_config;
 use md035_config::MD035Config;
 
 lazy_static! {
-    static ref HR_DASH: Regex = Regex::new(r"^\-{3,}\s*$").unwrap();
+    static ref HR_DASH: Regex = Regex::new(r"^-{3,}\s*$").unwrap();
     static ref HR_ASTERISK: Regex = Regex::new(r"^\*{3,}\s*$").unwrap();
     static ref HR_UNDERSCORE: Regex = Regex::new(r"^_{3,}\s*$").unwrap();
-    static ref HR_SPACED_DASH: Regex = Regex::new(r"^(\-\s+){2,}\-\s*$").unwrap();
+    static ref HR_SPACED_DASH: Regex = Regex::new(r"^(-\s+){2,}-\s*$").unwrap();
     static ref HR_SPACED_ASTERISK: Regex = Regex::new(r"^(\*\s+){2,}\*\s*$").unwrap();
     static ref HR_SPACED_UNDERSCORE: Regex = Regex::new(r"^(_\s+){2,}_\s*$").unwrap();
 }
@@ -206,5 +206,260 @@ impl Rule for MD035HRStyle {
         let style = crate::config::get_rule_config_value::<String>(config, "MD035", "style")
             .unwrap_or_else(|| "consistent".to_string());
         Box::new(MD035HRStyle::new(style))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_is_horizontal_rule() {
+        // Valid horizontal rules
+        assert!(MD035HRStyle::is_horizontal_rule("---"));
+        assert!(MD035HRStyle::is_horizontal_rule("----"));
+        assert!(MD035HRStyle::is_horizontal_rule("***"));
+        assert!(MD035HRStyle::is_horizontal_rule("****"));
+        assert!(MD035HRStyle::is_horizontal_rule("___"));
+        assert!(MD035HRStyle::is_horizontal_rule("____"));
+        assert!(MD035HRStyle::is_horizontal_rule("- - -"));
+        assert!(MD035HRStyle::is_horizontal_rule("* * *"));
+        assert!(MD035HRStyle::is_horizontal_rule("_ _ _"));
+        assert!(MD035HRStyle::is_horizontal_rule("  ---  ")); // With surrounding whitespace
+        
+        // Invalid horizontal rules
+        assert!(!MD035HRStyle::is_horizontal_rule("--")); // Too few characters
+        assert!(!MD035HRStyle::is_horizontal_rule("**"));
+        assert!(!MD035HRStyle::is_horizontal_rule("__"));
+        assert!(!MD035HRStyle::is_horizontal_rule("- -")); // Too few repetitions
+        assert!(!MD035HRStyle::is_horizontal_rule("* *"));
+        assert!(!MD035HRStyle::is_horizontal_rule("_ _"));
+        assert!(!MD035HRStyle::is_horizontal_rule("text"));
+        assert!(!MD035HRStyle::is_horizontal_rule(""));
+    }
+
+    #[test]
+    fn test_is_potential_setext_heading() {
+        let lines = vec!["Heading 1", "=========", "Content", "Heading 2", "---", "More content"];
+        
+        // Valid Setext headings
+        assert!(MD035HRStyle::is_potential_setext_heading(&lines, 1)); // ========= under "Heading 1"
+        assert!(MD035HRStyle::is_potential_setext_heading(&lines, 4)); // --- under "Heading 2"
+        
+        // Not Setext headings
+        assert!(!MD035HRStyle::is_potential_setext_heading(&lines, 0)); // First line can't be underline
+        assert!(!MD035HRStyle::is_potential_setext_heading(&lines, 2)); // "Content" is not an underline
+        
+        let lines2 = vec!["", "---", "Content"];
+        assert!(!MD035HRStyle::is_potential_setext_heading(&lines2, 1)); // Empty line above
+        
+        let lines3 = vec!["***", "---"];
+        assert!(!MD035HRStyle::is_potential_setext_heading(&lines3, 1)); // HR above
+    }
+
+    #[test]
+    fn test_most_prevalent_hr_style() {
+        // Single style (with blank lines to avoid Setext interpretation)
+        let lines = vec!["Content", "", "---", "", "More", "", "---", "", "Text"];
+        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("---".to_string()));
+        
+        // Multiple styles, one more prevalent
+        let lines = vec!["Content", "", "---", "", "More", "", "***", "", "Text", "", "---"];
+        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("---".to_string()));
+        
+        // Multiple styles, tie broken by first encountered
+        let lines = vec!["Content", "", "***", "", "More", "", "---", "", "Text"];
+        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("***".to_string()));
+        
+        // No horizontal rules
+        let lines = vec!["Just", "Regular", "Content"];
+        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), None);
+        
+        // Exclude Setext headings
+        let lines = vec!["Heading", "---", "Content", "", "***"];
+        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("***".to_string()));
+    }
+
+    #[test]
+    fn test_consistent_style() {
+        let rule = MD035HRStyle::new("consistent".to_string());
+        let content = "Content\n\n---\n\nMore\n\n***\n\nText\n\n---";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should flag the *** as it doesn't match the most prevalent style ---
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 7);
+        assert!(result[0].message.contains("Horizontal rule style should be \"---\""));
+    }
+
+    #[test]
+    fn test_specific_style_dashes() {
+        let rule = MD035HRStyle::new("---".to_string());
+        let content = "Content\n\n***\n\nMore\n\n___\n\nText";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should flag both *** and ___ as they don't match ---
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 3);
+        assert_eq!(result[1].line, 7);
+        assert!(result[0].message.contains("Horizontal rule style should be \"---\""));
+    }
+
+    #[test]
+    fn test_indented_horizontal_rule() {
+        let rule = MD035HRStyle::new("---".to_string());
+        let content = "Content\n\n  ---\n\nMore";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 3);
+        assert_eq!(result[0].message, "Horizontal rule should not be indented");
+    }
+
+    #[test]
+    fn test_setext_heading_not_flagged() {
+        let rule = MD035HRStyle::new("***".to_string());
+        let content = "Heading\n---\nContent\n***";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should not flag the --- under "Heading" as it's a Setext heading
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_fix_consistent_style() {
+        let rule = MD035HRStyle::new("consistent".to_string());
+        let content = "Content\n\n---\n\nMore\n\n***\n\nText\n\n---";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        let expected = "Content\n\n---\n\nMore\n\n---\n\nText\n\n---";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_fix_specific_style() {
+        let rule = MD035HRStyle::new("***".to_string());
+        let content = "Content\n\n---\n\nMore\n\n___\n\nText";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        let expected = "Content\n\n***\n\nMore\n\n***\n\nText";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_fix_preserves_setext_headings() {
+        let rule = MD035HRStyle::new("***".to_string());
+        let content = "Heading 1\n=========\nHeading 2\n---\nContent\n\n---";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        let expected = "Heading 1\n=========\nHeading 2\n---\nContent\n\n***";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_fix_removes_indentation() {
+        let rule = MD035HRStyle::new("---".to_string());
+        let content = "Content\n\n  ***\n\nMore\n\n    ___\n\nText";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        let expected = "Content\n\n---\n\nMore\n\n---\n\nText";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_spaced_styles() {
+        let rule = MD035HRStyle::new("* * *".to_string());
+        let content = "Content\n\n- - -\n\nMore\n\n_ _ _\n\nText";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("Horizontal rule style should be \"* * *\""));
+    }
+
+    #[test]
+    fn test_empty_style_uses_consistent() {
+        let rule = MD035HRStyle::new("".to_string());
+        let content = "Content\n\n---\n\nMore\n\n***\n\nText";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Empty style should behave like "consistent"
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 7);
+    }
+
+    #[test]
+    fn test_all_hr_styles_consistent() {
+        let rule = MD035HRStyle::new("consistent".to_string());
+        let content = "Content\n---\nMore\n---\nText\n---";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // All HRs are the same style, should not flag anything
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_no_horizontal_rules() {
+        let rule = MD035HRStyle::new("---".to_string());
+        let content = "Just regular content\nNo horizontal rules here";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_mixed_spaced_and_unspaced() {
+        let rule = MD035HRStyle::new("consistent".to_string());
+        let content = "Content\n\n---\n\nMore\n\n- - -\n\nText";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should flag the spaced style as inconsistent
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 7);
+    }
+
+    #[test]
+    fn test_trailing_whitespace_in_hr() {
+        let rule = MD035HRStyle::new("---".to_string());
+        let content = "Content\n\n---   \n\nMore";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Trailing whitespace is OK for HRs
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_hr_with_extra_characters() {
+        let rule = MD035HRStyle::new("---".to_string());
+        let content = "Content\n-----\nMore\n--------\nText";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Extra characters in the same style should not be flagged
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_default_config() {
+        let rule = MD035HRStyle::new("consistent".to_string());
+        let (name, config) = rule.default_config_section().unwrap();
+        assert_eq!(name, "MD035");
+        
+        let table = config.as_table().unwrap();
+        assert_eq!(table.get("style").unwrap().as_str().unwrap(), "consistent");
     }
 }
