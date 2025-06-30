@@ -1,5 +1,3 @@
-use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
 use std::fmt;
 
 /// The style for strong emphasis (MD050)
@@ -24,19 +22,34 @@ impl fmt::Display for StrongStyle {
     }
 }
 
-/// Get regex pattern for finding strong emphasis markers
-pub fn get_strong_pattern() -> &'static FancyRegex {
-    lazy_static! {
-        static ref STRONG_REGEX: FancyRegex = FancyRegex::new(r"(\*\*|__)(?!\s)(?:(?!\1).)+?(?<!\s)(\1)").unwrap();
-    }
-    &STRONG_REGEX
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Determine the strong style from a marker
-pub fn get_strong_style(marker: &str) -> Option<StrongStyle> {
-    match marker {
-        "**" => Some(StrongStyle::Asterisk),
-        "__" => Some(StrongStyle::Underscore),
-        _ => None,
+    #[test]
+    fn test_strong_style_default() {
+        let style: StrongStyle = Default::default();
+        assert_eq!(style, StrongStyle::Consistent);
+    }
+
+    #[test]
+    fn test_strong_style_display() {
+        assert_eq!(StrongStyle::Asterisk.to_string(), "asterisk");
+        assert_eq!(StrongStyle::Underscore.to_string(), "underscore");
+        assert_eq!(StrongStyle::Consistent.to_string(), "consistent");
+    }
+
+    #[test]
+    fn test_strong_style_clone() {
+        let style = StrongStyle::Asterisk;
+        let cloned = style.clone();
+        assert_eq!(style, cloned);
+    }
+
+    #[test]
+    fn test_strong_style_debug() {
+        let style = StrongStyle::Underscore;
+        let debug_str = format!("{:?}", style);
+        assert_eq!(debug_str, "Underscore");
     }
 }
