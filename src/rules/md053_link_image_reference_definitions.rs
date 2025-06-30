@@ -408,3 +408,236 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         Box::new(MD053LinkImageReferenceDefinitions::new())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_used_reference_link() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[text][ref]\n\n[ref]: https://example.com";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_unused_reference_definition() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[unused]: https://example.com";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Unused link/image reference: [unused]"));
+    }
+
+    #[test]
+    fn test_used_reference_image() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "![alt][img]\n\n[img]: image.jpg";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_case_insensitive_matching() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[Text][REF]\n\n[ref]: https://example.com";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_shortcut_reference() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[ref]\n\n[ref]: https://example.com";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_collapsed_reference() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[ref][]\n\n[ref]: https://example.com";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_unused_definitions() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[unused1]: url1\n[unused2]: url2\n[unused3]: url3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 3);
+        
+        // The warnings might not be in the same order, so collect all messages
+        let messages: Vec<String> = result.iter().map(|w| w.message.clone()).collect();
+        assert!(messages.iter().any(|m| m.contains("unused1")));
+        assert!(messages.iter().any(|m| m.contains("unused2")));
+        assert!(messages.iter().any(|m| m.contains("unused3")));
+    }
+
+    #[test]
+    fn test_mixed_used_and_unused() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[used]\n\n[used]: url1\n[unused]: url2";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("unused"));
+    }
+
+    #[test]
+    fn test_multiline_definition() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[ref]: https://example.com\n  \"Title on next line\"";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1); // Still unused
+    }
+
+    #[test]
+    fn test_reference_in_code_block() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "```\n[ref]\n```\n\n[ref]: https://example.com";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Reference used only in code block is still considered unused
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_reference_in_inline_code() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "`[ref]`\n\n[ref]: https://example.com";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Reference in inline code is not a usage
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_escaped_reference() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[example\\-ref]\n\n[example-ref]: https://example.com";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should match despite escaping
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_duplicate_definitions() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[ref]: url1\n[ref]: url2\n\n[ref]";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Both definitions are used (Markdown uses the first one)
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_fix_removes_unused_definition() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[used]\n\n[used]: url1\n[unused]: url2\n\nMore content";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert!(fixed.contains("[used]: url1"));
+        assert!(!fixed.contains("[unused]: url2"));
+        assert!(fixed.contains("More content"));
+    }
+
+    #[test]
+    fn test_fix_preserves_blank_lines() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "Content\n\n[unused]: url\n\nMore content";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "Content\n\nMore content");
+    }
+
+    #[test]
+    fn test_fix_multiple_consecutive_definitions() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[unused1]: url1\n[unused2]: url2\n[unused3]: url3";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "");
+    }
+
+    #[test]
+    fn test_special_characters_in_reference() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[ref-with_special.chars]\n\n[ref-with_special.chars]: url";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_find_definitions() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[ref1]: url1\n[ref2]: url2\nSome text\n[ref3]: url3";
+        let doc = DocumentStructure::new(content);
+        let defs = rule.find_definitions(content, &doc);
+        
+        assert_eq!(defs.len(), 3);
+        assert!(defs.contains_key("ref1"));
+        assert!(defs.contains_key("ref2"));
+        assert!(defs.contains_key("ref3"));
+    }
+
+    #[test]
+    fn test_find_usages() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[text][ref1] and [ref2] and ![img][ref3]";
+        let ctx = LintContext::new(content);
+        let doc = DocumentStructure::new(content);
+        let usages = rule.find_usages(content, &doc, &ctx);
+        
+        assert!(usages.contains("ref1"));
+        assert!(usages.contains("ref2"));
+        assert!(usages.contains("ref3"));
+    }
+
+    #[test]
+    fn test_clean_up_blank_lines() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        
+        // Test multiple consecutive blank lines
+        assert_eq!(
+            rule.clean_up_blank_lines("text\n\n\n\nmore text"),
+            "text\n\nmore text"
+        );
+        
+        // Test leading/trailing blank lines
+        assert_eq!(
+            rule.clean_up_blank_lines("\n\ntext\n\n"),
+            "text"
+        );
+    }
+}
