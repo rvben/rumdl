@@ -301,3 +301,173 @@ impl Rule for MD014CommandsShowOutput {
         Box::new(Self::from_config_struct(rule_config))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_is_command_line() {
+        let rule = MD014CommandsShowOutput::new();
+        assert!(rule.is_command_line("$ echo test"));
+        assert!(rule.is_command_line("  $ ls -la"));
+        assert!(rule.is_command_line("> pwd"));
+        assert!(rule.is_command_line("   > cd /home"));
+        assert!(!rule.is_command_line("echo test"));
+        assert!(!rule.is_command_line("# comment"));
+        assert!(!rule.is_command_line("output line"));
+    }
+
+    #[test]
+    fn test_is_shell_language() {
+        let rule = MD014CommandsShowOutput::new();
+        assert!(rule.is_shell_language("bash"));
+        assert!(rule.is_shell_language("BASH"));
+        assert!(rule.is_shell_language("sh"));
+        assert!(rule.is_shell_language("shell"));
+        assert!(rule.is_shell_language("Shell"));
+        assert!(rule.is_shell_language("console"));
+        assert!(rule.is_shell_language("CONSOLE"));
+        assert!(rule.is_shell_language("terminal"));
+        assert!(rule.is_shell_language("Terminal"));
+        assert!(!rule.is_shell_language("python"));
+        assert!(!rule.is_shell_language("javascript"));
+        assert!(!rule.is_shell_language(""));
+    }
+
+    #[test]
+    fn test_is_output_line() {
+        let rule = MD014CommandsShowOutput::new();
+        assert!(rule.is_output_line("output text"));
+        assert!(rule.is_output_line("   some output"));
+        assert!(rule.is_output_line("file1 file2"));
+        assert!(!rule.is_output_line(""));
+        assert!(!rule.is_output_line("   "));
+        assert!(!rule.is_output_line("$ command"));
+        assert!(!rule.is_output_line("> prompt"));
+        assert!(!rule.is_output_line("# comment"));
+    }
+
+    #[test]
+    fn test_is_no_output_command() {
+        let rule = MD014CommandsShowOutput::new();
+        assert!(rule.is_no_output_command("cd /home"));
+        assert!(rule.is_no_output_command("mkdir test"));
+        assert!(rule.is_no_output_command("touch file.txt"));
+        assert!(rule.is_no_output_command("rm -rf dir"));
+        assert!(rule.is_no_output_command("mv old new"));
+        assert!(rule.is_no_output_command("cp src dst"));
+        assert!(rule.is_no_output_command("export VAR=value"));
+        assert!(rule.is_no_output_command("set -e"));
+        assert!(rule.is_no_output_command("CD /HOME"));
+        assert!(rule.is_no_output_command("MKDIR TEST"));
+        assert!(!rule.is_no_output_command("ls -la"));
+        assert!(!rule.is_no_output_command("echo test"));
+        assert!(!rule.is_no_output_command("pwd"));
+    }
+
+    #[test]
+    fn test_get_command_from_block() {
+        let rule = MD014CommandsShowOutput::new();
+        let block = vec!["$ echo test", "output"];
+        assert_eq!(rule.get_command_from_block(&block), "echo test");
+        
+        let block2 = vec!["  $ ls -la", "file1 file2"];
+        assert_eq!(rule.get_command_from_block(&block2), "ls -la");
+        
+        let block3 = vec!["> pwd", "/home"];
+        assert_eq!(rule.get_command_from_block(&block3), "pwd");
+        
+        let empty_block: Vec<&str> = vec![];
+        assert_eq!(rule.get_command_from_block(&empty_block), "");
+    }
+
+    #[test]
+    fn test_fix_command_block() {
+        let rule = MD014CommandsShowOutput::new();
+        let block = vec!["$ echo test", "$ ls -la"];
+        assert_eq!(rule.fix_command_block(&block), "echo test\nls -la");
+        
+        let indented = vec!["    $ echo test", "  $ pwd"];
+        assert_eq!(rule.fix_command_block(&indented), "    echo test\n  pwd");
+        
+        let mixed = vec!["> cd /home", "$ mkdir test"];
+        assert_eq!(rule.fix_command_block(&mixed), "cd /home\nmkdir test");
+    }
+
+    #[test]
+    fn test_get_code_block_language() {
+        assert_eq!(MD014CommandsShowOutput::get_code_block_language("```bash"), "bash");
+        assert_eq!(MD014CommandsShowOutput::get_code_block_language("```shell"), "shell");
+        assert_eq!(MD014CommandsShowOutput::get_code_block_language("   ```console"), "console");
+        assert_eq!(MD014CommandsShowOutput::get_code_block_language("```bash {.line-numbers}"), "bash");
+        assert_eq!(MD014CommandsShowOutput::get_code_block_language("```"), "");
+    }
+
+    #[test]
+    fn test_find_first_command_line() {
+        let rule = MD014CommandsShowOutput::new();
+        let block = vec!["# comment", "$ echo test", "output"];
+        let result = rule.find_first_command_line(&block);
+        assert_eq!(result, Some((1, "$ echo test")));
+        
+        let no_commands = vec!["output1", "output2"];
+        assert_eq!(rule.find_first_command_line(&no_commands), None);
+    }
+
+    #[test]
+    fn test_is_command_without_output() {
+        let rule = MD014CommandsShowOutput::with_show_output(true);
+        
+        // Commands without output should be flagged
+        let block1 = vec!["$ echo test"];
+        assert!(rule.is_command_without_output(&block1, "bash"));
+        
+        // Commands with output should not be flagged
+        let block2 = vec!["$ echo test", "test"];
+        assert!(!rule.is_command_without_output(&block2, "bash"));
+        
+        // No-output commands should not be flagged
+        let block3 = vec!["$ cd /home"];
+        assert!(!rule.is_command_without_output(&block3, "bash"));
+        
+        // Disabled rule should not flag
+        let rule_disabled = MD014CommandsShowOutput::with_show_output(false);
+        assert!(!rule_disabled.is_command_without_output(&block1, "bash"));
+        
+        // Non-shell language should not be flagged
+        assert!(!rule.is_command_without_output(&block1, "python"));
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        let rule = MD014CommandsShowOutput::new();
+        // Bare $ doesn't match command pattern (needs a command after $)
+        let content = "```bash\n$ \n```";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Bare $ with only space doesn't match command pattern");
+        
+        // Test empty code block
+        let empty_content = "```bash\n```";
+        let ctx2 = LintContext::new(empty_content);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(result2.is_empty(), "Empty code block should not be flagged");
+        
+        // Test minimal command
+        let minimal = "```bash\n$ a\n```";
+        let ctx3 = LintContext::new(minimal);
+        let result3 = rule.check(&ctx3).unwrap();
+        assert_eq!(result3.len(), 1, "Minimal command should be flagged");
+    }
+
+    #[test]
+    fn test_default_config_section() {
+        let rule = MD014CommandsShowOutput::new();
+        let config_section = rule.default_config_section();
+        assert!(config_section.is_some());
+        let (name, _value) = config_section.unwrap();
+        assert_eq!(name, "MD014");
+    }
+}

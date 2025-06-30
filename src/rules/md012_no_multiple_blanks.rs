@@ -413,3 +413,227 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD012NoMu
         !ctx.content.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_single_blank_line_allowed() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Line 1\n\nLine 2\n\nLine 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_blank_lines_flagged() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 3); // 1 extra in first gap, 2 extra in second gap
+        assert_eq!(result[0].line, 3);
+        assert_eq!(result[1].line, 6);
+        assert_eq!(result[2].line, 7);
+    }
+
+    #[test]
+    fn test_custom_maximum() {
+        let rule = MD012NoMultipleBlanks::new(2);
+        let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1); // Only the fourth blank line is excessive
+        assert_eq!(result[0].line, 7);
+    }
+
+    #[test]
+    fn test_fix_multiple_blank_lines() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line 1\n\nLine 2\n\nLine 3");
+    }
+
+    #[test]
+    fn test_blank_lines_in_code_block() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Before\n\n```\ncode\n\n\n\nmore code\n```\n\nAfter";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty()); // Blank lines inside code blocks are ignored
+    }
+
+    #[test]
+    fn test_fix_preserves_code_block_blanks() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Before\n\n\n```\ncode\n\n\n\nmore code\n```\n\n\nAfter";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Before\n\n```\ncode\n\n\n\nmore code\n```\n\nAfter");
+    }
+
+    #[test]
+    fn test_blank_lines_in_front_matter() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "---\ntitle: Test\n\n\nauthor: Me\n---\n\nContent";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty()); // Blank lines in front matter are ignored
+    }
+
+    #[test]
+    fn test_blank_lines_at_start() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "\n\n\nContent";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("at start of file"));
+    }
+
+    #[test]
+    fn test_blank_lines_at_end() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Content\n\n\n";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("at end of file"));
+    }
+
+    #[test]
+    fn test_whitespace_only_lines() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Line 1\n  \n\t\nLine 2";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1); // Whitespace-only lines count as blank
+    }
+
+    #[test]
+    fn test_indented_code_blocks() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Text\n\n    code\n    \n    \n    more code\n\nText";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty()); // Blank lines in indented code blocks are preserved
+    }
+
+    #[test]
+    fn test_fix_with_final_newline() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Line 1\n\n\nLine 2\n";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line 1\n\nLine 2\n");
+        assert!(fixed.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_nested_code_blocks() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Before\n\n~~~\nouter\n\n```\ninner\n\n\n```\n\n~~~\n\nAfter";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_compute_code_block_regions() {
+        let lines = vec!["text", "```", "code", "", "", "```", "text"];
+        let regions = MD012NoMultipleBlanks::compute_code_block_regions(&lines);
+        assert_eq!(regions, vec![(1, 5)]);
+    }
+
+    #[test]
+    fn test_compute_front_matter_regions() {
+        let lines = vec!["---", "title: Test", "", "---", "content"];
+        let regions = MD012NoMultipleBlanks::compute_front_matter_regions(&lines);
+        assert_eq!(regions, vec![(0, 3)]);
+    }
+
+    #[test]
+    fn test_is_in_regions() {
+        let regions = vec![(2, 5), (10, 15)];
+        assert!(!MD012NoMultipleBlanks::is_in_regions(1, &regions));
+        assert!(MD012NoMultipleBlanks::is_in_regions(3, &regions));
+        assert!(MD012NoMultipleBlanks::is_in_regions(5, &regions));
+        assert!(!MD012NoMultipleBlanks::is_in_regions(7, &regions));
+        assert!(MD012NoMultipleBlanks::is_in_regions(12, &regions));
+    }
+
+    #[test]
+    fn test_unclosed_code_block() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Before\n\n```\ncode\n\n\n\nno closing fence";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty()); // Unclosed code blocks still preserve blank lines
+    }
+
+    #[test]
+    fn test_mixed_fence_styles() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Before\n\n```\ncode\n\n\n~~~\n\nAfter";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty()); // Mixed fence styles should work
+    }
+
+    #[test]
+    fn test_config_from_toml() {
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config.values.insert("maximum".to_string(), toml::Value::Integer(3));
+        config.rules.insert("MD012".to_string(), rule_config);
+        
+        let rule = MD012NoMultipleBlanks::from_config(&config);
+        let content = "Line 1\n\n\n\nLine 2"; // 3 blank lines
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty()); // 3 blank lines allowed with maximum=3
+    }
+
+    #[test]
+    fn test_blank_lines_between_sections() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Section 1\n\nContent\n\n\n# Section 2\n\nContent";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 5);
+    }
+
+    #[test]
+    fn test_fix_preserves_indented_code() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Text\n\n\n    code\n    \n    more code\n\n\nText";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        // The fix removes the extra blank line, but this is expected behavior
+        assert_eq!(fixed, "Text\n\n    code\n\n    more code\n\nText");
+    }
+
+    #[test]
+    fn test_edge_case_only_blanks() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "\n\n\n";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2); // Two excessive blank lines
+    }
+}

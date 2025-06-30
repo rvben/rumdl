@@ -419,3 +419,225 @@ impl Rule for MD026NoTrailingPunctuation {
         Box::new(Self::from_config_struct(rule_config))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_no_trailing_punctuation() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# This is a heading\n\n## Another heading";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Headings without punctuation should not be flagged");
+    }
+
+    #[test]
+    fn test_trailing_period() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# This is a heading.\n\n## Another one.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 20);
+        assert!(result[0].message.contains("ends with punctuation '.'"));
+        assert_eq!(result[1].line, 3);
+        assert_eq!(result[1].column, 15);
+    }
+
+    #[test]
+    fn test_trailing_comma() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# Heading,\n## Sub-heading,";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("ends with punctuation ','"));
+    }
+
+    #[test]
+    fn test_trailing_semicolon() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# Title;\n## Subtitle;";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("ends with punctuation ';'"));
+    }
+
+    #[test]
+    fn test_custom_punctuation() {
+        let rule = MD026NoTrailingPunctuation::new(Some("!".to_string()));
+        let content = "# Important!\n## Regular heading.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Only exclamation should be flagged with custom config");
+        assert_eq!(result[0].line, 1);
+        assert!(result[0].message.contains("ends with punctuation '!'"));
+    }
+
+    #[test]
+    fn test_legitimate_question_mark() {
+        let rule = MD026NoTrailingPunctuation::new(Some(".,;?".to_string()));
+        let content = "# What is this?\n# This is bad.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // With custom punctuation, legitimate punctuation exceptions don't apply
+        assert_eq!(result.len(), 2, "Both should be flagged with custom punctuation");
+    }
+
+    #[test]
+    fn test_default_legitimate_question() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# What is Rust?\n# How does it work?\n# Is it fast?";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Question marks in questions should be allowed by default");
+    }
+
+    #[test]
+    fn test_legitimate_colons() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# FAQ:\n# API Reference:\n# Step 1:\n# Version 2.0:";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Colons in categorical headings should be allowed by default");
+    }
+
+    #[test]
+    fn test_fix_atx_headings() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# Title.\n## Subtitle,\n### Sub-subtitle;";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "# Title\n## Subtitle\n### Sub-subtitle");
+    }
+
+    #[test]
+    fn test_fix_setext_headings() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "Title.\n======\n\nSubtitle,\n---------";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Title\n======\n\nSubtitle\n---------");
+    }
+
+    #[test]
+    fn test_fix_preserves_trailing_hashes() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# Title. #\n## Subtitle, ##";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "# Title #\n## Subtitle ##");
+    }
+
+    #[test]
+    fn test_indented_headings() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "   # Title.\n  ## Subtitle.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2, "Indented headings (< 4 spaces) should be checked");
+    }
+
+    #[test]
+    fn test_deeply_indented_ignored() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "    # This is code.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Deeply indented lines (4+ spaces) should be ignored");
+    }
+
+    #[test]
+    fn test_multiple_punctuation() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# Title...";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].column, 8); // Points to first period
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_no_headings() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "This is just text.\nMore text with punctuation.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Non-heading lines should not be checked");
+    }
+
+    #[test]
+    fn test_get_punctuation_regex() {
+        let rule = MD026NoTrailingPunctuation::new(Some("!?".to_string()));
+        let regex = rule.get_punctuation_regex().unwrap();
+        assert!(regex.is_match("text!"));
+        assert!(regex.is_match("text?"));
+        assert!(!regex.is_match("text."));
+    }
+
+    #[test]
+    fn test_regex_caching() {
+        let rule1 = MD026NoTrailingPunctuation::new(Some("!".to_string()));
+        let rule2 = MD026NoTrailingPunctuation::new(Some("!".to_string()));
+        
+        // Both should get the same cached regex
+        let _regex1 = rule1.get_punctuation_regex().unwrap();
+        let _regex2 = rule2.get_punctuation_regex().unwrap();
+        
+        // Check cache has the entry
+        let cache = PUNCTUATION_REGEX_CACHE.read().unwrap();
+        assert!(cache.contains_key("!"));
+    }
+
+    #[test]
+    fn test_config_from_toml() {
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config.values.insert("punctuation".to_string(), toml::Value::String("!?".to_string()));
+        config.rules.insert("MD026".to_string(), rule_config);
+        
+        let rule = MD026NoTrailingPunctuation::from_config(&config);
+        let content = "# Title!\n# Another?";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2, "Custom punctuation from config should be used");
+    }
+
+    #[test]
+    fn test_fix_removes_punctuation() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# Title.   \n## Subtitle,  ";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        // The current implementation doesn't preserve trailing whitespace after punctuation removal
+        assert_eq!(fixed, "# Title\n## Subtitle");
+    }
+
+    #[test]
+    fn test_final_newline_preservation() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# Title.\n";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "# Title\n");
+        
+        let content_no_newline = "# Title.";
+        let ctx2 = LintContext::new(content_no_newline);
+        let fixed2 = rule.fix(&ctx2).unwrap();
+        assert_eq!(fixed2, "# Title");
+    }
+}

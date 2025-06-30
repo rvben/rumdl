@@ -117,3 +117,221 @@ impl Rule for MD045NoAltText {
         Box::new(MD045NoAltText::new())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_image_with_alt_text() {
+        let rule = MD045NoAltText::new();
+        let content = "![A beautiful sunset](sunset.jpg)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_image_without_alt_text() {
+        let rule = MD045NoAltText::new();
+        let content = "![](sunset.jpg)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+        assert!(result[0].message.contains("Image missing alt text"));
+    }
+
+    #[test]
+    fn test_image_with_only_whitespace_alt_text() {
+        let rule = MD045NoAltText::new();
+        let content = "![   ](sunset.jpg)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+    }
+
+    #[test]
+    fn test_multiple_images() {
+        let rule = MD045NoAltText::new();
+        let content = "![Good alt text](image1.jpg)\n![](image2.jpg)\n![Another good one](image3.jpg)\n![](image4.jpg)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 2);
+        assert_eq!(result[1].line, 4);
+    }
+
+    #[test]
+    fn test_reference_style_image() {
+        let rule = MD045NoAltText::new();
+        let content = "![][sunset]\n\n[sunset]: sunset.jpg";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+    }
+
+    #[test]
+    fn test_reference_style_with_alt_text() {
+        let rule = MD045NoAltText::new();
+        let content = "![Beautiful sunset][sunset]\n\n[sunset]: sunset.jpg";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_image_in_code_block() {
+        let rule = MD045NoAltText::new();
+        let content = "```\n![](image.jpg)\n```";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should not flag images in code blocks
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_image_in_inline_code() {
+        let rule = MD045NoAltText::new();
+        let content = "Use `![](image.jpg)` syntax";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should not flag images in inline code
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_fix_empty_alt_text() {
+        let rule = MD045NoAltText::new();
+        let content = "![](sunset.jpg)";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "![TODO: Add image description](sunset.jpg)");
+    }
+
+    #[test]
+    fn test_fix_whitespace_alt_text() {
+        let rule = MD045NoAltText::new();
+        let content = "![   ](sunset.jpg)";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "![TODO: Add image description](sunset.jpg)");
+    }
+
+    #[test]
+    fn test_fix_multiple_images() {
+        let rule = MD045NoAltText::new();
+        let content = "![Good](img1.jpg) ![](img2.jpg) ![](img3.jpg)";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "![Good](img1.jpg) ![TODO: Add image description](img2.jpg) ![TODO: Add image description](img3.jpg)");
+    }
+
+    #[test]
+    fn test_fix_preserves_existing_alt_text() {
+        let rule = MD045NoAltText::new();
+        let content = "![This has alt text](image.jpg)";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "![This has alt text](image.jpg)");
+    }
+
+    #[test]
+    fn test_fix_does_not_modify_code_blocks() {
+        let rule = MD045NoAltText::new();
+        let content = "```\n![](image.jpg)\n```\n![](real-image.jpg)";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "```\n![](image.jpg)\n```\n![TODO: Add image description](real-image.jpg)");
+    }
+
+    #[test]
+    fn test_complex_urls() {
+        let rule = MD045NoAltText::new();
+        let content = "![](https://example.com/path/to/image.jpg?query=value#fragment)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_nested_parentheses_in_url() {
+        let rule = MD045NoAltText::new();
+        let content = "![](image(1).jpg)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_image_with_title() {
+        let rule = MD045NoAltText::new();
+        let content = "![](image.jpg \"Title text\")";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Image missing alt text"));
+    }
+
+    #[test]
+    fn test_fix_preserves_title() {
+        let rule = MD045NoAltText::new();
+        let content = "![](image.jpg \"Title text\")";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "![TODO: Add image description](image.jpg \"Title text\")");
+    }
+
+    #[test]
+    fn test_image_with_spaces_in_url() {
+        let rule = MD045NoAltText::new();
+        let content = "![](my image.jpg)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_column_positions() {
+        let rule = MD045NoAltText::new();
+        let content = "Text before ![](image.jpg) text after";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 13); // 1-indexed column
+    }
+
+    #[test]
+    fn test_multiline_content() {
+        let rule = MD045NoAltText::new();
+        let content = "Line 1\nLine 2 with ![](image.jpg)\nLine 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
+    }
+}

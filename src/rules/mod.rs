@@ -239,12 +239,3 @@ pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Ve
 
     enabled_rules
 }
-
-// Make sure dyn_clone is added as a dependency in Cargo.toml if not already present
-// And add `use dyn_clone::DynClone;` and `impl DynClone for MyTrait {}` where needed.
-// For Rule trait:
-// Add `use dyn_clone::DynClone;` in src/rule.rs
-// Add `pub trait Rule: DynClone { ... }` in src/rule.rs
-// Add `dyn_clone::clone_trait_object!(Rule);` in src/rule.rs
-
-// TODO: Need to add dyn_clone dependency and update Rule trait definition.

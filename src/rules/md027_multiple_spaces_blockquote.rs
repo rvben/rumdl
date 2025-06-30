@@ -11,16 +11,16 @@ lazy_static! {
     // New patterns for detecting malformed blockquote attempts where user intent is clear
     static ref MALFORMED_BLOCKQUOTE_PATTERNS: Vec<(Regex, &'static str)> = vec![
         // Double > without space: >>text (looks like nested but missing spaces)
-        (Regex::new(r"^(\s*)>>([^\s>].*|$)").unwrap(), "missing spaces in nested quote"),
+        (Regex::new(r"^(\s*)>>([^\s>].*|$)").unwrap(), "missing spaces in nested blockquote"),
 
         // Triple > without space: >>>text
-        (Regex::new(r"^(\s*)>>>([^\s>].*|$)").unwrap(), "missing spaces in deeply nested quote"),
+        (Regex::new(r"^(\s*)>>>([^\s>].*|$)").unwrap(), "missing spaces in deeply nested blockquote"),
 
         // Space then > then text: > >text (extra > by mistake)
-        (Regex::new(r"^(\s*)>\s+>([^\s>].*|$)").unwrap(), "extra quote marker"),
+        (Regex::new(r"^(\s*)>\s+>([^\s>].*|$)").unwrap(), "extra blockquote marker"),
 
         // Multiple spaces then >: (spaces)>text (indented blockquote without space)
-        (Regex::new(r"^(\s{4,})>([^\s].*|$)").unwrap(), "indented quote missing space"),
+        (Regex::new(r"^(\s{4,})>([^\s].*|$)").unwrap(), "indented blockquote missing space"),
     ];
 }
 
@@ -287,5 +287,227 @@ impl MD027MultipleSpacesBlockquote {
         }
 
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_valid_blockquote() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let content = "> This is a blockquote\n> > Nested quote";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Valid blockquotes should not be flagged");
+    }
+
+    #[test]
+    fn test_multiple_spaces_after_marker() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let content = ">  This has two spaces\n>   This has three spaces";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 3); // Points to the extra space (after > and first space)
+        assert_eq!(result[0].message, "Multiple spaces after quote marker (>)");
+        assert_eq!(result[1].line, 2);
+        assert_eq!(result[1].column, 3);
+    }
+
+    #[test]
+    fn test_nested_multiple_spaces() {
+        let rule = MD027MultipleSpacesBlockquote;
+        // LintContext sees these as single-level blockquotes because of the space between markers
+        let content = ">  Two spaces after marker\n>>  Two spaces in nested blockquote";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("Multiple spaces"));
+        assert!(result[1].message.contains("Multiple spaces"));
+    }
+
+    #[test]
+    fn test_malformed_nested_quote() {
+        let rule = MD027MultipleSpacesBlockquote;
+        // LintContext sees >>text as a valid nested blockquote with no space after marker
+        // MD027 doesn't flag this as malformed, only as missing space after marker
+        let content = ">>This is a nested blockquote without space after markers";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // This should not be flagged at all since >>text is valid CommonMark
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_malformed_deeply_nested() {
+        let rule = MD027MultipleSpacesBlockquote;
+        // LintContext sees >>>text as a valid triple-nested blockquote
+        let content = ">>>This is deeply nested without spaces after markers";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // This should not be flagged - >>>text is valid CommonMark
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_extra_quote_marker() {
+        let rule = MD027MultipleSpacesBlockquote;
+        // "> >text" is parsed as single-level blockquote with ">text" as content
+        // This is valid CommonMark and not detected as malformed
+        let content = "> >This looks like nested but is actually single level with >This as content";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_indented_missing_space() {
+        let rule = MD027MultipleSpacesBlockquote;
+        // 4+ spaces makes this a code block, not a blockquote
+        let content = "   >This has 3 spaces indent and no space after marker";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // LintContext sees this as a blockquote with no space after marker
+        // MD027 doesn't flag this as malformed
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_fix_multiple_spaces() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let content = ">  Two spaces\n>   Three spaces";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "> Two spaces\n> Three spaces");
+    }
+
+    #[test]
+    fn test_fix_malformed_quotes() {
+        let rule = MD027MultipleSpacesBlockquote;
+        // These are valid nested blockquotes, not malformed
+        let content = ">>Nested without spaces\n>>>Deeply nested without spaces";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        // No fix needed - these are valid
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_fix_extra_marker() {
+        let rule = MD027MultipleSpacesBlockquote;
+        // This is valid - single blockquote with >Extra as content
+        let content = "> >Extra marker here";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        // No fix needed
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_code_block_ignored() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let content = "```\n>  This is in a code block\n```";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Code blocks should be ignored");
+    }
+
+    #[test]
+    fn test_short_content_not_flagged() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let content = ">>>\n>>";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Very short content should not be flagged");
+    }
+
+    #[test]
+    fn test_non_prose_not_flagged() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let content = ">>#header\n>>[link]\n>>`code`\n>>http://example.com";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Non-prose content should not be flagged");
+    }
+
+    #[test]
+    fn test_preserve_trailing_newline() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let content = ">  Two spaces\n";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "> Two spaces\n");
+        
+        let content_no_newline = ">  Two spaces";
+        let ctx2 = LintContext::new(content_no_newline);
+        let fixed2 = rule.fix(&ctx2).unwrap();
+        assert_eq!(fixed2, "> Two spaces");
+    }
+
+    #[test]
+    fn test_mixed_issues() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let content = ">  Multiple spaces here\n>>Normal nested quote\n> Normal quote";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should only flag the multiple spaces");
+        assert_eq!(result[0].line, 1);
+    }
+
+    #[test]
+    fn test_looks_like_blockquote_attempt() {
+        let rule = MD027MultipleSpacesBlockquote;
+        
+        // Should return true for genuine attempts
+        assert!(rule.looks_like_blockquote_attempt(
+            ">>This is a real blockquote attempt with text", 
+            "> > This is a real blockquote attempt with text"
+        ));
+        
+        // Should return false for too short
+        assert!(!rule.looks_like_blockquote_attempt(">>>", "> > >"));
+        
+        // Should return false for no alphabetic content
+        assert!(!rule.looks_like_blockquote_attempt(">>123", "> > 123"));
+        
+        // Should return false for code-like content
+        assert!(!rule.looks_like_blockquote_attempt(">>#header", "> > #header"));
+    }
+
+    #[test]
+    fn test_extract_blockquote_fix() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let regex = Regex::new(r"^(\s*)>>([^\s>].*|$)").unwrap();
+        let cap = regex.captures(">>content").unwrap();
+        
+        let result = rule.extract_blockquote_fix_from_match(&cap, "missing spaces in nested blockquote", ">>content");
+        assert!(result.is_some());
+        let (fixed, desc) = result.unwrap();
+        assert_eq!(fixed, "> > content");
+        assert!(desc.contains("Missing spaces"));
+    }
+
+    #[test]
+    fn test_empty_blockquote() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let content = ">\n>  \n> content";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Empty blockquotes with multiple spaces should still be flagged
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
+    }
+
+    #[test]
+    fn test_fix_preserves_indentation() {
+        let rule = MD027MultipleSpacesBlockquote;
+        let content = "  >  Indented with multiple spaces";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "  > Indented with multiple spaces");
     }
 }

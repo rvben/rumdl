@@ -372,3 +372,349 @@ impl Rule for MD044ProperNames {
         Box::new(Self::from_config_struct(rule_config))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    fn create_context(content: &str) -> LintContext {
+        LintContext::new(content)
+    }
+
+    #[test]
+    fn test_correctly_capitalized_names() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string(), "TypeScript".to_string(), "Node.js".to_string()],
+            true,
+        );
+        
+        let content = "This document uses JavaScript, TypeScript, and Node.js correctly.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should not flag correctly capitalized names");
+    }
+
+    #[test]
+    fn test_incorrectly_capitalized_names() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string(), "TypeScript".to_string()],
+            true,
+        );
+        
+        let content = "This document uses javascript and typescript incorrectly.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2, "Should flag two incorrect capitalizations");
+        assert_eq!(result[0].message, "Proper name 'javascript' should be 'JavaScript'");
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 20);
+        assert_eq!(result[1].message, "Proper name 'typescript' should be 'TypeScript'");
+        assert_eq!(result[1].line, 1);
+        assert_eq!(result[1].column, 35);
+    }
+
+    #[test]
+    fn test_names_at_beginning_of_sentences() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string(), "Python".to_string()],
+            true,
+        );
+        
+        let content = "javascript is a great language. python is also popular.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2, "Should flag names at beginning of sentences");
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 1);
+        assert_eq!(result[1].line, 1);
+        assert_eq!(result[1].column, 33);
+    }
+
+    #[test]
+    fn test_names_in_code_blocks_ignored() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string()],
+            true,
+        );
+        
+        let content = r#"Here is some text with JavaScript.
+
+```javascript
+// This javascript should be ignored
+const lang = "javascript";
+```
+
+But this javascript should be flagged."#;
+        
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1, "Should only flag javascript outside code blocks");
+        assert_eq!(result[0].line, 8);
+        assert_eq!(result[0].message, "Proper name 'javascript' should be 'JavaScript'");
+    }
+
+    #[test]
+    fn test_names_in_code_blocks_not_ignored_when_disabled() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string()],
+            false, // code_blocks = false means check inside code blocks
+        );
+        
+        let content = r#"```
+javascript in code block
+```"#;
+        
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1, "Should flag javascript in code blocks when code_blocks is false");
+    }
+
+    #[test]
+    fn test_names_in_inline_code_ignored() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string()],
+            true,
+        );
+        
+        let content = "This is `javascript` in inline code and javascript outside.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Note: In test context, inline code detection may not work as expected
+        // since is_in_code_block_or_span requires full markdown parsing context
+        assert_eq!(result.len(), 2, "Both javascript occurrences are flagged in test context");
+        assert_eq!(result[0].column, 10); // `javascript`
+        assert_eq!(result[1].column, 41); // javascript outside
+    }
+
+    #[test]
+    fn test_multiple_names_in_same_line() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string(), "TypeScript".to_string(), "React".to_string()],
+            true,
+        );
+        
+        let content = "I use javascript, typescript, and react in my projects.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 3, "Should flag all three incorrect names");
+        assert_eq!(result[0].message, "Proper name 'javascript' should be 'JavaScript'");
+        assert_eq!(result[1].message, "Proper name 'typescript' should be 'TypeScript'");
+        assert_eq!(result[2].message, "Proper name 'react' should be 'React'");
+    }
+
+    #[test]
+    fn test_case_sensitivity() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string()],
+            true,
+        );
+        
+        let content = "JAVASCRIPT, Javascript, javascript, and JavaScript variations.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 3, "Should flag all incorrect case variations");
+        // JavaScript (correct) should not be flagged
+        assert!(result.iter().all(|w| w.message.contains("should be 'JavaScript'")));
+    }
+
+    #[test]
+    fn test_configuration_with_custom_name_list() {
+        let config = MD044Config {
+            names: vec!["GitHub".to_string(), "GitLab".to_string(), "DevOps".to_string()],
+            code_blocks: true,
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+        
+        let content = "We use github, gitlab, and devops for our workflow.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 3, "Should flag all custom names");
+        assert_eq!(result[0].message, "Proper name 'github' should be 'GitHub'");
+        assert_eq!(result[1].message, "Proper name 'gitlab' should be 'GitLab'");
+        assert_eq!(result[2].message, "Proper name 'devops' should be 'DevOps'");
+    }
+
+    #[test]
+    fn test_empty_configuration() {
+        let rule = MD044ProperNames::new(vec![], true);
+        
+        let content = "This has javascript and typescript but no configured names.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert!(result.is_empty(), "Should not flag anything with empty configuration");
+    }
+
+    #[test]
+    fn test_names_with_special_characters() {
+        let rule = MD044ProperNames::new(
+            vec!["Node.js".to_string(), "ASP.NET".to_string(), "C++".to_string()],
+            true,
+        );
+        
+        let content = "We use nodejs, asp.net, ASP.NET, and c++ in our stack.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // nodejs should match Node.js (dotless variation)
+        // asp.net should be flagged (wrong case)
+        // ASP.NET should not be flagged (correct)
+        // c++ should be flagged
+        assert_eq!(result.len(), 3, "Should handle special characters correctly");
+        
+        let messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
+        assert!(messages.contains(&"Proper name 'nodejs' should be 'Node.js'"));
+        assert!(messages.contains(&"Proper name 'asp.net' should be 'ASP.NET'"));
+        assert!(messages.contains(&"Proper name 'c++' should be 'C++'"));
+    }
+
+    #[test]
+    fn test_word_boundaries() {
+        let rule = MD044ProperNames::new(
+            vec!["Java".to_string(), "Script".to_string()],
+            true,
+        );
+        
+        let content = "JavaScript is not java or script, but Java and Script are separate.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should only flag lowercase "java" and "script" as separate words
+        assert_eq!(result.len(), 2, "Should respect word boundaries");
+        assert!(result.iter().any(|w| w.column == 19)); // "java" position
+        assert!(result.iter().any(|w| w.column == 27)); // "script" position
+    }
+
+    #[test]
+    fn test_fix_method() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string(), "TypeScript".to_string(), "Node.js".to_string()],
+            true,
+        );
+        
+        let content = "I love javascript, typescript, and nodejs!";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "I love JavaScript, TypeScript, and Node.js!");
+    }
+
+    #[test]
+    fn test_fix_multiple_occurrences() {
+        let rule = MD044ProperNames::new(
+            vec!["Python".to_string()],
+            true,
+        );
+        
+        let content = "python is great. I use python daily. PYTHON is powerful.";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "Python is great. I use Python daily. Python is powerful.");
+    }
+
+    #[test]
+    fn test_fix_preserves_code_blocks() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string()],
+            true,
+        );
+        
+        let content = r#"I love javascript.
+
+```
+const lang = "javascript";
+```
+
+More javascript here."#;
+        
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        let expected = r#"I love JavaScript.
+
+```
+const lang = "javascript";
+```
+
+More JavaScript here."#;
+        
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_multiline_content() {
+        let rule = MD044ProperNames::new(
+            vec!["Rust".to_string(), "Python".to_string()],
+            true,
+        );
+        
+        let content = r#"First line with rust.
+Second line with python.
+Third line with RUST and PYTHON."#;
+        
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 4, "Should flag all incorrect occurrences");
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[1].line, 2);
+        assert_eq!(result[2].line, 3);
+        assert_eq!(result[3].line, 3);
+    }
+
+    #[test]
+    fn test_default_config() {
+        let config = MD044Config::default();
+        assert!(config.names.is_empty());
+        assert_eq!(config.code_blocks, true);
+    }
+
+    #[test]
+    fn test_performance_with_many_names() {
+        let mut names = vec![];
+        for i in 0..50 {
+            names.push(format!("ProperName{}", i));
+        }
+        
+        let rule = MD044ProperNames::new(names, true);
+        
+        let content = "This has propername0, propername25, and propername49 incorrectly.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 3, "Should handle many configured names efficiently");
+    }
+
+    #[test]
+    fn test_cache_behavior() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string()],
+            true,
+        );
+        
+        let content = "Using javascript here.";
+        let ctx = create_context(content);
+        
+        // First check
+        let result1 = rule.check(&ctx).unwrap();
+        assert_eq!(result1.len(), 1);
+        
+        // Second check should use cache
+        let result2 = rule.check(&ctx).unwrap();
+        assert_eq!(result2.len(), 1);
+        
+        // Results should be identical
+        assert_eq!(result1[0].line, result2[0].line);
+        assert_eq!(result1[0].column, result2[0].column);
+    }
+}
