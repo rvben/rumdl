@@ -1,17 +1,11 @@
 use crate::utils::range_utils::{calculate_match_range, LineIndex};
+use crate::utils::regex_cache::{BOLD_ASTERISK_REGEX, BOLD_UNDERSCORE_REGEX};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
-use lazy_static::lazy_static;
-use regex::Regex;
 
 mod md050_config;
 use md050_config::MD050Config;
-
-lazy_static! {
-    static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"__[^_\\]+__").unwrap();
-    static ref ASTERISK_PATTERN: Regex = Regex::new(r"\*\*[^*\\]+\*\*").unwrap();
-}
 
 /// Rule MD050: Strong style
 ///
@@ -39,7 +33,7 @@ impl MD050StrongStyle {
 
         // Find the first occurrence of either style that's not in a code block
         let mut first_asterisk = None;
-        for m in ASTERISK_PATTERN.find_iter(content) {
+        for m in BOLD_ASTERISK_REGEX.find_iter(content) {
             if !ctx.is_in_code_block_or_span(m.start()) {
                 first_asterisk = Some(m);
                 break;
@@ -47,7 +41,7 @@ impl MD050StrongStyle {
         }
 
         let mut first_underscore = None;
-        for m in UNDERSCORE_PATTERN.find_iter(content) {
+        for m in BOLD_UNDERSCORE_REGEX.find_iter(content) {
             if !ctx.is_in_code_block_or_span(m.start()) {
                 first_underscore = Some(m);
                 break;
@@ -109,8 +103,8 @@ impl Rule for MD050StrongStyle {
         };
 
         let strong_regex = match target_style {
-            StrongStyle::Asterisk => &*UNDERSCORE_PATTERN,
-            StrongStyle::Underscore => &*ASTERISK_PATTERN,
+            StrongStyle::Asterisk => &*BOLD_UNDERSCORE_REGEX,
+            StrongStyle::Underscore => &*BOLD_ASTERISK_REGEX,
             StrongStyle::Consistent => unreachable!(),
         };
 
@@ -179,8 +173,8 @@ impl Rule for MD050StrongStyle {
         };
 
         let strong_regex = match target_style {
-            StrongStyle::Asterisk => &*UNDERSCORE_PATTERN,
-            StrongStyle::Underscore => &*ASTERISK_PATTERN,
+            StrongStyle::Asterisk => &*BOLD_UNDERSCORE_REGEX,
+            StrongStyle::Underscore => &*BOLD_ASTERISK_REGEX,
             StrongStyle::Consistent => unreachable!(),
         };
 
@@ -227,5 +221,221 @@ impl Rule for MD050StrongStyle {
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD050Config>(config);
         Box::new(Self::from_config_struct(rule_config))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_asterisk_style_with_asterisks() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "This is **strong text** here.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_asterisk_style_with_underscores() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "This is __strong text__ here.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Strong emphasis should use ** instead of __"));
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 9);
+    }
+
+    #[test]
+    fn test_underscore_style_with_underscores() {
+        let rule = MD050StrongStyle::new(StrongStyle::Underscore);
+        let content = "This is __strong text__ here.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_underscore_style_with_asterisks() {
+        let rule = MD050StrongStyle::new(StrongStyle::Underscore);
+        let content = "This is **strong text** here.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Strong emphasis should use __ instead of **"));
+    }
+
+    #[test]
+    fn test_consistent_style_first_asterisk() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let content = "First **strong** then __also strong__.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // First strong is **, so __ should be flagged
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Strong emphasis should use ** instead of __"));
+    }
+
+    #[test]
+    fn test_consistent_style_first_underscore() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let content = "First __strong__ then **also strong**.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // First strong is __, so ** should be flagged
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Strong emphasis should use __ instead of **"));
+    }
+
+    #[test]
+    fn test_detect_style_asterisk() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let ctx = LintContext::new("This has **strong** text.");
+        let style = rule.detect_style(&ctx);
+        
+        assert_eq!(style, Some(StrongStyle::Asterisk));
+    }
+
+    #[test]
+    fn test_detect_style_underscore() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let ctx = LintContext::new("This has __strong__ text.");
+        let style = rule.detect_style(&ctx);
+        
+        assert_eq!(style, Some(StrongStyle::Underscore));
+    }
+
+    #[test]
+    fn test_detect_style_none() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let ctx = LintContext::new("No strong text here.");
+        let style = rule.detect_style(&ctx);
+        
+        assert_eq!(style, None);
+    }
+
+    #[test]
+    fn test_strong_in_code_block() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "```\n__strong__ in code\n```\n__strong__ outside";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Only the strong outside code block should be flagged
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 4);
+    }
+
+    #[test]
+    fn test_strong_in_inline_code() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "Text with `__strong__` in code and __strong__ outside.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Only the strong outside inline code should be flagged
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_escaped_strong() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "This is \\__not strong\\__ but __this is__.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Only the unescaped strong should be flagged
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 30);
+    }
+
+    #[test]
+    fn test_fix_asterisks_to_underscores() {
+        let rule = MD050StrongStyle::new(StrongStyle::Underscore);
+        let content = "This is **strong** text.";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "This is __strong__ text.");
+    }
+
+    #[test]
+    fn test_fix_underscores_to_asterisks() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "This is __strong__ text.";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "This is **strong** text.");
+    }
+
+    #[test]
+    fn test_fix_multiple_strong() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "First __strong__ and second __also strong__.";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "First **strong** and second **also strong**.");
+    }
+
+    #[test]
+    fn test_fix_preserves_code_blocks() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "```\n__strong__ in code\n```\n__strong__ outside";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert_eq!(fixed, "```\n__strong__ in code\n```\n**strong** outside");
+    }
+
+    #[test]
+    fn test_multiline_content() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "Line 1 with __strong__\nLine 2 with __another__\nLine 3 normal";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[1].line, 2);
+    }
+
+    #[test]
+    fn test_nested_emphasis() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "This has __strong with *emphasis* inside__.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_default_config() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let (name, _config) = rule.default_config_section().unwrap();
+        assert_eq!(name, "MD050");
     }
 }

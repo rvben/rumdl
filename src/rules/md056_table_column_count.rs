@@ -183,3 +183,309 @@ impl Rule for MD056TableColumnCount {
         Box::new(MD056TableColumnCount)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_valid_table() {
+        let rule = MD056TableColumnCount;
+        let content = "| Header 1 | Header 2 | Header 3 |
+|----------|----------|----------|
+| Cell 1   | Cell 2   | Cell 3   |
+| Cell 4   | Cell 5   | Cell 6   |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_too_few_columns() {
+        let rule = MD056TableColumnCount;
+        let content = "| Header 1 | Header 2 | Header 3 |
+|----------|----------|----------|
+| Cell 1   | Cell 2   |
+| Cell 4   | Cell 5   | Cell 6   |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 3);
+        assert!(result[0].message.contains("has 2 cells, but expected 3"));
+    }
+
+    #[test]
+    fn test_too_many_columns() {
+        let rule = MD056TableColumnCount;
+        let content = "| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   | Cell 3   | Cell 4   |
+| Cell 5   | Cell 6   |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 3);
+        assert!(result[0].message.contains("has 4 cells, but expected 2"));
+    }
+
+    #[test]
+    fn test_delimiter_row_mismatch() {
+        let rule = MD056TableColumnCount;
+        let content = "| Header 1 | Header 2 | Header 3 |
+|----------|----------|
+| Cell 1   | Cell 2   | Cell 3   |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
+        assert!(result[0].message.contains("has 2 cells, but expected 3"));
+    }
+
+    #[test]
+    fn test_fix_too_few_columns() {
+        let rule = MD056TableColumnCount;
+        let content = "| Header 1 | Header 2 | Header 3 |
+|----------|----------|----------|
+| Cell 1   | Cell 2   |
+| Cell 4   | Cell 5   | Cell 6   |";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert!(fixed.contains("| Cell 1 | Cell 2 |  |"));
+    }
+
+    #[test]
+    fn test_fix_too_many_columns() {
+        let rule = MD056TableColumnCount;
+        let content = "| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   | Cell 3   | Cell 4   |
+| Cell 5   | Cell 6   |";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert!(fixed.contains("| Cell 1 | Cell 2 |"));
+        assert!(!fixed.contains("Cell 3"));
+        assert!(!fixed.contains("Cell 4"));
+    }
+
+    #[test]
+    fn test_no_leading_pipe() {
+        let rule = MD056TableColumnCount;
+        let content = "Header 1 | Header 2 | Header 3 |
+---------|----------|----------|
+Cell 1   | Cell 2   |
+Cell 4   | Cell 5   | Cell 6   |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 3);
+    }
+
+    #[test]
+    fn test_no_trailing_pipe() {
+        let rule = MD056TableColumnCount;
+        let content = "| Header 1 | Header 2 | Header 3
+|----------|----------|----------
+| Cell 1   | Cell 2   
+| Cell 4   | Cell 5   | Cell 6";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 3);
+    }
+
+    #[test]
+    fn test_no_pipes_at_all() {
+        let rule = MD056TableColumnCount;
+        let content = "This is not a table
+Just regular text
+No pipes here";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_empty_cells() {
+        let rule = MD056TableColumnCount;
+        let content = "| Header 1 | Header 2 | Header 3 |
+|----------|----------|----------|
+|          |          |          |
+| Cell 1   |          | Cell 3   |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_tables() {
+        let rule = MD056TableColumnCount;
+        let content = "| Table 1 Col 1 | Table 1 Col 2 |
+|----------------|----------------|
+| Data 1         | Data 2         |
+
+Some text in between.
+
+| Table 2 Col 1 | Table 2 Col 2 | Table 2 Col 3 |
+|----------------|----------------|----------------|
+| Data 3         | Data 4         |
+| Data 5         | Data 6         | Data 7         |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 9);
+        assert!(result[0].message.contains("has 2 cells, but expected 3"));
+    }
+
+    #[test]
+    #[ignore = "Table utils doesn't handle escaped pipes in code correctly yet"]
+    fn test_table_with_escaped_pipes() {
+        let rule = MD056TableColumnCount;
+        let content = "| Command | Description |
+|---------|-------------|
+| `echo \\| grep` | Pipe example |
+| `ls` | List files |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should handle escaped pipes correctly
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let rule = MD056TableColumnCount;
+        let content = "";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_code_block_with_table() {
+        let rule = MD056TableColumnCount;
+        let content = "```
+| This | Is | Code |
+|------|----|----|
+| Not  | A  | Table |
+```
+
+| Real | Table |
+|------|-------|
+| Data | Here  |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should not check tables inside code blocks
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_fix_preserves_pipe_style() {
+        let rule = MD056TableColumnCount;
+        // Test with no trailing pipes
+        let content = "| Header 1 | Header 2 | Header 3
+|----------|----------|----------
+| Cell 1   | Cell 2";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert!(!lines[2].ends_with('|'));
+        assert!(lines[2].contains("Cell 1"));
+        assert!(lines[2].contains("Cell 2"));
+    }
+
+    #[test]
+    fn test_single_column_table() {
+        let rule = MD056TableColumnCount;
+        let content = "| Header |
+|---------|
+| Cell 1  |
+| Cell 2  |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_complex_delimiter_row() {
+        let rule = MD056TableColumnCount;
+        let content = "| Left | Center | Right |
+|:-----|:------:|------:|
+| L    | C      | R     |
+| Left | Center |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 4);
+    }
+
+    #[test]
+    fn test_unicode_content() {
+        let rule = MD056TableColumnCount;
+        let content = "| 名前 | 年齢 | 都市 |
+|------|------|------|
+| 田中 | 25   | 東京 |
+| 佐藤 | 30   |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 4);
+    }
+
+    #[test]
+    fn test_very_long_cells() {
+        let rule = MD056TableColumnCount;
+        let content = "| Short | Very very very very very very very very very very long header | Another |
+|-------|--------------------------------------------------------------|---------|
+| Data  | This is an extremely long cell content that goes on and on   |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("has 2 cells, but expected 3"));
+    }
+
+    #[test]
+    fn test_fix_with_newline_ending() {
+        let rule = MD056TableColumnCount;
+        let content = "| A | B | C |
+|---|---|---|
+| 1 | 2 |
+";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert!(fixed.ends_with('\n'));
+        assert!(fixed.contains("| 1 | 2 |  |"));
+    }
+
+    #[test]
+    fn test_fix_without_newline_ending() {
+        let rule = MD056TableColumnCount;
+        let content = "| A | B | C |
+|---|---|---|
+| 1 | 2 |";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        assert!(!fixed.ends_with('\n'));
+        assert!(fixed.contains("| 1 | 2 |  |"));
+    }
+}

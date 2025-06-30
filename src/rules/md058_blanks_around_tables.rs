@@ -139,3 +139,376 @@ impl Rule for MD058BlanksAroundTables {
         Box::new(MD058BlanksAroundTables)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_table_with_blanks() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Some text before.
+
+| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   |
+
+Some text after.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_table_missing_blank_before() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Some text before.
+| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   |
+
+Some text after.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
+        assert!(result[0].message.contains("Missing blank line before table"));
+    }
+
+    #[test]
+    fn test_table_missing_blank_after() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Some text before.
+
+| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   |
+Some text after.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 5);
+        assert!(result[0].message.contains("Missing blank line after table"));
+    }
+
+    #[test]
+    fn test_table_missing_both_blanks() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Some text before.
+| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   |
+Some text after.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("Missing blank line before table"));
+        assert!(result[1].message.contains("Missing blank line after table"));
+    }
+
+    #[test]
+    fn test_table_at_start_of_document() {
+        let rule = MD058BlanksAroundTables;
+        let content = "| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   |
+
+Some text after.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // No blank line needed before table at start of document
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_table_at_end_of_document() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Some text before.
+
+| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   |";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // No blank line needed after table at end of document
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_tables() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Text before first table.
+| Col 1 | Col 2 |
+|--------|-------|
+| Data 1 | Val 1 |
+Text between tables.
+| Col A | Col B |
+|--------|-------|
+| Data 2 | Val 2 |
+Text after second table.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 4);
+        // First table missing blanks
+        assert!(result[0].message.contains("Missing blank line before table"));
+        assert!(result[1].message.contains("Missing blank line after table"));
+        // Second table missing blanks
+        assert!(result[2].message.contains("Missing blank line before table"));
+        assert!(result[3].message.contains("Missing blank line after table"));
+    }
+
+    #[test]
+    fn test_consecutive_tables() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Some text.
+
+| Col 1 | Col 2 |
+|--------|-------|
+| Data 1 | Val 1 |
+
+| Col A | Col B |
+|--------|-------|
+| Data 2 | Val 2 |
+
+More text.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Tables separated by blank line should be OK
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_consecutive_tables_no_blank() {
+        let rule = MD058BlanksAroundTables;
+        // Add a non-table line between tables to force detection as separate tables
+        let content = "Some text.
+
+| Col 1 | Col 2 |
+|--------|-------|
+| Data 1 | Val 1 |
+Text between.
+| Col A | Col B |
+|--------|-------|
+| Data 2 | Val 2 |
+
+More text.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should flag missing blanks around both tables
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("Missing blank line after table"));
+        assert!(result[1].message.contains("Missing blank line before table"));
+    }
+
+    #[test]
+    fn test_fix_missing_blanks() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Text before.
+| Header | Col 2 |
+|--------|-------|
+| Cell   | Data  |
+Text after.";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        let expected = "Text before.
+
+| Header | Col 2 |
+|--------|-------|
+| Cell   | Data  |
+
+Text after.";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_fix_multiple_tables() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Start
+| T1 | C1 |
+|----|----|
+| D1 | V1 |
+Middle
+| T2 | C2 |
+|----|----|
+| D2 | V2 |
+End";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        let expected = "Start
+
+| T1 | C1 |
+|----|----|
+| D1 | V1 |
+
+Middle
+
+| T2 | C2 |
+|----|----|
+| D2 | V2 |
+
+End";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let rule = MD058BlanksAroundTables;
+        let content = "";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_no_tables() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Just regular text.
+No tables here.
+Only paragraphs.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_code_block_with_table() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Text before.
+```
+| Not | A | Table |
+|-----|---|-------|
+| In  | Code | Block |
+```
+Text after.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Tables in code blocks should be ignored
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_table_with_complex_content() {
+        let rule = MD058BlanksAroundTables;
+        let content = "# Heading
+| Column 1 | Column 2 | Column 3 |
+|:---------|:--------:|---------:|
+| Left     | Center   | Right    |
+| Data     | More     | Info     |
+## Another Heading";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("Missing blank line before table"));
+        assert!(result[1].message.contains("Missing blank line after table"));
+    }
+
+    #[test]
+    fn test_table_with_empty_cells() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Text.
+
+|     |     |     |
+|-----|-----|-----|
+|     | X   |     |
+| O   |     | X   |
+
+More text.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_table_with_unicode() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Unicode test.
+| 名前 | 年齢 | 都市 |
+|------|------|------|
+| 田中 | 25   | 東京 |
+| 佐藤 | 30   | 大阪 |
+End.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_table_with_long_cells() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Before.
+
+| Short | Very very very very very very very very long header |
+|-------|-----------------------------------------------------|
+| Data  | This is an extremely long cell content that goes on |
+
+After.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_table_without_content_rows() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Text.
+| Header 1 | Header 2 |
+|----------|----------|
+Next paragraph.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should still require blanks around header-only table
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_indented_table() {
+        let rule = MD058BlanksAroundTables;
+        let content = "List item:
+    
+    | Indented | Table |
+    |----------|-------|
+    | Data     | Here  |
+    
+    More content.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Indented tables should be detected
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_single_column_table_not_detected() {
+        let rule = MD058BlanksAroundTables;
+        let content = "Text before.
+| Single |
+|--------|
+| Column |
+Text after.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Single column tables are not detected by table_utils (requires 2+ columns)
+        assert_eq!(result.len(), 0);
+    }
+}

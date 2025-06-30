@@ -116,6 +116,13 @@ impl MD054LinkImageStyle {
     }
 }
 
+#[derive(Debug)]
+struct LinkMatch {
+    style: &'static str,
+    start: usize,
+    end: usize,
+}
+
 impl Rule for MD054LinkImageStyle {
     fn name(&self) -> &'static str {
         "MD054"
@@ -159,169 +166,112 @@ impl Rule for MD054LinkImageStyle {
                 continue;
             }
 
-            let mut idx = 0;
-            let line_chars: Vec<char> = line.chars().collect();
+            // Find all matches in the line
+            let mut matches = Vec::new();
 
-            while idx < line_chars.len() {
-                let byte_idx = line_chars[..idx].iter().map(|c| c.len_utf8()).sum::<usize>();
-                let slice = &line[byte_idx..];
+            // Find all autolinks
+            for cap in AUTOLINK_RE.captures_iter(line) {
+                let m = cap.get(0).unwrap();
+                matches.push(LinkMatch {
+                    style: "autolink",
+                    start: m.start(),
+                    end: m.end(),
+                });
+            }
 
-                // Strict priority: full -> collapsed -> inline/url_inline -> autolink -> shortcut
-                // 1. Full reference
-                if let Some(cap) = FULL_RE.captures(slice) {
-                    let m = cap.get(0).unwrap();
-                    let match_start_byte = byte_idx + m.start();
-                    let match_end_byte = byte_idx + m.end();
-                    let match_start_char = line[..match_start_byte].chars().count();
-                    let match_end_char = line[..match_end_byte].chars().count();
+            // Find all full references
+            for cap in FULL_RE.captures_iter(line) {
+                let m = cap.get(0).unwrap();
+                matches.push(LinkMatch {
+                    style: "full",
+                    start: m.start(),
+                    end: m.end(),
+                });
+            }
 
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.config.full {
-                        let match_len = match_end_char - match_start_char;
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num + 1, line, match_start_char, match_len);
+            // Find all collapsed references
+            for cap in COLLAPSED_RE.captures_iter(line) {
+                let m = cap.get(0).unwrap();
+                matches.push(LinkMatch {
+                    style: "collapsed",
+                    start: m.start(),
+                    end: m.end(),
+                });
+            }
 
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: "Link/image style 'full' is not consistent with document".to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
+            // Find all inline links
+            for cap in INLINE_RE.captures_iter(line) {
+                let m = cap.get(0).unwrap();
+                let text = cap.get(1).unwrap().as_str();
+                let url = cap.get(2).unwrap().as_str();
+                matches.push(LinkMatch {
+                    style: if text == url { "url_inline" } else { "inline" },
+                    start: m.start(),
+                    end: m.end(),
+                });
+            }
+
+            // Sort matches by start position to ensure we don't double-count
+            matches.sort_by_key(|m| m.start);
+
+            // Remove overlapping matches (keep the first one)
+            let mut filtered_matches = Vec::new();
+            let mut last_end = 0;
+            for m in matches {
+                if m.start >= last_end {
+                    last_end = m.end;
+                    filtered_matches.push(m);
+                }
+            }
+
+            // Now find shortcut references that don't overlap with other matches
+            for cap in SHORTCUT_RE.captures_iter(line) {
+                let m = cap.get(0).unwrap();
+                let start = m.start();
+                let end = m.end();
+                
+                // Check if this overlaps with any existing match
+                let overlaps = filtered_matches.iter().any(|existing| {
+                    (start >= existing.start && start < existing.end) ||
+                    (end > existing.start && end <= existing.end)
+                });
+                
+                if !overlaps {
+                    // Check if followed by '(', '[', '[]', or ']['
+                    let after = &line[end..];
+                    if !after.starts_with('(') && !after.starts_with('[') {
+                        filtered_matches.push(LinkMatch {
+                            style: "shortcut",
+                            start,
+                            end,
                         });
                     }
-                    idx = match_end_char;
-                    continue;
                 }
+            }
 
-                // 2. Collapsed reference
-                if let Some(cap) = COLLAPSED_RE.captures(slice) {
-                    let m = cap.get(0).unwrap();
-                    let match_start_byte = byte_idx + m.start();
-                    let match_end_byte = byte_idx + m.end();
-                    let match_start_char = line[..match_start_byte].chars().count();
-                    let match_end_char = line[..match_end_byte].chars().count();
+            // Sort again after adding shortcuts
+            filtered_matches.sort_by_key(|m| m.start);
 
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.config.collapsed {
-                        let match_len = match_end_char - match_start_char;
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num + 1, line, match_start_char, match_len);
+            // Check each match
+            for m in filtered_matches {
+                let match_start_char = line[..m.start].chars().count();
+                
+                if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.is_style_allowed(m.style) {
+                    let match_len = line[m.start..m.end].chars().count();
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_match_range(line_num + 1, line, match_start_char, match_len);
 
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: "Link/image style 'collapsed' is not consistent with document".to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    }
-                    idx = match_end_char;
-                    continue;
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: format!("Link/image style '{}' is not consistent with document", m.style),
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
                 }
-
-                // 3. Inline/url_inline
-                if let Some(cap) = INLINE_RE.captures(slice) {
-                    let m = cap.get(0).unwrap();
-                    let match_start_byte = byte_idx + m.start();
-                    let match_end_byte = byte_idx + m.end();
-                    let match_start_char = line[..match_start_byte].chars().count();
-                    let match_end_char = line[..match_end_byte].chars().count();
-
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) {
-                        let text = cap.get(1).unwrap().as_str();
-                        let url = cap.get(2).unwrap().as_str();
-                        let style = if text == url { "url_inline" } else { "inline" };
-
-                        if !self.is_style_allowed(style) {
-                            let match_len = match_end_char - match_start_char;
-                            let (start_line, start_col, end_line, end_col) =
-                                calculate_match_range(line_num + 1, line, match_start_char, match_len);
-
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
-                                line: start_line,
-                                column: start_col,
-                                end_line,
-                                end_column: end_col,
-                                message: format!("Link/image style '{}' is not consistent with document", style),
-                                severity: Severity::Warning,
-                                fix: None,
-                            });
-                        }
-                    }
-                    idx = match_end_char;
-                    continue;
-                }
-
-                // 4. Autolink
-                if let Some(cap) = AUTOLINK_RE.captures(slice) {
-                    let m = cap.get(0).unwrap();
-                    let match_start_byte = byte_idx + m.start();
-                    let match_end_byte = byte_idx + m.end();
-                    let match_start_char = line[..match_start_byte].chars().count();
-                    let match_end_char = line[..match_end_byte].chars().count();
-
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.config.autolink {
-                        let match_len = match_end_char - match_start_char;
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num + 1, line, match_start_char, match_len);
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: "Link/image style 'autolink' is not consistent with document".to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    }
-                    idx = match_end_char;
-                    continue;
-                }
-
-                // 5. Shortcut (only if not followed by '[', '[]', or '][')
-                if let Some(cap) = SHORTCUT_RE.captures(slice) {
-                    let m = cap.get(0).unwrap();
-                    let match_start_byte = byte_idx + m.start();
-                    let match_end_byte = byte_idx + m.end();
-                    let match_start_char = line[..match_start_byte].chars().count();
-                    let match_end_char = line[..match_end_byte].chars().count();
-                    let after = &line[match_end_byte..];
-
-                    // Only match as shortcut if not followed by '[', '[]', or ']['
-                    if after.starts_with('[') || after.starts_with("[]") || after.starts_with("][") {
-                        idx += 1;
-                        continue;
-                    }
-
-                    if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.config.shortcut {
-                        let match_len = match_end_char - match_start_char;
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num + 1, line, match_start_char, match_len);
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: "Link/image style 'shortcut' is not consistent with document".to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    }
-                    idx = match_end_char;
-                    continue;
-                }
-
-                // No match, advance by 1
-                idx += 1;
             }
         }
         Ok(warnings)
@@ -352,5 +302,240 @@ impl Rule for MD054LinkImageStyle {
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD054Config>(config);
         Box::new(Self::from_config_struct(rule_config))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_all_styles_allowed_by_default() {
+        let rule = MD054LinkImageStyle::new(true, true, true, true, true, true);
+        let content = "[inline](url) [ref][] [ref] <autolink> [full][ref] [url](url)\n\n[ref]: url";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_only_inline_allowed() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "[allowed](url) [not][ref] <https://bad.com> [bad][] [shortcut]\n\n[ref]: url\n[shortcut]: url";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 4);
+        assert!(result[0].message.contains("'full'"));
+        assert!(result[1].message.contains("'autolink'"));
+        assert!(result[2].message.contains("'collapsed'"));
+        assert!(result[3].message.contains("'shortcut'"));
+    }
+
+    #[test]
+    fn test_only_autolink_allowed() {
+        let rule = MD054LinkImageStyle::new(true, false, false, false, false, false);
+        let content = "<https://good.com> [bad](url) [bad][ref]\n\n[ref]: url";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("'inline'"));
+        assert!(result[1].message.contains("'full'"));
+    }
+
+    #[test]
+    fn test_url_inline_detection() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, true);
+        let content = "[https://example.com](https://example.com) [text](https://example.com)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // First is url_inline (allowed), second is inline (allowed)
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_url_inline_not_allowed() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "[https://example.com](https://example.com)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'url_inline'"));
+    }
+
+    #[test]
+    fn test_shortcut_vs_full_detection() {
+        let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
+        let content = "[shortcut] [full][ref]\n\n[shortcut]: url\n[ref]: url2";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Only shortcut should be flagged
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'shortcut'"));
+    }
+
+    #[test]
+    fn test_collapsed_reference() {
+        let rule = MD054LinkImageStyle::new(false, true, false, false, false, false);
+        let content = "[collapsed][] [bad][ref]\n\n[collapsed]: url\n[ref]: url2";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'full'"));
+    }
+
+    #[test]
+    fn test_code_blocks_ignored() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "```\n[ignored](url) <https://ignored.com>\n```\n\n[checked](url)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Only the link outside code block should be checked
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_code_spans_ignored() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "`[ignored](url)` and `<https://ignored.com>` but [checked](url)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Only the link outside code spans should be checked
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_reference_definitions_ignored() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "[ref]: https://example.com\n[ref2]: <https://example2.com>";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Reference definitions should be ignored
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_html_comments_ignored() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "<!-- [ignored](url) -->\n  <!-- <https://ignored.com> -->";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_unicode_support() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "[café ☕](https://café.com) [emoji 😀](url) [한글](url) [עברית](url)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // All should be detected as inline (allowed)
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_line_positions() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "Line 1\n\nLine 3 with <https://bad.com> here";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 3);
+        assert_eq!(result[0].column, 13); // Position of '<'
+    }
+
+    #[test]
+    fn test_multiple_links_same_line() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "[ok](url) but <bad> and [also][bad]\n\n[bad]: url";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("'autolink'"));
+        assert!(result[1].message.contains("'full'"));
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_no_links() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "Just plain text without any links";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_fix_returns_error() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "[link](url)";
+        let ctx = LintContext::new(content);
+        let result = rule.fix(&ctx);
+        
+        assert!(result.is_err());
+        if let Err(LintError::FixFailed(msg)) = result {
+            assert!(msg.contains("does not support automatic fixing"));
+        }
+    }
+
+    #[test]
+    fn test_priority_order() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        // Test that [text][ref] is detected as full, not shortcut
+        let content = "[text][ref] not detected as [shortcut]\n\n[ref]: url\n[shortcut]: url2";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("'full'"));
+        assert!(result[1].message.contains("'shortcut'"));
+    }
+
+    #[test]
+    fn test_not_shortcut_when_followed_by_bracket() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, true, false);
+        // [text][ should not be detected as shortcut
+        let content = "[text][ more text\n[text](url) is inline";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Only second line should have inline link
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_complex_unicode_with_zwj() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        // Test with zero-width joiners and complex Unicode
+        let content = "[👨‍👩‍👧‍👦 family](url) [café☕](https://café.com)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Both should be detected as inline (allowed)
+        assert_eq!(result.len(), 0);
     }
 }

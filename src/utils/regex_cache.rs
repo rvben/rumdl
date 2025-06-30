@@ -72,6 +72,7 @@ impl RegexCache {
             Ok(regex) => {
                 let arc_regex = Arc::new(regex);
                 self.fancy_cache.insert(pattern.to_string(), arc_regex.clone());
+                *self.usage_stats.entry(pattern.to_string()).or_insert(0) += 1;
                 Ok(arc_regex)
             }
             Err(e) => Err(Box::new(e)),
@@ -337,6 +338,142 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_regex_cache_new() {
+        let cache = RegexCache::new();
+        assert!(cache.cache.is_empty());
+        assert!(cache.fancy_cache.is_empty());
+        assert!(cache.usage_stats.is_empty());
+    }
+
+    #[test]
+    fn test_regex_cache_default() {
+        let cache = RegexCache::default();
+        assert!(cache.cache.is_empty());
+        assert!(cache.fancy_cache.is_empty());
+        assert!(cache.usage_stats.is_empty());
+    }
+
+    #[test]
+    fn test_get_regex_compilation() {
+        let mut cache = RegexCache::new();
+        
+        // First call compiles and caches
+        let regex1 = cache.get_regex(r"\d+").unwrap();
+        assert_eq!(cache.cache.len(), 1);
+        assert_eq!(cache.usage_stats.get(r"\d+"), Some(&1));
+        
+        // Second call returns cached version
+        let regex2 = cache.get_regex(r"\d+").unwrap();
+        assert_eq!(cache.cache.len(), 1);
+        assert_eq!(cache.usage_stats.get(r"\d+"), Some(&2));
+        
+        // Both should be the same Arc
+        assert!(Arc::ptr_eq(&regex1, &regex2));
+    }
+
+    #[test]
+    fn test_get_regex_invalid_pattern() {
+        let mut cache = RegexCache::new();
+        let result = cache.get_regex(r"[unterminated");
+        assert!(result.is_err());
+        assert!(cache.cache.is_empty());
+    }
+
+    #[test]
+    fn test_get_fancy_regex_compilation() {
+        let mut cache = RegexCache::new();
+        
+        // First call compiles and caches
+        let regex1 = cache.get_fancy_regex(r"(?<=foo)bar").unwrap();
+        assert_eq!(cache.fancy_cache.len(), 1);
+        assert_eq!(cache.usage_stats.get(r"(?<=foo)bar"), Some(&1));
+        
+        // Second call returns cached version
+        let regex2 = cache.get_fancy_regex(r"(?<=foo)bar").unwrap();
+        assert_eq!(cache.fancy_cache.len(), 1);
+        assert_eq!(cache.usage_stats.get(r"(?<=foo)bar"), Some(&2));
+        
+        // Both should be the same Arc
+        assert!(Arc::ptr_eq(&regex1, &regex2));
+    }
+
+    #[test]
+    fn test_get_fancy_regex_invalid_pattern() {
+        let mut cache = RegexCache::new();
+        let result = cache.get_fancy_regex(r"(?<=invalid");
+        assert!(result.is_err());
+        assert!(cache.fancy_cache.is_empty());
+    }
+
+    #[test]
+    fn test_get_stats() {
+        let mut cache = RegexCache::new();
+        
+        // Use some patterns
+        let _ = cache.get_regex(r"\d+").unwrap();
+        let _ = cache.get_regex(r"\d+").unwrap();
+        let _ = cache.get_regex(r"\w+").unwrap();
+        let _ = cache.get_fancy_regex(r"(?<=foo)bar").unwrap();
+        
+        let stats = cache.get_stats();
+        assert_eq!(stats.get(r"\d+"), Some(&2));
+        assert_eq!(stats.get(r"\w+"), Some(&1));
+        assert_eq!(stats.get(r"(?<=foo)bar"), Some(&1));
+    }
+
+    #[test]
+    fn test_clear_cache() {
+        let mut cache = RegexCache::new();
+        
+        // Add some patterns
+        let _ = cache.get_regex(r"\d+").unwrap();
+        let _ = cache.get_fancy_regex(r"(?<=foo)bar").unwrap();
+        
+        assert!(!cache.cache.is_empty());
+        assert!(!cache.fancy_cache.is_empty());
+        assert!(!cache.usage_stats.is_empty());
+        
+        // Clear cache
+        cache.clear();
+        
+        assert!(cache.cache.is_empty());
+        assert!(cache.fancy_cache.is_empty());
+        assert!(cache.usage_stats.is_empty());
+    }
+
+    #[test]
+    fn test_global_cache_functions() {
+        // Test get_cached_regex
+        let regex1 = get_cached_regex(r"\d{3}").unwrap();
+        let regex2 = get_cached_regex(r"\d{3}").unwrap();
+        assert!(Arc::ptr_eq(&regex1, &regex2));
+        
+        // Test get_cached_fancy_regex
+        let fancy1 = get_cached_fancy_regex(r"(?<=test)ing").unwrap();
+        let fancy2 = get_cached_fancy_regex(r"(?<=test)ing").unwrap();
+        assert!(Arc::ptr_eq(&fancy1, &fancy2));
+        
+        // Test stats
+        let stats = get_cache_stats();
+        assert!(stats.contains_key(r"\d{3}"));
+        assert!(stats.contains_key(r"(?<=test)ing"));
+    }
+
+    #[test]
+    fn test_regex_lazy_macro() {
+        let re = regex_lazy!(r"^test.*end$");
+        assert!(re.is_match("test something end"));
+        assert!(!re.is_match("test something"));
+        
+        // The macro creates a new static for each invocation location,
+        // so we can't test pointer equality across different invocations
+        // But we can test that the regex works correctly
+        let re2 = regex_lazy!(r"^start.*finish$");
+        assert!(re2.is_match("start and finish"));
+        assert!(!re2.is_match("start without end"));
+    }
+
+    #[test]
     fn test_has_heading_markers() {
         assert!(has_heading_markers("# Heading"));
         assert!(has_heading_markers("Text with # symbol"));
@@ -361,12 +498,66 @@ mod tests {
     }
 
     #[test]
+    fn test_has_emphasis_markers() {
+        assert!(has_emphasis_markers("*emphasis*"));
+        assert!(has_emphasis_markers("_emphasis_"));
+        assert!(has_emphasis_markers("**bold**"));
+        assert!(has_emphasis_markers("__bold__"));
+        assert!(!has_emphasis_markers("no emphasis"));
+    }
+
+    #[test]
+    fn test_has_html_tags() {
+        assert!(has_html_tags("<div>content</div>"));
+        assert!(has_html_tags("<br/>"));
+        assert!(has_html_tags("<img src='test.jpg'>"));
+        assert!(!has_html_tags("no html tags"));
+        assert!(!has_html_tags("less than < but no tag"));
+    }
+
+    #[test]
+    fn test_has_link_markers() {
+        assert!(has_link_markers("[text](url)"));
+        assert!(has_link_markers("[reference][1]"));
+        assert!(has_link_markers("http://example.com"));
+        assert!(has_link_markers("https://example.com"));
+        assert!(has_link_markers("ftp://example.com"));
+        assert!(!has_link_markers("no links here"));
+    }
+
+    #[test]
+    fn test_has_image_markers() {
+        assert!(has_image_markers("![alt text](image.png)"));
+        assert!(has_image_markers("![](image.png)"));
+        assert!(!has_image_markers("[link](url)"));
+        assert!(!has_image_markers("no images"));
+    }
+
+    #[test]
     fn test_contains_url() {
         assert!(contains_url("http://example.com"));
         assert!(contains_url("Text with https://example.com link"));
         assert!(contains_url("ftp://example.com"));
         assert!(!contains_url("Text without URL"));
         assert!(!contains_url("http not followed by ://"));
+        
+        // Edge cases
+        assert!(!contains_url("http"));
+        assert!(!contains_url("https"));
+        assert!(!contains_url("://"));
+        assert!(contains_url("Visit http://site.com now"));
+        assert!(contains_url("See https://secure.site.com/path"));
+    }
+
+    #[test]
+    fn test_contains_url_performance() {
+        // Test early exit for strings without "://"
+        let long_text = "a".repeat(10000);
+        assert!(!contains_url(&long_text));
+        
+        // Test with URL at the end
+        let text_with_url = format!("{}https://example.com", long_text);
+        assert!(contains_url(&text_with_url));
     }
 
     #[test]
@@ -376,5 +567,85 @@ mod tests {
         assert_eq!(escape_regex("(test)"), "\\(test\\)");
         assert_eq!(escape_regex("[a-z]"), "\\[a-z\\]");
         assert_eq!(escape_regex("normal text"), "normal text");
+        
+        // Test all special characters
+        assert_eq!(escape_regex(".$^{[(|)*+?\\"), "\\.\\$\\^\\{\\[\\(\\|\\)\\*\\+\\?\\\\");
+        
+        // Test empty string
+        assert_eq!(escape_regex(""), "");
+        
+        // Test mixed content
+        assert_eq!(escape_regex("test.com/path?query=1"), "test\\.com/path\\?query=1");
+    }
+
+    #[test]
+    fn test_static_regex_patterns() {
+        // Test URL patterns
+        assert!(URL_REGEX.is_match("https://example.com"));
+        assert!(URL_REGEX.is_match("http://test.org/path"));
+        assert!(URL_REGEX.is_match("ftp://files.com"));
+        assert!(!URL_REGEX.is_match("not a url"));
+        
+        // Test heading patterns
+        assert!(ATX_HEADING_REGEX.is_match("# Heading"));
+        assert!(ATX_HEADING_REGEX.is_match("  ## Indented"));
+        assert!(ATX_HEADING_REGEX.is_match("### "));
+        assert!(!ATX_HEADING_REGEX.is_match("Not a heading"));
+        
+        // Test list patterns
+        assert!(UNORDERED_LIST_MARKER_REGEX.is_match("* Item"));
+        assert!(UNORDERED_LIST_MARKER_REGEX.is_match("- Item"));
+        assert!(UNORDERED_LIST_MARKER_REGEX.is_match("+ Item"));
+        assert!(ORDERED_LIST_MARKER_REGEX.is_match("1. Item"));
+        assert!(ORDERED_LIST_MARKER_REGEX.is_match("99. Item"));
+        
+        // Test code block patterns
+        assert!(FENCED_CODE_BLOCK_START_REGEX.is_match("```"));
+        assert!(FENCED_CODE_BLOCK_START_REGEX.is_match("```rust"));
+        assert!(FENCED_CODE_BLOCK_START_REGEX.is_match("~~~"));
+        assert!(FENCED_CODE_BLOCK_END_REGEX.is_match("```"));
+        assert!(FENCED_CODE_BLOCK_END_REGEX.is_match("~~~"));
+        
+        // Test emphasis patterns
+        assert!(BOLD_ASTERISK_REGEX.is_match("**bold**"));
+        assert!(BOLD_UNDERSCORE_REGEX.is_match("__bold__"));
+        assert!(ITALIC_ASTERISK_REGEX.is_match("*italic*"));
+        assert!(ITALIC_UNDERSCORE_REGEX.is_match("_italic_"));
+        
+        // Test HTML patterns
+        assert!(HTML_TAG_REGEX.is_match("<div>"));
+        assert!(HTML_TAG_REGEX.is_match("<span class='test'>"));
+        assert!(HTML_SELF_CLOSING_TAG_REGEX.is_match("<br/>"));
+        assert!(HTML_SELF_CLOSING_TAG_REGEX.is_match("<img src='test'/>"));
+        
+        // Test whitespace patterns
+        assert!(TRAILING_WHITESPACE_REGEX.is_match("line with spaces   "));
+        assert!(TRAILING_WHITESPACE_REGEX.is_match("tabs\t\t"));
+        assert!(MULTIPLE_BLANK_LINES_REGEX.is_match("\n\n\n"));
+        assert!(MULTIPLE_BLANK_LINES_REGEX.is_match("\n\n\n\n"));
+        
+        // Test blockquote pattern
+        assert!(BLOCKQUOTE_PREFIX_RE.is_match("> Quote"));
+        assert!(BLOCKQUOTE_PREFIX_RE.is_match("  > Indented quote"));
+        assert!(BLOCKQUOTE_PREFIX_RE.is_match(">> Nested"));
+    }
+
+    #[test]
+    fn test_thread_safety() {
+        use std::thread;
+        
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                thread::spawn(move || {
+                    let pattern = format!(r"\d{{{}}}", i);
+                    let regex = get_cached_regex(&pattern).unwrap();
+                    assert!(regex.is_match(&"1".repeat(i)));
+                })
+            })
+            .collect();
+        
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 }
