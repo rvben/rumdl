@@ -1196,4 +1196,168 @@ impl<'a> LintContext<'a> {
 
         list_blocks
     }
+}
 
+/// Merge adjacent list blocks that should be treated as one
+fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
+    if list_blocks.len() < 2 {
+        return;
+    }
+
+    let mut merged = Vec::new();
+    let mut current = list_blocks[0].clone();
+
+    for next in list_blocks.iter().skip(1) {
+        // Check if blocks should be merged
+        // For MD032 purposes, consecutive unordered lists with different markers
+        // should be treated as one list block only if truly consecutive
+        let consecutive = next.start_line == current.end_line + 1;
+        let only_blank_between = next.start_line == current.end_line + 2;
+
+        let should_merge = next.is_ordered == current.is_ordered
+            && next.blockquote_prefix == current.blockquote_prefix
+            && next.nesting_level == current.nesting_level
+            && (consecutive || (only_blank_between && current.marker == next.marker));
+
+        if should_merge {
+            // Merge blocks
+            current.end_line = next.end_line;
+            current.item_lines.extend_from_slice(&next.item_lines);
+
+            // Update marker consistency
+            if !current.is_ordered && current.marker.is_some() && next.marker.is_some() && current.marker != next.marker {
+                current.marker = None; // Mixed markers
+            }
+        } else {
+            // Save current and start new
+            merged.push(current);
+            current = next.clone();
+        }
+    }
+
+    // Don't forget the last block
+    merged.push(current);
+
+    *list_blocks = merged;
+}
+
+/// Check if content contains patterns that cause the markdown crate to panic
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_content() {
+        let ctx = LintContext::new("");
+        assert_eq!(ctx.content, "");
+        assert_eq!(ctx.line_offsets, vec![0]);
+        assert_eq!(ctx.offset_to_line_col(0), (1, 1));
+        assert_eq!(ctx.lines.len(), 0);
+    }
+
+    #[test]
+    fn test_single_line() {
+        let ctx = LintContext::new("# Hello");
+        assert_eq!(ctx.content, "# Hello");
+        assert_eq!(ctx.line_offsets, vec![0]);
+        assert_eq!(ctx.offset_to_line_col(0), (1, 1));
+        assert_eq!(ctx.offset_to_line_col(3), (1, 4));
+    }
+
+    #[test]
+    fn test_multi_line() {
+        let content = "# Title\n\nSecond line\nThird line";
+        let ctx = LintContext::new(content);
+        assert_eq!(ctx.line_offsets, vec![0, 8, 9, 21]);
+        // Test offset to line/col
+        assert_eq!(ctx.offset_to_line_col(0), (1, 1)); // start
+        assert_eq!(ctx.offset_to_line_col(8), (2, 1)); // start of blank line
+        assert_eq!(ctx.offset_to_line_col(9), (3, 1)); // start of 'Second line'
+        assert_eq!(ctx.offset_to_line_col(15), (3, 7)); // middle of 'Second line'
+        assert_eq!(ctx.offset_to_line_col(21), (4, 1)); // start of 'Third line'
+    }
+
+    #[test]
+    fn test_line_info() {
+        let content = "# Title\n    indented\n\ncode:\n```rust\nfn main() {}\n```";
+        let ctx = LintContext::new(content);
+
+        // Test line info
+        assert_eq!(ctx.lines.len(), 7);
+
+        // Line 1: "# Title"
+        let line1 = &ctx.lines[0];
+        assert_eq!(line1.content, "# Title");
+        assert_eq!(line1.byte_offset, 0);
+        assert_eq!(line1.indent, 0);
+        assert!(!line1.is_blank);
+        assert!(!line1.in_code_block);
+        assert!(line1.list_item.is_none());
+
+        // Line 2: "    indented"
+        let line2 = &ctx.lines[1];
+        assert_eq!(line2.content, "    indented");
+        assert_eq!(line2.byte_offset, 8);
+        assert_eq!(line2.indent, 4);
+        assert!(!line2.is_blank);
+
+        // Line 3: "" (blank)
+        let line3 = &ctx.lines[2];
+        assert_eq!(line3.content, "");
+        assert!(line3.is_blank);
+
+        // Test helper methods
+        assert_eq!(ctx.line_to_byte_offset(1), Some(0));
+        assert_eq!(ctx.line_to_byte_offset(2), Some(8));
+        assert_eq!(ctx.line_info(1).map(|l| l.indent), Some(0));
+        assert_eq!(ctx.line_info(2).map(|l| l.indent), Some(4));
+    }
+
+    #[test]
+    fn test_list_item_detection() {
+        let content = "- Unordered item\n  * Nested item\n1. Ordered item\n   2) Nested ordered\n\nNot a list";
+        let ctx = LintContext::new(content);
+
+        // Line 1: "- Unordered item"
+        let line1 = &ctx.lines[0];
+        assert!(line1.list_item.is_some());
+        let list1 = line1.list_item.as_ref().unwrap();
+        assert_eq!(list1.marker, "-");
+        assert!(!list1.is_ordered);
+        assert_eq!(list1.marker_column, 0);
+        assert_eq!(list1.content_column, 2);
+
+        // Line 2: "  * Nested item"
+        let line2 = &ctx.lines[1];
+        assert!(line2.list_item.is_some());
+        let list2 = line2.list_item.as_ref().unwrap();
+        assert_eq!(list2.marker, "*");
+        assert_eq!(list2.marker_column, 2);
+
+        // Line 3: "1. Ordered item"
+        let line3 = &ctx.lines[2];
+        assert!(line3.list_item.is_some());
+        let list3 = line3.list_item.as_ref().unwrap();
+        assert_eq!(list3.marker, "1.");
+        assert!(list3.is_ordered);
+        assert_eq!(list3.number, Some(1));
+
+        // Line 6: "Not a list"
+        let line6 = &ctx.lines[5];
+        assert!(line6.list_item.is_none());
+    }
+
+    #[test]
+    fn test_offset_to_line_col_edge_cases() {
+        let content = "a\nb\nc";
+        let ctx = LintContext::new(content);
+        // line_offsets: [0, 2, 4]
+        assert_eq!(ctx.offset_to_line_col(0), (1, 1)); // 'a'
+        assert_eq!(ctx.offset_to_line_col(1), (1, 2)); // after 'a'
+        assert_eq!(ctx.offset_to_line_col(2), (2, 1)); // 'b'
+        assert_eq!(ctx.offset_to_line_col(3), (2, 2)); // after 'b'
+        assert_eq!(ctx.offset_to_line_col(4), (3, 1)); // 'c'
+        assert_eq!(ctx.offset_to_line_col(5), (3, 2)); // after 'c'
+    }
+}
