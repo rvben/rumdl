@@ -129,7 +129,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
         assert_eq!(
             output,
@@ -153,7 +153,7 @@ mod tests {
                 replacement: "\n# Heading\n".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "doc.md");
         assert_eq!(
             output,
@@ -189,7 +189,7 @@ mod tests {
                 }),
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let expected = "test.md:5:1: [MD001] First warning\ntest.md:10:3: [MD013] Second warning [*]";
         assert_eq!(output, expected);
@@ -208,7 +208,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
         assert_eq!(
             output,
@@ -234,18 +234,18 @@ mod tests {
                 replacement: "fixed".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         // Verify the formatter is set to use colors
         assert!(formatter.use_colors());
-        
+
         // Check that core content is present (colors might be disabled in tests)
         assert!(output.contains("test.md")); // file path is still there
         assert!(output.contains("MD001")); // rule name is still there
         assert!(output.contains("Test warning")); // message is still there
         assert!(output.contains("[*]")); // fix indicator is still there
-        
+
         // The format should still be correct
         assert!(output.contains("test.md:1:1: [MD001] Test warning [*]"));
     }
@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn test_rule_name_padding() {
         let formatter = TextFormatter::without_colors();
-        
+
         // Test short rule name gets padded
         let warnings = vec![LintWarning {
             line: 1,
@@ -265,7 +265,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         assert!(output.contains("[MD1  ]")); // Should be padded to 5 chars
     }
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn test_edge_cases() {
         let formatter = TextFormatter::without_colors();
-        
+
         // Test large line/column numbers
         let warnings = vec![LintWarning {
             line: 99999,
@@ -285,7 +285,7 @@ mod tests {
             severity: Severity::Error,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "large.md");
         assert_eq!(
             output,
@@ -306,7 +306,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         assert!(output.contains("Warning with \"quotes\" and 'apostrophes' and \n newline"));
     }
@@ -324,7 +324,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "path/with spaces/and-dashes.md");
         assert!(output.starts_with("path/with spaces/and-dashes.md:1:1:"));
     }
@@ -333,7 +333,7 @@ mod tests {
     fn test_use_colors_trait_method() {
         let formatter_with_colors = TextFormatter::new();
         assert!(formatter_with_colors.use_colors());
-        
+
         let formatter_without_colors = TextFormatter::without_colors();
         assert!(!formatter_without_colors.use_colors());
     }

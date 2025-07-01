@@ -475,8 +475,9 @@ impl DocumentStructure {
     /// Compute code blocks in the document
     fn compute_code_blocks(&self, content: &str) -> Vec<CodeBlock> {
         lazy_static! {
-            static ref FENCED_START: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*([^`\s]*)").unwrap();
-            static ref FENCED_END: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*$").unwrap();
+            // Fenced code blocks can be indented 0-3 spaces according to CommonMark
+            static ref FENCED_START: Regex = Regex::new(r"^(\s{0,3})(`{3,}|~{3,})\s*([^`\s]*)").unwrap();
+            static ref FENCED_END: Regex = Regex::new(r"^(\s{0,3})(`{3,}|~{3,})\s*$").unwrap();
         }
 
         let mut code_blocks = Vec::new();
@@ -484,6 +485,8 @@ impl DocumentStructure {
         let mut current_block_start = 0;
         let mut current_language = None;
         let mut current_fence_char = ' ';
+        let mut current_fence_length = 0;  // Track fence length for proper nesting
+        let mut current_fence_indent = 0;  // Track fence indentation
         let lines: Vec<&str> = content.lines().collect();
 
         let mut i = 0;
@@ -495,7 +498,11 @@ impl DocumentStructure {
                 if let Some(captures) = FENCED_START.captures(line) {
                     in_code_block = true;
                     current_block_start = i + 1;
-                    current_fence_char = captures.get(2).map_or('`', |m| m.as_str().chars().next().unwrap());
+                    let indent = captures.get(1).map_or("", |m| m.as_str());
+                    current_fence_indent = indent.len();
+                    let fence = captures.get(2).map_or("```", |m| m.as_str());
+                    current_fence_char = fence.chars().next().unwrap();
+                    current_fence_length = fence.len();
 
                     // Only set language if it's not empty
                     let lang = captures.get(3).map(|m| m.as_str().to_string());
@@ -556,18 +563,29 @@ impl DocumentStructure {
                     i = end_line;
                 }
             } else {
-                // Check for fenced code block end - must start with the same fence character
-                if FENCED_END.is_match(line) && line.trim().starts_with(current_fence_char) {
-                    code_blocks.push(CodeBlock {
-                        start_line: current_block_start,
-                        end_line: i + 1,
-                        language: current_language.clone(),
-                        block_type: CodeBlockType::Fenced,
-                    });
+                // Check for fenced code block end - must start with the same fence character,
+                // be at least as long as the opening fence, and have same or less indentation
+                if let Some(captures) = FENCED_END.captures(line) {
+                    let indent = captures.get(1).map_or("", |m| m.as_str());
+                    let fence = captures.get(2).map_or("", |m| m.as_str());
+                    
+                    // CommonMark: closing fence must have same or less indentation than opening
+                    if fence.chars().next() == Some(current_fence_char) 
+                        && fence.len() >= current_fence_length 
+                        && indent.len() <= current_fence_indent {
+                        code_blocks.push(CodeBlock {
+                            start_line: current_block_start,
+                            end_line: i + 1,
+                            language: current_language.clone(),
+                            block_type: CodeBlockType::Fenced,
+                        });
 
-                    in_code_block = false;
-                    current_language = None;
-                    current_fence_char = ' ';
+                        in_code_block = false;
+                        current_language = None;
+                        current_fence_char = ' ';
+                        current_fence_length = 0;
+                        current_fence_indent = 0;
+                    }
                 }
             }
 
@@ -1425,6 +1443,31 @@ mod tests {
         assert_eq!(structure.heading_levels.len(), 2);
         assert!(structure.has_code_blocks);
         assert_eq!(structure.code_blocks.len(), 1);
+    }
+    
+    #[test]
+    fn test_nested_code_blocks() {
+        let content = r#"```markdown
+1. First item
+
+   ```python
+   code_in_list()
+   ```
+
+2. Second item
+```"#;
+        
+        let structure = DocumentStructure::new(content);
+        
+        // Should have exactly one code block (the outer markdown block)
+        assert_eq!(structure.code_blocks.len(), 1);
+        assert_eq!(structure.code_blocks[0].start_line, 1);
+        assert_eq!(structure.code_blocks[0].end_line, 9);
+        
+        // Lines 2-8 should be inside the code block
+        for line in 2..=8 {
+            assert!(structure.is_in_code_block(line), "Line {} should be in code block", line);
+        }
     }
 
     #[test]
