@@ -3,259 +3,18 @@
 /// See [docs/md037.md](../../docs/md037.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::emphasis_utils::{
+    find_emphasis_markers, find_emphasis_spans, has_doc_patterns,
+    replace_inline_code, EmphasisSpan
+};
 use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    // Front matter detection
-    static ref FRONT_MATTER_DELIM: Regex = Regex::new(r"^---\s*$").unwrap();
-
-    // Better detection of inline code with support for multiple backticks
-    static ref INLINE_CODE: Regex = Regex::new(r"(`+)([^`]|[^`].*?[^`])(`+)").unwrap();
-
     // List markers pattern - used to avoid confusion with emphasis
     static ref LIST_MARKER: Regex = Regex::new(r"^\s*[*+-]\s+").unwrap();
-
-    // Valid emphasis at start of line that should not be treated as lists
-    static ref VALID_START_EMPHASIS: Regex = Regex::new(r"^(\*\*[^*\s]|\*[^*\s]|__[^_\s]|_[^_\s])").unwrap();
-
-    // Documentation style patterns
-    static ref DOC_METADATA_PATTERN: Regex = Regex::new(r"^\s*\*?\s*\*\*[^*]+\*\*\s*:").unwrap();
-
-    // Bold text pattern (for preserving bold text in documentation) - only match valid bold without spaces
-    static ref BOLD_TEXT_PATTERN: Regex = Regex::new(r"\*\*[^*\s][^*]*[^*\s]\*\*|\*\*[^*\s]\*\*").unwrap();
-
-    // Pre-compiled patterns for quick checks
-    static ref QUICK_DOC_CHECK: Regex = Regex::new(r"^\s*\*\s+\*").unwrap();
-    static ref QUICK_BOLD_CHECK: Regex = Regex::new(r"\*\*[^*\s]").unwrap();
 }
 
-/// Enhanced inline code replacement with optimized performance
-#[inline]
-fn replace_inline_code(line: &str) -> String {
-    // Quick check: if no backticks, return original
-    if !line.contains('`') {
-        return line.to_string();
-    }
-
-    let mut result = line.to_string();
-    let mut offset = 0;
-
-    for cap in INLINE_CODE.captures_iter(line) {
-        if let (Some(full_match), Some(_opening), Some(_content), Some(_closing)) =
-            (cap.get(0), cap.get(1), cap.get(2), cap.get(3))
-        {
-            let match_start = full_match.start();
-            let match_end = full_match.end();
-            let placeholder = " ".repeat(match_end - match_start);
-
-            result.replace_range(match_start + offset..match_end + offset, &placeholder);
-            offset += placeholder.len() - (match_end - match_start);
-        }
-    }
-
-    result
-}
-
-/// Represents an emphasis marker found in text (optimized with smaller size)
-#[derive(Debug, Clone, PartialEq)]
-struct EmphasisMarker {
-    marker_type: u8,  // b'*' or b'_' for faster comparison
-    count: u8,        // 1 for single, 2 for double (u8 is sufficient)
-    start_pos: usize, // Position in the line
-}
-
-impl EmphasisMarker {
-    #[inline]
-    fn end_pos(&self) -> usize {
-        self.start_pos + self.count as usize
-    }
-
-    #[inline]
-    fn as_char(&self) -> char {
-        self.marker_type as char
-    }
-}
-
-/// Represents a complete emphasis span (optimized structure)
-#[derive(Debug, Clone)]
-struct EmphasisSpan {
-    opening: EmphasisMarker,
-    closing: EmphasisMarker,
-    content: String,
-    has_leading_space: bool,
-    has_trailing_space: bool,
-}
-
-/// Optimized emphasis marker parsing using byte iteration
-#[inline]
-fn find_emphasis_markers(line: &str) -> Vec<EmphasisMarker> {
-    // Early return for lines without emphasis markers
-    if !line.contains('*') && !line.contains('_') {
-        return Vec::new();
-    }
-
-    let mut markers = Vec::new();
-    let bytes = line.as_bytes();
-    let mut i = 0;
-
-    while i < bytes.len() {
-        let byte = bytes[i];
-        if byte == b'*' || byte == b'_' {
-            let start_pos = i;
-            let mut count = 1u8;
-
-            // Count consecutive markers (limit to avoid overflow)
-            while i + (count as usize) < bytes.len() && bytes[i + (count as usize)] == byte && count < 3 {
-                count += 1;
-            }
-
-            // Only consider single (*) and double (**) markers
-            if count == 1 || count == 2 {
-                markers.push(EmphasisMarker {
-                    marker_type: byte,
-                    count,
-                    start_pos,
-                });
-            }
-
-            i += count as usize;
-        } else {
-            i += 1;
-        }
-    }
-
-    markers
-}
-
-/// Optimized emphasis span finding with reduced complexity
-fn find_emphasis_spans(line: &str, markers: Vec<EmphasisMarker>) -> Vec<EmphasisSpan> {
-    // Early return for insufficient markers
-    if markers.len() < 2 {
-        return Vec::new();
-    }
-
-    let mut spans = Vec::new();
-    let mut used_markers = vec![false; markers.len()];
-
-    // Process markers in pairs more efficiently
-    for i in 0..markers.len() {
-        if used_markers[i] {
-            continue;
-        }
-
-        let opening = &markers[i];
-
-        // Look for the nearest matching closing marker using optimized search
-        for j in (i + 1)..markers.len() {
-            if used_markers[j] {
-                continue;
-            }
-
-            let closing = &markers[j];
-
-            // Quick type and count check
-            if closing.marker_type == opening.marker_type && closing.count == opening.count {
-                let content_start = opening.end_pos();
-                let content_end = closing.start_pos;
-
-                if content_end > content_start {
-                    let content = &line[content_start..content_end];
-
-                    // Optimized validation checks
-                    if is_valid_emphasis_content_fast(content) && is_valid_emphasis_span_fast(line, opening, closing) {
-                        // Quick check for crossing markers
-                        let crosses_markers = markers[i + 1..j]
-                            .iter()
-                            .any(|marker| marker.marker_type == opening.marker_type);
-
-                        if !crosses_markers {
-                            let has_leading_space = content.starts_with(' ') || content.starts_with('\t');
-                            let has_trailing_space = content.ends_with(' ') || content.ends_with('\t');
-
-                            spans.push(EmphasisSpan {
-                                opening: opening.clone(),
-                                closing: closing.clone(),
-                                content: content.to_string(),
-                                has_leading_space,
-                                has_trailing_space,
-                            });
-
-                            // Mark both markers as used
-                            used_markers[i] = true;
-                            used_markers[j] = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    spans
-}
-
-/// Fast validation of emphasis span context
-#[inline]
-fn is_valid_emphasis_span_fast(line: &str, opening: &EmphasisMarker, closing: &EmphasisMarker) -> bool {
-    let content_start = opening.end_pos();
-    let content_end = closing.start_pos;
-
-    // Content must exist and not be just whitespace
-    if content_end <= content_start {
-        return false;
-    }
-
-    let content = &line[content_start..content_end];
-    if content.trim().is_empty() {
-        return false;
-    }
-
-    // Quick boundary checks using byte indexing
-    let bytes = line.as_bytes();
-
-    // Opening should be at start or after valid character
-    let valid_opening = opening.start_pos == 0
-        || matches!(
-            bytes.get(opening.start_pos.saturating_sub(1)),
-            Some(&b' ')
-                | Some(&b'\t')
-                | Some(&b'(')
-                | Some(&b'[')
-                | Some(&b'{')
-                | Some(&b'"')
-                | Some(&b'\'')
-                | Some(&b'>')
-        );
-
-    // Closing should be at end or before valid character
-    let valid_closing = closing.end_pos() >= bytes.len()
-        || matches!(
-            bytes.get(closing.end_pos()),
-            Some(&b' ')
-                | Some(&b'\t')
-                | Some(&b')')
-                | Some(&b']')
-                | Some(&b'}')
-                | Some(&b'"')
-                | Some(&b'\'')
-                | Some(&b'.')
-                | Some(&b',')
-                | Some(&b'!')
-                | Some(&b'?')
-                | Some(&b';')
-                | Some(&b':')
-                | Some(&b'<')
-        );
-
-    valid_opening && valid_closing && !content.contains('\n')
-}
-
-/// Fast validation of emphasis content
-#[inline]
-fn is_valid_emphasis_content_fast(content: &str) -> bool {
-    !content.trim().is_empty()
-}
 
 /// Check if an emphasis span has spacing issues that should be flagged
 #[inline]
@@ -434,10 +193,8 @@ impl MD037NoSpaceInEmphasis {
     /// Optimized line checking for emphasis spacing issues
     #[inline]
     fn check_line_for_emphasis_issues_fast(&self, line: &str, line_num: usize, warnings: &mut Vec<LintWarning>) {
-        // Quick documentation pattern checks using pre-compiled regex
-        if (QUICK_DOC_CHECK.is_match(line) || QUICK_BOLD_CHECK.is_match(line))
-            && (DOC_METADATA_PATTERN.is_match(line) || BOLD_TEXT_PATTERN.is_match(line))
-        {
+        // Quick documentation pattern checks
+        if has_doc_patterns(line) {
             return;
         }
 

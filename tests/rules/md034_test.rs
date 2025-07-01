@@ -103,8 +103,8 @@ fn test_multiple_protocols() {
     let content = "http://example.com\nhttps://secure.com\nftp://files.com";
     let ctx = LintContext::new(content);
     let debug_str = format!(
-        "test_multiple_protocols\nMD034 test content: {}\nMD034 full AST: {:#?}\n",
-        content, ctx.ast
+        "test_multiple_protocols\nMD034 test content: {}\n",
+        content
     );
     let _ = write("/tmp/md034_ast_debug.txt", debug_str);
     let result = rule.check(&ctx).unwrap();
@@ -119,8 +119,8 @@ fn test_mixed_content() {
     let content = "# Heading\nVisit https://example.com\n> Quote with https://another.com";
     let ctx = LintContext::new(content);
     let debug_str = format!(
-        "test_mixed_content\nMD034 test content: {}\nMD034 full AST: {:#?}\n",
-        content, ctx.ast
+        "test_mixed_content\nMD034 test content: {}\n",
+        content
     );
     let _ = write("/tmp/md034_ast_debug.txt", debug_str);
     let result = rule.check(&ctx).unwrap();
@@ -172,7 +172,7 @@ fn test_multiple_badges_and_links_on_one_line() {
 fn debug_ast_multiple_urls() {
     let content = "Visit https://example.com and http://another.com";
     let ctx = LintContext::new(content);
-    let debug_str = format!("MD034 test content: {}\nMD034 full AST: {:#?}\n", content, ctx.ast);
+    let debug_str = format!("MD034 test content: {}\n", content);
     match write("/tmp/md034_ast_debug.txt", debug_str) {
         Ok(_) => (),
         Err(e) => panic!("Failed to write AST debug file: {}", e),

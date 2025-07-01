@@ -131,6 +131,7 @@ pub trait Rule: DynClone + Send + Sync {
         false
     }
 
+
     fn as_any(&self) -> &dyn std::any::Any;
 
     fn as_maybe_document_structure(&self) -> Option<&dyn MaybeDocumentStructure> {

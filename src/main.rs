@@ -1971,7 +1971,18 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     let start_time = Instant::now();
 
     // Choose processing strategy based on file count and fix mode
-    let use_parallel = file_paths.len() > 1 && !args._fix; // Don't parallelize fixes due to file I/O conflicts
+    // Also check if it's a single small file to avoid parallel overhead
+    let single_small_file = if file_paths.len() == 1 {
+        if let Ok(metadata) = fs::metadata(&file_paths[0]) {
+            metadata.len() < 10_000 // 10KB threshold
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    
+    let use_parallel = file_paths.len() > 1 && !args._fix && !single_small_file; // Don't parallelize fixes or small files
 
     // Collect all warnings for statistics if requested
     let mut all_warnings_for_stats = Vec::new();
