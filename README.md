@@ -24,6 +24,7 @@
   - [Table of Contents](#table-of-contents)
   - [Quick Start](#quick-start)
   - [Overview](#overview)
+  - [Performance](#performance)
   - [Installation](#installation)
     - [Using Cargo (Rust)](#using-cargo-rust)
     - [Using pip (Python)](#using-pip-python)
@@ -71,7 +72,7 @@ rumdl init
 
 rumdl is a high-performance Markdown linter and fixer that helps ensure consistency and best practices in your Markdown files. It offers:
 
-- ⚡️ **Built for speed** with Rust
+- ⚡️ **Built for speed** with Rust - significantly faster than alternatives
 - 🔍 **54 lint rules** covering common Markdown issues
 - 🛠️ **Automatic fixing** with `--fix` for most rules
 - 📦 **Zero dependencies** - single binary with no runtime requirements
@@ -80,6 +81,14 @@ rumdl is a high-performance Markdown linter and fixer that helps ensure consiste
 - 🐍 **Installable via pip** for Python users
 - 📏 **Modern CLI** with detailed error reporting
 - 🔄 **CI/CD friendly** with non-zero exit code on errors
+
+## Performance
+
+rumdl is designed for speed and efficiency:
+
+![Performance Comparison](assets/performance_overview.png)
+
+rumdl is **4.3x faster** on average than markdownlint for typical markdown files, with performance improvements ranging from 3.4x to 5.4x depending on project size.
 
 ## Installation
 
