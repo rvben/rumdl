@@ -254,6 +254,7 @@ impl Rule for MD010NoHardTabs {
         RuleCategory::Whitespace
     }
 
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let default_config = MD010Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;

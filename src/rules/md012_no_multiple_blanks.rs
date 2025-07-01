@@ -378,6 +378,7 @@ impl Rule for MD012NoMultipleBlanks {
         self
     }
 
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let default_config = MD012Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;

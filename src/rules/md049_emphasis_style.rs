@@ -1,8 +1,7 @@
-use crate::lint_context::LintContext;
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
-use crate::utils::range_utils::calculate_match_range;
-use markdown::mdast::{Emphasis, Node};
+use crate::utils::document_structure::DocumentStructure;
+use crate::utils::emphasis_utils::{find_emphasis_markers, find_single_emphasis_spans, replace_inline_code};
 
 mod md049_config;
 use md049_config::MD049Config;
@@ -33,41 +32,30 @@ impl MD049EmphasisStyle {
         Self { config }
     }
 
-    // Recursively walk AST and collect all valid emphasis nodes with marker info
-    fn collect_emphasis<'a>(
-        node: &'a Node,
-        parent_type: Option<&'static str>,
-        emphasis_nodes: &mut Vec<(usize, usize, char, &'a Emphasis)>, // (line, col, marker, node)
-        ctx: &LintContext,
+    // Collect emphasis from a single line
+    fn collect_emphasis_from_line(
+        &self,
+        line: &str,
+        line_num: usize,
+        emphasis_info: &mut Vec<(usize, usize, char, String)>, // (line, col, marker, content)
     ) {
-        match node {
-            Node::Emphasis(em) => {
-                if let Some(pos) = &em.position {
-                    let start = pos.start.offset;
-                    let (line, col) = ctx.offset_to_line_col(start);
-                    let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
-                    // Find marker at col-1 (1-based col)
-                    let marker = line_str.chars().nth(col - 1).unwrap_or('*');
-                    // Only consider if not inside ignored parent
-                    if !matches!(parent_type, Some("Link" | "Image" | "Code")) {
-                        emphasis_nodes.push((line, col, marker, em));
-                    }
-                }
-                // Recurse into children
-                for child in &em.children {
-                    Self::collect_emphasis(child, Some("Emphasis"), emphasis_nodes, ctx);
-                }
-            }
-            Node::Link(_) | Node::Image(_) | Node::Code(_) => {
-                // Do not recurse into these
-            }
-            _ => {
-                if let Some(children) = node.children() {
-                    for child in children {
-                        Self::collect_emphasis(child, parent_type, emphasis_nodes, ctx);
-                    }
-                }
-            }
+        // Replace inline code to avoid false positives
+        let line_no_code = replace_inline_code(line);
+        
+        // Find all emphasis markers
+        let markers = find_emphasis_markers(&line_no_code);
+        if markers.is_empty() {
+            return;
+        }
+        
+        // Find single emphasis spans (not strong emphasis)
+        let spans = find_single_emphasis_spans(&line_no_code, markers);
+        
+        for span in spans {
+            let marker_char = span.opening.as_char();
+            let col = span.opening.start_pos + 1; // Convert to 1-based
+            
+            emphasis_info.push((line_num, col, marker_char, span.content.clone()));
         }
     }
 }
@@ -83,125 +71,125 @@ impl Rule for MD049EmphasisStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = vec![];
-        let ast = &ctx.ast;
+        let content = ctx.content;
+        
+        // Early return if no emphasis markers
+        if !content.contains('*') && !content.contains('_') {
+            return Ok(warnings);
+        }
+        
+        // Create document structure to skip code blocks
+        let structure = DocumentStructure::new(content);
+        
+        // Collect all emphasis from the document
+        let mut emphasis_info = vec![];
+        
+        // Track absolute position for fixes
+        let mut abs_pos = 0;
+        
+        for (line_idx, line) in content.lines().enumerate() {
+            let line_num = line_idx + 1;
+            
+            // Skip if in code block or front matter
+            if structure.is_in_code_block(line_num) || structure.is_in_front_matter(line_num) {
+                abs_pos += line.len() + 1; // +1 for newline
+                continue;
+            }
+            
+            // Skip if the line doesn't contain any emphasis markers
+            if !line.contains('*') && !line.contains('_') {
+                abs_pos += line.len() + 1;
+                continue;
+            }
+            
+            // Collect emphasis with absolute positions
+            let line_start = abs_pos;
+            self.collect_emphasis_from_line(line, line_num, &mut emphasis_info);
+            
+            // Update emphasis_info with absolute positions
+            let last_emphasis_count = emphasis_info.len();
+            for i in (0..last_emphasis_count).rev() {
+                if emphasis_info[i].0 == line_num {
+                    // Add line start position to column
+                    let (line_num, col, marker, content) = emphasis_info[i].clone();
+                    emphasis_info[i] = (line_num, line_start + col - 1, marker, content);
+                } else {
+                    break;
+                }
+            }
+            
+            abs_pos += line.len() + 1;
+        }
+        
         match self.config.style {
             EmphasisStyle::Consistent => {
-                // Collect all emphasis nodes from the entire document
-                let mut emphasis_nodes = vec![];
-                Self::collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
-
                 // If we have less than 2 emphasis nodes, no need to check consistency
-                if emphasis_nodes.len() < 2 {
+                if emphasis_info.len() < 2 {
                     return Ok(warnings);
                 }
-
+                
                 // Use the first emphasis marker found as the target style
-                let target_marker = emphasis_nodes[0].2;
-
+                let target_marker = emphasis_info[0].2;
+                
                 // Check all subsequent emphasis nodes for consistency
-                for (line, col, marker, em) in emphasis_nodes.iter().skip(1) {
+                for (line_num, abs_col, marker, content) in emphasis_info.iter().skip(1) {
                     if *marker != target_marker {
-                        // Calculate precise character range for the entire emphasis
-                        let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
-                        let emphasis_start = col - 1; // Convert to 0-based
-                        let emphasis_len = if let Some(pos) = &em.position {
-                            pos.end.offset - pos.start.offset
-                        } else {
-                            1 // Fallback to single character
-                        };
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(*line, line_str, emphasis_start, emphasis_len);
-
-                        // Generate fix for this emphasis
-                        let fix = if let Some(pos) = &em.position {
-                            let start_offset = pos.start.offset;
-                            let end_offset = pos.end.offset;
-
-                            // Create fix for just the emphasis markers
-                            if end_offset > start_offset
-                                && start_offset < ctx.content.len()
-                                && end_offset <= ctx.content.len()
-                            {
-                                let inner_content = &ctx.content[start_offset + 1..end_offset - 1];
-                                Some(crate::rule::Fix {
-                                    range: start_offset..end_offset,
-                                    replacement: format!("{}{}{}", target_marker, inner_content, target_marker),
-                                })
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
+                        // Calculate emphasis length (marker + content + marker)
+                        let emphasis_len = 1 + content.len() + 1;
+                        
+                        // Calculate line-relative column (1-based)
+                        let line_start = content.lines()
+                            .take(line_num - 1)
+                            .map(|l| l.len() + 1)
+                            .sum::<usize>();
+                        let col = abs_col - line_start + 1;
+                        
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
+                            line: *line_num,
+                            column: col,
+                            end_line: *line_num,
+                            end_column: col + emphasis_len,
                             message: format!("Emphasis should use {} instead of {}", target_marker, marker),
-                            fix,
+                            fix: Some(Fix {
+                                range: *abs_col..*abs_col + emphasis_len,
+                                replacement: format!("{}{}{}", target_marker, content, target_marker),
+                            }),
                             severity: Severity::Warning,
                         });
                     }
                 }
             }
             EmphasisStyle::Asterisk | EmphasisStyle::Underscore => {
-                let mut emphasis_nodes = vec![];
-                Self::collect_emphasis(ast, None, &mut emphasis_nodes, ctx);
                 let (wrong_marker, correct_marker) = match self.config.style {
                     EmphasisStyle::Asterisk => ('_', '*'),
                     EmphasisStyle::Underscore => ('*', '_'),
                     EmphasisStyle::Consistent => unreachable!(),
                 };
-                for (line, col, marker, em) in &emphasis_nodes {
+                
+                for (line_num, abs_col, marker, content) in &emphasis_info {
                     if *marker == wrong_marker {
-                        // Calculate precise character range for the entire emphasis
-                        let line_str = ctx.content.lines().nth(line - 1).unwrap_or("");
-                        let emphasis_start = col - 1; // Convert to 0-based
-                        let emphasis_len = if let Some(pos) = &em.position {
-                            pos.end.offset - pos.start.offset
-                        } else {
-                            1 // Fallback to single character
-                        };
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(*line, line_str, emphasis_start, emphasis_len);
-
-                        // Generate fix for this emphasis
-                        let fix = if let Some(pos) = &em.position {
-                            let start_offset = pos.start.offset;
-                            let end_offset = pos.end.offset;
-
-                            // Create fix for just the emphasis markers
-                            if end_offset > start_offset
-                                && start_offset < ctx.content.len()
-                                && end_offset <= ctx.content.len()
-                            {
-                                let inner_content = &ctx.content[start_offset + 1..end_offset - 1];
-                                Some(crate::rule::Fix {
-                                    range: start_offset..end_offset,
-                                    replacement: format!("{}{}{}", correct_marker, inner_content, correct_marker),
-                                })
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
+                        // Calculate emphasis length (marker + content + marker)
+                        let emphasis_len = 1 + content.len() + 1;
+                        
+                        // Calculate line-relative column (1-based)
+                        let line_start = ctx.content.lines()
+                            .take(line_num - 1)
+                            .map(|l| l.len() + 1)
+                            .sum::<usize>();
+                        let col = abs_col - line_start + 1;
+                        
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: format!(
-                                "Emphasis should use {
-            } instead of {}",
-                                correct_marker, wrong_marker
-                            ),
-                            fix,
+                            line: *line_num,
+                            column: col,
+                            end_line: *line_num,
+                            end_column: col + emphasis_len,
+                            message: format!("Emphasis should use {} instead of {}", correct_marker, wrong_marker),
+                            fix: Some(Fix {
+                                range: *abs_col..*abs_col + emphasis_len,
+                                replacement: format!("{}{}{}", correct_marker, content, correct_marker),
+                            }),
                             severity: Severity::Warning,
                         });
                     }

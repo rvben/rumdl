@@ -1,8 +1,6 @@
 use crate::utils::code_block_utils::CodeBlockUtils;
 use lazy_static::lazy_static;
-use markdown::{mdast::Node, to_mdast, ParseOptions};
 use regex::Regex;
-use std::panic;
 
 lazy_static! {
     // Comprehensive link pattern that captures both inline and reference links
@@ -263,7 +261,6 @@ pub struct ListBlock {
 
 pub struct LintContext<'a> {
     pub content: &'a str,
-    pub ast: Node, // The root of the AST
     pub line_offsets: Vec<usize>,
     pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
     pub lines: Vec<LineInfo>,             // Pre-computed line information
@@ -277,74 +274,6 @@ pub struct LintContext<'a> {
 
 impl<'a> LintContext<'a> {
     pub fn new(content: &'a str) -> Self {
-        // Check for problematic patterns that cause the markdown crate to panic
-        if content_has_problematic_lists(content) {
-            log::debug!("Detected problematic list patterns in LintContext, skipping AST parsing");
-            let ast = Node::Root(markdown::mdast::Root {
-                children: vec![],
-                position: None,
-            });
-
-            let mut line_offsets = vec![0];
-            for (i, c) in content.char_indices() {
-                if c == '\n' {
-                    line_offsets.push(i + 1);
-                }
-            }
-
-            // Detect code blocks once and cache them
-            let code_blocks = CodeBlockUtils::detect_code_blocks(content);
-
-            // Pre-compute line information
-            let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
-
-            // Parse links, images, references, code spans, and list blocks
-            let links = Self::parse_links(content, &lines, &code_blocks);
-            let images = Self::parse_images(content, &lines, &code_blocks);
-            let reference_defs = Self::parse_reference_defs(content, &lines);
-            let code_spans = Self::parse_code_spans(content, &lines);
-            let list_blocks = Self::parse_list_blocks(&lines);
-            let bare_urls = Self::parse_bare_urls(content, &lines, &code_blocks, &links, &images, &reference_defs);
-
-            return Self {
-                content,
-                ast,
-                line_offsets,
-                code_blocks,
-                lines,
-                links,
-                images,
-                reference_defs,
-                code_spans,
-                list_blocks,
-                bare_urls,
-            };
-        }
-
-        // Try to parse AST, but handle panics from the markdown crate
-        let ast = match panic::catch_unwind(std::panic::AssertUnwindSafe(|| to_mdast(content, &ParseOptions::gfm()))) {
-            Ok(Ok(ast)) => {
-                // Successfully parsed AST
-                ast
-            }
-            Ok(Err(err)) => {
-                // Parsing failed with an error
-                log::debug!("Failed to parse markdown AST: {:?}", err);
-                Node::Root(markdown::mdast::Root {
-                    children: vec![],
-                    position: None,
-                })
-            }
-            Err(_) => {
-                // Parsing panicked
-                log::debug!("Markdown AST parsing panicked, falling back to empty AST");
-                Node::Root(markdown::mdast::Root {
-                    children: vec![],
-                    position: None,
-                })
-            }
-        };
-
         let mut line_offsets = vec![0];
         for (i, c) in content.char_indices() {
             if c == '\n' {
@@ -368,7 +297,6 @@ impl<'a> LintContext<'a> {
 
         Self {
             content,
-            ast,
             line_offsets,
             code_blocks,
             lines,
@@ -1545,48 +1473,15 @@ fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
 }
 
 /// Check if content contains patterns that cause the markdown crate to panic
-fn content_has_problematic_lists(content: &str) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
-
-    // Look for mixed list markers in consecutive lines (which causes the panic)
-    for window in lines.windows(3) {
-        if window.len() >= 2 {
-            let line1 = window[0].trim_start();
-            let line2 = window[1].trim_start();
-
-            // Check if both lines are list items with different markers
-            let is_list1 = line1.starts_with("* ") || line1.starts_with("+ ") || line1.starts_with("- ");
-            let is_list2 = line2.starts_with("* ") || line2.starts_with("+ ") || line2.starts_with("- ");
-
-            if is_list1 && is_list2 {
-                let marker1 = line1.chars().next().unwrap_or(' ');
-                let marker2 = line2.chars().next().unwrap_or(' ');
-
-                // If different markers, this could cause a panic
-                if marker1 != marker2 {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use markdown::mdast::{Heading, Node};
 
     #[test]
     fn test_empty_content() {
         let ctx = LintContext::new("");
         assert_eq!(ctx.content, "");
-        // Should be a Root node with no children
-        match &ctx.ast {
-            Node::Root(root) => assert!(root.children.is_empty()),
-            _ => panic!("AST root is not Root node"),
-        }
         assert_eq!(ctx.line_offsets, vec![0]);
         assert_eq!(ctx.offset_to_line_col(0), (1, 1));
         assert_eq!(ctx.lines.len(), 0);
@@ -1596,17 +1491,6 @@ mod tests {
     fn test_single_line() {
         let ctx = LintContext::new("# Hello");
         assert_eq!(ctx.content, "# Hello");
-        // Should parse a heading
-        match &ctx.ast {
-            Node::Root(root) => {
-                assert_eq!(root.children.len(), 1);
-                match &root.children[0] {
-                    Node::Heading(Heading { depth, .. }) => assert_eq!(*depth, 1),
-                    _ => panic!("First child is not a Heading"),
-                }
-            }
-            _ => panic!("AST root is not Root node"),
-        }
         assert_eq!(ctx.line_offsets, vec![0]);
         assert_eq!(ctx.offset_to_line_col(0), (1, 1));
         assert_eq!(ctx.offset_to_line_col(3), (1, 4));
