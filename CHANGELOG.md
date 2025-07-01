@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MD005: Fixed blockquote handling to correctly ignore intentional separations
 - MD054: Fixed overlapping match detection for link/image styles
 - Strong style utility module refactored to remove unused code
+- MD029: Fixed nested code block detection by implementing proper CommonMark fence closing rules
+- MD052: Fixed false positives for arrays and references inside inline code spans
+- MD013: Fixed line length calculation to intelligently handle URLs in non-strict mode
 
 ### Improved
 - Test infrastructure now includes both unit and integration tests
