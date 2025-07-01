@@ -17,6 +17,12 @@ lazy_static! {
     static ref IMAGE_REF_PATTERN: Regex = Regex::new(r"^!\[.*?\]\[.*?\]$" ).unwrap();
     static ref LINK_REF_PATTERN: Regex = Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap();
 
+    // Pattern to find URLs anywhere in text
+    static ref URL_IN_TEXT: Regex = Regex::new(r"https?://\S+").unwrap();
+
+    // Pattern to find markdown links [text](url) for URL exclusion
+    static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").unwrap();
+
     // Sentence splitting patterns
     static ref SENTENCE_END: Regex = Regex::new(r"[.!?]\s+[A-Z]").unwrap();
     static ref ABBREVIATION: Regex = Regex::new(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|i\.e|e\.g|Inc|Corp|Ltd|Co|St|Ave|Blvd|Rd|Ph\.D|M\.D|B\.A|M\.A|Ph\.D|U\.S|U\.K|U\.N|N\.Y|L\.A|D\.C)\.\s+[A-Z]").unwrap();
@@ -175,7 +181,9 @@ impl Rule for MD013LineLength {
 
         for (line_num, line) in lines.iter().enumerate() {
             let line_number = line_num + 1;
-            let effective_length = line.chars().count();
+
+            // Calculate effective length excluding unbreakable URLs
+            let effective_length = self.calculate_effective_length(line);
 
             // Skip short lines immediately
             if effective_length <= self.config.line_length {
@@ -358,6 +366,42 @@ impl MD013LineLength {
 
         false
     }
+
+    /// Calculate effective line length excluding unbreakable URLs
+    fn calculate_effective_length(&self, line: &str) -> usize {
+        if self.config.strict {
+            // In strict mode, count everything
+            return line.chars().count();
+        }
+
+        let mut effective_line = line.to_string();
+
+        // First handle markdown links to avoid double-counting URLs
+        // Pattern: [text](very-long-url) -> [text](url)
+        for cap in MARKDOWN_LINK_PATTERN.captures_iter(&effective_line.clone()) {
+            if let (Some(full_match), Some(text), Some(url)) = (cap.get(0), cap.get(1), cap.get(2)) {
+                if url.as_str().len() > 15 {
+                    let replacement = format!("[{}](url)", text.as_str());
+                    effective_line = effective_line.replacen(full_match.as_str(), &replacement, 1);
+                }
+            }
+        }
+
+        // Then replace bare URLs with a placeholder of reasonable length
+        // This allows lines with long URLs to pass if the rest of the content is reasonable
+        for url_match in URL_IN_TEXT.find_iter(&effective_line.clone()) {
+            let url = url_match.as_str();
+            // Skip if this URL is already part of a markdown link we handled
+            if !effective_line.contains(&format!("({})", url)) {
+                // Replace URL with placeholder that represents a "reasonable" URL length
+                // Using 15 chars as a reasonable URL placeholder (e.g., "https://ex.com")
+                let placeholder = "x".repeat(15.min(url.len()));
+                effective_line = effective_line.replacen(url, &placeholder, 1);
+            }
+        }
+
+        effective_line.chars().count()
+    }
 }
 
 impl DocumentStructureExtensions for MD013LineLength {
@@ -402,7 +446,7 @@ mod tests {
         let content = "This is a line that is definitely longer than fifty characters and should trigger a warning.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Line length"));
         assert!(result[0].message.contains("exceeds 50 characters"));
@@ -414,7 +458,7 @@ mod tests {
         let content = "Short line.\nAnother short line.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -424,7 +468,7 @@ mod tests {
         let content = "This line is definitely longer than thirty chars.\nThis is also a line that exceeds the limit.\nShort line.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 2);
@@ -436,7 +480,7 @@ mod tests {
         let content = "```\nThis is a very long line inside a code block that should be ignored.\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -446,7 +490,7 @@ mod tests {
         let content = "```\nThis is a very long line inside a code block that should NOT be ignored.\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert!(result.len() > 0);
     }
 
@@ -456,7 +500,7 @@ mod tests {
         let content = "# This is a very long heading that would normally exceed the limit";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -466,7 +510,7 @@ mod tests {
         let content = "# This is a very long heading that should trigger a warning";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
     }
 
@@ -477,7 +521,7 @@ mod tests {
             "|----------|----------|",
             "| Value 1  | Value 2  |"
         ];
-        
+
         assert!(MD013LineLength::is_in_table(&lines, 0));
         assert!(MD013LineLength::is_in_table(&lines, 1));
         assert!(MD013LineLength::is_in_table(&lines, 2));
@@ -489,7 +533,7 @@ mod tests {
         let content = "| This is a very long table header | Another long column header |\n|-----------------------------------|-------------------------------|";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -499,7 +543,7 @@ mod tests {
         let content = "https://example.com/this/is/a/very/long/url/that/exceeds/the/limit";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -509,7 +553,7 @@ mod tests {
         let content = "![This is a very long image alt text that exceeds limit][reference]";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -519,7 +563,7 @@ mod tests {
         let content = "[reference]: https://example.com/very/long/url/that/exceeds/limit";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -529,7 +573,7 @@ mod tests {
         let content = "https://example.com/this/is/a/very/long/url/that/exceeds/the/limit";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // In strict mode, even URLs trigger warnings
         assert_eq!(result.len(), 1);
     }
@@ -540,7 +584,7 @@ mod tests {
         let content = "> This is a very long line inside a blockquote that should be ignored.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -550,7 +594,7 @@ mod tests {
         let content = "Heading\n========================================";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // The underline should be exempt
         assert_eq!(result.len(), 0);
     }
@@ -561,12 +605,12 @@ mod tests {
         let content = "This line has trailing whitespace that makes it too long      ";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         // The line without spaces is 56 chars, within limit of 60
         assert!(result[0].fix.is_some());
         assert!(result[0].message.contains("can trim whitespace"));
-        
+
         // Apply fix
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed.trim(), "This line has trailing whitespace that makes it too long");
@@ -579,7 +623,7 @@ mod tests {
         let content = "你好世界这是测试文字超过限制"; // 14 characters
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
     }
@@ -589,7 +633,7 @@ mod tests {
         let rule = MD013LineLength::default();
         let ctx = LintContext::new("");
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -599,7 +643,7 @@ mod tests {
         let content = "12345678901234567890"; // 20 chars, limit is 10
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         // The warning should highlight from character 11 onwards
         assert_eq!(result[0].column, 11);
@@ -612,7 +656,7 @@ mod tests {
         let content = "<div>\nThis is a very long line inside an HTML block that should be ignored.\n</div>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // HTML blocks should be exempt
         assert_eq!(result.len(), 0);
     }
@@ -633,10 +677,10 @@ Code block line that is very long but exempt.
 |-------|------------------------|
 
 Another long line that should trigger a warning."#;
-        
+
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should have warnings for the two regular paragraph lines only
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 3);
@@ -648,7 +692,7 @@ Another long line that should trigger a warning."#;
         let rule = MD013LineLength::new(50, false, false, false, false);
         let content = "Line 1\nThis line has trailing spaces and is too long      \nLine 3";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.contains("Line 1"));
         assert!(fixed.contains("Line 3"));
@@ -659,10 +703,10 @@ Another long line that should trigger a warning."#;
     fn test_has_relevant_elements() {
         let rule = MD013LineLength::default();
         let structure = DocumentStructure::new("test");
-        
+
         let ctx = LintContext::new("Some content");
         assert!(rule.has_relevant_elements(&ctx, &structure));
-        
+
         let empty_ctx = LintContext::new("");
         assert!(!rule.has_relevant_elements(&empty_ctx, &structure));
     }
@@ -673,5 +717,84 @@ Another long line that should trigger a warning."#;
         assert_eq!(rule.name(), "MD013");
         assert_eq!(rule.description(), "Line length should not be excessive");
         assert_eq!(rule.category(), RuleCategory::Whitespace);
+    }
+
+    #[test]
+    fn test_url_embedded_in_text() {
+        let rule = MD013LineLength::new(50, false, false, false, false);
+
+        // This line would be 85 chars, but only ~45 without the URL
+        let content = "Check the docs at https://example.com/very/long/url/that/exceeds/limit for info";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag because effective length (with URL placeholder) is under 50
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_urls_in_line() {
+        let rule = MD013LineLength::new(50, false, false, false, false);
+
+        // Line with multiple URLs
+        let content = "See https://first-url.com/long and https://second-url.com/also/very/long here";
+        let ctx = LintContext::new(content);
+
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag because effective length is reasonable
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_markdown_link_with_long_url() {
+        let rule = MD013LineLength::new(50, false, false, false, false);
+
+        // Markdown link with very long URL
+        let content = "Check the [documentation](https://example.com/very/long/path/to/documentation/page) for details";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag because effective length counts link as short
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_line_too_long_even_without_urls() {
+        let rule = MD013LineLength::new(50, false, false, false, false);
+
+        // Line that's too long even after URL exclusion
+        let content = "This is a very long line with lots of text and https://url.com that still exceeds the limit";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag because even with URL placeholder, line is too long
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_strict_mode_counts_urls() {
+        let rule = MD013LineLength::new(50, false, false, false, true); // strict=true
+
+        // Same line that passes in non-strict mode
+        let content = "Check the docs at https://example.com/very/long/url/that/exceeds/limit for info";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // In strict mode, should flag because full URL is counted
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_documentation_example_from_md051() {
+        let rule = MD013LineLength::new(80, false, false, false, false);
+
+        // This is the actual line from md051.md that was causing issues
+        let content = r#"For more information, see the [CommonMark specification](https://spec.commonmark.org/0.30/#link-reference-definitions)."#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag because the URL is in a markdown link
+        assert_eq!(result.len(), 0);
     }
 }

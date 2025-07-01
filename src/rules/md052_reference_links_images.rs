@@ -49,6 +49,13 @@ impl MD052ReferenceLinkImages {
     pub fn new() -> Self {
         Self
     }
+    
+    /// Check if a position is inside any code span
+    fn is_in_code_span(line: usize, col: usize, code_spans: &[crate::lint_context::CodeSpan]) -> bool {
+        code_spans.iter().any(|span| {
+            span.line == line && col >= span.start_col && col < span.end_col
+        })
+    }
 
     fn extract_references(&self, content: &str) -> HashSet<String> {
         let mut references = HashSet::new();
@@ -104,6 +111,11 @@ impl MD052ReferenceLinkImages {
             if !link.is_reference {
                 continue; // Skip inline links
             }
+            
+            // Skip links inside code spans
+            if Self::is_in_code_span(link.line, link.start_col, &ctx.code_spans) {
+                continue;
+            }
 
             if let Some(ref_id) = &link.reference_id {
                 let reference_lower = ref_id.to_lowercase();
@@ -138,6 +150,11 @@ impl MD052ReferenceLinkImages {
         for image in &ctx.images {
             if !image.is_reference {
                 continue; // Skip inline images
+            }
+            
+            // Skip images inside code spans
+            if Self::is_in_code_span(image.line, image.start_col, &ctx.code_spans) {
+                continue;
             }
 
             if let Some(ref_id) = &image.reference_id {
@@ -224,6 +241,12 @@ impl MD052ReferenceLinkImages {
                         if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
                             let full_match = cap.get(0).unwrap();
                             let col = full_match.start();
+                            
+                            // Skip if inside code span
+                            if Self::is_in_code_span(line_num + 1, col, &ctx.code_spans) {
+                                continue;
+                            }
+                            
                             let match_len = full_match.end() - full_match.start();
                             undefined.push((line_num, col, match_len, reference.to_string()));
                             reported_refs.insert(reference_lower, true);
@@ -525,5 +548,51 @@ mod tests {
         assert!(refs.contains("ref1"));
         assert!(refs.contains("ref2"));
         assert!(refs.contains("ref3"));
+    }
+    
+    #[test]
+    fn test_inline_code_not_flagged() {
+        let rule = MD052ReferenceLinkImages::new();
+        
+        // Test that arrays in inline code are not flagged as references
+        let content = r#"# Test
+
+Configure with `["JavaScript", "GitHub", "Node.js"]` in your settings.
+
+Also, `[todo]` is not a reference link.
+
+But this [reference] should be flagged.
+
+And this `[inline code]` should not be flagged.
+"#;
+        
+        let ctx = LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        
+        // Should only flag [reference], not the ones in backticks
+        assert_eq!(warnings.len(), 1, "Should only flag one undefined reference");
+        assert!(warnings[0].message.contains("'reference'"));
+    }
+    
+    #[test]
+    fn test_code_block_references_ignored() {
+        let rule = MD052ReferenceLinkImages::new();
+        
+        let content = r#"# Test
+
+```markdown
+[undefined] reference in code block
+![undefined] image in code block
+```
+
+[real-undefined] reference outside
+"#;
+        
+        let ctx = LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        
+        // Should only flag [real-undefined], not the ones in code block
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("'real-undefined'"));
     }
 }
