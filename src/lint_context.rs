@@ -221,24 +221,6 @@ pub struct BlockquoteInfo {
     pub needs_md028_fix: bool,
 }
 
-/// Information about a bare URL or email
-#[derive(Debug, Clone)]
-pub struct BareUrl {
-    /// Line number (1-indexed)
-    pub line: usize,
-    /// Start column (0-indexed) in the line
-    pub start_col: usize,
-    /// End column (0-indexed) in the line
-    pub end_col: usize,
-    /// Byte offset in document
-    pub byte_offset: usize,
-    /// End byte offset in document
-    pub byte_end: usize,
-    /// The URL or email text
-    pub text: String,
-    /// Whether this is an email (true) or URL (false)
-    pub is_email: bool,
-}
 
 /// Information about a list block
 #[derive(Debug, Clone)]
@@ -269,7 +251,6 @@ pub struct LintContext<'a> {
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
     pub code_spans: Vec<CodeSpan>,        // Pre-parsed inline code spans
     pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
-    pub bare_urls: Vec<BareUrl>,          // Pre-parsed bare URLs and emails
 }
 
 impl<'a> LintContext<'a> {
@@ -293,7 +274,6 @@ impl<'a> LintContext<'a> {
         let reference_defs = Self::parse_reference_defs(content, &lines);
         let code_spans = Self::parse_code_spans(content, &lines);
         let list_blocks = Self::parse_list_blocks(&lines);
-        let bare_urls = Self::parse_bare_urls(content, &lines, &code_blocks, &links, &images, &reference_defs);
 
         Self {
             content,
@@ -305,7 +285,6 @@ impl<'a> LintContext<'a> {
             reference_defs,
             code_spans,
             list_blocks,
-            bare_urls,
         }
     }
 
@@ -593,28 +572,30 @@ impl<'a> LintContext<'a> {
 
     /// Pre-compute line information
     fn compute_line_info(content: &str, line_offsets: &[usize], code_blocks: &[(usize, usize)]) -> Vec<LineInfo> {
+        lazy_static! {
+            // Regex for list detection - allow any whitespace including no space (to catch malformed lists)
+            static ref UNORDERED_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)([-*+])([ \t]*)(.*)").unwrap();
+            static ref ORDERED_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(\d+)([.)])([ \t]*)(.*)").unwrap();
+
+            // Regex for blockquote prefix
+            static ref BLOCKQUOTE_REGEX: regex::Regex = regex::Regex::new(r"^(\s*>\s*)(.*)").unwrap();
+
+            // Regex for heading detection
+            static ref ATX_HEADING_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap();
+            static ref SETEXT_UNDERLINE_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
+
+            // Regex for blockquote detection
+            static ref BLOCKQUOTE_REGEX_FULL: regex::Regex = regex::Regex::new(r"^(\s*)(>+)(\s*)(.*)$").unwrap();
+        }
+        
         let mut lines = Vec::new();
         let content_lines: Vec<&str> = content.lines().collect();
-
-        // Regex for list detection - allow any whitespace including no space (to catch malformed lists)
-        let unordered_regex = regex::Regex::new(r"^(\s*)([-*+])([ \t]*)(.*)").unwrap();
-        let ordered_regex = regex::Regex::new(r"^(\s*)(\d+)([.)])([ \t]*)(.*)").unwrap();
-
-        // Regex for blockquote prefix
-        let blockquote_regex = regex::Regex::new(r"^(\s*>\s*)(.*)").unwrap();
-
-        // Regex for heading detection
-        let atx_heading_regex = regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap();
-        let setext_underline_regex = regex::Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
-
-        // Regex for blockquote detection
-        let blockquote_regex_full = regex::Regex::new(r"^(\s*)(>+)(\s*)(.*)$").unwrap();
 
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
             let indent = line.len() - line.trim_start().len();
             // For blank detection, consider blockquote context
-            let is_blank = if let Some(caps) = blockquote_regex.captures(line) {
+            let is_blank = if let Some(caps) = BLOCKQUOTE_REGEX.captures(line) {
                 // In blockquote context, check if content after prefix is blank
                 let after_prefix = caps.get(2).map_or("", |m| m.as_str());
                 after_prefix.trim().is_empty()
@@ -640,7 +621,7 @@ impl<'a> LintContext<'a> {
             // Detect list items
             let list_item = if !in_code_block && !is_blank {
                 // Strip blockquote prefix if present for list detection
-                let (line_for_list_check, blockquote_prefix_len) = if let Some(caps) = blockquote_regex.captures(line) {
+                let (line_for_list_check, blockquote_prefix_len) = if let Some(caps) = BLOCKQUOTE_REGEX.captures(line) {
                     let prefix = caps.get(1).unwrap().as_str();
                     let content = caps.get(2).unwrap().as_str();
                     (content, prefix.len())
@@ -648,7 +629,7 @@ impl<'a> LintContext<'a> {
                     (&**line, 0)
                 };
 
-                if let Some(caps) = unordered_regex.captures(line_for_list_check) {
+                if let Some(caps) = UNORDERED_REGEX.captures(line_for_list_check) {
                     let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
                     let marker = caps.get(2).map_or("", |m| m.as_str());
                     let spacing = caps.get(3).map_or("", |m| m.as_str());
@@ -694,7 +675,7 @@ impl<'a> LintContext<'a> {
                             content_column,
                         })
                     }
-                } else if let Some(caps) = ordered_regex.captures(line_for_list_check) {
+                } else if let Some(caps) = ORDERED_REGEX.captures(line_for_list_check) {
                     let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
                     let number_str = caps.get(2).map_or("", |m| m.as_str());
                     let delimiter = caps.get(3).map_or("", |m| m.as_str());
@@ -764,7 +745,7 @@ impl<'a> LintContext<'a> {
             let line = content_lines[i];
 
             // Check for blockquotes (even on blank lines within blockquotes)
-            if let Some(caps) = blockquote_regex_full.captures(line) {
+            if let Some(caps) = BLOCKQUOTE_REGEX_FULL.captures(line) {
                 let indent_str = caps.get(1).map_or("", |m| m.as_str());
                 let markers = caps.get(2).map_or("", |m| m.as_str());
                 let spaces_after = caps.get(3).map_or("", |m| m.as_str());
@@ -801,7 +782,7 @@ impl<'a> LintContext<'a> {
             }
 
             // Check for ATX headings
-            if let Some(caps) = atx_heading_regex.captures(line) {
+            if let Some(caps) = ATX_HEADING_REGEX.captures(line) {
                 let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
                 let hashes = caps.get(2).map_or("", |m| m.as_str());
                 let spaces_after = caps.get(3).map_or("", |m| m.as_str());
@@ -854,7 +835,7 @@ impl<'a> LintContext<'a> {
             // Check for Setext headings (need to look at next line)
             else if i + 1 < content_lines.len() {
                 let next_line = content_lines[i + 1];
-                if !lines[i + 1].in_code_block && setext_underline_regex.is_match(next_line) {
+                if !lines[i + 1].in_code_block && SETEXT_UNDERLINE_REGEX.is_match(next_line) {
                     // Skip if next line is front matter delimiter
                     if in_front_matter && i < front_matter_end {
                         continue;
@@ -1216,379 +1197,3 @@ impl<'a> LintContext<'a> {
         list_blocks
     }
 
-    /// Parse all bare URLs and emails in the content
-    fn parse_bare_urls(
-        content: &str,
-        lines: &[LineInfo],
-        code_blocks: &[(usize, usize)],
-        links: &[ParsedLink],
-        images: &[ParsedImage],
-        reference_defs: &[ReferenceDef],
-    ) -> Vec<BareUrl> {
-        let mut bare_urls = Vec::new();
-
-        // Quick check - if no URLs or emails, return empty
-        if !content.contains("http://")
-            && !content.contains("https://")
-            && !content.contains("ftp://")
-            && !content.contains('@')
-        {
-            return bare_urls;
-        }
-
-        // Build exclusion ranges from links, images, and angle bracket links
-        let mut excluded_ranges: Vec<(usize, usize)> = Vec::new();
-
-        // Exclude link URLs
-        for link in links {
-            if !link.url.is_empty() {
-                excluded_ranges.push((link.byte_offset, link.byte_end));
-            }
-        }
-
-        // Exclude image URLs
-        for image in images {
-            if !image.url.is_empty() {
-                excluded_ranges.push((image.byte_offset, image.byte_end));
-            }
-        }
-
-        // Exclude angle bracket links <url> or <email>
-        for angle_match in ANGLE_BRACKET_PATTERN.find_iter(content) {
-            excluded_ranges.push((angle_match.start(), angle_match.end()));
-        }
-
-        // Sort and merge overlapping ranges
-        excluded_ranges.sort_by_key(|r| r.0);
-        let mut merged: Vec<(usize, usize)> = Vec::new();
-        for (start, end) in excluded_ranges {
-            if let Some((_, last_end)) = merged.last_mut() {
-                if *last_end >= start {
-                    *last_end = (*last_end).max(end);
-                    continue;
-                }
-            }
-            merged.push((start, end));
-        }
-
-        // Find bare URLs
-        for url_match in BARE_URL_PATTERN.find_iter(content) {
-            let url_start = url_match.start();
-            let mut url_end = url_match.end();
-
-            // Skip if in code block or code span
-            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, url_start) {
-                continue;
-            }
-
-            // Skip if within any excluded range (link/image)
-            let in_any_range = merged.iter().any(|(start, end)| url_start >= *start && url_end <= *end);
-            if in_any_range {
-                continue;
-            }
-
-            // Check if it's in a reference definition line
-            let mut is_ref_def = false;
-            for ref_def in reference_defs {
-                if let Some(line_info) = lines.get(ref_def.line - 1) {
-                    let line_start = line_info.byte_offset;
-                    let line_end = if ref_def.line < lines.len() {
-                        lines[ref_def.line].byte_offset
-                    } else {
-                        content.len()
-                    };
-                    if url_start >= line_start && url_start < line_end {
-                        is_ref_def = true;
-                        break;
-                    }
-                }
-            }
-            if is_ref_def {
-                continue;
-            }
-
-            // Trim trailing punctuation
-            let raw_url = &content[url_start..url_end];
-            let trailing_punct = ['.', ',', ';', ':', '!', '?'];
-            while url_end > url_start {
-                if let Some(last_char) = raw_url.chars().last() {
-                    if trailing_punct.contains(&last_char) {
-                        url_end -= last_char.len_utf8();
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-
-            // Manual boundary check
-            let before = if url_start == 0 {
-                None
-            } else {
-                content.get(url_start - 1..url_start)
-            };
-            let after = content.get(url_end..url_end + 1);
-            let is_valid_boundary = before.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
-                && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
-            if !is_valid_boundary {
-                continue;
-            }
-
-            // Find which line this URL is on
-            let mut line_num = 1;
-            let mut col_start = url_start;
-            for (idx, line_info) in lines.iter().enumerate() {
-                if url_start >= line_info.byte_offset {
-                    line_num = idx + 1;
-                    col_start = url_start - line_info.byte_offset;
-                } else {
-                    break;
-                }
-            }
-
-            // Calculate end column
-            let mut col_end = col_start + (url_end - url_start);
-            if let Some(line_info) = lines.get(line_num - 1) {
-                // For single-line URLs
-                col_end = url_end - line_info.byte_offset;
-            }
-
-            bare_urls.push(BareUrl {
-                line: line_num,
-                start_col: col_start,
-                end_col: col_end,
-                byte_offset: url_start,
-                byte_end: url_end,
-                text: content[url_start..url_end].to_string(),
-                is_email: false,
-            });
-        }
-
-        // Find bare emails
-        for email_match in BARE_EMAIL_PATTERN.find_iter(content) {
-            let email_start = email_match.start();
-            let email_end = email_match.end();
-
-            // Skip if in code block or code span
-            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, email_start) {
-                continue;
-            }
-
-            // Skip if within any excluded range (link/image)
-            let in_any_range = merged
-                .iter()
-                .any(|(start, end)| email_start >= *start && email_end <= *end);
-            if in_any_range {
-                continue;
-            }
-
-            // Manual boundary check
-            let before = if email_start == 0 {
-                None
-            } else {
-                content.get(email_start - 1..email_start)
-            };
-            let after = content.get(email_end..email_end + 1);
-            let is_valid_boundary = before.is_none_or(|c| {
-                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-            }) && after.is_none_or(|c| {
-                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-            });
-            if !is_valid_boundary {
-                continue;
-            }
-
-            // Find which line this email is on
-            let mut line_num = 1;
-            let mut col_start = email_start;
-            for (idx, line_info) in lines.iter().enumerate() {
-                if email_start >= line_info.byte_offset {
-                    line_num = idx + 1;
-                    col_start = email_start - line_info.byte_offset;
-                } else {
-                    break;
-                }
-            }
-
-            // Calculate end column
-            let col_end = email_end - lines[line_num - 1].byte_offset;
-
-            bare_urls.push(BareUrl {
-                line: line_num,
-                start_col: col_start,
-                end_col: col_end,
-                byte_offset: email_start,
-                byte_end: email_end,
-                text: content[email_start..email_end].to_string(),
-                is_email: true,
-            });
-        }
-
-        bare_urls
-    }
-}
-
-/// Merge adjacent list blocks that should be treated as one
-fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
-    if list_blocks.len() < 2 {
-        return;
-    }
-
-    let mut merged = Vec::new();
-    let mut current = list_blocks[0].clone();
-
-    for next in list_blocks.iter().skip(1) {
-        // Check if blocks should be merged
-        // For MD032 purposes, consecutive unordered lists with different markers
-        // should be treated as one list block only if truly consecutive
-        let consecutive = next.start_line == current.end_line + 1;
-        let only_blank_between = next.start_line == current.end_line + 2;
-
-        let should_merge = next.is_ordered == current.is_ordered
-            && next.blockquote_prefix == current.blockquote_prefix
-            && next.nesting_level == current.nesting_level
-            && (consecutive || (only_blank_between && current.marker == next.marker));
-
-        if should_merge {
-            // Merge blocks
-            current.end_line = next.end_line;
-            current.item_lines.extend_from_slice(&next.item_lines);
-
-            // Update marker consistency
-            if !current.is_ordered && current.marker.is_some() && next.marker.is_some() && current.marker != next.marker {
-                current.marker = None; // Mixed markers
-            }
-        } else {
-            // Save current and start new
-            merged.push(current);
-            current = next.clone();
-        }
-    }
-
-    // Don't forget the last block
-    merged.push(current);
-
-    *list_blocks = merged;
-}
-
-/// Check if content contains patterns that cause the markdown crate to panic
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_empty_content() {
-        let ctx = LintContext::new("");
-        assert_eq!(ctx.content, "");
-        assert_eq!(ctx.line_offsets, vec![0]);
-        assert_eq!(ctx.offset_to_line_col(0), (1, 1));
-        assert_eq!(ctx.lines.len(), 0);
-    }
-
-    #[test]
-    fn test_single_line() {
-        let ctx = LintContext::new("# Hello");
-        assert_eq!(ctx.content, "# Hello");
-        assert_eq!(ctx.line_offsets, vec![0]);
-        assert_eq!(ctx.offset_to_line_col(0), (1, 1));
-        assert_eq!(ctx.offset_to_line_col(3), (1, 4));
-    }
-
-    #[test]
-    fn test_multi_line() {
-        let content = "# Title\n\nSecond line\nThird line";
-        let ctx = LintContext::new(content);
-        assert_eq!(ctx.line_offsets, vec![0, 8, 9, 21]);
-        // Test offset to line/col
-        assert_eq!(ctx.offset_to_line_col(0), (1, 1)); // start
-        assert_eq!(ctx.offset_to_line_col(8), (2, 1)); // start of blank line
-        assert_eq!(ctx.offset_to_line_col(9), (3, 1)); // start of 'Second line'
-        assert_eq!(ctx.offset_to_line_col(15), (3, 7)); // middle of 'Second line'
-        assert_eq!(ctx.offset_to_line_col(21), (4, 1)); // start of 'Third line'
-    }
-
-    #[test]
-    fn test_line_info() {
-        let content = "# Title\n    indented\n\ncode:\n```rust\nfn main() {}\n```";
-        let ctx = LintContext::new(content);
-
-        // Test line info
-        assert_eq!(ctx.lines.len(), 7);
-
-        // Line 1: "# Title"
-        let line1 = &ctx.lines[0];
-        assert_eq!(line1.content, "# Title");
-        assert_eq!(line1.byte_offset, 0);
-        assert_eq!(line1.indent, 0);
-        assert!(!line1.is_blank);
-        assert!(!line1.in_code_block);
-        assert!(line1.list_item.is_none());
-
-        // Line 2: "    indented"
-        let line2 = &ctx.lines[1];
-        assert_eq!(line2.content, "    indented");
-        assert_eq!(line2.byte_offset, 8);
-        assert_eq!(line2.indent, 4);
-        assert!(!line2.is_blank);
-
-        // Line 3: "" (blank)
-        let line3 = &ctx.lines[2];
-        assert_eq!(line3.content, "");
-        assert!(line3.is_blank);
-
-        // Test helper methods
-        assert_eq!(ctx.line_to_byte_offset(1), Some(0));
-        assert_eq!(ctx.line_to_byte_offset(2), Some(8));
-        assert_eq!(ctx.line_info(1).map(|l| l.indent), Some(0));
-        assert_eq!(ctx.line_info(2).map(|l| l.indent), Some(4));
-    }
-
-    #[test]
-    fn test_list_item_detection() {
-        let content = "- Unordered item\n  * Nested item\n1. Ordered item\n   2) Nested ordered\n\nNot a list";
-        let ctx = LintContext::new(content);
-
-        // Line 1: "- Unordered item"
-        let line1 = &ctx.lines[0];
-        assert!(line1.list_item.is_some());
-        let list1 = line1.list_item.as_ref().unwrap();
-        assert_eq!(list1.marker, "-");
-        assert!(!list1.is_ordered);
-        assert_eq!(list1.marker_column, 0);
-        assert_eq!(list1.content_column, 2);
-
-        // Line 2: "  * Nested item"
-        let line2 = &ctx.lines[1];
-        assert!(line2.list_item.is_some());
-        let list2 = line2.list_item.as_ref().unwrap();
-        assert_eq!(list2.marker, "*");
-        assert_eq!(list2.marker_column, 2);
-
-        // Line 3: "1. Ordered item"
-        let line3 = &ctx.lines[2];
-        assert!(line3.list_item.is_some());
-        let list3 = line3.list_item.as_ref().unwrap();
-        assert_eq!(list3.marker, "1.");
-        assert!(list3.is_ordered);
-        assert_eq!(list3.number, Some(1));
-
-        // Line 6: "Not a list"
-        let line6 = &ctx.lines[5];
-        assert!(line6.list_item.is_none());
-    }
-
-    #[test]
-    fn test_offset_to_line_col_edge_cases() {
-        let content = "a\nb\nc";
-        let ctx = LintContext::new(content);
-        // line_offsets: [0, 2, 4]
-        assert_eq!(ctx.offset_to_line_col(0), (1, 1)); // 'a'
-        assert_eq!(ctx.offset_to_line_col(1), (1, 2)); // after 'a'
-        assert_eq!(ctx.offset_to_line_col(2), (2, 1)); // 'b'
-        assert_eq!(ctx.offset_to_line_col(3), (2, 2)); // after 'b'
-        assert_eq!(ctx.offset_to_line_col(4), (3, 1)); // 'c'
-        assert_eq!(ctx.offset_to_line_col(5), (3, 2)); // after 'c'
-    }
-}
