@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.89] - 2025-07-01
+
+### Added
+- Comprehensive unit test coverage for all 54 linting rules (~742 new tests)
+- Unit tests for LSP server functionality
+- Unit tests for all 11 output formatters
+- Unit tests for Python bindings
+- Test coverage improved from 75.4% to 77.1%
+
+### Fixed
+- MD005: Fixed blockquote handling to correctly ignore intentional separations
+- MD054: Fixed overlapping match detection for link/image styles
+- Strong style utility module refactored to remove unused code
+
+### Improved
+- Test infrastructure now includes both unit and integration tests
+- Better test organization with inline unit tests in implementation files
+
 ## [0.0.88] - 2025-06-28
 
 ### Added
@@ -90,7 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.87...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.89...HEAD
+[0.0.89]: https://github.com/rvben/rumdl/compare/v0.0.88...v0.0.89
 [0.0.87]: https://github.com/rvben/rumdl/compare/v0.0.86...v0.0.87
 [0.0.86]: https://github.com/rvben/rumdl/compare/v0.0.85...v0.0.86
 [0.0.85]: https://github.com/rvben/rumdl/compare/v0.0.84...v0.0.85
