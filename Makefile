@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify
+.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release
 
 # Development environment setup
 setup-mise:
@@ -248,3 +248,64 @@ trigger-pre-commit:
 	-H "Authorization: Bearer $(PRECOMMIT_DISPATCH_TOKEN)" \
 	https://api.github.com/repos/rvben/rumdl-pre-commit/dispatches \
 	-d '{"event_type": "pypi_release"}'
+
+# Dependency and version update targets
+update-dependencies:
+	@echo "Updating Cargo dependencies to latest compatible versions..."
+	@cargo update
+	@echo "Dependencies updated in Cargo.lock"
+	@echo ""
+	@if command -v cargo-outdated >/dev/null 2>&1; then \
+		echo "Checking for available updates beyond current constraints:"; \
+		cargo outdated; \
+	else \
+		echo "Install cargo-outdated for more detailed update information:"; \
+		echo "  cargo install cargo-outdated"; \
+	fi
+
+update-rust-version:
+	@echo "Checking for latest stable Rust version..."
+	$(eval LATEST_RUST := $(shell curl -s https://api.github.com/repos/rust-lang/rust/releases/latest | grep '"tag_name":' | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/' | head -1))
+	$(eval CURRENT_RUST := $(shell grep '^rust-version' Cargo.toml | sed -E 's/rust-version = "([0-9]+\.[0-9]+\.[0-9]+)"/\1/'))
+	@if [ -z "$(LATEST_RUST)" ]; then \
+		echo "Failed to fetch latest Rust version"; \
+		exit 1; \
+	fi
+	@echo "Current Rust version: $(CURRENT_RUST)"
+	@echo "Latest Rust version: $(LATEST_RUST)"
+	@if [ "$(CURRENT_RUST)" = "$(LATEST_RUST)" ]; then \
+		echo "Already using the latest Rust version"; \
+	else \
+		echo "Updating Rust version to $(LATEST_RUST)..."; \
+		sed -i.bak -E 's/^rust-version = "[0-9]+\.[0-9]+\.[0-9]+"/rust-version = "$(LATEST_RUST)"/' Cargo.toml; \
+		sed -i.bak -E 's/^rust = "[0-9]+\.[0-9]+\.[0-9]+"/rust = "$(LATEST_RUST)"/' .mise.toml; \
+		sed -i.bak -E 's/^channel = "[0-9]+\.[0-9]+\.[0-9]+"/channel = "$(LATEST_RUST)"/' rust-toolchain.toml; \
+		rm -f Cargo.toml.bak .mise.toml.bak rust-toolchain.toml.bak; \
+		echo "Updated Rust version in Cargo.toml, .mise.toml, and rust-toolchain.toml"; \
+		echo "Running 'cargo check' to verify compatibility..."; \
+		cargo check || (echo "Warning: cargo check failed. You may need to fix compatibility issues."; exit 1); \
+	fi
+
+pre-release:
+	@echo "Preparing for release..."
+	@echo "===================="
+	@$(MAKE) update-rust-version
+	@echo ""
+	@$(MAKE) update-dependencies
+	@echo ""
+	@echo "Running tests to verify everything works..."
+	@$(MAKE) test-quick
+	@echo ""
+	@echo "Pre-release preparation complete!"
+	@echo "===================="
+	@echo ""
+	@echo "Summary of changes:"
+	@echo "- Rust version: $$(grep '^rust-version' Cargo.toml | sed -E 's/rust-version = "([0-9]+\.[0-9]+\.[0-9]+)"/\1/')"
+	@echo "- Dependencies: Updated to latest compatible versions"
+	@echo ""
+	@echo "Please review changes and commit if satisfied."
+
+# Full release targets that include pre-release preparation
+release-major-full: pre-release version-major version-push
+release-minor-full: pre-release version-minor version-push
+release-patch-full: pre-release version-patch version-push
