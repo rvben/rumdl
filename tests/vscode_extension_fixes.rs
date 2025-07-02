@@ -147,7 +147,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             "javascript instead of JavaScript",
             Box::new(MD044ProperNames::new(vec!["JavaScript".to_string()], false)),
         )),
-        "MD045" => Some(("![](image.png)", Box::new(MD045NoAltText))),
+        "MD045" => Some(("![](image.png)", Box::new(MD045NoAltText::new()))),
         "MD046" => Some((
             "    indented code",
             Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Fenced)),

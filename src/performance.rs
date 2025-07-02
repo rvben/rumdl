@@ -239,6 +239,36 @@ impl PerformanceBenchmark {
         self
     }
 
+    /// Get current memory usage in MB (platform-specific)
+    /// Returns None if memory measurement is not available on the platform
+    fn get_memory_usage_mb() -> Option<f64> {
+        #[cfg(target_os = "linux")]
+        {
+            // Try to read from /proc/self/status
+            if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+                for line in status.lines() {
+                    if line.starts_with("VmRSS:") {
+                        if let Some(kb_str) = line.split_whitespace().nth(1) {
+                            if let Ok(kb) = kb_str.parse::<f64>() {
+                                return Some(kb / 1024.0); // Convert KB to MB
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // For other platforms, return None for now
+        // This can be enhanced with platform-specific implementations in the future
+        #[cfg(not(target_os = "linux"))]
+        {
+            // Memory measurement not implemented for this platform yet
+            // Could add support for macOS (using libc), Windows (using winapi), etc.
+        }
+        
+        None
+    }
+
     /// Benchmark a single rule with given content
     pub fn benchmark_rule(&self, rule: &dyn Rule, content: &str) -> RulePerformanceResult {
         let ctx = LintContext::new(content);
@@ -248,16 +278,42 @@ impl PerformanceBenchmark {
         // Warm up
         let _ = rule.check(&ctx);
 
+        // Collect memory samples
+        let mut memory_samples = Vec::new();
+        
+        // Take initial memory reading
+        if let Some(initial_mem) = Self::get_memory_usage_mb() {
+            memory_samples.push(initial_mem);
+        }
+
         // Measure execution time
         let start = Instant::now();
         let warnings = rule.check(&ctx).unwrap_or_else(|_| vec![]);
         let execution_time = start.elapsed();
+        
+        // Take final memory reading
+        if let Some(final_mem) = Self::get_memory_usage_mb() {
+            memory_samples.push(final_mem);
+        }
+        
+        // Calculate memory stats if we have samples
+        let memory_stats = if !memory_samples.is_empty() {
+            let peak = memory_samples.iter().cloned().fold(f64::MIN, f64::max);
+            let average = memory_samples.iter().sum::<f64>() / memory_samples.len() as f64;
+            Some(MemoryStats {
+                peak_memory_mb: peak,
+                average_memory_mb: average,
+                memory_samples,
+            })
+        } else {
+            None
+        };
 
         RulePerformanceResult {
             rule_name: rule.name().to_string(),
             execution_time,
             warnings_count: warnings.len(),
-            memory_stats: None, // TODO: Implement memory measurement
+            memory_stats,
             content_size_bytes: content_size,
             lines_processed: lines_count,
         }
@@ -424,6 +480,57 @@ mod tests {
         assert!(small.contains("- "), "Should contain lists");
         assert!(small.contains("```"), "Should contain code blocks");
         assert!(small.contains("http"), "Should contain URLs");
+    }
+
+    #[test]
+    fn test_memory_measurement() {
+        // Test that memory measurement doesn't panic
+        let memory = PerformanceBenchmark::get_memory_usage_mb();
+        
+        #[cfg(target_os = "linux")]
+        {
+            // On Linux, we should get a value if /proc/self/status exists
+            if std::path::Path::new("/proc/self/status").exists() {
+                assert!(memory.is_some(), "Memory measurement should work on Linux");
+                if let Some(mb) = memory {
+                    assert!(mb > 0.0, "Memory usage should be positive");
+                }
+            }
+        }
+        
+        #[cfg(not(target_os = "linux"))]
+        {
+            // On other platforms, we currently return None
+            assert!(memory.is_none(), "Memory measurement not implemented for this platform");
+        }
+    }
+
+    #[test]
+    fn test_benchmark_rule_with_memory() {
+        use crate::rules;
+        
+        // Create a simple test rule
+        let config = crate::config::Config::default();
+        let rules = rules::all_rules(&config);
+        let monitor = PerformanceBenchmark::new(rules.clone()).with_memory_measurement();
+        if let Some(rule) = rules.first() {
+            let content = "# Test\n\nSome content";
+            let result = monitor.benchmark_rule(rule.as_ref(), content);
+            
+            // Check basic properties
+            assert!(!result.rule_name.is_empty());
+            assert!(result.execution_time.as_nanos() > 0);
+            assert_eq!(result.content_size_bytes, content.len());
+            assert_eq!(result.lines_processed, 3);
+            
+            // Memory stats might be None on unsupported platforms
+            #[cfg(target_os = "linux")]
+            {
+                if std::path::Path::new("/proc/self/status").exists() {
+                    assert!(result.memory_stats.is_some(), "Should have memory stats on Linux");
+                }
+            }
+        }
     }
 
     #[test]

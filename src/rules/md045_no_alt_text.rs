@@ -2,6 +2,9 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
 use regex::Regex;
 
+pub mod md045_config;
+use md045_config::MD045Config;
+
 lazy_static! {
     static ref IMAGE_REGEX: Regex = Regex::new(r"!\[([^\]]*)\](\([^)]+\))").unwrap();
 }
@@ -12,7 +15,9 @@ lazy_static! {
 ///
 /// This rule is triggered when an image is missing alternate text (alt text).
 #[derive(Clone)]
-pub struct MD045NoAltText;
+pub struct MD045NoAltText {
+    config: MD045Config,
+}
 
 impl Default for MD045NoAltText {
     fn default() -> Self {
@@ -22,7 +27,13 @@ impl Default for MD045NoAltText {
 
 impl MD045NoAltText {
     pub fn new() -> Self {
-        Self
+        Self {
+            config: MD045Config::default(),
+        }
+    }
+
+    pub fn from_config_struct(config: MD045Config) -> Self {
+        Self { config }
     }
 }
 
@@ -62,7 +73,7 @@ impl Rule for MD045NoAltText {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: image.byte_offset..image.byte_offset + (image.end_col - image.start_col),
-                        replacement: format!("![TODO: Add image description]{url_part}"),
+                        replacement: format!("![{}]{url_part}", self.config.placeholder_text),
                     }),
                 });
             }
@@ -91,7 +102,7 @@ impl Rule for MD045NoAltText {
                 result.push_str(&caps[0]);
             } else if alt_text.trim().is_empty() {
                 // Fix the image if it's not in a code block and has empty alt text
-                result.push_str(&format!("![TODO: Add image description]{url_part}"));
+                result.push_str(&format!("![{}]{url_part}", self.config.placeholder_text));
             } else {
                 // Keep the original if alt text is not empty
                 result.push_str(&caps[0]);
@@ -110,11 +121,20 @@ impl Rule for MD045NoAltText {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD045NoAltText::new())
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD045Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 
@@ -339,5 +359,34 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
+    }
+
+    #[test]
+    fn test_custom_placeholder_text() {
+        let config = MD045Config {
+            placeholder_text: "FIXME: Add alt text".to_string(),
+        };
+        let rule = MD045NoAltText::from_config_struct(config);
+        let content = "![](image.jpg)";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "![FIXME: Add alt text](image.jpg)");
+    }
+
+    #[test]
+    fn test_fix_multiple_with_custom_placeholder() {
+        let config = MD045Config {
+            placeholder_text: "MISSING ALT".to_string(),
+        };
+        let rule = MD045NoAltText::from_config_struct(config);
+        let content = "![Good](img1.jpg) ![](img2.jpg) ![   ](img3.jpg)";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(
+            fixed,
+            "![Good](img1.jpg) ![MISSING ALT](img2.jpg) ![MISSING ALT](img3.jpg)"
+        );
     }
 }
