@@ -3,7 +3,7 @@
 //!
 //! See [docs/md005.md](../../docs/md005.md) for full documentation, configuration, and examples.
 
-use crate::utils::range_utils::{calculate_match_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::DocumentStructure;
@@ -82,7 +82,7 @@ impl MD005ListIndent {
             if let Some(list_item) = &line_info.list_item {
                 // For MD005, we need the indentation within the list context
                 let line = &line_info.content;
-                
+
                 // Check if this line is in a blockquote
                 let indent = if let Some(caps) = BLOCKQUOTE_PREFIX.captures(line) {
                     // Get the content after all blockquote markers
@@ -206,8 +206,7 @@ impl MD005ListIndent {
                 if let Some(reference_indent) = level_indents.get(&key) {
                     if indent != *reference_indent {
                         let inconsistent_message = format!(
-                            "List item indentation is inconsistent with other items at the same level (found: {}, expected: {})",
-                            indent, reference_indent
+                            "List item indentation is inconsistent with other items at the same level (found: {indent}, expected: {reference_indent})"
                         );
 
                         // Only add if we don't already have a warning for this line
@@ -588,9 +587,12 @@ Even more text";
 > * Item 2";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Blockquoted lists should have correct indentation within the blockquote context
-        assert!(result.is_empty(), "Expected no warnings for correctly indented blockquote list, got: {:?}", result);
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for correctly indented blockquote list, got: {result:?}"
+        );
     }
 
     #[test]
@@ -643,7 +645,7 @@ Even more text";
   * Nested";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // The current implementation accepts lists that start indented
         // It treats the first item as establishing the base indent level
         // This is reasonable behavior - not all lists must start at column 0
@@ -709,8 +711,8 @@ Even more text";
         let rule = MD005ListIndent;
         let mut content = String::new();
         for i in 0..100 {
-            content.push_str(&format!("* Item {}\n", i));
-            content.push_str(&format!("  * Nested {}\n", i));
+            content.push_str(&format!("* Item {i}\n"));
+            content.push_str(&format!("  * Nested {i}\n"));
         }
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
@@ -731,19 +733,19 @@ Even more text";
     #[test]
     fn test_should_skip() {
         let rule = MD005ListIndent;
-        
+
         // Empty content should skip
         let ctx = LintContext::new("");
         assert!(rule.should_skip(&ctx));
-        
+
         // Content without lists should skip
         let ctx = LintContext::new("Just plain text");
         assert!(rule.should_skip(&ctx));
-        
+
         // Content with lists should not skip
         let ctx = LintContext::new("* List item");
         assert!(!rule.should_skip(&ctx));
-        
+
         let ctx = LintContext::new("1. Ordered list");
         assert!(!rule.should_skip(&ctx));
     }
@@ -755,7 +757,7 @@ Even more text";
         let ctx = LintContext::new(content);
         let doc_structure = DocumentStructure::new(content);
         assert!(rule.has_relevant_elements(&ctx, &doc_structure));
-        
+
         let content = "No lists here";
         let ctx = LintContext::new(content);
         let doc_structure = DocumentStructure::new(content);
@@ -798,10 +800,9 @@ Even more text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        
+
         let fix = result[0].fix.as_ref().unwrap();
         // Fix should replace the single space with nothing (0 indent for level 1)
         assert_eq!(fix.replacement, "");
     }
-    
 }

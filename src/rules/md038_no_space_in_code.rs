@@ -303,7 +303,7 @@ mod tests {
         for case in valid_cases {
             let ctx = crate::lint_context::LintContext::new(case);
             let result = rule.check(&ctx).unwrap();
-            assert!(result.is_empty(), "Valid case should not have warnings: {}", case);
+            assert!(result.is_empty(), "Valid case should not have warnings: {case}");
         }
     }
 
@@ -320,7 +320,7 @@ mod tests {
         for case in invalid_cases {
             let ctx = crate::lint_context::LintContext::new(case);
             let result = rule.check(&ctx).unwrap();
-            assert!(!result.is_empty(), "Invalid case should have warnings: {}", case);
+            assert!(!result.is_empty(), "Invalid case should have warnings: {case}");
         }
     }
 
@@ -340,7 +340,7 @@ mod tests {
         for case in invalid_cases {
             let ctx = crate::lint_context::LintContext::new(case);
             let result = rule.check(&ctx).unwrap();
-            assert!(!result.is_empty(), "Strict mode should flag all spaces: {}", case);
+            assert!(!result.is_empty(), "Strict mode should flag all spaces: {case}");
         }
     }
 
@@ -365,7 +365,7 @@ mod tests {
         for (input, expected) in test_cases {
             let ctx = crate::lint_context::LintContext::new(input);
             let result = rule.fix(&ctx).unwrap();
-            assert_eq!(result, expected, "Fix did not produce expected output for: {}", input);
+            assert_eq!(result, expected, "Fix did not produce expected output for: {input}");
         }
     }
 

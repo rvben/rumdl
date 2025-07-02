@@ -2,7 +2,7 @@
 ///
 /// See [docs/md019.md](../../docs/md019.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{calculate_single_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_single_line_range};
 
 #[derive(Clone)]
 pub struct MD019NoMultipleSpaceAtx;

@@ -3,7 +3,7 @@
 //! This module contains character range tests for additional rules
 //! covering MD006-MD053.
 
-use super::{multi_warning_test, simple_test, test_character_ranges, ExpectedWarning};
+use super::{ExpectedWarning, multi_warning_test, simple_test, test_character_ranges};
 
 // MD006 - Start bullets at beginning of line
 #[test]

@@ -155,7 +155,7 @@ fn test_md012_debug_indented_fenced() {
     // Debug the regions
     println!("Lines:");
     for (i, line) in lines.iter().enumerate() {
-        println!("  {}: {:?}", i, line);
+        println!("  {i}: {line:?}");
     }
 
     // Test the rule
@@ -163,13 +163,13 @@ fn test_md012_debug_indented_fenced() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-    println!("Warnings: {:?}", result);
+    println!("Warnings: {result:?}");
     for warning in &result {
         println!("  Line {}: {}", warning.line, warning.message);
     }
 
     // This should pass but currently fails
-    assert!(result.is_empty(), "Expected no warnings, got: {:?}", result);
+    assert!(result.is_empty(), "Expected no warnings, got: {result:?}");
 }
 
 #[test]
@@ -183,16 +183,16 @@ fn test_md012_contributing_pattern() {
 
     println!("Content lines:");
     for (i, line) in content.lines().enumerate() {
-        println!("  {}: {:?}", i, line);
+        println!("  {i}: {line:?}");
     }
 
-    println!("Warnings: {:?}", result);
+    println!("Warnings: {result:?}");
     for warning in &result {
         println!("  Line {}: {}", warning.line, warning.message);
     }
 
     // This should pass - there's only 1 blank line before the indented fenced code block
-    assert!(result.is_empty(), "Expected no warnings, got: {:?}", result);
+    assert!(result.is_empty(), "Expected no warnings, got: {result:?}");
 }
 
 #[test]
@@ -203,7 +203,7 @@ fn test_md012_region_calculation() {
 
     println!("Lines:");
     for (i, line) in lines.iter().enumerate() {
-        println!("  {}: {:?}", i, line);
+        println!("  {i}: {line:?}");
     }
 
     // We need to access the compute_code_block_regions function somehow
@@ -212,11 +212,11 @@ fn test_md012_region_calculation() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-    println!("Warnings: {:?}", result);
+    println!("Warnings: {result:?}");
     for warning in &result {
         println!("  Line {}: {}", warning.line, warning.message);
     }
 
     // This should pass - there's only 1 blank line before and after the code block
-    assert!(result.is_empty(), "Expected no warnings, got: {:?}", result);
+    assert!(result.is_empty(), "Expected no warnings, got: {result:?}");
 }

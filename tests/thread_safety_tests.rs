@@ -58,8 +58,7 @@ More content.
     for (thread_id, warning_count) in results.iter() {
         assert_eq!(
             *warning_count, first_result,
-            "Thread {} produced different warning count: {} vs {}",
-            thread_id, warning_count, first_result
+            "Thread {thread_id} produced different warning count: {warning_count} vs {first_result}"
         );
     }
 
@@ -130,7 +129,7 @@ Text with *emphasis * and **strong **.
     // Verify all rules executed (warning_count is usize, always non-negative)
     for (rule_name, _warning_count) in results.iter() {
         // Each rule executed successfully
-        println!("Rule {} executed in parallel", rule_name);
+        println!("Rule {rule_name} executed in parallel");
     }
 }
 
@@ -171,8 +170,7 @@ fn test_concurrent_configuration_access() {
     for (thread_id, rule_count) in results.iter() {
         assert_eq!(
             *rule_count, first_result,
-            "Thread {} got different rule count: {} vs {}",
-            thread_id, rule_count, first_result
+            "Thread {thread_id} got different rule count: {rule_count} vs {first_result}"
         );
     }
 }
@@ -216,7 +214,7 @@ More content."#;
 
     // All fix operations should succeed
     for (thread_id, success) in results.iter() {
-        assert!(*success, "Thread {} fix operation failed", thread_id);
+        assert!(*success, "Thread {thread_id} fix operation failed");
     }
 }
 
@@ -312,7 +310,7 @@ Text with *bad emphasis * here.
     println!("High concurrency results: {} operations completed", results.len());
 
     // Verify all threads completed successfully
-    assert_eq!(results.len(), thread_count, "Expected {} thread results", thread_count);
+    assert_eq!(results.len(), thread_count, "Expected {thread_count} thread results");
 
     // Group results by operation type
     let mut operation_counts = std::collections::HashMap::new();
@@ -320,7 +318,7 @@ Text with *bad emphasis * here.
         *operation_counts.entry(operation.clone()).or_insert(0) += 1;
     }
 
-    println!("Operation distribution: {:?}", operation_counts);
+    println!("Operation distribution: {operation_counts:?}");
 
     // Each operation type should have been executed
     assert!(operation_counts.contains_key("check"));
@@ -397,7 +395,7 @@ Content for section 10.
                         let mut count = success_count_clone.lock().unwrap();
                         *count += 1;
                     }
-                    Err(_) => panic!("Rule check failed in thread {}", i),
+                    Err(_) => panic!("Rule check failed in thread {i}"),
                 }
 
                 // Small delay to allow other threads to access
@@ -414,7 +412,7 @@ Content for section 10.
     }
 
     let final_count = *success_count.lock().unwrap();
-    println!("Successful operations: {}", final_count);
+    println!("Successful operations: {final_count}");
 
     // All operations should succeed
     assert_eq!(final_count, 20 * 5, "Expected 100 successful operations");

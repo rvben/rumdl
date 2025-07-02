@@ -199,8 +199,7 @@ fn test_list_with_content() {
         }
     }
     println!(
-        "DEBUG MD032 - test_list_with_content - calculated_blocks: {:?}",
-        calculated_blocks
+        "DEBUG MD032 - test_list_with_content - calculated_blocks: {calculated_blocks:?}"
     );
     // --- End Temporary Debugging ---
 
@@ -272,8 +271,7 @@ fn test_md032_toc_false_positive() {
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
-        "MD032 should not trigger inside a list, but got warnings: {:?}",
-        result
+        "MD032 should not trigger inside a list, but got warnings: {result:?}"
     );
 }
 
@@ -322,7 +320,7 @@ fn test_allow_list_after_heading() {
     for case in valid_cases {
         let ctx = LintContext::new(case);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Should not flag lists after headings in: {}", case);
+        assert!(result.is_empty(), "Should not flag lists after headings in: {case}");
     }
 }
 
@@ -340,7 +338,7 @@ fn test_allow_list_after_colon() {
     for case in valid_cases {
         let ctx = LintContext::new(case);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Should not flag lists after colons in: {}", case);
+        assert!(result.is_empty(), "Should not flag lists after colons in: {case}");
     }
 }
 
@@ -357,7 +355,7 @@ fn test_strict_mode_flags_all() {
     for case in cases {
         let ctx = LintContext::new(case);
         let result = rule.check(&ctx).unwrap();
-        assert!(!result.is_empty(), "Strict mode should flag lists in: {}", case);
+        assert!(!result.is_empty(), "Strict mode should flag lists in: {case}");
     }
 }
 
@@ -374,6 +372,6 @@ fn test_still_flags_inappropriate_cases() {
     for case in invalid_cases {
         let ctx = LintContext::new(case);
         let result = rule.check(&ctx).unwrap();
-        assert!(!result.is_empty(), "Should still flag inappropriate cases: {}", case);
+        assert!(!result.is_empty(), "Should still flag inappropriate cases: {case}");
     }
 }

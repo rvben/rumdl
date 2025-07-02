@@ -256,7 +256,7 @@ impl ListUtils {
             let indentation = captures.get(1).map_or("", |m| m.as_str());
             let marker = captures.get(2).map_or("", |m| m.as_str());
             let content = captures.get(3).map_or("", |m| m.as_str());
-            return format!("{}{} {}", indentation, marker, content);
+            return format!("{indentation}{marker} {content}");
         }
 
         // Handle ordered list items
@@ -264,7 +264,7 @@ impl ListUtils {
             let indentation = captures.get(1).map_or("", |m| m.as_str());
             let marker = captures.get(2).map_or("", |m| m.as_str());
             let content = captures.get(3).map_or("", |m| m.as_str());
-            return format!("{}{} {}", indentation, marker, content);
+            return format!("{indentation}{marker} {content}");
         }
 
         line.to_string()
@@ -282,7 +282,7 @@ impl ListUtils {
             let content = if start_pos < line.len() { &line[start_pos..] } else { "" };
 
             // Replace multiple spaces with a single space
-            return format!("{}{} {}", leading_space, marker, content);
+            return format!("{leading_space}{marker} {content}");
         }
 
         if let Some(captures) = ORDERED_LIST_MULTIPLE_SPACE_PATTERN.captures(line) {
@@ -295,7 +295,7 @@ impl ListUtils {
             let content = if start_pos < line.len() { &line[start_pos..] } else { "" };
 
             // Replace multiple spaces with a single space
-            return format!("{}{} {}", leading_space, marker, content);
+            return format!("{leading_space}{marker} {content}");
         }
 
         // Return the original line if no pattern matched
@@ -426,19 +426,19 @@ mod tests {
         assert!(ListUtils::is_list_item("    - Level 3"));
         assert!(ListUtils::is_list_item("      - Level 4"));
         assert!(ListUtils::is_list_item("        - Level 5"));
-        
+
         // Mixed markers in nested lists
         assert!(ListUtils::is_list_item("* Main item"));
         assert!(ListUtils::is_list_item("  - Sub item"));
         assert!(ListUtils::is_list_item("    + Sub-sub item"));
         assert!(ListUtils::is_list_item("      * Deep item"));
-        
+
         // Ordered lists nested in unordered
         assert!(ListUtils::is_list_item("- Unordered"));
         assert!(ListUtils::is_list_item("  1. First ordered"));
         assert!(ListUtils::is_list_item("  2. Second ordered"));
         assert!(ListUtils::is_list_item("    - Back to unordered"));
-        
+
         // Tab indentation
         assert!(ListUtils::is_list_item("\t- Tab indented"));
         assert!(ListUtils::is_list_item("\t\t- Double tab"));
@@ -451,21 +451,21 @@ mod tests {
         // Unicode content
         let unicode_item = ListUtils::parse_list_item("- 测试项目 🚀").unwrap();
         assert_eq!(unicode_item.content, "测试项目 🚀");
-        
+
         // Empty content after marker
         let empty_item = ListUtils::parse_list_item("- ").unwrap();
         assert_eq!(empty_item.content, "");
-        
+
         // Multiple spaces after marker
         let multi_space = ListUtils::parse_list_item("-   Multiple spaces").unwrap();
         assert_eq!(multi_space.spaces_after_marker, 3);
         assert_eq!(multi_space.content, "Multiple spaces");
-        
+
         // Very long ordered list numbers
         let long_number = ListUtils::parse_list_item("999999. Item").unwrap();
         assert_eq!(long_number.marker, "999999.");
         assert_eq!(long_number.marker_type, ListMarkerType::Ordered);
-        
+
         // List with only marker - might not parse as valid list
         if let Some(marker_only) = ListUtils::parse_list_item("*") {
             assert_eq!(marker_only.content, "");
@@ -485,10 +485,10 @@ mod tests {
             ("  - Item 1.2", 2),
             ("- Item 2", 0),
         ];
-        
+
         for (line, expected_indent) in lines {
             let item = ListUtils::parse_list_item(line).unwrap();
-            assert_eq!(item.indentation, expected_indent, "Failed for line: {}", line);
+            assert_eq!(item.indentation, expected_indent, "Failed for line: {line}");
         }
     }
 
@@ -502,10 +502,10 @@ mod tests {
             ("1. Ordered", ListMarkerType::Ordered),
             ("42. Ordered", ListMarkerType::Ordered),
         ];
-        
+
         for (line, expected_type) in markers {
             let item = ListUtils::parse_list_item(line).unwrap();
-            assert_eq!(item.marker_type, expected_type, "Failed for line: {}", line);
+            assert_eq!(item.marker_type, expected_type, "Failed for line: {line}");
         }
     }
 
@@ -516,12 +516,12 @@ mod tests {
         assert!(ListUtils::is_list_item_without_space("+b"));
         assert!(ListUtils::is_list_item_without_space("-c"));
         assert!(ListUtils::is_list_item_without_space("1.d"));
-        
+
         // Single character lines
         assert!(!ListUtils::is_list_item_without_space("*"));
         assert!(!ListUtils::is_list_item_without_space("+"));
         assert!(!ListUtils::is_list_item_without_space("-"));
-        
+
         // Markers at end of line
         assert!(!ListUtils::is_list_item_without_space("Text ends with -"));
         assert!(!ListUtils::is_list_item_without_space("Text ends with *"));
@@ -535,7 +535,7 @@ mod tests {
         assert!(ListUtils::is_list_item_with_multiple_spaces("*   Three spaces"));
         assert!(ListUtils::is_list_item_with_multiple_spaces("+    Four spaces"));
         assert!(ListUtils::is_list_item_with_multiple_spaces("1.  Two spaces"));
-        
+
         // Should not match single space
         assert!(!ListUtils::is_list_item_with_multiple_spaces("- One space"));
         assert!(!ListUtils::is_list_item_with_multiple_spaces("* One space"));
@@ -548,17 +548,17 @@ mod tests {
         // List items with inline formatting
         let bold_item = ListUtils::parse_list_item("- **Bold** content").unwrap();
         assert_eq!(bold_item.content, "**Bold** content");
-        
+
         let link_item = ListUtils::parse_list_item("* [Link](url) in list").unwrap();
         assert_eq!(link_item.content, "[Link](url) in list");
-        
+
         let code_item = ListUtils::parse_list_item("+ Item with `code`").unwrap();
         assert_eq!(code_item.content, "Item with `code`");
-        
+
         // List with inline HTML
         let html_item = ListUtils::parse_list_item("- Item with <span>HTML</span>").unwrap();
         assert_eq!(html_item.content, "Item with <span>HTML</span>");
-        
+
         // List with emoji
         let emoji_item = ListUtils::parse_list_item("1. 🎉 Party time!").unwrap();
         assert_eq!(emoji_item.content, "🎉 Party time!");
@@ -567,20 +567,20 @@ mod tests {
     #[test]
     fn test_ambiguous_list_markers() {
         // Test cases that might be ambiguous
-        
+
         // Arithmetic expressions should not be lists
         assert!(!ListUtils::is_list_item("2 + 2 = 4"));
         assert!(!ListUtils::is_list_item("5 - 3 = 2"));
         assert!(!ListUtils::is_list_item("3 * 3 = 9"));
-        
+
         // Emphasis markers should not be lists
         assert!(!ListUtils::is_list_item("*emphasis*"));
         assert!(!ListUtils::is_list_item("**strong**"));
         assert!(!ListUtils::is_list_item("***strong emphasis***"));
-        
+
         // Date ranges
         assert!(!ListUtils::is_list_item("2023-01-01 - 2023-12-31"));
-        
+
         // But these should be lists
         assert!(ListUtils::is_list_item("- 2023-01-01 - 2023-12-31"));
         assert!(ListUtils::is_list_item("* emphasis text here"));
@@ -600,11 +600,16 @@ mod tests {
             "              1. Can we go deeper?",
             "                - Apparently yes!",
         ];
-        
+
         for line in complex_doc {
-            assert!(ListUtils::is_list_item(line), "Failed to recognize: {}", line);
+            assert!(ListUtils::is_list_item(line), "Failed to recognize: {line}");
             let item = ListUtils::parse_list_item(line).unwrap();
-            assert!(!item.content.is_empty() || line.trim().ends_with('-') || line.trim().ends_with('*') || line.trim().ends_with('+'));
+            assert!(
+                !item.content.is_empty()
+                    || line.trim().ends_with('-')
+                    || line.trim().ends_with('*')
+                    || line.trim().ends_with('+')
+            );
         }
     }
 
@@ -617,15 +622,15 @@ mod tests {
             ("    1. Ordered", 4, ListMarkerType::Ordered, "1.", "Ordered"),
             ("\t+ Tab indent", 4, ListMarkerType::Plus, "+", "Tab indent"), // Tab counts as 4 spaces per CommonMark
         ];
-        
+
         for (line, expected_indent, expected_type, expected_marker, expected_content) in test_cases {
             let item = ListUtils::parse_list_item(line);
-            assert!(item.is_some(), "Failed to parse: {}", line);
+            assert!(item.is_some(), "Failed to parse: {line}");
             let item = item.unwrap();
-            assert_eq!(item.indentation, expected_indent, "Wrong indentation for: {}", line);
-            assert_eq!(item.marker_type, expected_type, "Wrong marker type for: {}", line);
-            assert_eq!(item.marker, expected_marker, "Wrong marker for: {}", line);
-            assert_eq!(item.content, expected_content, "Wrong content for: {}", line);
+            assert_eq!(item.indentation, expected_indent, "Wrong indentation for: {line}");
+            assert_eq!(item.marker_type, expected_type, "Wrong marker type for: {line}");
+            assert_eq!(item.marker, expected_marker, "Wrong marker for: {line}");
+            assert_eq!(item.content, expected_content, "Wrong content for: {line}");
         }
     }
 
@@ -641,11 +646,11 @@ mod tests {
             "2. Item with [ ] brackets",
             "3. Item with { } braces",
         ];
-        
+
         for line in special_cases {
-            assert!(ListUtils::is_list_item(line), "Failed for: {}", line);
+            assert!(ListUtils::is_list_item(line), "Failed for: {line}");
             let item = ListUtils::parse_list_item(line);
-            assert!(item.is_some(), "Failed to parse: {}", line);
+            assert!(item.is_some(), "Failed to parse: {line}");
         }
     }
 
@@ -655,7 +660,7 @@ mod tests {
         let continuation = "- This is a very long list item that \
                            continues on the next line";
         assert!(ListUtils::is_list_item(continuation));
-        
+
         // Indented continuation
         let indented_cont = "  - Another long item that \
                                continues with proper indentation";
@@ -666,14 +671,14 @@ mod tests {
     fn test_performance_edge_cases() {
         // Very long lines
         let long_content = "x".repeat(10000);
-        let long_line = format!("- {}", long_content);
+        let long_line = format!("- {long_content}");
         assert!(ListUtils::is_list_item(&long_line));
-        
+
         // Many spaces
         let many_spaces = " ".repeat(100);
-        let spaced_line = format!("{}- Item", many_spaces);
+        let spaced_line = format!("{many_spaces}- Item");
         assert!(ListUtils::is_list_item(&spaced_line));
-        
+
         // Large ordered number
         let big_number = format!("{}. Item", "9".repeat(20));
         assert!(ListUtils::is_list_item(&big_number));
@@ -685,11 +690,11 @@ mod tests {
         assert!(ListUtils::is_unordered_list_item("- Item"));
         assert!(ListUtils::is_unordered_list_item("* Item"));
         assert!(ListUtils::is_unordered_list_item("+ Item"));
-        
+
         // Invalid - ordered lists
         assert!(!ListUtils::is_unordered_list_item("1. Item"));
         assert!(!ListUtils::is_unordered_list_item("99. Item"));
-        
+
         // Invalid - no space after marker
         assert!(!ListUtils::is_unordered_list_item("-Item"));
         assert!(!ListUtils::is_unordered_list_item("*Item"));
@@ -715,12 +720,12 @@ mod tests {
         assert!(ListUtils::is_ordered_list_item("1. Item"));
         assert!(ListUtils::is_ordered_list_item("99. Item"));
         assert!(ListUtils::is_ordered_list_item("1234567890. Item"));
-        
+
         // Invalid - unordered lists
         assert!(!ListUtils::is_ordered_list_item("- Item"));
         assert!(!ListUtils::is_ordered_list_item("* Item"));
         assert!(!ListUtils::is_ordered_list_item("+ Item"));
-        
+
         // Invalid - no space after period
         assert!(!ListUtils::is_ordered_list_item("1.Item"));
         assert!(!ListUtils::is_ordered_list_item("99.Item"));

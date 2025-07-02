@@ -48,11 +48,7 @@ impl MD039NoSpaceInLinks {
             .find(|&(_, c)| !c.is_whitespace())
             .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(0);
-        if start >= end {
-            ""
-        } else {
-            &text[start..end]
-        }
+        if start >= end { "" } else { &text[start..end] }
     }
 
     /// Optimized whitespace checking for link text
@@ -138,7 +134,7 @@ impl Rule for MD039NoSpaceInLinks {
             if needs_warning {
                 let url = if link.is_reference {
                     if let Some(ref_id) = &link.reference_id {
-                        format!("[{}]", ref_id)
+                        format!("[{ref_id}]")
                     } else {
                         "[]".to_string()
                     }
@@ -147,10 +143,10 @@ impl Rule for MD039NoSpaceInLinks {
                 };
 
                 let fixed = if ALL_WHITESPACE.is_match(&unescaped) {
-                    format!("[]{}", url)
+                    format!("[]{url}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
-                    format!("[{}]{}", trimmed, url)
+                    format!("[{trimmed}]{url}")
                 };
 
                 warnings.push(LintWarning {
@@ -194,7 +190,7 @@ impl Rule for MD039NoSpaceInLinks {
             if needs_warning {
                 let url = if image.is_reference {
                     if let Some(ref_id) = &image.reference_id {
-                        format!("[{}]", ref_id)
+                        format!("[{ref_id}]")
                     } else {
                         "[]".to_string()
                     }
@@ -203,10 +199,10 @@ impl Rule for MD039NoSpaceInLinks {
                 };
 
                 let fixed = if ALL_WHITESPACE.is_match(&unescaped) {
-                    format!("![]{}", url)
+                    format!("![]{url}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
-                    format!("![{}]{}", trimmed, url)
+                    format!("![{trimmed}]{url}")
                 };
 
                 warnings.push(LintWarning {
@@ -255,7 +251,7 @@ impl Rule for MD039NoSpaceInLinks {
             if needs_fix {
                 let url_part = if link.is_reference {
                     if let Some(ref_id) = &link.reference_id {
-                        format!("[{}]", ref_id)
+                        format!("[{ref_id}]")
                     } else {
                         "[]".to_string()
                     }
@@ -264,10 +260,10 @@ impl Rule for MD039NoSpaceInLinks {
                 };
 
                 let replacement = if ALL_WHITESPACE.is_match(&unescaped) {
-                    format!("[]{}", url_part)
+                    format!("[]{url_part}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
-                    format!("[{}]{}", trimmed, url_part)
+                    format!("[{trimmed}]{url_part}")
                 };
 
                 fixes.push((link.byte_offset, link.byte_end, replacement));
@@ -297,7 +293,7 @@ impl Rule for MD039NoSpaceInLinks {
             if needs_fix {
                 let url_part = if image.is_reference {
                     if let Some(ref_id) = &image.reference_id {
-                        format!("[{}]", ref_id)
+                        format!("[{ref_id}]")
                     } else {
                         "[]".to_string()
                     }
@@ -306,10 +302,10 @@ impl Rule for MD039NoSpaceInLinks {
                 };
 
                 let replacement = if ALL_WHITESPACE.is_match(&unescaped) {
-                    format!("![]{}", url_part)
+                    format!("![]{url_part}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
-                    format!("![{}]{}", trimmed, url_part)
+                    format!("![{trimmed}]{url_part}")
                 };
 
                 fixes.push((image.byte_offset, image.byte_end, replacement));
@@ -331,8 +327,7 @@ impl Rule for MD039NoSpaceInLinks {
             if start < last_pos {
                 // This should not happen if fixes are properly sorted and non-overlapping
                 return Err(LintError::FixFailed(format!(
-                    "Overlapping fixes detected: last_pos={}, start={}",
-                    last_pos, start
+                    "Overlapping fixes detected: last_pos={last_pos}, start={start}"
                 )));
             }
             result.push_str(&content[last_pos..start]);
@@ -506,7 +501,7 @@ mod tests {
 
         // Add links with spaces (should be detected and fixed)
         for i in 0..500 {
-            content.push_str(&format!("Line {} with [ spaced link {} ](url{}) and text.\n", i, i, i));
+            content.push_str(&format!("Line {i} with [ spaced link {i} ](url{i}) and text.\n"));
         }
 
         // Add valid links (should be fast to skip)
@@ -550,7 +545,7 @@ mod tests {
             avg_check_duration,
             avg_check_duration.as_secs_f64() * 1000.0
         );
-        println!("- Found {} warnings", warnings_count);
+        println!("- Found {warnings_count} warnings");
         println!(
             "- Lines per second: {:.0}",
             content.lines().count() as f64 / avg_check_duration.as_secs_f64()

@@ -2,7 +2,7 @@
 ///
 /// See [docs/md020.md](../../docs/md020.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{calculate_single_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_single_line_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -47,15 +47,14 @@ impl MD020NoMissingSpaceClosedAtx {
             let last_char = &captures[4];
             let closing_hashes = &captures[5];
             format!(
-                "{}{} {}{} {}",
-                indentation, opening_hashes, content, last_char, closing_hashes
+                "{indentation}{opening_hashes} {content}{last_char} {closing_hashes}"
             )
         } else if let Some(captures) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
             let content = &captures[3];
             let closing_hashes = &captures[4];
-            format!("{}{} {} {}", indentation, opening_hashes, content, closing_hashes)
+            format!("{indentation}{opening_hashes} {content} {closing_hashes}")
         } else if let Some(captures) = CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line) {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
@@ -63,8 +62,7 @@ impl MD020NoMissingSpaceClosedAtx {
             let last_char = &captures[4];
             let closing_hashes = &captures[5];
             format!(
-                "{}{} {}{} {}",
-                indentation, opening_hashes, content, last_char, closing_hashes
+                "{indentation}{opening_hashes} {content}{last_char} {closing_hashes}"
             )
         } else {
             line.to_string()

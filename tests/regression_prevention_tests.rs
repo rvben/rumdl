@@ -36,10 +36,7 @@ fn test_pattern_1_empty_byte_ranges_prevention() {
             Box::new(MD041FirstLineHeading::new(1, false)) as Box<dyn Rule>,
         ),
         // MD042: Should calculate proper length for link replacement
-        (
-            "[](empty-link)",
-            Box::new(MD042NoEmptyLinks) as Box<dyn Rule>,
-        ),
+        ("[](empty-link)", Box::new(MD042NoEmptyLinks) as Box<dyn Rule>),
         // MD045: Should use regex capture group for URL
         ("![](no-alt-text.jpg)", Box::new(MD045NoAltText::new()) as Box<dyn Rule>),
         // MD047: Should handle trailing newline logic properly
@@ -73,9 +70,14 @@ fn test_pattern_1_empty_byte_ranges_prevention() {
                 // For empty ranges, ensure they represent valid insertion points
                 // Empty ranges are valid for insertions (start == end)
                 if fix.range.is_empty() {
-                    assert!(fix.range.start <= content.len(),
+                    assert!(
+                        fix.range.start <= content.len(),
                         "Rule {} produced empty fix range with invalid insertion point {} > content length {} for content: '{}'",
-                        rule.name(), fix.range.start, content.len(), content);
+                        rule.name(),
+                        fix.range.start,
+                        content.len(),
+                        content
+                    );
                 } else {
                     // For non-empty ranges, ensure they represent valid replacement ranges
                     assert!(

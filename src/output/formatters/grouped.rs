@@ -35,7 +35,7 @@ impl OutputFormatter for GroupedFormatter {
         }
 
         // Output file header
-        output.push_str(&format!("{}:\n", file_path));
+        output.push_str(&format!("{file_path}:\n"));
 
         // Sort rules for consistent output
         let mut rules: Vec<_> = grouped.keys().collect();
@@ -43,7 +43,7 @@ impl OutputFormatter for GroupedFormatter {
 
         for rule_name in rules {
             let rule_warnings = &grouped[rule_name];
-            output.push_str(&format!("  {}:\n", rule_name));
+            output.push_str(&format!("  {rule_name}:\n"));
 
             for warning in rule_warnings {
                 output.push_str(&format!("    {}:{} {}", warning.line, warning.column, warning.message));
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn test_grouped_formatter_default() {
-        let _formatter = GroupedFormatter::default();
+        let _formatter = GroupedFormatter;
         // No fields to test, just ensure it constructs
     }
 
@@ -101,7 +101,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
         let expected = "README.md:\n  MD001:\n    10:5 Heading levels should only increment by one level at a time";
         assert_eq!(output, expected);
@@ -123,9 +123,10 @@ mod tests {
                 replacement: "## Heading".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
-        let expected = "README.md:\n  MD001:\n    10:5 Heading levels should only increment by one level at a time (fixable)";
+        let expected =
+            "README.md:\n  MD001:\n    10:5 Heading levels should only increment by one level at a time (fixable)";
         assert_eq!(output, expected);
     }
 
@@ -154,7 +155,7 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let expected = "test.md:\n  MD001:\n    5:1 First violation\n    10:3 Second violation";
         assert_eq!(output, expected);
@@ -198,7 +199,7 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let expected = "test.md:\n  MD001:\n    5:1 Heading increment\n    15:1 Another heading issue\n  MD013:\n    10:3 Line too long (fixable)";
         assert_eq!(output, expected);
@@ -217,7 +218,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
         let expected = "file.md:\n  unknown:\n    1:1 Unknown rule warning";
         assert_eq!(output, expected);
@@ -258,10 +259,10 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let lines: Vec<&str> = output.lines().collect();
-        
+
         // Verify rules are sorted alphabetically
         assert_eq!(lines[1], "  MD001:");
         assert_eq!(lines[3], "  MD005:");
@@ -271,7 +272,7 @@ mod tests {
     #[test]
     fn test_edge_cases() {
         let formatter = GroupedFormatter::new();
-        
+
         // Test large line/column numbers
         let warnings = vec![LintWarning {
             line: 99999,
@@ -283,7 +284,7 @@ mod tests {
             severity: Severity::Error,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "large.md");
         let expected = "large.md:\n  MD999:\n    99999:12345 Edge case warning";
         assert_eq!(output, expected);
@@ -302,7 +303,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let expected = "test.md:\n  MD001:\n    1:1 Warning with \"quotes\" and 'apostrophes' and \n newline";
         assert_eq!(output, expected);
@@ -321,7 +322,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "path/with spaces/and-dashes.md");
         let expected = "path/with spaces/and-dashes.md:\n  MD001:\n    1:1 Test";
         assert_eq!(output, expected);
@@ -365,7 +366,7 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let expected = "test.md:\n  MD001:\n    1:1 Not fixable\n    2:1 Fixable (fixable)\n    3:1 Also not fixable";
         assert_eq!(output, expected);
@@ -374,7 +375,7 @@ mod tests {
     #[test]
     fn test_severity_not_shown() {
         let formatter = GroupedFormatter::new();
-        
+
         // Test that severity doesn't affect output
         let warnings = vec![
             LintWarning {
@@ -398,7 +399,7 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let expected = "test.md:\n  MD001:\n    1:1 Warning severity\n    2:1 Error severity";
         assert_eq!(output, expected);

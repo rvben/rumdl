@@ -3,7 +3,7 @@
 //! This module contains character range tests for additional rules
 //! beyond the basic set.
 
-use super::{multi_warning_test, simple_test, test_character_ranges, ExpectedWarning};
+use super::{ExpectedWarning, multi_warning_test, simple_test, test_character_ranges};
 
 // MD003 - Heading style consistency
 #[test]

@@ -205,10 +205,10 @@ impl Rule for MD002FirstHeadingH1 {
                             let hashes = "#".repeat(self.config.level as usize);
                             if heading.has_closing_sequence {
                                 // Preserve closed ATX: # Heading #
-                                fixed_lines.push(format!("{}{} {} {}", indent, hashes, heading_text, hashes));
+                                fixed_lines.push(format!("{indent}{hashes} {heading_text} {hashes}"));
                             } else {
                                 // Standard ATX: # Heading
-                                fixed_lines.push(format!("{}{} {}", indent, hashes, heading_text));
+                                fixed_lines.push(format!("{indent}{hashes} {heading_text}"));
                             }
                             i += 1;
                         }
@@ -305,7 +305,7 @@ mod tests {
         let content = "# Main Title\n\n## Subsection\n\nContent here";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -315,9 +315,13 @@ mod tests {
         let content = "## Introduction\n\nContent here\n\n# Main Title";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("First heading should be level 1, found level 2"));
+        assert!(
+            result[0]
+                .message
+                .contains("First heading should be level 1, found level 2")
+        );
         assert_eq!(result[0].line, 1);
     }
 
@@ -326,7 +330,7 @@ mod tests {
         let rule = MD002FirstHeadingH1::default();
         let ctx = LintContext::new("");
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -336,7 +340,7 @@ mod tests {
         let content = "This is just paragraph text.\n\nMore paragraph text.\n\n- List item 1\n- List item 2";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -346,9 +350,13 @@ mod tests {
         let content = "Introduction\n------------\n\nContent here";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("First heading should be level 1, found level 2"));
+        assert!(
+            result[0]
+                .message
+                .contains("First heading should be level 1, found level 2")
+        );
     }
 
     #[test]
@@ -357,7 +365,7 @@ mod tests {
         let content = "Main Title\n==========\n\nContent here";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -367,9 +375,13 @@ mod tests {
         let content = "---\ntitle: Test Document\nauthor: Test Author\n---\n\n## Introduction\n\nContent";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("First heading should be level 1, found level 2"));
+        assert!(
+            result[0]
+                .message
+                .contains("First heading should be level 1, found level 2")
+        );
     }
 
     #[test]
@@ -377,7 +389,7 @@ mod tests {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "## Introduction\n\nContent here";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Introduction\n\nContent here");
     }
@@ -387,7 +399,7 @@ mod tests {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "## Introduction ##\n\nContent here";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Introduction #\n\nContent here");
     }
@@ -397,7 +409,7 @@ mod tests {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "Introduction\n------------\n\nContent here";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Introduction\n=======\n\nContent here");
     }
@@ -407,7 +419,7 @@ mod tests {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "  ## Introduction\n\nContent here";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "  # Introduction\n\nContent here");
     }
@@ -418,9 +430,13 @@ mod tests {
         let content = "# Main Title\n\n## Subsection";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("First heading should be level 2, found level 1"));
+        assert!(
+            result[0]
+                .message
+                .contains("First heading should be level 2, found level 1")
+        );
     }
 
     #[test]
@@ -428,7 +444,7 @@ mod tests {
         let rule = MD002FirstHeadingH1::new(2);
         let content = "# Main Title\n\nContent";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "## Main Title\n\nContent");
     }
@@ -439,29 +455,33 @@ mod tests {
         let content = "### Introduction\n\n# Main Title\n\n## Section\n\n#### Subsection";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Only the first heading matters
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("First heading should be level 1, found level 3"));
+        assert!(
+            result[0]
+                .message
+                .contains("First heading should be level 1, found level 3")
+        );
         assert_eq!(result[0].line, 1);
     }
 
     #[test]
     fn test_should_skip_optimization() {
         let rule = MD002FirstHeadingH1::default();
-        
+
         // Should skip empty content
         let ctx = LintContext::new("");
         assert!(rule.should_skip(&ctx));
-        
+
         // Should skip content without heading indicators
         let ctx = LintContext::new("Just paragraph text\n\nMore text");
         assert!(rule.should_skip(&ctx));
-        
+
         // Should not skip content with ATX heading
         let ctx = LintContext::new("Some text\n# Heading");
         assert!(!rule.should_skip(&ctx));
-        
+
         // Should not skip content with potential setext heading
         let ctx = LintContext::new("Title\n=====");
         assert!(!rule.should_skip(&ctx));
@@ -487,7 +507,7 @@ mod tests {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "### Heading\n\nParagraph 1\n\n## Section\n\nParagraph 2";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Heading\n\nParagraph 1\n\n## Section\n\nParagraph 2");
     }
@@ -497,7 +517,7 @@ mod tests {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "Short Title\n----------------------------------------\n\nContent";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         // The fix should use a reasonable length underline, not preserve the exact length
         assert!(fixed.starts_with("Short Title\n======="));
@@ -508,7 +528,7 @@ mod tests {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "# Correct Heading\n\nContent";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content);
     }
@@ -519,9 +539,9 @@ mod tests {
         let content = "## Heading with **bold** and _italic_ text\n\nContent";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Heading with **bold** and _italic_ text\n\nContent");
     }
@@ -531,7 +551,7 @@ mod tests {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "##    Introduction    \n\nContent";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Introduction\n\nContent");
     }

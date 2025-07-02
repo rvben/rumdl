@@ -3,7 +3,7 @@
 //! These tests verify the LSP server works correctly in scenarios that
 //! mirror how editors like VS Code, Neovim, etc. would interact with rumdl.
 
-use rumdl::lsp::types::{warning_to_diagnostic, RumdlLspConfig};
+use rumdl::lsp::types::{RumdlLspConfig, warning_to_diagnostic};
 use std::time::Duration;
 
 /// Test the core LSP workflow without full server setup
@@ -130,8 +130,7 @@ async fn test_performance_with_large_document() {
 
     for i in 1..=100 {
         large_content.push_str(&format!(
-            "## Section {}\n\nThis is paragraph {} with some content. ",
-            i, i
+            "## Section {i}\n\nThis is paragraph {i} with some content. "
         ));
         large_content.push_str("Here's some more text to make it substantial. ");
         large_content.push_str("And even more content to test performance.\n\n");
@@ -156,8 +155,7 @@ async fn test_performance_with_large_document() {
     // Should complete reasonably quickly (within 2 seconds for this size)
     assert!(
         elapsed < Duration::from_secs(2),
-        "Large document processing took too long: {:?}",
-        elapsed
+        "Large document processing took too long: {elapsed:?}"
     );
 }
 
@@ -180,13 +178,12 @@ async fn test_rapid_editing_simulation() {
     }
 
     let elapsed = start.elapsed();
-    println!("Rapid editing simulation completed in {:?}", elapsed);
+    println!("Rapid editing simulation completed in {elapsed:?}");
 
     // Should handle rapid changes efficiently
     assert!(
         elapsed < Duration::from_secs(1),
-        "Rapid editing simulation took too long: {:?}",
-        elapsed
+        "Rapid editing simulation took too long: {elapsed:?}"
     );
 }
 
@@ -233,8 +230,7 @@ async fn test_workspace_scenarios() {
     }
 
     println!(
-        "Workspace total: {} warnings across {} files",
-        total_warnings, file_count
+        "Workspace total: {total_warnings} warnings across {file_count} files"
     );
 }
 

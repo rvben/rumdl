@@ -5,7 +5,7 @@
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
-use crate::utils::range_utils::{calculate_emphasis_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_emphasis_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -154,7 +154,7 @@ impl MD036NoEmphasisAsHeading {
             }
             result
         } else {
-            format!("{} {}", prefix, text)
+            format!("{prefix} {text}")
         }
     }
 }
@@ -211,7 +211,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    message: format!("Emphasis used instead of a heading: '{}'", text),
+                    message: format!("Emphasis used instead of a heading: '{text}'"),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_content_range(i + 1),
@@ -291,10 +291,14 @@ mod tests {
         let content = "*This is emphasized*\n\nRegular text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
-        assert!(result[0].message.contains("Emphasis used instead of a heading: 'This is emphasized'"));
+        assert!(
+            result[0]
+                .message
+                .contains("Emphasis used instead of a heading: 'This is emphasized'")
+        );
     }
 
     #[test]
@@ -303,10 +307,14 @@ mod tests {
         let content = "_This is emphasized_\n\nRegular text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
-        assert!(result[0].message.contains("Emphasis used instead of a heading: 'This is emphasized'"));
+        assert!(
+            result[0]
+                .message
+                .contains("Emphasis used instead of a heading: 'This is emphasized'")
+        );
     }
 
     #[test]
@@ -315,10 +323,14 @@ mod tests {
         let content = "**This is strong**\n\nRegular text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
-        assert!(result[0].message.contains("Emphasis used instead of a heading: 'This is strong'"));
+        assert!(
+            result[0]
+                .message
+                .contains("Emphasis used instead of a heading: 'This is strong'")
+        );
     }
 
     #[test]
@@ -327,10 +339,14 @@ mod tests {
         let content = "__This is strong__\n\nRegular text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
-        assert!(result[0].message.contains("Emphasis used instead of a heading: 'This is strong'"));
+        assert!(
+            result[0]
+                .message
+                .contains("Emphasis used instead of a heading: 'This is strong'")
+        );
     }
 
     #[test]
@@ -339,7 +355,7 @@ mod tests {
         let content = "**Important Note:**\n\nRegular text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
         // The punctuation should be included in the message
@@ -352,7 +368,7 @@ mod tests {
         let content = "This is a paragraph with *emphasis* in the middle.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should not flag emphasis within a line
         assert_eq!(result.len(), 0);
     }
@@ -363,7 +379,7 @@ mod tests {
         let content = "- *List item with emphasis*\n- Another item";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should not flag emphasis in list items
         assert_eq!(result.len(), 0);
     }
@@ -374,7 +390,7 @@ mod tests {
         let content = "> *Quote with emphasis*\n> Another line";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should not flag emphasis in blockquotes
         assert_eq!(result.len(), 0);
     }
@@ -385,7 +401,7 @@ mod tests {
         let content = "```\n*Not emphasis in code*\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should not flag emphasis in code blocks
         assert_eq!(result.len(), 0);
     }
@@ -396,7 +412,7 @@ mod tests {
         let content = "**Table of Contents**\n\n- Item 1\n- Item 2";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should not flag common TOC labels
         assert_eq!(result.len(), 0);
     }
@@ -407,7 +423,7 @@ mod tests {
         let content = "# **Bold in heading**\n\nRegular text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should not flag emphasis that's already in a heading
         assert_eq!(result.len(), 0);
     }
@@ -418,7 +434,7 @@ mod tests {
         let content = "*Convert to heading*\n\nRegular text";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "# Convert to heading\n\nRegular text");
     }
 
@@ -428,7 +444,7 @@ mod tests {
         let content = "**Convert to heading**\n\nRegular text";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "## Convert to heading\n\nRegular text");
     }
 
@@ -438,7 +454,7 @@ mod tests {
         let content = "**Important Note:**\n\nRegular text";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "## Important Note\n\nRegular text");
     }
 
@@ -448,7 +464,7 @@ mod tests {
         let content = "**Important Note:**\n\nRegular text";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // With empty punctuation config, keeps the colon
         assert_eq!(fixed, "## Important Note:\n\nRegular text");
     }
@@ -459,7 +475,7 @@ mod tests {
         let content = "*First heading*\n\nSome text\n\n**Second heading**\n\nMore text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 5);
@@ -471,7 +487,7 @@ mod tests {
         let content = "  **Indented emphasis**  \n\nRegular text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
     }
@@ -482,7 +498,7 @@ mod tests {
         let content = "***Not a simple emphasis***\n\nRegular text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Nested emphasis (3 asterisks) should not match our patterns
         assert_eq!(result.len(), 0);
     }
@@ -493,7 +509,7 @@ mod tests {
         let content = "*First line\nSecond line*\n\nRegular text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Multi-line emphasis should not be flagged
         assert_eq!(result.len(), 0);
     }
@@ -504,7 +520,7 @@ mod tests {
         let content = "*Convert to heading*\n";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "# Convert to heading\n");
     }
 
@@ -513,7 +529,7 @@ mod tests {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let (name, config) = rule.default_config_section().unwrap();
         assert_eq!(name, "MD036");
-        
+
         let table = config.as_table().unwrap();
         assert_eq!(table.get("punctuation").unwrap().as_str().unwrap(), ".,;:!?");
     }

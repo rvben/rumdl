@@ -46,7 +46,7 @@ impl Rule for MD024NoDuplicateHeading {
         let mut warnings = Vec::new();
         let mut seen_headings: HashSet<String> = HashSet::new();
         let mut seen_headings_per_level: HashMap<u8, HashSet<String>> = HashMap::new();
-        
+
         // For siblings_only mode, track heading hierarchy
         let mut current_section_path: Vec<(u8, String)> = Vec::new(); // Stack of (level, heading_text)
         let mut seen_siblings: HashMap<String, HashSet<String>> = HashMap::new(); // parent_path -> set of child headings
@@ -82,14 +82,14 @@ impl Rule for MD024NoDuplicateHeading {
                     while !current_section_path.is_empty() && current_section_path.last().unwrap().0 >= level {
                         current_section_path.pop();
                     }
-                    
+
                     // Build parent path for sibling detection
                     let parent_path = current_section_path
                         .iter()
                         .map(|(_, text)| text.as_str())
                         .collect::<Vec<_>>()
                         .join("/");
-                    
+
                     // Check if this heading is a duplicate among its siblings
                     let siblings = seen_siblings.entry(parent_path.clone()).or_default();
                     if siblings.contains(&heading_key) {
@@ -106,7 +106,7 @@ impl Rule for MD024NoDuplicateHeading {
                     } else {
                         siblings.insert(heading_key.clone());
                     }
-                    
+
                     // Add current heading to the section path
                     current_section_path.push((level, heading_key.clone()));
                 } else if self.config.allow_different_nesting {
@@ -730,7 +730,10 @@ Not a duplicate."#;
         assert!(result.is_ok());
         let warnings = result.unwrap();
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].message, "Duplicate heading: '[Link Text](http://example.com)'.");
+        assert_eq!(
+            warnings[0].message,
+            "Duplicate heading: '[Link Text](http://example.com)'."
+        );
         assert_eq!(warnings[0].line, 5);
     }
 
@@ -779,7 +782,7 @@ Different parent sections, so not siblings - no warning expected."#;
         // With siblings_only, these are not flagged because they're under different parents
         assert_eq!(warnings.len(), 0);
     }
-    
+
     #[test]
     fn test_siblings_only_with_actual_siblings() {
         let content = r#"# Main Section
@@ -834,8 +837,7 @@ Duplicate with code span."#;
     fn test_very_long_heading() {
         let long_text = "This is a very long heading that goes on and on and on and contains many words to test how the rule handles long headings";
         let content = format!(
-            "# {}\n\nSome content.\n\n## {}\n\nDuplicate long heading.",
-            long_text, long_text
+            "# {long_text}\n\nSome content.\n\n## {long_text}\n\nDuplicate long heading."
         );
 
         let config = MD024Config::default();
@@ -843,7 +845,7 @@ Duplicate with code span."#;
         assert!(result.is_ok());
         let warnings = result.unwrap();
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].message, format!("Duplicate heading: '{}'.", long_text));
+        assert_eq!(warnings[0].message, format!("Duplicate heading: '{long_text}'."));
         assert_eq!(warnings[0].line, 5);
     }
 

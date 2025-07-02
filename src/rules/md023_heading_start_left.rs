@@ -2,7 +2,7 @@
 ///
 /// See [docs/md023.md](../../docs/md023.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{calculate_single_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_single_line_range};
 
 #[derive(Clone)]
 pub struct MD023HeadingStartLeft;
@@ -56,7 +56,7 @@ impl Rule for MD023HeadingStartLeft {
                             end_line,
                             end_column: end_col,
                             severity: Severity::Warning,
-                            message: format!("Setext heading should not be indented by {} spaces", indentation),
+                            message: format!("Setext heading should not be indented by {indentation} spaces"),
                             fix: Some(Fix {
                                 range: line_index.line_col_to_byte_range_with_length(
                                     line_num + 1,
@@ -115,7 +115,7 @@ impl Rule for MD023HeadingStartLeft {
                             end_line: atx_end_line,
                             end_column: atx_end_col,
                             severity: Severity::Warning,
-                            message: format!("Heading should not be indented by {} spaces", indentation),
+                            message: format!("Heading should not be indented by {indentation} spaces"),
                             fix: Some(Fix {
                                 range: line_index.line_col_to_byte_range_with_length(
                                     line_num + 1,

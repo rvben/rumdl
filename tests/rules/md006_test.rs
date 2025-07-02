@@ -28,8 +28,7 @@ fn test_valid_nested_list() {
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
-        "Valid nested lists should not generate warnings, found: {:?}",
-        result
+        "Valid nested lists should not generate warnings, found: {result:?}"
     );
 }
 
@@ -237,7 +236,6 @@ Some breaking content
     let flagged_lines: Vec<usize> = result.iter().map(|w| w.line).collect();
     assert!(
         flagged_lines.contains(&7) && flagged_lines.contains(&8),
-        "Should flag lines 7 and 8 (the improperly indented items), but flagged: {:?}",
-        flagged_lines
+        "Should flag lines 7 and 8 (the improperly indented items), but flagged: {flagged_lines:?}"
     );
 }

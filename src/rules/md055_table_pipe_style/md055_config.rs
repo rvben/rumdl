@@ -48,7 +48,7 @@ where
     if valid_styles.contains(&s.as_str()) {
         Ok(s)
     } else {
-        Err(serde::de::Error::custom(format!("Invalid table pipe style: {}", s)))
+        Err(serde::de::Error::custom(format!("Invalid table pipe style: {s}")))
     }
 }
 

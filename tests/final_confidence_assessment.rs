@@ -78,13 +78,11 @@ Another paragraph.
 
     assert!(
         total_warnings >= 5,
-        "Should find multiple issues in test content, found {}",
-        total_warnings
+        "Should find multiple issues in test content, found {total_warnings}"
     );
 
     println!(
-        "   ✓ Core rules functioning correctly ({} warnings found)",
-        total_warnings
+        "   ✓ Core rules functioning correctly ({total_warnings} warnings found)"
     );
 }
 
@@ -134,8 +132,7 @@ fn validate_cli_lsp_consistency() {
 
     assert!(consistency_checks > 0, "Should have performed consistency checks");
     println!(
-        "   ✓ CLI/LSP consistency validated ({} checks passed)",
-        consistency_checks
+        "   ✓ CLI/LSP consistency validated ({consistency_checks} checks passed)"
     );
 }
 
@@ -244,7 +241,7 @@ fn validate_unicode_and_edge_cases() {
         edge_case_checks += 1;
     }
 
-    println!("   ✓ Unicode and edge cases validated ({} cases)", edge_case_checks);
+    println!("   ✓ Unicode and edge cases validated ({edge_case_checks} cases)");
 }
 
 fn validate_integration_scenarios() {
@@ -292,7 +289,7 @@ fn validate_integration_scenarios() {
             }
         }
 
-        println!("   ✓ {} scenario: {} warnings processed", scenario_name, total_warnings);
+        println!("   ✓ {scenario_name} scenario: {total_warnings} warnings processed");
     }
 
     println!("   ✓ Integration scenarios validated");

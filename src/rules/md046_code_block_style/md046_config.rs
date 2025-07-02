@@ -32,7 +32,7 @@ where
         "fenced" => Ok(CodeBlockStyle::Fenced),
         "indented" => Ok(CodeBlockStyle::Indented),
         "consistent" => Ok(CodeBlockStyle::Consistent),
-        _ => Err(serde::de::Error::custom(format!("Invalid code block style: {}", s))),
+        _ => Err(serde::de::Error::custom(format!("Invalid code block style: {s}"))),
     }
 }
 

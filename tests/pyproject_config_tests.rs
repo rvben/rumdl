@@ -27,8 +27,7 @@ fn test_pyproject_toml_init_command() {
     assert!(success, "Command failed");
     assert!(
         stdout.contains("Created pyproject.toml with rumdl configuration"),
-        "Expected success message not found in stdout: {}",
-        stdout
+        "Expected success message not found in stdout: {stdout}"
     );
 
     // Verify the file was created
@@ -74,13 +73,11 @@ build-backend = "setuptools.build_meta"
     assert!(output.status.success(), "Command failed");
     assert!(
         stdout.contains("Would you like to append rumdl configuration?"),
-        "Expected prompt not found in stdout: {}",
-        stdout
+        "Expected prompt not found in stdout: {stdout}"
     );
     assert!(
         stdout.contains("Added rumdl configuration to pyproject.toml"),
-        "Expected success message not found in stdout: {}",
-        stdout
+        "Expected success message not found in stdout: {stdout}"
     );
 
     // Check file contents
@@ -126,8 +123,8 @@ line-length = 100
     let (success, stdout, stderr) = run_rumdl_command(&[test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
 
     // Print output for debugging
-    println!("STDOUT (pyproject_toml_config_loading):\n{}", stdout);
-    println!("STDERR (pyproject_toml_config_loading):\n{}", stderr);
+    println!("STDOUT (pyproject_toml_config_loading):\n{stdout}");
+    println!("STDERR (pyproject_toml_config_loading):\n{stderr}");
 
     assert!(success, "Command should succeed with custom line length");
     // Only fail if an actual MD013 warning line is present (not just in enabled rules)
@@ -180,16 +177,16 @@ line-length = 100
         run_rumdl_command(&[snake_test_file.to_str().unwrap(), "--verbose"], snake_case_dir.path());
 
     // Print output for debugging
-    println!("STDOUT (snake_case):\n{}", snake_stdout);
-    println!("STDERR (snake_case):\n{}", snake_stderr);
+    println!("STDOUT (snake_case):\n{snake_stdout}");
+    println!("STDERR (snake_case):\n{snake_stderr}");
 
     // Test kebab-case config
     let (kebab_success, kebab_stdout, kebab_stderr) =
         run_rumdl_command(&[kebab_test_file.to_str().unwrap(), "--verbose"], kebab_case_dir.path());
 
     // Print output for debugging
-    println!("STDOUT (kebab_case):\n{}", kebab_stdout);
-    println!("STDERR (kebab_case):\n{}", kebab_stderr);
+    println!("STDOUT (kebab_case):\n{kebab_stdout}");
+    println!("STDERR (kebab_case):\n{kebab_stderr}");
 
     // Both should succeed with custom line length
     assert!(snake_success, "Command should succeed with snake_case config");

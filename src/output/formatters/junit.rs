@@ -24,44 +24,43 @@ impl OutputFormatter for JunitFormatter {
         let mut xml = String::new();
         xml.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
         xml.push('\n');
-        
+
         let escaped_file = xml_escape(file_path);
-        
+
         xml.push_str(&format!(
             r#"<testsuites name="rumdl" tests="1" failures="{}" errors="0" time="0.000">"#,
             warnings.len()
         ));
         xml.push('\n');
-        
+
         xml.push_str(&format!(
             r#"  <testsuite name="{}" tests="1" failures="{}" errors="0" time="0.000">"#,
             escaped_file,
             warnings.len()
         ));
         xml.push('\n');
-        
+
         xml.push_str(&format!(
-            r#"    <testcase name="Lint {}" classname="rumdl" time="0.000">"#,
-            escaped_file
+            r#"    <testcase name="Lint {escaped_file}" classname="rumdl" time="0.000">"#
         ));
         xml.push('\n');
-        
+
         // Add failures for each warning
         for warning in warnings {
             let rule_name = warning.rule_name.unwrap_or("unknown");
             let message = xml_escape(&warning.message);
-            
+
             xml.push_str(&format!(
                 r#"      <failure type="{}" message="{}">{} at line {}, column {}</failure>"#,
                 rule_name, message, message, warning.line, warning.column
             ));
             xml.push('\n');
         }
-        
+
         xml.push_str("    </testcase>\n");
         xml.push_str("  </testsuite>\n");
         xml.push_str("</testsuites>\n");
-        
+
         xml
     }
 }
@@ -80,8 +79,7 @@ pub fn format_junit_report(all_warnings: &[(String, Vec<LintWarning>)], duration
     let duration_secs = duration_ms as f64 / 1000.0;
 
     xml.push_str(&format!(
-        r#"<testsuites name="rumdl" tests="{}" failures="{}" errors="0" time="{:.3}">"#,
-        files_with_issues, total_issues, duration_secs
+        r#"<testsuites name="rumdl" tests="{files_with_issues}" failures="{total_issues}" errors="0" time="{duration_secs:.3}">"#
     ));
     xml.push('\n');
 
@@ -98,8 +96,7 @@ pub fn format_junit_report(all_warnings: &[(String, Vec<LintWarning>)], duration
 
         // Create a test case for the file
         xml.push_str(&format!(
-            r#"    <testcase name="Lint {}" classname="rumdl" time="0.000">"#,
-            escaped_file
+            r#"    <testcase name="Lint {escaped_file}" classname="rumdl" time="0.000">"#
         ));
         xml.push('\n');
 
@@ -139,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_junit_formatter_default() {
-        let _formatter = JunitFormatter::default();
+        let _formatter = JunitFormatter;
         // No fields to test, just ensure it constructs
     }
 
@@ -154,7 +151,7 @@ mod tests {
         let formatter = JunitFormatter::new();
         let warnings = vec![];
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         assert!(output.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
         assert!(output.contains("<testsuites name=\"rumdl\" tests=\"1\" failures=\"0\" errors=\"0\" time=\"0.000\">"));
         assert!(output.contains("<testsuite name=\"test.md\" tests=\"1\" failures=\"0\" errors=\"0\" time=\"0.000\">"));
@@ -177,12 +174,16 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
-        
+
         assert!(output.contains("<testsuites name=\"rumdl\" tests=\"1\" failures=\"1\" errors=\"0\" time=\"0.000\">"));
-        assert!(output.contains("<testsuite name=\"README.md\" tests=\"1\" failures=\"1\" errors=\"0\" time=\"0.000\">"));
-        assert!(output.contains("<failure type=\"MD001\" message=\"Heading levels should only increment by one level at a time\">"));
+        assert!(
+            output.contains("<testsuite name=\"README.md\" tests=\"1\" failures=\"1\" errors=\"0\" time=\"0.000\">")
+        );
+        assert!(output.contains(
+            "<failure type=\"MD001\" message=\"Heading levels should only increment by one level at a time\">"
+        ));
         assert!(output.contains("at line 10, column 5</failure>"));
     }
 
@@ -202,9 +203,9 @@ mod tests {
                 replacement: "## Heading".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
-        
+
         // JUnit format doesn't indicate fixable issues
         assert!(output.contains("<failure type=\"MD001\""));
         assert!(!output.contains("fixable"));
@@ -235,9 +236,9 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         assert!(output.contains("<testsuites name=\"rumdl\" tests=\"1\" failures=\"2\" errors=\"0\" time=\"0.000\">"));
         assert!(output.contains("<testsuite name=\"test.md\" tests=\"1\" failures=\"2\" errors=\"0\" time=\"0.000\">"));
         assert!(output.contains("<failure type=\"MD001\" message=\"First warning\">"));
@@ -259,9 +260,9 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
-        
+
         assert!(output.contains("<failure type=\"unknown\" message=\"Unknown rule warning\">"));
     }
 
@@ -279,7 +280,7 @@ mod tests {
     fn test_junit_report_empty() {
         let warnings = vec![];
         let output = format_junit_report(&warnings, 1234);
-        
+
         assert!(output.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
         assert!(output.contains("<testsuites name=\"rumdl\" tests=\"0\" failures=\"0\" errors=\"0\" time=\"1.234\">"));
         assert!(output.ends_with("</testsuites>\n"));
@@ -300,9 +301,9 @@ mod tests {
                 fix: None,
             }],
         )];
-        
+
         let output = format_junit_report(&warnings, 500);
-        
+
         assert!(output.contains("<testsuites name=\"rumdl\" tests=\"1\" failures=\"1\" errors=\"0\" time=\"0.500\">"));
         assert!(output.contains("<testsuite name=\"test.md\" tests=\"1\" failures=\"1\" errors=\"0\" time=\"0.000\">"));
     }
@@ -349,9 +350,9 @@ mod tests {
                 ],
             ),
         ];
-        
+
         let output = format_junit_report(&warnings, 2500);
-        
+
         // Total: 2 files, 3 failures
         assert!(output.contains("<testsuites name=\"rumdl\" tests=\"2\" failures=\"3\" errors=\"0\" time=\"2.500\">"));
         assert!(output.contains("<testsuite name=\"file1.md\" tests=\"1\" failures=\"1\""));
@@ -371,9 +372,9 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         assert!(output.contains("message=\"Warning with &lt; &gt; &amp; &quot; &apos; special chars\""));
         assert!(output.contains(">Warning with &lt; &gt; &amp; &quot; &apos; special chars at line"));
     }
@@ -391,9 +392,9 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "path/with<special>&chars.md");
-        
+
         assert!(output.contains("<testsuite name=\"path/with&lt;special&gt;&amp;chars.md\""));
         assert!(output.contains("<testcase name=\"Lint path/with&lt;special&gt;&amp;chars.md\""));
     }
@@ -411,9 +412,9 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         // Verify XML structure is properly nested
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines[0], "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
@@ -441,14 +442,14 @@ mod tests {
                 fix: None,
             }],
         )];
-        
+
         // Test various duration values
         let output1 = format_junit_report(&warnings, 1234);
         assert!(output1.contains("time=\"1.234\""));
-        
+
         let output2 = format_junit_report(&warnings, 500);
         assert!(output2.contains("time=\"0.500\""));
-        
+
         let output3 = format_junit_report(&warnings, 12345);
         assert!(output3.contains("time=\"12.345\""));
     }

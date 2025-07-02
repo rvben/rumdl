@@ -330,8 +330,7 @@ README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
-        "MD037 should not trigger inside a code block, but got warnings: {:?}",
-        result
+        "MD037 should not trigger inside a code block, but got warnings: {result:?}"
     );
 }
 
@@ -353,7 +352,7 @@ fn test_false_positive_punctuation_after_emphasis() {
         let result = rule.check(&ctx).unwrap();
 
         // Print results for debugging
-        println!("Testing: {}", content);
+        println!("Testing: {content}");
         println!("Found {} warnings:", result.len());
         for warning in &result {
             println!("  Line {}:{} - {}", warning.line, warning.column, warning.message);
@@ -387,7 +386,7 @@ fn test_false_positive_nested_emphasis() {
         let result = rule.check(&ctx).unwrap();
 
         // Print results for debugging
-        println!("Testing nested emphasis: {}", content);
+        println!("Testing nested emphasis: {content}");
         println!("Found {} warnings:", result.len());
         for warning in &result {
             println!("  Line {}:{} - {}", warning.line, warning.column, warning.message);
@@ -421,7 +420,7 @@ fn test_false_positive_multiple_emphasis_same_line() {
         let result = rule.check(&ctx).unwrap();
 
         // Print results for debugging
-        println!("Testing multiple emphasis: {}", content);
+        println!("Testing multiple emphasis: {content}");
         println!("Found {} warnings:", result.len());
         for warning in &result {
             println!("  Line {}:{} - {}", warning.line, warning.column, warning.message);
@@ -456,7 +455,7 @@ fn test_true_positive_spaces_in_emphasis() {
         let result = rule.check(&ctx).unwrap();
 
         // Print results for debugging
-        println!("Testing true positive: {}", content);
+        println!("Testing true positive: {content}");
         println!("Found {} warnings (expected {}):", result.len(), expected_warnings);
         for warning in &result {
             println!("  Line {}:{} - {}", warning.line, warning.column, warning.message);
@@ -539,7 +538,7 @@ fn test_math_expressions_not_flagged() {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
-        println!("Testing math expression: {}", content);
+        println!("Testing math expression: {content}");
         println!("Found {} warnings:", result.len());
         for warning in &result {
             println!("  Line {}:{} - {}", warning.line, warning.column, warning.message);

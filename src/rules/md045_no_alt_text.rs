@@ -43,7 +43,7 @@ impl Rule for MD045NoAltText {
             if image.alt_text.trim().is_empty() {
                 let url_part = if image.is_reference {
                     if let Some(ref_id) = &image.reference_id {
-                        format!("[{}]", ref_id)
+                        format!("[{ref_id}]")
                     } else {
                         "[]".to_string()
                     }
@@ -62,7 +62,7 @@ impl Rule for MD045NoAltText {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: image.byte_offset..image.byte_offset + (image.end_col - image.start_col),
-                        replacement: format!("![TODO: Add image description]{}", url_part),
+                        replacement: format!("![TODO: Add image description]{url_part}"),
                     }),
                 });
             }
@@ -91,7 +91,7 @@ impl Rule for MD045NoAltText {
                 result.push_str(&caps[0]);
             } else if alt_text.trim().is_empty() {
                 // Fix the image if it's not in a code block and has empty alt text
-                result.push_str(&format!("![TODO: Add image description]{}", url_part));
+                result.push_str(&format!("![TODO: Add image description]{url_part}"));
             } else {
                 // Keep the original if alt text is not empty
                 result.push_str(&caps[0]);
@@ -129,7 +129,7 @@ mod tests {
         let content = "![A beautiful sunset](sunset.jpg)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -139,7 +139,7 @@ mod tests {
         let content = "![](sunset.jpg)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
         assert!(result[0].message.contains("Image missing alt text"));
@@ -151,7 +151,7 @@ mod tests {
         let content = "![   ](sunset.jpg)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
     }
@@ -162,7 +162,7 @@ mod tests {
         let content = "![Good alt text](image1.jpg)\n![](image2.jpg)\n![Another good one](image3.jpg)\n![](image4.jpg)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 2);
         assert_eq!(result[1].line, 4);
@@ -174,7 +174,7 @@ mod tests {
         let content = "![][sunset]\n\n[sunset]: sunset.jpg";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
     }
@@ -185,7 +185,7 @@ mod tests {
         let content = "![Beautiful sunset][sunset]\n\n[sunset]: sunset.jpg";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -195,7 +195,7 @@ mod tests {
         let content = "```\n![](image.jpg)\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should not flag images in code blocks
         assert_eq!(result.len(), 0);
     }
@@ -206,7 +206,7 @@ mod tests {
         let content = "Use `![](image.jpg)` syntax";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should not flag images in inline code
         assert_eq!(result.len(), 0);
     }
@@ -217,7 +217,7 @@ mod tests {
         let content = "![](sunset.jpg)";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "![TODO: Add image description](sunset.jpg)");
     }
 
@@ -227,7 +227,7 @@ mod tests {
         let content = "![   ](sunset.jpg)";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "![TODO: Add image description](sunset.jpg)");
     }
 
@@ -237,8 +237,11 @@ mod tests {
         let content = "![Good](img1.jpg) ![](img2.jpg) ![](img3.jpg)";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
-        assert_eq!(fixed, "![Good](img1.jpg) ![TODO: Add image description](img2.jpg) ![TODO: Add image description](img3.jpg)");
+
+        assert_eq!(
+            fixed,
+            "![Good](img1.jpg) ![TODO: Add image description](img2.jpg) ![TODO: Add image description](img3.jpg)"
+        );
     }
 
     #[test]
@@ -247,7 +250,7 @@ mod tests {
         let content = "![This has alt text](image.jpg)";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "![This has alt text](image.jpg)");
     }
 
@@ -257,8 +260,11 @@ mod tests {
         let content = "```\n![](image.jpg)\n```\n![](real-image.jpg)";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
-        assert_eq!(fixed, "```\n![](image.jpg)\n```\n![TODO: Add image description](real-image.jpg)");
+
+        assert_eq!(
+            fixed,
+            "```\n![](image.jpg)\n```\n![TODO: Add image description](real-image.jpg)"
+        );
     }
 
     #[test]
@@ -267,7 +273,7 @@ mod tests {
         let content = "![](https://example.com/path/to/image.jpg?query=value#fragment)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
     }
 
@@ -277,7 +283,7 @@ mod tests {
         let content = "![](image(1).jpg)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
     }
 
@@ -287,7 +293,7 @@ mod tests {
         let content = "![](image.jpg \"Title text\")";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Image missing alt text"));
     }
@@ -298,7 +304,7 @@ mod tests {
         let content = "![](image.jpg \"Title text\")";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "![TODO: Add image description](image.jpg \"Title text\")");
     }
 
@@ -308,7 +314,7 @@ mod tests {
         let content = "![](my image.jpg)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
     }
 
@@ -318,7 +324,7 @@ mod tests {
         let content = "Text before ![](image.jpg) text after";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
         assert_eq!(result[0].column, 13); // 1-indexed column
@@ -330,7 +336,7 @@ mod tests {
         let content = "Line 1\nLine 2 with ![](image.jpg)\nLine 3";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
     }

@@ -249,8 +249,7 @@ disable = ["MD013" # Missing closing bracket
     if let Err(err) = sourced_result {
         assert!(
             err.to_string().contains("Failed to parse TOML"),
-            "Error message should indicate parsing failure: {}",
-            err
+            "Error message should indicate parsing failure: {err}"
         );
     }
 }
@@ -365,8 +364,8 @@ unknown_global = true"#;
     let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
     let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
-                                                                                // It seems unknown global keys are not yet tracked properly. Adjust test or implementation.
-                                                                                // For now, let's expect 0 warnings related to global keys until tracking is implemented/fixed.
+    // It seems unknown global keys are not yet tracked properly. Adjust test or implementation.
+    // For now, let's expect 0 warnings related to global keys until tracking is implemented/fixed.
     let global_warnings = warnings.iter().filter(|w| w.rule.is_none()).count();
     assert_eq!(
         global_warnings, 0,
@@ -466,13 +465,11 @@ mod config_file_parsing_tests {
         let error_msg = result.unwrap_err().to_string();
         assert!(
             error_msg.contains("Failed to parse JSON"),
-            "Error should mention JSON parsing: {}",
-            error_msg
+            "Error should mention JSON parsing: {error_msg}"
         );
         assert!(
             error_msg.contains("key must be a string"),
-            "Error should be specific about the issue: {}",
-            error_msg
+            "Error should be specific about the issue: {error_msg}"
         );
     }
 
@@ -517,8 +514,7 @@ MD004:
         let error_msg = result.unwrap_err().to_string();
         assert!(
             error_msg.contains("Failed to parse YAML"),
-            "Error should mention YAML parsing: {}",
-            error_msg
+            "Error should mention YAML parsing: {error_msg}"
         );
     }
 
@@ -564,13 +560,11 @@ invalid_key =
         let error_msg = result.unwrap_err().to_string();
         assert!(
             error_msg.contains("Failed to parse TOML"),
-            "Error should mention TOML parsing: {}",
-            error_msg
+            "Error should mention TOML parsing: {error_msg}"
         );
         assert!(
             error_msg.contains("invalid string"),
-            "Error should describe the specific issue: {}",
-            error_msg
+            "Error should describe the specific issue: {error_msg}"
         );
     }
 
@@ -624,13 +618,11 @@ line-length:
         let error_msg = result.unwrap_err().to_string();
         assert!(
             error_msg.contains("Failed to read config file"),
-            "Error should mention file reading failure: {}",
-            error_msg
+            "Error should mention file reading failure: {error_msg}"
         );
         assert!(
             error_msg.contains("No such file or directory"),
-            "Error should mention specific I/O error: {}",
-            error_msg
+            "Error should mention specific I/O error: {error_msg}"
         );
     }
 
@@ -732,12 +724,10 @@ line-length:
         assert!(!output.status.success(), "Command should fail with invalid config");
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let combined_output = format!("{}{}", stderr, stdout);
+        let combined_output = format!("{stderr}{stdout}");
         assert!(
             combined_output.contains("Failed to parse JSON") || combined_output.contains("Config error"),
-            "CLI should show JSON parsing error: stderr='{}' stdout='{}'",
-            stderr,
-            stdout
+            "CLI should show JSON parsing error: stderr='{stderr}' stdout='{stdout}'"
         );
 
         // Test YAML syntax error via CLI
@@ -752,12 +742,10 @@ line-length:
         assert!(!output.status.success(), "Command should fail with invalid YAML config");
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let combined_output = format!("{}{}", stderr, stdout);
+        let combined_output = format!("{stderr}{stdout}");
         assert!(
             combined_output.contains("Failed to parse YAML") || combined_output.contains("Config error"),
-            "CLI should show YAML parsing error: stderr='{}' stdout='{}'",
-            stderr,
-            stdout
+            "CLI should show YAML parsing error: stderr='{stderr}' stdout='{stdout}'"
         );
 
         // Test file not found error via CLI
@@ -769,12 +757,10 @@ line-length:
         assert!(!output.status.success(), "Command should fail with nonexistent config");
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let combined_output = format!("{}{}", stderr, stdout);
+        let combined_output = format!("{stderr}{stdout}");
         assert!(
             combined_output.contains("Failed to read config file") || combined_output.contains("Config error"),
-            "CLI should show file reading error: stderr='{}' stdout='{}'",
-            stderr,
-            stdout
+            "CLI should show file reading error: stderr='{stderr}' stdout='{stdout}'"
         );
     }
 

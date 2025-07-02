@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rand::rng;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rand::Rng;
+use rand::rng;
 use rumdl::utils::range_utils::LineIndex;
 
 // Naive implementation that doesn't use the optimized function
@@ -38,7 +38,7 @@ fn naive_line_col_to_byte_range(content: &str, line: usize, column: usize) -> st
 
 fn generate_test_content(line_count: usize) -> String {
     (0..line_count)
-        .map(|i| format!("Line {}: This is a test line with some content.", i))
+        .map(|i| format!("Line {i}: This is a test line with some content."))
         .collect::<Vec<String>>()
         .join("\n")
 }

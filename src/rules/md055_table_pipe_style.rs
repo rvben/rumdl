@@ -1,5 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use crate::utils::table_utils::TableUtils;
 
 mod md055_config;
@@ -117,11 +117,7 @@ impl MD055TablePipeStyle {
             0
         };
         let end_idx = if parts.last().is_some_and(|p| p.trim().is_empty()) {
-            if !parts.is_empty() {
-                parts.len() - 1
-            } else {
-                0
-            }
+            if !parts.is_empty() { parts.len() - 1 } else { 0 }
         } else {
             parts.len()
         };
@@ -265,7 +261,7 @@ impl Rule for MD055TablePipeStyle {
                             fix: Some(crate::rule::Fix {
                                 range: line_index.whole_line_range(line_idx + 1),
                                 replacement: if line_idx < lines.len() - 1 {
-                                    format!("{}\n", fixed_line)
+                                    format!("{fixed_line}\n")
                                 } else {
                                     fixed_line
                                 },

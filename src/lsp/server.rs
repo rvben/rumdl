@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::config::Config;
-use crate::lsp::types::{warning_to_code_action, warning_to_diagnostic, RumdlLspConfig};
+use crate::lsp::types::{RumdlLspConfig, warning_to_code_action, warning_to_diagnostic};
 use crate::rules;
 
 /// Main LSP server for rumdl
@@ -67,7 +67,7 @@ impl RumdlLanguageServer {
                 Ok(diagnostics)
             }
             Err(e) => {
-                log::error!("Failed to lint document {}: {}", uri, e);
+                log::error!("Failed to lint document {uri}: {e}");
                 Ok(Vec::new())
             }
         }
@@ -80,7 +80,7 @@ impl RumdlLanguageServer {
                 self.client.publish_diagnostics(uri, diagnostics, None).await;
             }
             Err(e) => {
-                log::error!("Failed to update diagnostics: {}", e);
+                log::error!("Failed to update diagnostics: {e}");
             }
         }
     }
@@ -108,7 +108,7 @@ impl RumdlLanguageServer {
                 Ok(actions)
             }
             Err(e) => {
-                log::error!("Failed to get code actions: {}", e);
+                log::error!("Failed to get code actions: {e}");
                 Ok(Vec::new())
             }
         }
@@ -128,7 +128,7 @@ impl RumdlLanguageServer {
 
                 if !loaded_files.is_empty() {
                     let message = format!("Loaded rumdl config from: {}", loaded_files.join(", "));
-                    log::info!("{}", message);
+                    log::info!("{message}");
                     if notify_client {
                         self.client.log_message(MessageType::INFO, &message).await;
                     }
@@ -137,8 +137,8 @@ impl RumdlLanguageServer {
                 }
             }
             Err(e) => {
-                let message = format!("Failed to load rumdl config: {}", e);
-                log::warn!("{}", message);
+                let message = format!("Failed to load rumdl config: {e}");
+                log::warn!("{message}");
                 if notify_client {
                     self.client.log_message(MessageType::WARNING, &message).await;
                 }
@@ -286,7 +286,7 @@ impl LanguageServer for RumdlLanguageServer {
                     Ok(Some(response))
                 }
                 Err(e) => {
-                    log::error!("Failed to get code actions: {}", e);
+                    log::error!("Failed to get code actions: {e}");
                     Ok(None)
                 }
             }
@@ -310,7 +310,7 @@ impl LanguageServer for RumdlLanguageServer {
                     },
                 ))),
                 Err(e) => {
-                    log::error!("Failed to get diagnostics: {}", e);
+                    log::error!("Failed to get diagnostics: {e}");
                     Ok(DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
                         RelatedFullDocumentDiagnosticReport {
                             related_documents: None,
@@ -339,141 +339,141 @@ impl LanguageServer for RumdlLanguageServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::LspService;
     use crate::rule::LintWarning;
-    
+    use tower_lsp::LspService;
+
     fn create_test_server() -> RumdlLanguageServer {
-        let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client));
+        let (service, _socket) = LspService::new(RumdlLanguageServer::new);
         service.inner().clone()
     }
-    
+
     #[tokio::test]
     async fn test_server_creation() {
         let server = create_test_server();
-        
+
         // Verify default configuration
         let config = server.config.read().await;
         assert!(config.enable_linting);
         assert!(!config.enable_auto_fix);
     }
-    
+
     #[tokio::test]
     async fn test_lint_document() {
         let server = create_test_server();
-        
+
         // Test linting with a simple markdown document
         let uri = Url::parse("file:///test.md").unwrap();
         let text = "# Test\n\nThis is a test  \nWith trailing spaces  ";
-        
+
         let diagnostics = server.lint_document(&uri, text).await.unwrap();
-        
+
         // Should find trailing spaces violations
         assert!(!diagnostics.is_empty());
         assert!(diagnostics.iter().any(|d| d.message.contains("trailing")));
     }
-    
+
     #[tokio::test]
     async fn test_lint_document_disabled() {
         let server = create_test_server();
-        
+
         // Disable linting
         server.config.write().await.enable_linting = false;
-        
+
         let uri = Url::parse("file:///test.md").unwrap();
         let text = "# Test\n\nThis is a test  \nWith trailing spaces  ";
-        
+
         let diagnostics = server.lint_document(&uri, text).await.unwrap();
-        
+
         // Should return empty diagnostics when disabled
         assert!(diagnostics.is_empty());
     }
-    
+
     #[tokio::test]
     async fn test_get_code_actions() {
         let server = create_test_server();
-        
+
         let uri = Url::parse("file:///test.md").unwrap();
         let text = "# Test\n\nThis is a test  \nWith trailing spaces  ";
-        
+
         // Create a range covering the whole document
         let range = Range {
             start: Position { line: 0, character: 0 },
             end: Position { line: 3, character: 21 },
         };
-        
+
         let actions = server.get_code_actions(&uri, text, range).await.unwrap();
-        
+
         // Should have code actions for fixing trailing spaces
         assert!(!actions.is_empty());
         assert!(actions.iter().any(|a| a.title.contains("trailing")));
     }
-    
+
     #[tokio::test]
     async fn test_get_code_actions_outside_range() {
         let server = create_test_server();
-        
+
         let uri = Url::parse("file:///test.md").unwrap();
         let text = "# Test\n\nThis is a test  \nWith trailing spaces  ";
-        
+
         // Create a range that doesn't cover the violations
         let range = Range {
             start: Position { line: 0, character: 0 },
             end: Position { line: 0, character: 6 },
         };
-        
+
         let actions = server.get_code_actions(&uri, text, range).await.unwrap();
-        
+
         // Should have no code actions for this range
         assert!(actions.is_empty());
     }
-    
+
     #[tokio::test]
     async fn test_document_storage() {
         let server = create_test_server();
-        
+
         let uri = Url::parse("file:///test.md").unwrap();
         let text = "# Test Document";
-        
+
         // Store document
         server.documents.write().await.insert(uri.clone(), text.to_string());
-        
+
         // Verify storage
         let stored = server.documents.read().await.get(&uri).cloned();
         assert_eq!(stored, Some(text.to_string()));
-        
+
         // Remove document
         server.documents.write().await.remove(&uri);
-        
+
         // Verify removal
         let stored = server.documents.read().await.get(&uri).cloned();
         assert_eq!(stored, None);
     }
-    
+
     #[tokio::test]
     async fn test_configuration_loading() {
         let server = create_test_server();
-        
+
         // Load configuration with auto-discovery
         server.load_configuration(false).await;
-        
+
         // Verify configuration was loaded successfully
         // The config could be from: .rumdl.toml, pyproject.toml, .markdownlint.json, or default
         let rumdl_config = server.rumdl_config.read().await;
         // The loaded config is valid regardless of source
         drop(rumdl_config); // Just verify we can access it without panic
     }
-    
+
     #[tokio::test]
     async fn test_load_config_for_lsp() {
         // Test with no config file
         let result = RumdlLanguageServer::load_config_for_lsp(None);
         assert!(result.is_ok());
-        
+
         // Test with non-existent config file
         let result = RumdlLanguageServer::load_config_for_lsp(Some("/nonexistent/config.toml"));
         assert!(result.is_err());
     }
-    
+
     #[tokio::test]
     async fn test_warning_conversion() {
         let warning = LintWarning {
@@ -486,53 +486,53 @@ mod tests {
             fix: None,
             rule_name: Some("MD001"),
         };
-        
+
         // Test diagnostic conversion
         let diagnostic = warning_to_diagnostic(&warning);
         assert_eq!(diagnostic.message, "Test warning");
         assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::WARNING));
         assert_eq!(diagnostic.code, Some(NumberOrString::String("MD001".to_string())));
-        
+
         // Test code action conversion (no fix)
         let uri = Url::parse("file:///test.md").unwrap();
         let action = warning_to_code_action(&warning, &uri, "Test content");
         assert!(action.is_none());
     }
-    
+
     #[tokio::test]
     async fn test_multiple_documents() {
         let server = create_test_server();
-        
+
         let uri1 = Url::parse("file:///test1.md").unwrap();
         let uri2 = Url::parse("file:///test2.md").unwrap();
         let text1 = "# Document 1";
         let text2 = "# Document 2";
-        
+
         // Store multiple documents
         {
             let mut docs = server.documents.write().await;
             docs.insert(uri1.clone(), text1.to_string());
             docs.insert(uri2.clone(), text2.to_string());
         }
-        
+
         // Verify both are stored
         let docs = server.documents.read().await;
         assert_eq!(docs.len(), 2);
         assert_eq!(docs.get(&uri1).map(|s| s.as_str()), Some(text1));
         assert_eq!(docs.get(&uri2).map(|s| s.as_str()), Some(text2));
     }
-    
+
     #[tokio::test]
     async fn test_empty_document_handling() {
         let server = create_test_server();
-        
+
         let uri = Url::parse("file:///empty.md").unwrap();
         let text = "";
-        
+
         // Test linting empty document
         let diagnostics = server.lint_document(&uri, text).await.unwrap();
         assert!(diagnostics.is_empty());
-        
+
         // Test code actions on empty document
         let range = Range {
             start: Position { line: 0, character: 0 },
@@ -541,18 +541,18 @@ mod tests {
         let actions = server.get_code_actions(&uri, text, range).await.unwrap();
         assert!(actions.is_empty());
     }
-    
+
     #[tokio::test]
     async fn test_config_update() {
         let server = create_test_server();
-        
+
         // Update config
         {
             let mut config = server.config.write().await;
             config.enable_auto_fix = true;
             config.config_path = Some("/custom/path.toml".to_string());
         }
-        
+
         // Verify update
         let config = server.config.read().await;
         assert!(config.enable_auto_fix);

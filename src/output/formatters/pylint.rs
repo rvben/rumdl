@@ -24,13 +24,13 @@ impl OutputFormatter for PylintFormatter {
 
         for warning in warnings {
             let rule_name = warning.rule_name.unwrap_or("unknown");
-            
+
             // Convert MD prefix to CMD for pylint convention
             // Pylint uses C for Convention, so CMD = Convention + MD rule
             let pylint_code = if let Some(stripped) = rule_name.strip_prefix("MD") {
-                format!("CMD{}", stripped)
+                format!("CMD{stripped}")
             } else {
-                format!("C{}", rule_name)
+                format!("C{rule_name}")
             };
 
             // Pylint format: file:line:column: [C0000] message
@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn test_pylint_formatter_default() {
-        let _formatter = PylintFormatter::default();
+        let _formatter = PylintFormatter;
         // No fields to test, just ensure it constructs
     }
 
@@ -90,7 +90,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
         assert_eq!(
             output,
@@ -123,7 +123,7 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let expected = "test.md:5:1: [CMD001] First warning\ntest.md:10:3: [CMD013] Second warning";
         assert_eq!(output, expected);
@@ -145,7 +145,7 @@ mod tests {
                 replacement: "\n# Heading\n".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "doc.md");
         // Pylint format doesn't show fix indicator
         assert_eq!(
@@ -167,12 +167,9 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
-        assert_eq!(
-            output,
-            "file.md:1:1: [Cunknown] Unknown rule warning"
-        );
+        assert_eq!(output, "file.md:1:1: [Cunknown] Unknown rule warning");
     }
 
     #[test]
@@ -188,25 +185,18 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
-        assert_eq!(
-            output,
-            "file.md:1:1: [CCUSTOM001] Custom rule warning"
-        );
+        assert_eq!(output, "file.md:1:1: [CCUSTOM001] Custom rule warning");
     }
 
     #[test]
     fn test_pylint_code_conversion() {
         let formatter = PylintFormatter::new();
-        
+
         // Test various MD codes
-        let test_cases = vec![
-            ("MD001", "CMD001"),
-            ("MD010", "CMD010"),
-            ("MD999", "CMD999"),
-        ];
-        
+        let test_cases = vec![("MD001", "CMD001"), ("MD010", "CMD010"), ("MD999", "CMD999")];
+
         for (md_code, expected_pylint) in test_cases {
             let warnings = vec![LintWarning {
                 line: 1,
@@ -218,16 +208,16 @@ mod tests {
                 severity: Severity::Warning,
                 fix: None,
             }];
-            
+
             let output = formatter.format_warnings(&warnings, "test.md");
-            assert!(output.contains(&format!("[{}]", expected_pylint)));
+            assert!(output.contains(&format!("[{expected_pylint}]")));
         }
     }
 
     #[test]
     fn test_edge_cases() {
         let formatter = PylintFormatter::new();
-        
+
         // Test large line/column numbers
         let warnings = vec![LintWarning {
             line: 99999,
@@ -239,12 +229,9 @@ mod tests {
             severity: Severity::Error,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "large.md");
-        assert_eq!(
-            output,
-            "large.md:99999:12345: [CMD999] Edge case warning"
-        );
+        assert_eq!(output, "large.md:99999:12345: [CMD999] Edge case warning");
     }
 
     #[test]
@@ -260,7 +247,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         assert_eq!(
             output,
@@ -281,18 +268,15 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "path/with spaces/and-dashes.md");
-        assert_eq!(
-            output,
-            "path/with spaces/and-dashes.md:1:1: [CMD001] Test"
-        );
+        assert_eq!(output, "path/with spaces/and-dashes.md:1:1: [CMD001] Test");
     }
 
     #[test]
     fn test_severity_ignored() {
         let formatter = PylintFormatter::new();
-        
+
         // Test that severity doesn't affect output (pylint format doesn't show severity)
         let warnings = vec![
             LintWarning {
@@ -316,10 +300,10 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let lines: Vec<&str> = output.lines().collect();
-        
+
         // Both should have same format regardless of severity
         assert!(lines[0].starts_with("test.md:1:1: [CMD001]"));
         assert!(lines[1].starts_with("test.md:2:1: [CMD002]"));

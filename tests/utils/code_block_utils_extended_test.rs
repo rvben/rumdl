@@ -345,7 +345,7 @@ fn test_performance_code_block_specific_functions() {
     // Create a smaller document with various code elements
     let mut content = String::with_capacity(5_000);
     for i in 0..50 {
-        content.push_str(&format!("Line {}\n", i));
+        content.push_str(&format!("Line {i}\n"));
 
         if i % 10 == 0 {
             content.push_str("```\nCode block content\nMore code\n```\n");
@@ -378,10 +378,10 @@ fn test_performance_code_block_specific_functions() {
     }
     let check_time = start.elapsed();
 
-    println!("identify_code_block_lines: {:?}", identify_time);
-    println!("compute_code_blocks: {:?}", compute_time);
-    println!("CodeBlockInfo creation: {:?}", creation_time);
-    println!("is_in_code_block checks: {:?}", check_time);
+    println!("identify_code_block_lines: {identify_time:?}");
+    println!("compute_code_blocks: {compute_time:?}");
+    println!("CodeBlockInfo creation: {creation_time:?}");
+    println!("is_in_code_block checks: {check_time:?}");
 
     // Verify that we got results
     assert!(block_lines.len() > 50);

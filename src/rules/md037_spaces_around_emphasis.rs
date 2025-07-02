@@ -4,8 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::emphasis_utils::{
-    find_emphasis_markers, find_emphasis_spans, has_doc_patterns,
-    replace_inline_code, EmphasisSpan
+    EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
 };
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -14,7 +13,6 @@ lazy_static! {
     // List markers pattern - used to avoid confusion with emphasis
     static ref LIST_MARKER: Regex = Regex::new(r"^\s*[*+-]\s+").unwrap();
 }
-
 
 /// Check if an emphasis span has spacing issues that should be flagged
 #[inline]
@@ -288,16 +286,16 @@ impl MD037NoSpaceInEmphasis {
                 let marker_str = if span.opening.count == 1 {
                     marker_char.to_string()
                 } else {
-                    format!("{}{}", marker_char, marker_char)
+                    format!("{marker_char}{marker_char}")
                 };
 
                 // Create the fixed version by trimming spaces from content
                 let trimmed_content = span.content.trim();
-                let fixed_text = format!("{}{}{}", marker_str, trimmed_content, marker_str);
+                let fixed_text = format!("{marker_str}{trimmed_content}{marker_str}");
 
                 let warning = LintWarning {
                     rule_name: Some(self.name()),
-                    message: format!("Spaces inside emphasis markers: {:?}", full_text),
+                    message: format!("Spaces inside emphasis markers: {full_text:?}"),
                     line: line_num,
                     column: offset + full_start + 1, // +1 because columns are 1-indexed
                     end_line: line_num,

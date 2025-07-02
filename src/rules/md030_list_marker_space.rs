@@ -131,8 +131,7 @@ impl Rule for MD030ListMarkerSpace {
 
                         // Generate appropriate message
                         let message = format!(
-                            "Spaces after list markers (Expected: {}; Actual: {})",
-                            expected_spaces, actual_spaces
+                            "Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})"
                         );
 
                         warnings.push(LintWarning {
@@ -264,7 +263,7 @@ impl MD030ListMarkerSpace {
                     if !content.is_empty() {
                         // Use the configured number of spaces for unordered lists
                         let spaces = " ".repeat(self.config.ul_single);
-                        return Some(format!("{}{}{}{}", indent, marker, spaces, content));
+                        return Some(format!("{indent}{marker}{spaces}{content}"));
                     }
                 }
                 break; // Found a marker, don't check others
@@ -285,7 +284,7 @@ impl MD030ListMarkerSpace {
                     if !content.is_empty() {
                         // Use the configured number of spaces for ordered lists
                         let spaces = " ".repeat(self.config.ol_single);
-                        return Some(format!("{}{}.{}{}", indent, before_dot, spaces, content));
+                        return Some(format!("{indent}{before_dot}.{spaces}{content}"));
                     }
                 }
             }

@@ -147,7 +147,11 @@ fn test_greater_than_prompt() {
     let content = "```bash\n> echo test\n```";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Commands with > prompt should be flagged without output");
+    assert_eq!(
+        result.len(),
+        1,
+        "Commands with > prompt should be flagged without output"
+    );
 }
 
 #[test]
@@ -157,17 +161,17 @@ fn test_case_insensitive_languages() {
     let ctx1 = LintContext::new(content1);
     let result1 = rule.check(&ctx1).unwrap();
     assert_eq!(result1.len(), 1, "BASH (uppercase) should be recognized");
-    
+
     let content2 = "```Shell\n$ echo test\n```";
     let ctx2 = LintContext::new(content2);
     let result2 = rule.check(&ctx2).unwrap();
     assert_eq!(result2.len(), 1, "Shell (mixed case) should be recognized");
-    
+
     let content3 = "```CONSOLE\n$ echo test\n```";
     let ctx3 = LintContext::new(content3);
     let result3 = rule.check(&ctx3).unwrap();
     assert_eq!(result3.len(), 1, "CONSOLE (uppercase) should be recognized");
-    
+
     let content4 = "```Terminal\n$ echo test\n```";
     let ctx4 = LintContext::new(content4);
     let result4 = rule.check(&ctx4).unwrap();
@@ -181,7 +185,10 @@ fn test_message_includes_command() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    assert!(result[0].message.contains("git status"), "Error message should include the actual command");
+    assert!(
+        result[0].message.contains("git status"),
+        "Error message should include the actual command"
+    );
 }
 
 #[test]
@@ -199,7 +206,11 @@ fn test_commands_only_without_other_content() {
     let content = "```bash\n$ pwd\n$ ls\n$ echo test\n```";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Block with only commands (no output) should be flagged");
+    assert_eq!(
+        result.len(),
+        1,
+        "Block with only commands (no output) should be flagged"
+    );
 }
 
 #[test]
@@ -209,7 +220,7 @@ fn test_fix_preserves_trailing_newline() {
     let ctx1 = LintContext::new(content_with_newline);
     let fixed1 = rule.fix(&ctx1).unwrap();
     assert!(fixed1.ends_with('\n'), "Should preserve trailing newline");
-    
+
     let content_without_newline = "```bash\n$ echo test\n```";
     let ctx2 = LintContext::new(content_without_newline);
     let fixed2 = rule.fix(&ctx2).unwrap();
@@ -231,16 +242,22 @@ fn test_only_commands_no_output() {
     let content = "```bash\n$ ls\n$ pwd\n```";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Blocks with only commands (no output) should be flagged");
+    assert_eq!(
+        result.len(),
+        1,
+        "Blocks with only commands (no output) should be flagged"
+    );
 }
 
-#[test] 
+#[test]
 fn test_config_from_toml() {
     let mut config = rumdl::config::Config::default();
     let mut rule_config = rumdl::config::RuleConfig::default();
-    rule_config.values.insert("show-output".to_string(), toml::Value::Boolean(false)); // kebab-case
+    rule_config
+        .values
+        .insert("show-output".to_string(), toml::Value::Boolean(false)); // kebab-case
     config.rules.insert("MD014".to_string(), rule_config);
-    
+
     let rule = MD014CommandsShowOutput::from_config(&config);
     let content = "```bash\n$ echo test\n```";
     let ctx = LintContext::new(content);
@@ -255,11 +272,14 @@ fn test_fix_range_calculation() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     // Verify the fix range is correct
     if let Some(_fix) = &result[0].fix {
         let fixed_content = rule.fix(&ctx).unwrap();
-        assert!(fixed_content.contains("echo test\n```"), "Fix should produce correct output");
+        assert!(
+            fixed_content.contains("echo test\n```"),
+            "Fix should produce correct output"
+        );
     }
 }
 

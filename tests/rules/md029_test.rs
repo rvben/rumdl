@@ -134,7 +134,7 @@ fn test_md029_nested_with_code_blocks() {
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    println!("Warnings: {:?}", result);
+    println!("Warnings: {result:?}");
     assert!(
         result.is_empty(),
         "Nested lists with code blocks should maintain correct sequence"

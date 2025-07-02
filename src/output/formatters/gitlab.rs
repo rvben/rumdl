@@ -23,24 +23,27 @@ impl GitLabFormatter {
 impl OutputFormatter for GitLabFormatter {
     fn format_warnings(&self, warnings: &[LintWarning], file_path: &str) -> String {
         // Format warnings for a single file as GitLab Code Quality issues
-        let issues: Vec<_> = warnings.iter().map(|warning| {
-            let rule_name = warning.rule_name.unwrap_or("unknown");
-            let fingerprint = format!("{}-{}-{}-{}", file_path, warning.line, warning.column, rule_name);
-            
-            json!({
-                "description": warning.message,
-                "check_name": rule_name,
-                "fingerprint": fingerprint,
-                "severity": "minor",
-                "location": {
-                    "path": file_path,
-                    "lines": {
-                        "begin": warning.line
+        let issues: Vec<_> = warnings
+            .iter()
+            .map(|warning| {
+                let rule_name = warning.rule_name.unwrap_or("unknown");
+                let fingerprint = format!("{}-{}-{}-{}", file_path, warning.line, warning.column, rule_name);
+
+                json!({
+                    "description": warning.message,
+                    "check_name": rule_name,
+                    "fingerprint": fingerprint,
+                    "severity": "minor",
+                    "location": {
+                        "path": file_path,
+                        "lines": {
+                            "begin": warning.line
+                        }
                     }
-                }
+                })
             })
-        }).collect();
-        
+            .collect();
+
         serde_json::to_string_pretty(&issues).unwrap_or_else(|_| "[]".to_string())
     }
 }
@@ -84,7 +87,7 @@ mod tests {
 
     #[test]
     fn test_gitlab_formatter_default() {
-        let _formatter = GitLabFormatter::default();
+        let _formatter = GitLabFormatter;
         // No fields to test, just ensure it constructs
     }
 
@@ -115,13 +118,16 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
         let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(issues.len(), 1);
         let issue = &issues[0];
-        assert_eq!(issue["description"], "Heading levels should only increment by one level at a time");
+        assert_eq!(
+            issue["description"],
+            "Heading levels should only increment by one level at a time"
+        );
         assert_eq!(issue["check_name"], "MD001");
         assert_eq!(issue["fingerprint"], "README.md-10-5-MD001");
         assert_eq!(issue["severity"], "minor");
@@ -145,10 +151,10 @@ mod tests {
                 replacement: "## Heading".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
         let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         // GitLab format doesn't indicate fixable issues
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0]["check_name"], "MD001");
@@ -179,10 +185,10 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0]["check_name"], "MD001");
         assert_eq!(issues[0]["location"]["lines"]["begin"], 5);
@@ -203,10 +209,10 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
         let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(issues[0]["check_name"], "unknown");
         assert_eq!(issues[0]["fingerprint"], "file.md-1-1-unknown");
     }
@@ -233,10 +239,10 @@ mod tests {
                 fix: None,
             }],
         )];
-        
+
         let output = format_gitlab_report(&warnings);
         let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0]["location"]["path"], "test.md");
     }
@@ -283,10 +289,10 @@ mod tests {
                 ],
             ),
         ];
-        
+
         let output = format_gitlab_report(&warnings);
         let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(issues.len(), 3);
         assert_eq!(issues[0]["location"]["path"], "file1.md");
         assert_eq!(issues[1]["location"]["path"], "file2.md");
@@ -296,7 +302,7 @@ mod tests {
     #[test]
     fn test_fingerprint_uniqueness() {
         let formatter = GitLabFormatter::new();
-        
+
         // Same line/column but different rules should have different fingerprints
         let warnings = vec![
             LintWarning {
@@ -320,10 +326,10 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_ne!(issues[0]["fingerprint"], issues[1]["fingerprint"]);
         assert_eq!(issues[0]["fingerprint"], "test.md-10-5-MD001");
         assert_eq!(issues[1]["fingerprint"], "test.md-10-5-MD002");
@@ -332,7 +338,7 @@ mod tests {
     #[test]
     fn test_severity_always_minor() {
         let formatter = GitLabFormatter::new();
-        
+
         // Test that all severities are output as "minor" in GitLab format
         let warnings = vec![
             LintWarning {
@@ -356,10 +362,10 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         // Both should use severity "minor" regardless of actual severity
         assert_eq!(issues[0]["severity"], "minor");
         assert_eq!(issues[1]["severity"], "minor");
@@ -378,12 +384,15 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         // JSON should properly handle special characters
-        assert_eq!(issues[0]["description"], "Warning with \"quotes\" and 'apostrophes' and \n newline");
+        assert_eq!(
+            issues[0]["description"],
+            "Warning with \"quotes\" and 'apostrophes' and \n newline"
+        );
     }
 
     #[test]
@@ -399,10 +408,10 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "path/with spaces/and-dashes.md");
         let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(issues[0]["location"]["path"], "path/with spaces/and-dashes.md");
         assert_eq!(issues[0]["fingerprint"], "path/with spaces/and-dashes.md-1-1-MD001");
     }
@@ -420,9 +429,9 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         // Check that output is pretty-printed (contains newlines and indentation)
         assert!(output.contains('\n'));
         assert!(output.contains("  "));

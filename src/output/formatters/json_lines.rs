@@ -58,7 +58,7 @@ mod tests {
 
     #[test]
     fn test_json_lines_formatter_default() {
-        let _formatter = JsonLinesFormatter::default();
+        let _formatter = JsonLinesFormatter;
         // No fields to test, just ensure it constructs
     }
 
@@ -89,16 +89,19 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
-        
+
         // Parse the JSON to verify structure
         let json: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(json["file"], "README.md");
         assert_eq!(json["line"], 10);
         assert_eq!(json["column"], 5);
         assert_eq!(json["rule"], "MD001");
-        assert_eq!(json["message"], "Heading levels should only increment by one level at a time");
+        assert_eq!(
+            json["message"],
+            "Heading levels should only increment by one level at a time"
+        );
         assert_eq!(json["severity"], "warning");
         assert_eq!(json["fixable"], false);
     }
@@ -119,9 +122,9 @@ mod tests {
                 replacement: "## Heading".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
-        
+
         // Parse the JSON to verify structure
         let json: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(json["fixable"], true);
@@ -155,19 +158,19 @@ mod tests {
                 }),
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let lines: Vec<&str> = output.lines().collect();
-        
+
         // Should have 2 lines of JSON
         assert_eq!(lines.len(), 2);
-        
+
         // Parse each line as JSON
         let json1: Value = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(json1["line"], 5);
         assert_eq!(json1["rule"], "MD001");
         assert_eq!(json1["fixable"], false);
-        
+
         let json2: Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(json2["line"], 10);
         assert_eq!(json2["rule"], "MD013");
@@ -187,17 +190,17 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
         let json: Value = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(json["rule"], "unknown");
     }
 
     #[test]
     fn test_edge_cases() {
         let formatter = JsonLinesFormatter::new();
-        
+
         // Test large line/column numbers
         let warnings = vec![LintWarning {
             line: 99999,
@@ -209,10 +212,10 @@ mod tests {
             severity: Severity::Error,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "large.md");
         let json: Value = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(json["line"], 99999);
         assert_eq!(json["column"], 12345);
     }
@@ -230,12 +233,15 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let json: Value = serde_json::from_str(&output).unwrap();
-        
+
         // JSON should properly escape special characters
-        assert_eq!(json["message"], "Warning with \"quotes\" and 'apostrophes' and \n newline");
+        assert_eq!(
+            json["message"],
+            "Warning with \"quotes\" and 'apostrophes' and \n newline"
+        );
     }
 
     #[test]
@@ -251,10 +257,10 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "path/with spaces/and-dashes.md");
         let json: Value = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(json["file"], "path/with spaces/and-dashes.md");
     }
 
@@ -293,14 +299,14 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         // Each line should be valid JSON
         for line in output.lines() {
             assert!(serde_json::from_str::<Value>(line).is_ok());
         }
-        
+
         // Should have 3 lines
         assert_eq!(output.lines().count(), 3);
     }
@@ -308,7 +314,7 @@ mod tests {
     #[test]
     fn test_severity_always_warning() {
         let formatter = JsonLinesFormatter::new();
-        
+
         // Test that all severities are output as "warning" in the JSON
         let warnings = vec![
             LintWarning {
@@ -332,9 +338,9 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         for line in output.lines() {
             let json: Value = serde_json::from_str(line).unwrap();
             assert_eq!(json["severity"], "warning");
@@ -354,9 +360,9 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         // Verify that all expected fields are present
         let json: Value = serde_json::from_str(&output).unwrap();
         assert!(json.get("file").is_some());
@@ -381,10 +387,10 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "测试.md");
         let json: Value = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(json["message"], "Unicode: 你好 émoji 🎉");
         assert_eq!(json["file"], "测试.md");
     }

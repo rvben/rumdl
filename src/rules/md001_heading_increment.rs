@@ -1,7 +1,7 @@
+use crate::HeadingStyle;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingUtils;
-use crate::utils::range_utils::{calculate_heading_range, LineIndex};
-use crate::HeadingStyle;
+use crate::utils::range_utils::{LineIndex, calculate_heading_range};
 
 /// Rule MD001: Heading levels should only increment by one level at a time
 ///

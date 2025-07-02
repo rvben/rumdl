@@ -74,8 +74,8 @@ fn test_code_block() {
     let _fixed_ctx = LintContext::new(&fixed);
 
     // Debug print
-    println!("Original content:\n{}", content);
-    println!("Fixed content:\n{}", fixed);
+    println!("Original content:\n{content}");
+    println!("Fixed content:\n{fixed}");
 
     // Check if we get warnings on the fixed content
     let warnings = _rule.check(&_fixed_ctx).unwrap();

@@ -285,8 +285,7 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "No warnings expected for content with front matter, found: {:?}",
-            result
+            "No warnings expected for content with front matter, found: {result:?}"
         );
     }
 
@@ -311,8 +310,7 @@ mod tests {
         // Make test more resilient
         assert!(
             result.is_empty(),
-            "No warnings expected for consistent ATX style, found: {:?}",
-            result
+            "No warnings expected for consistent ATX style, found: {result:?}"
         );
 
         // Test with incorrect style
@@ -333,8 +331,7 @@ mod tests {
         // The level 3 heading can't be setext, so it's valid as ATX
         assert!(
             result.is_empty(),
-            "No warnings expected for setext style with ATX for level 3, found: {:?}",
-            result
+            "No warnings expected for setext style with ATX for level 3, found: {result:?}"
         );
     }
 }

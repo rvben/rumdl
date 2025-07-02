@@ -32,7 +32,7 @@ fn test_init_command_creates_and_loads_config() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let combined_output = format!("{}\n{}", stdout, stderr);
+    let combined_output = format!("{stdout}\n{stderr}");
 
     // Verify that we've detected at least one rule violation
     assert!(
@@ -109,7 +109,7 @@ ___
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined_output = format!("{}\n{}", stdout, stderr);
+    let combined_output = format!("{stdout}\n{stderr}");
 
     // Simply verify that the linter detected some issues with our complex file
     assert!(
@@ -163,7 +163,7 @@ Multiple blank lines above this one.
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined_output = format!("{}\n{}", stdout, stderr);
+    let combined_output = format!("{stdout}\n{stderr}");
 
     // Simply verify that we detected some issues
     assert!(
@@ -205,7 +205,7 @@ Text immediately below heading (MD022)
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined_output = format!("{}\n{}", stdout, stderr);
+    let combined_output = format!("{stdout}\n{stderr}");
 
     // Check if at least one rule violation was detected
     assert!(
@@ -226,8 +226,8 @@ Text immediately below heading (MD022)
 
     // Verify some issues were fixed
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();
-    println!("Original content:\n{}", test_content);
-    println!("Fixed content:\n{}", fixed_content);
+    println!("Original content:\n{test_content}");
+    println!("Fixed content:\n{fixed_content}");
     assert!(
         fixed_content != test_content,
         "File should be modified by fix operation"
@@ -267,9 +267,9 @@ Visit http://example.com for more information.
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined_output = format!("{}\n{}", stdout, stderr);
+    let combined_output = format!("{stdout}\n{stderr}");
 
-    println!("Check command output:\n{}", combined_output);
+    println!("Check command output:\n{combined_output}");
 
     // Check if at least one link-related issue was detected
     assert!(
@@ -290,8 +290,8 @@ Visit http://example.com for more information.
 
     // Verify the file was modified
     let fixed_content = fs::read_to_string(base_path.join("test.md")).unwrap();
-    println!("Original content:\n{}", test_content);
-    println!("Fixed content:\n{}", fixed_content);
+    println!("Original content:\n{test_content}");
+    println!("Fixed content:\n{fixed_content}");
     assert!(
         fixed_content != test_content,
         "File should be modified by fix operation"
@@ -364,7 +364,7 @@ fn test_low_coverage_rules() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined_output = format!("{}\n{}", stdout, stderr);
+    let combined_output = format!("{stdout}\n{stderr}");
 
     // Verify we detected some issues
     assert!(

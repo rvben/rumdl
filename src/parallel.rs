@@ -63,7 +63,7 @@ impl FileParallelProcessor {
             rayon::ThreadPoolBuilder::new()
                 .num_threads(thread_count)
                 .build_global()
-                .unwrap_or_else(|_| log::warn!("Failed to set thread pool size to {}", thread_count));
+                .unwrap_or_else(|_| log::warn!("Failed to set thread pool size to {thread_count}"));
         }
 
         let results: Vec<(String, LintResult)> = files
@@ -74,7 +74,7 @@ impl FileParallelProcessor {
                 let duration = start.elapsed();
 
                 if duration.as_millis() > 1000 {
-                    log::debug!("File {} took {:?}", path, duration);
+                    log::debug!("File {path} took {duration:?}");
                 }
 
                 (path.clone(), result)
@@ -141,10 +141,10 @@ impl ParallelPerformanceComparison {
 
         if self.speedup_factor > 1.0 {
             let improvement = (self.speedup_factor - 1.0) * 100.0;
-            println!("   Performance improvement: {:.1}%", improvement);
+            println!("   Performance improvement: {improvement:.1}%");
         } else {
             let degradation = (1.0 - self.speedup_factor) * 100.0;
-            println!("   Performance degradation: {:.1}%", degradation);
+            println!("   Performance degradation: {degradation:.1}%");
             if self.parallel_overhead > std::time::Duration::ZERO {
                 println!(
                     "   Parallel overhead: {:.3}ms",
@@ -253,10 +253,12 @@ mod tests {
 
         // Create many files to test parallel processing scalability
         let test_files: Vec<(String, String)> = (0..100)
-            .map(|i| (
-                format!("test{}.md", i),
-                format!("# Test {}\n\nContent with trailing spaces   \n", i)
-            ))
+            .map(|i| {
+                (
+                    format!("test{i}.md"),
+                    format!("# Test {i}\n\nContent with trailing spaces   \n"),
+                )
+            })
             .collect();
 
         let results = processor.process_files(&test_files, &rules).unwrap();
@@ -264,10 +266,10 @@ mod tests {
 
         // Verify all results are Ok and have expected warnings
         for (path, result) in &results {
-            assert!(result.is_ok(), "Failed processing {}", path);
+            assert!(result.is_ok(), "Failed processing {path}");
             let warnings = result.as_ref().unwrap();
             // Should have at least one warning for trailing spaces
-            assert!(!warnings.is_empty(), "Expected warnings for {}", path);
+            assert!(!warnings.is_empty(), "Expected warnings for {path}");
         }
     }
 
@@ -281,7 +283,10 @@ mod tests {
         let test_files = vec![
             ("empty.md".to_string(), "".to_string()),
             ("unicode.md".to_string(), "# 测试标题\n\n这是中文内容。".to_string()),
-            ("emoji.md".to_string(), "# Title with 🚀 emoji\n\n🎉 Content!".to_string()),
+            (
+                "emoji.md".to_string(),
+                "# Title with 🚀 emoji\n\n🎉 Content!".to_string(),
+            ),
             ("very_long_line.md".to_string(), "a".repeat(10000)), // Very long single line
             ("many_lines.md".to_string(), "Line\n".repeat(10000)), // Many lines
         ];
@@ -291,7 +296,7 @@ mod tests {
 
         // All should process successfully even with edge cases
         for (path, result) in &results {
-            assert!(result.is_ok(), "Failed processing {}", path);
+            assert!(result.is_ok(), "Failed processing {path}");
         }
     }
 
@@ -326,14 +331,14 @@ mod tests {
         let processor = FileParallelProcessor::with_default_config();
 
         let test_files: Vec<(String, String)> = (0..20)
-            .map(|i| (format!("test{:02}.md", i), format!("# Test {}", i)))
+            .map(|i| (format!("test{i:02}.md"), format!("# Test {i}")))
             .collect();
 
         let results = processor.process_files(&test_files, &rules).unwrap();
 
         // Verify results maintain the same order as input
         for (i, (path, _)) in results.iter().enumerate() {
-            assert_eq!(path, &format!("test{:02}.md", i));
+            assert_eq!(path, &format!("test{i:02}.md"));
         }
     }
 
@@ -346,10 +351,12 @@ mod tests {
 
         // Create files that will trigger the same rules
         let test_files: Vec<(String, String)> = (0..10)
-            .map(|i| (
-                format!("test{}.md", i),
-                "# Heading\n\n- List item\n- Another item\n\n[link](url)\n`code`".to_string()
-            ))
+            .map(|i| {
+                (
+                    format!("test{i}.md"),
+                    "# Heading\n\n- List item\n- Another item\n\n[link](url)\n`code`".to_string(),
+                )
+            })
             .collect();
 
         let results = processor.process_files(&test_files, &rules).unwrap();
@@ -367,9 +374,9 @@ mod tests {
     fn test_performance_comparison() {
         let seq_time = std::time::Duration::from_millis(1000);
         let par_time = std::time::Duration::from_millis(400);
-        
+
         let comparison = ParallelPerformanceComparison::new(seq_time, par_time);
-        
+
         assert_eq!(comparison.sequential_time, seq_time);
         assert_eq!(comparison.parallel_time, par_time);
         assert!((comparison.speedup_factor - 2.5).abs() < 0.01);
@@ -380,9 +387,9 @@ mod tests {
     fn test_performance_comparison_with_overhead() {
         let seq_time = std::time::Duration::from_millis(100);
         let par_time = std::time::Duration::from_millis(150);
-        
+
         let comparison = ParallelPerformanceComparison::new(seq_time, par_time);
-        
+
         assert!((comparison.speedup_factor - 0.667).abs() < 0.01);
         assert_eq!(comparison.parallel_overhead, std::time::Duration::from_millis(50));
     }
@@ -391,7 +398,7 @@ mod tests {
     fn test_fallback_to_sequential() {
         let config = Config::default();
         let rules = all_rules(&config);
-        
+
         // Force sequential processing
         let sequential_config = ParallelConfig {
             enabled: false,
@@ -418,12 +425,15 @@ mod tests {
             ("plain.md".to_string(), "Just plain text".to_string()),
             ("code.md".to_string(), "```rust\nfn main() {}\n```".to_string()),
             ("table.md".to_string(), "| A | B |\n|---|---|\n| 1 | 2 |".to_string()),
-            ("front_matter.md".to_string(), "---\ntitle: Test\n---\n# Content".to_string()),
+            (
+                "front_matter.md".to_string(),
+                "---\ntitle: Test\n---\n# Content".to_string(),
+            ),
         ];
 
         let results = processor.process_files(&test_files, &rules).unwrap();
         assert_eq!(results.len(), 4);
-        
+
         for (_, result) in results {
             assert!(result.is_ok());
         }
@@ -437,10 +447,12 @@ mod tests {
         let processor = FileParallelProcessor::with_default_config();
 
         let test_files: Vec<(String, String)> = (0..10)
-            .map(|i| (
-                format!("test{}.md", i),
-                format!("# Heading {}\n\nTrailing spaces   \n", i)
-            ))
+            .map(|i| {
+                (
+                    format!("test{i}.md"),
+                    format!("# Heading {i}\n\nTrailing spaces   \n"),
+                )
+            })
             .collect();
 
         // Run multiple times
@@ -453,7 +465,7 @@ mod tests {
             let warnings1 = results1[i].1.as_ref().unwrap();
             let warnings2 = results2[i].1.as_ref().unwrap();
             let warnings3 = results3[i].1.as_ref().unwrap();
-            
+
             assert_eq!(warnings1.len(), warnings2.len());
             assert_eq!(warnings2.len(), warnings3.len());
         }

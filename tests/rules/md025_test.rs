@@ -129,7 +129,7 @@ fn test_md025_performance() {
     content.push_str("# Main Title\n\n");
 
     for i in 1..=100 {
-        content.push_str(&format!("## Heading {}\n\nSome text here.\n\n", i));
+        content.push_str(&format!("## Heading {i}\n\nSome text here.\n\n"));
     }
 
     let ctx = LintContext::new(&content);

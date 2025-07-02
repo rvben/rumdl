@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::*;
@@ -9,7 +9,7 @@ fn generate_test_content() -> String {
 
     for i in 0..500 {
         // MD009 - Trailing spaces (very common)
-        content.push_str(&format!("Line {} with trailing spaces   \n", i));
+        content.push_str(&format!("Line {i} with trailing spaces   \n"));
 
         // MD012 - Multiple blank lines
         if i % 10 == 0 {
@@ -18,21 +18,21 @@ fn generate_test_content() -> String {
 
         // MD018 - No space after hash
         if i % 15 == 0 {
-            content.push_str(&format!("#Heading without space {}\n\n", i));
+            content.push_str(&format!("#Heading without space {i}\n\n"));
         }
 
         // MD026 - Trailing punctuation
         if i % 20 == 0 {
-            content.push_str(&format!("# Heading with punctuation {}!\n\n", i));
+            content.push_str(&format!("# Heading with punctuation {i}!\n\n"));
         }
 
         // MD037 - Spaces inside emphasis
         if i % 8 == 0 {
-            content.push_str(&format!("Text with * bad emphasis * number {}\n", i));
+            content.push_str(&format!("Text with * bad emphasis * number {i}\n"));
         }
 
         // Regular content
-        content.push_str(&format!("Regular paragraph {} with some content.\n\n", i));
+        content.push_str(&format!("Regular paragraph {i} with some content.\n\n"));
     }
 
     content

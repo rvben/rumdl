@@ -52,6 +52,9 @@ lazy_static! {
     static ref ANGLE_BRACKET_PATTERN: Regex = Regex::new(
         r"<((?:https?|ftp)://[^>]+|[^@\s]+@[^@\s]+\.[^@\s>]+)>"
     ).unwrap();
+
+    // Pattern for blockquote prefix in parse_list_blocks
+    static ref BLOCKQUOTE_PREFIX_REGEX: Regex = Regex::new(r"^(\s*>+\s*)").unwrap();
 }
 
 /// Pre-computed information about a line
@@ -221,7 +224,6 @@ pub struct BlockquoteInfo {
     pub needs_md028_fix: bool,
 }
 
-
 /// Information about a list block
 #[derive(Debug, Clone)]
 pub struct ListBlock {
@@ -361,7 +363,8 @@ impl<'a> LintContext<'a> {
 
     /// Parse all links in the content
     fn parse_links(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<ParsedLink> {
-        let mut links = Vec::new();
+        // Pre-size based on a heuristic: most markdown files have relatively few links
+        let mut links = Vec::with_capacity(content.len() / 500); // ~1 link per 500 chars
 
         // Parse links across the entire content, not line by line
         for cap in LINK_PATTERN.captures_iter(content) {
@@ -454,7 +457,8 @@ impl<'a> LintContext<'a> {
 
     /// Parse all images in the content
     fn parse_images(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<ParsedImage> {
-        let mut images = Vec::new();
+        // Pre-size based on a heuristic: images are less common than links
+        let mut images = Vec::with_capacity(content.len() / 1000); // ~1 image per 1000 chars
 
         // Parse images across the entire content, not line by line
         for cap in IMAGE_PATTERN.captures_iter(content) {
@@ -542,7 +546,8 @@ impl<'a> LintContext<'a> {
 
     /// Parse reference definitions
     fn parse_reference_defs(_content: &str, lines: &[LineInfo]) -> Vec<ReferenceDef> {
-        let mut refs = Vec::new();
+        // Pre-size based on lines count as reference definitions are line-based
+        let mut refs = Vec::with_capacity(lines.len() / 20); // ~1 ref per 20 lines
 
         for (line_idx, line_info) in lines.iter().enumerate() {
             // Skip lines in code blocks
@@ -587,9 +592,9 @@ impl<'a> LintContext<'a> {
             // Regex for blockquote detection
             static ref BLOCKQUOTE_REGEX_FULL: regex::Regex = regex::Regex::new(r"^(\s*)(>+)(\s*)(.*)$").unwrap();
         }
-        
-        let mut lines = Vec::new();
+
         let content_lines: Vec<&str> = content.lines().collect();
+        let mut lines = Vec::with_capacity(content_lines.len());
 
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
@@ -681,7 +686,7 @@ impl<'a> LintContext<'a> {
                     let delimiter = caps.get(3).map_or("", |m| m.as_str());
                     let spacing = caps.get(4).map_or("", |m| m.as_str());
                     let content = caps.get(5).map_or("", |m| m.as_str());
-                    let marker = format!("{}{}", number_str, delimiter);
+                    let marker = format!("{number_str}{delimiter}");
                     let marker_column = blockquote_prefix_len + leading_spaces.len();
                     let content_column = marker_column + marker.len() + spacing.len();
 
@@ -755,7 +760,7 @@ impl<'a> LintContext<'a> {
                 let marker_column = indent_str.len();
 
                 // Build the prefix (indentation + markers + space)
-                let prefix = format!("{}{}{}", indent_str, markers, spaces_after);
+                let prefix = format!("{indent_str}{markers}{spaces_after}");
 
                 // Check for various blockquote issues
                 let has_no_space = spaces_after.is_empty() && !content.is_empty();
@@ -868,7 +873,8 @@ impl<'a> LintContext<'a> {
 
     /// Parse all inline code spans in the content
     fn parse_code_spans(content: &str, lines: &[LineInfo]) -> Vec<CodeSpan> {
-        let mut code_spans = Vec::new();
+        // Pre-size based on content - code spans are fairly common
+        let mut code_spans = Vec::with_capacity(content.matches('`').count() / 2); // Each code span has 2 backticks
 
         // Quick check - if no backticks, no code spans
         if !content.contains('`') {
@@ -974,13 +980,11 @@ impl<'a> LintContext<'a> {
 
     /// Parse all list blocks in the content
     fn parse_list_blocks(lines: &[LineInfo]) -> Vec<ListBlock> {
-        let mut list_blocks = Vec::new();
+        // Pre-size based on lines that could be list items
+        let mut list_blocks = Vec::with_capacity(lines.len() / 10); // Estimate ~10% of lines might start list blocks
         let mut current_block: Option<ListBlock> = None;
         let mut last_list_item_line = 0;
         let mut current_indent_level = 0;
-
-        // Regex for blockquote prefix detection
-        let blockquote_re = regex::Regex::new(r"^(\s*>+\s*)").unwrap();
 
         for (line_idx, line_info) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
@@ -1004,7 +1008,7 @@ impl<'a> LintContext<'a> {
             }
 
             // Extract blockquote prefix if any
-            let blockquote_prefix = if let Some(caps) = blockquote_re.captures(&line_info.content) {
+            let blockquote_prefix = if let Some(caps) = BLOCKQUOTE_PREFIX_REGEX.captures(&line_info.content) {
                 caps.get(0).unwrap().as_str().to_string()
             } else {
                 String::new()
@@ -1053,7 +1057,10 @@ impl<'a> LintContext<'a> {
                         block.item_lines.push(line_num);
 
                         // Update marker consistency for unordered lists
-                        if !block.is_ordered && block.marker.is_some() && block.marker.as_ref() != Some(&list_item.marker) {
+                        if !block.is_ordered
+                            && block.marker.is_some()
+                            && block.marker.as_ref() != Some(&list_item.marker)
+                        {
                             // Mixed markers, clear the marker field
                             block.marker = None;
                         }
@@ -1125,7 +1132,7 @@ impl<'a> LintContext<'a> {
                         // Check if followed by another list item at the same level
                         else if !next_line.in_code_block && next_line.list_item.is_some() {
                             if let Some(item) = &next_line.list_item {
-                                let next_blockquote_prefix = blockquote_re
+                                let next_blockquote_prefix = BLOCKQUOTE_PREFIX_REGEX
                                     .find(&next_line.content)
                                     .map_or(String::new(), |m| m.as_str().to_string());
                                 if item.marker_column == current_indent_level
@@ -1225,7 +1232,8 @@ fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
             current.item_lines.extend_from_slice(&next.item_lines);
 
             // Update marker consistency
-            if !current.is_ordered && current.marker.is_some() && next.marker.is_some() && current.marker != next.marker {
+            if !current.is_ordered && current.marker.is_some() && next.marker.is_some() && current.marker != next.marker
+            {
                 current.marker = None; // Mixed markers
             }
         } else {
@@ -1242,7 +1250,6 @@ fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
 }
 
 /// Check if content contains patterns that cause the markdown crate to panic
-
 #[cfg(test)]
 mod tests {
     use super::*;

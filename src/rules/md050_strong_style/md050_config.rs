@@ -39,7 +39,7 @@ where
         "asterisk" => Ok(StrongStyle::Asterisk),
         "underscore" => Ok(StrongStyle::Underscore),
         "consistent" => Ok(StrongStyle::Consistent),
-        _ => Err(serde::de::Error::custom(format!("Invalid strong style: {}", s))),
+        _ => Err(serde::de::Error::custom(format!("Invalid strong style: {s}"))),
     }
 }
 

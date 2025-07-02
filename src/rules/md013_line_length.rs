@@ -392,7 +392,7 @@ impl MD013LineLength {
         for url_match in URL_IN_TEXT.find_iter(&effective_line.clone()) {
             let url = url_match.as_str();
             // Skip if this URL is already part of a markdown link we handled
-            if !effective_line.contains(&format!("({})", url)) {
+            if !effective_line.contains(&format!("({url})")) {
                 // Replace URL with placeholder that represents a "reasonable" URL length
                 // Using 15 chars as a reasonable URL placeholder (e.g., "https://ex.com")
                 let placeholder = "x".repeat(15.min(url.len()));
@@ -424,20 +424,20 @@ mod tests {
     fn test_default_config() {
         let rule = MD013LineLength::default();
         assert_eq!(rule.config.line_length, 80);
-        assert_eq!(rule.config.code_blocks, true);  // Default is true
-        assert_eq!(rule.config.tables, true);       // Default is true
-        assert_eq!(rule.config.headings, true);
-        assert_eq!(rule.config.strict, false);
+        assert!(rule.config.code_blocks); // Default is true
+        assert!(rule.config.tables); // Default is true
+        assert!(rule.config.headings);
+        assert!(!rule.config.strict);
     }
 
     #[test]
     fn test_custom_config() {
         let rule = MD013LineLength::new(100, true, true, false, true);
         assert_eq!(rule.config.line_length, 100);
-        assert_eq!(rule.config.code_blocks, true);
-        assert_eq!(rule.config.tables, true);
-        assert_eq!(rule.config.headings, false);
-        assert_eq!(rule.config.strict, true);
+        assert!(rule.config.code_blocks);
+        assert!(rule.config.tables);
+        assert!(!rule.config.headings);
+        assert!(rule.config.strict);
     }
 
     #[test]
@@ -491,7 +491,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
-        assert!(result.len() > 0);
+        assert!(!result.is_empty());
     }
 
     #[test]
@@ -519,7 +519,7 @@ mod tests {
         let lines = vec![
             "| Column 1 | Column 2 |",
             "|----------|----------|",
-            "| Value 1  | Value 2  |"
+            "| Value 1  | Value 2  |",
         ];
 
         assert!(MD013LineLength::is_in_table(&lines, 0));

@@ -157,7 +157,7 @@ mod tests {
 Some text after.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -172,7 +172,7 @@ Some text after.";
 Some text after.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
         assert!(result[0].message.contains("Missing blank line before table"));
@@ -189,7 +189,7 @@ Some text after.";
 Some text after.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 5);
         assert!(result[0].message.contains("Missing blank line after table"));
@@ -205,7 +205,7 @@ Some text after.";
 Some text after.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
         assert!(result[0].message.contains("Missing blank line before table"));
         assert!(result[1].message.contains("Missing blank line after table"));
@@ -221,7 +221,7 @@ Some text after.";
 Some text after.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // No blank line needed before table at start of document
         assert_eq!(result.len(), 0);
     }
@@ -236,7 +236,7 @@ Some text after.";
 | Cell 1   | Cell 2   |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // No blank line needed after table at end of document
         assert_eq!(result.len(), 0);
     }
@@ -255,7 +255,7 @@ Text between tables.
 Text after second table.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 4);
         // First table missing blanks
         assert!(result[0].message.contains("Missing blank line before table"));
@@ -281,7 +281,7 @@ Text after second table.";
 More text.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Tables separated by blank line should be OK
         assert_eq!(result.len(), 0);
     }
@@ -303,7 +303,7 @@ Text between.
 More text.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should flag missing blanks around both tables
         assert_eq!(result.len(), 2);
         assert!(result[0].message.contains("Missing blank line after table"));
@@ -320,7 +320,7 @@ More text.";
 Text after.";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         let expected = "Text before.
 
 | Header | Col 2 |
@@ -345,7 +345,7 @@ Middle
 End";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         let expected = "Start
 
 | T1 | C1 |
@@ -368,7 +368,7 @@ End";
         let content = "";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -380,7 +380,7 @@ No tables here.
 Only paragraphs.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -396,7 +396,7 @@ Only paragraphs.";
 Text after.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Tables in code blocks should be ignored
         assert_eq!(result.len(), 0);
     }
@@ -412,7 +412,7 @@ Text after.";
 ## Another Heading";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
         assert!(result[0].message.contains("Missing blank line before table"));
         assert!(result[1].message.contains("Missing blank line after table"));
@@ -431,7 +431,7 @@ Text after.";
 More text.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -446,7 +446,7 @@ More text.";
 End.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
     }
 
@@ -462,7 +462,7 @@ End.";
 After.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -475,7 +475,7 @@ After.";
 Next paragraph.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should still require blanks around header-only table
         assert_eq!(result.len(), 2);
     }
@@ -492,7 +492,7 @@ Next paragraph.";
     More content.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Indented tables should be detected
         assert_eq!(result.len(), 0);
     }
@@ -507,7 +507,7 @@ Next paragraph.";
 Text after.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Single column tables are not detected by table_utils (requires 2+ columns)
         assert_eq!(result.len(), 0);
     }

@@ -140,17 +140,17 @@ mod tests {
     fn test_detect_fenced_code_blocks() {
         // The function detects BOTH fenced blocks and inline code spans
         // Fenced blocks with backticks also get picked up as inline spans due to the backticks
-        
+
         // Basic fenced code block with backticks
         let content = "Some text\n```\ncode here\n```\nMore text";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
         // Should find: 1 fenced block + 1 inline span (the ```)
         assert_eq!(blocks.len(), 2);
-        
+
         // Check that we have the fenced block
-        let fenced_block = blocks.iter().find(|(start, end)| 
-            end - start > 10 && content[*start..*end].contains("code here")
-        );
+        let fenced_block = blocks
+            .iter()
+            .find(|(start, end)| end - start > 10 && content[*start..*end].contains("code here"));
         assert!(fenced_block.is_some());
 
         // Fenced code block with tildes (no inline code detection for ~)
@@ -268,31 +268,31 @@ mod tests {
         // The function may detect overlapping blocks (fenced block and inline spans)
         // We should have at least: span1, fenced block, span2
         assert!(blocks.len() >= 3);
-        
+
         // Check we have the expected elements
         assert!(blocks.iter().any(|(s, e)| &content[*s..*e] == "`span1`"));
         assert!(blocks.iter().any(|(s, e)| &content[*s..*e] == "`span2`"));
         assert!(blocks.iter().any(|(s, e)| content[*s..*e].contains("block")));
-        
+
         // Verify they're sorted by position (allowing duplicates/overlaps)
         for i in 1..blocks.len() {
-            assert!(blocks[i-1].0 <= blocks[i].0);
+            assert!(blocks[i - 1].0 <= blocks[i].0);
         }
     }
 
     #[test]
     fn test_is_in_code_block_or_span() {
         let blocks = vec![(10, 20), (30, 40), (50, 60)];
-        
+
         // Test positions inside blocks
         assert!(CodeBlockUtils::is_in_code_block_or_span(&blocks, 15));
         assert!(CodeBlockUtils::is_in_code_block_or_span(&blocks, 35));
         assert!(CodeBlockUtils::is_in_code_block_or_span(&blocks, 55));
-        
+
         // Test positions at boundaries
         assert!(CodeBlockUtils::is_in_code_block_or_span(&blocks, 10)); // Start is inclusive
         assert!(!CodeBlockUtils::is_in_code_block_or_span(&blocks, 20)); // End is exclusive
-        
+
         // Test positions outside blocks
         assert!(!CodeBlockUtils::is_in_code_block_or_span(&blocks, 5));
         assert!(!CodeBlockUtils::is_in_code_block_or_span(&blocks, 25));
@@ -331,7 +331,7 @@ mod tests {
         let content = "Text\n````\n```\nnested\n```\n````\nAfter";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
         // Should detect: outer block, inner ```, outer ````
-        assert!(blocks.len() >= 1);
+        assert!(!blocks.is_empty());
         // Check we have the outer block
         let outer = blocks.iter().find(|(s, e)| content[*s..*e].contains("nested"));
         assert!(outer.is_some());
@@ -343,9 +343,10 @@ mod tests {
         let content = "Text\n\n    line1\n\n    line2\n\nAfter";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
         // May have multiple blocks due to blank line handling
-        assert!(blocks.len() >= 1);
+        assert!(!blocks.is_empty());
         // Check that we captured the indented code
-        let all_content: String = blocks.iter()
+        let all_content: String = blocks
+            .iter()
             .map(|(s, e)| &content[*s..*e])
             .collect::<Vec<_>>()
             .join("");

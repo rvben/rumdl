@@ -110,9 +110,15 @@ mod tests {
 
         // Verify content
         let content = fs::read_to_string(&config_path).unwrap();
-        assert!(content.contains("# rumdl configuration file"), "Should contain header comment");
+        assert!(
+            content.contains("# rumdl configuration file"),
+            "Should contain header comment"
+        );
         assert!(content.contains("[general]"), "Should contain general section");
-        assert!(content.contains("line_length = 80"), "Should contain line_length setting");
+        assert!(
+            content.contains("line_length = 80"),
+            "Should contain line_length setting"
+        );
         assert!(content.contains("[rules]"), "Should contain rules section");
         assert!(content.contains("[rules.MD007]"), "Should contain MD007 config");
         assert!(content.contains("[rules.MD013]"), "Should contain MD013 config");
@@ -148,7 +154,7 @@ mod tests {
         // Test with a path that likely can't be written to
         let result = create_default_config("/root/.rumdl.toml");
         assert!(result.is_err(), "Should error on permission denied");
-        
+
         if let Err(e) = result {
             assert!(e.to_string().contains("Failed to access file"));
             assert!(e.to_string().contains("/root/.rumdl.toml"));
@@ -184,7 +190,7 @@ mod tests {
         let value = parsed.unwrap();
         assert!(value.get("general").is_some(), "Should have general section");
         assert!(value.get("rules").is_some(), "Should have rules section");
-        
+
         let general = value.get("general").unwrap();
         assert_eq!(
             general.get("line_length").and_then(|v| v.as_integer()),
@@ -207,11 +213,11 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(&temp_dir).unwrap();
-        
+
         let result = create_default_config(".rumdl.toml");
         assert!(result.is_ok(), "Should work with relative path");
         assert!(result.unwrap(), "Should create file with relative path");
-        
+
         std::env::set_current_dir(original_dir).unwrap();
     }
 
@@ -233,7 +239,7 @@ mod tests {
             source: io::Error::new(io::ErrorKind::PermissionDenied, "test error"),
             path: "/test/path".to_string(),
         };
-        
+
         let error_string = error.to_string();
         assert!(error_string.contains("Failed to access file"));
         assert!(error_string.contains("/test/path"));
@@ -244,19 +250,19 @@ mod tests {
     #[cfg(unix)]
     fn test_create_default_config_symlink() {
         use std::os::unix::fs::symlink;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let target_path = temp_dir.path().join("target.toml");
         let symlink_path = temp_dir.path().join("symlink.toml");
-        
+
         // Create a file and symlink to it
         fs::write(&target_path, "existing content").unwrap();
         symlink(&target_path, &symlink_path).unwrap();
-        
+
         // Should not overwrite symlink target
         let result = create_default_config(symlink_path.to_str().unwrap()).unwrap();
         assert!(!result, "Should return false for existing symlink");
-        
+
         // Verify target content is preserved
         let content = fs::read_to_string(&target_path).unwrap();
         assert_eq!(content, "existing content", "Symlink target should not be modified");
@@ -266,34 +272,36 @@ mod tests {
     fn test_create_default_config_concurrent() {
         use std::sync::Arc;
         use std::thread;
-        
+
         let temp_dir = Arc::new(TempDir::new().unwrap());
         let config_path = temp_dir.path().join(".rumdl.toml");
         let config_path_str = config_path.to_str().unwrap().to_string();
-        
+
         // Try to create the same file from multiple threads
-        let handles: Vec<_> = (0..5).map(|_| {
-            let path = config_path_str.clone();
-            thread::spawn(move || {
-                create_default_config(&path)
+        let handles: Vec<_> = (0..5)
+            .map(|_| {
+                let path = config_path_str.clone();
+                thread::spawn(move || create_default_config(&path))
             })
-        }).collect();
-        
-        let results: Vec<_> = handles.into_iter()
-            .map(|h| h.join().unwrap())
             .collect();
-        
+
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
         // Exactly one thread should have created the file
-        let _successes = results.iter()
+        let _successes = results
+            .iter()
             .filter(|r| r.as_ref().map(|&v| v).unwrap_or(false))
             .count();
-        
+
         // Due to race conditions, we might get 1 or more successes
         // but the file should exist and be valid
         assert!(config_path.exists(), "File should exist after concurrent attempts");
-        
+
         let content = fs::read_to_string(&config_path).unwrap();
-        assert!(content.contains("# rumdl configuration file"), "File should contain valid config");
+        assert!(
+            content.contains("# rumdl configuration file"),
+            "File should contain valid config"
+        );
     }
 
     #[test]
@@ -320,16 +328,10 @@ mod tests {
 
         for (rule, config) in expected_rules {
             assert!(
-                content.contains(&format!("[rules.{}]", rule)),
-                "Should contain {} section",
-                rule
+                content.contains(&format!("[rules.{rule}]")),
+                "Should contain {rule} section"
             );
-            assert!(
-                content.contains(config),
-                "Should contain {} config: {}",
-                rule,
-                config
-            );
+            assert!(content.contains(config), "Should contain {rule} config: {config}");
         }
     }
 }

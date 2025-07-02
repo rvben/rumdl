@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{calculate_match_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use crate::utils::regex_cache::{BOLD_ASTERISK_REGEX, BOLD_UNDERSCORE_REGEX};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
@@ -145,11 +145,9 @@ impl Rule for MD050StrongStyle {
                             range: _line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
                             replacement: match target_style {
                                 StrongStyle::Asterisk => format!(
-                                    "**{
-            }**",
-                                    text
+                                    "**{text}**"
                                 ),
-                                StrongStyle::Underscore => format!("__{}__", text),
+                                StrongStyle::Underscore => format!("__{text}__"),
                                 StrongStyle::Consistent => unreachable!(),
                             },
                         }),
@@ -193,8 +191,8 @@ impl Rule for MD050StrongStyle {
         for (start, end) in matches.into_iter().rev() {
             let text = &result[start + 2..end - 2];
             let replacement = match target_style {
-                StrongStyle::Asterisk => format!("**{}**", text),
-                StrongStyle::Underscore => format!("__{}__", text),
+                StrongStyle::Asterisk => format!("**{text}**"),
+                StrongStyle::Underscore => format!("__{text}__"),
                 StrongStyle::Consistent => unreachable!(),
             };
             result.replace_range(start..end, &replacement);
@@ -235,7 +233,7 @@ mod tests {
         let content = "This is **strong text** here.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -245,9 +243,13 @@ mod tests {
         let content = "This is __strong text__ here.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Strong emphasis should use ** instead of __"));
+        assert!(
+            result[0]
+                .message
+                .contains("Strong emphasis should use ** instead of __")
+        );
         assert_eq!(result[0].line, 1);
         assert_eq!(result[0].column, 9);
     }
@@ -258,7 +260,7 @@ mod tests {
         let content = "This is __strong text__ here.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -268,9 +270,13 @@ mod tests {
         let content = "This is **strong text** here.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Strong emphasis should use __ instead of **"));
+        assert!(
+            result[0]
+                .message
+                .contains("Strong emphasis should use __ instead of **")
+        );
     }
 
     #[test]
@@ -279,10 +285,14 @@ mod tests {
         let content = "First **strong** then __also strong__.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // First strong is **, so __ should be flagged
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Strong emphasis should use ** instead of __"));
+        assert!(
+            result[0]
+                .message
+                .contains("Strong emphasis should use ** instead of __")
+        );
     }
 
     #[test]
@@ -291,10 +301,14 @@ mod tests {
         let content = "First __strong__ then **also strong**.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // First strong is __, so ** should be flagged
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Strong emphasis should use __ instead of **"));
+        assert!(
+            result[0]
+                .message
+                .contains("Strong emphasis should use __ instead of **")
+        );
     }
 
     #[test]
@@ -302,7 +316,7 @@ mod tests {
         let rule = MD050StrongStyle::new(StrongStyle::Consistent);
         let ctx = LintContext::new("This has **strong** text.");
         let style = rule.detect_style(&ctx);
-        
+
         assert_eq!(style, Some(StrongStyle::Asterisk));
     }
 
@@ -311,7 +325,7 @@ mod tests {
         let rule = MD050StrongStyle::new(StrongStyle::Consistent);
         let ctx = LintContext::new("This has __strong__ text.");
         let style = rule.detect_style(&ctx);
-        
+
         assert_eq!(style, Some(StrongStyle::Underscore));
     }
 
@@ -320,7 +334,7 @@ mod tests {
         let rule = MD050StrongStyle::new(StrongStyle::Consistent);
         let ctx = LintContext::new("No strong text here.");
         let style = rule.detect_style(&ctx);
-        
+
         assert_eq!(style, None);
     }
 
@@ -330,7 +344,7 @@ mod tests {
         let content = "```\n__strong__ in code\n```\n__strong__ outside";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Only the strong outside code block should be flagged
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 4);
@@ -342,7 +356,7 @@ mod tests {
         let content = "Text with `__strong__` in code and __strong__ outside.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Only the strong outside inline code should be flagged
         assert_eq!(result.len(), 1);
     }
@@ -353,7 +367,7 @@ mod tests {
         let content = "This is \\__not strong\\__ but __this is__.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Only the unescaped strong should be flagged
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
@@ -366,7 +380,7 @@ mod tests {
         let content = "This is **strong** text.";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "This is __strong__ text.");
     }
 
@@ -376,7 +390,7 @@ mod tests {
         let content = "This is __strong__ text.";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "This is **strong** text.");
     }
 
@@ -386,7 +400,7 @@ mod tests {
         let content = "First __strong__ and second __also strong__.";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "First **strong** and second **also strong**.");
     }
 
@@ -396,7 +410,7 @@ mod tests {
         let content = "```\n__strong__ in code\n```\n__strong__ outside";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "```\n__strong__ in code\n```\n**strong** outside");
     }
 
@@ -406,7 +420,7 @@ mod tests {
         let content = "Line 1 with __strong__\nLine 2 with __another__\nLine 3 normal";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 2);
@@ -418,7 +432,7 @@ mod tests {
         let content = "This has __strong with *emphasis* inside__.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
     }
 
@@ -428,7 +442,7 @@ mod tests {
         let content = "";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 

@@ -8,7 +8,7 @@ use std::time::Instant;
 fn test_extremely_long_lines() {
     // Test with extremely long lines that could cause buffer overflows
     let long_line = "a".repeat(100000);
-    let content = format!("# Heading\n{}\n## Another heading", long_line);
+    let content = format!("# Heading\n{long_line}\n## Another heading");
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD013LineLength::new(80, true, true, true, false)),
@@ -101,19 +101,14 @@ fn test_malformed_markdown_edge_cases() {
     let test_cases = [
         // Unclosed code blocks
         "```rust\ncode without closing fence\n# Heading after unclosed fence",
-
         // Malformed links
         "[unclosed link text\n## Heading\n[another [nested [link]]] structure",
-
         // Mixed line endings (simulate different platforms)
         "# Heading 1\r\nContent with CRLF\n# Heading 2\nContent with LF\r\n# Heading 3",
-
         // Invalid UTF-8 sequences (using valid UTF-8 that represents edge cases)
         "# Heading with emoji 🚀 and unicode \u{1F600}\nContent with special chars: ±×÷√∞",
-
         // Extremely nested lists
         &nested_lists,
-
         // Many consecutive headings
         &consecutive_headings,
         // Mixed markdown syntax
@@ -247,7 +242,7 @@ fn test_memory_intensive_scenarios() {
     // Test scenarios that could cause excessive memory usage
     let scenarios = [
         // Many small allocations
-        (0..10000).map(|i| format!("Line {}", i)).collect::<Vec<_>>().join("\n"),
+        (0..10000).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n"),
         // Large single allocation
         format!("# Large Content\n{}", "content ".repeat(50000)),
         // Many rules on same content

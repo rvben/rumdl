@@ -61,7 +61,7 @@ fn test_indented_code_block() {
             eprintln!("  Line {}: {}", warning.line, warning.message);
         }
         eprintln!("Code blocks detected: {:?}", ctx.code_blocks);
-        eprintln!("Content: {:?}", content);
+        eprintln!("Content: {content:?}");
         let mut byte_pos = 0;
         for (i, line) in content.lines().enumerate() {
             eprintln!(
@@ -101,8 +101,8 @@ fn test_multiple_occurrences() {
     assert!(!result.is_empty(), "Should detect multiple improper names");
 
     let fixed = rule.fix(&ctx).unwrap();
-    println!("Original content: '{}'", content);
-    println!("Fixed content: '{}'", fixed);
+    println!("Original content: '{content}'");
+    println!("Fixed content: '{fixed}'");
 
     // More lenient assertions
     assert!(

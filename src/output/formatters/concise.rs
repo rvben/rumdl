@@ -51,7 +51,7 @@ mod tests {
 
     #[test]
     fn test_concise_formatter_default() {
-        let _formatter = ConciseFormatter::default();
+        let _formatter = ConciseFormatter;
         // No fields to test, just ensure it constructs
     }
 
@@ -82,7 +82,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
         assert_eq!(
             output,
@@ -106,7 +106,7 @@ mod tests {
                 replacement: "\n# Heading\n".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "doc.md");
         // Concise format doesn't show fix indicator
         assert_eq!(
@@ -143,7 +143,7 @@ mod tests {
                 }),
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let expected = "test.md:5:1: [MD001] First warning\ntest.md:10:3: [MD013] Second warning";
         assert_eq!(output, expected);
@@ -162,18 +162,15 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
-        assert_eq!(
-            output,
-            "file.md:1:1: [unknown] Unknown rule warning"
-        );
+        assert_eq!(output, "file.md:1:1: [unknown] Unknown rule warning");
     }
 
     #[test]
     fn test_edge_cases() {
         let formatter = ConciseFormatter::new();
-        
+
         // Test large line/column numbers
         let warnings = vec![LintWarning {
             line: 99999,
@@ -185,12 +182,9 @@ mod tests {
             severity: Severity::Error,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "large.md");
-        assert_eq!(
-            output,
-            "large.md:99999:12345: [MD999] Edge case warning"
-        );
+        assert_eq!(output, "large.md:99999:12345: [MD999] Edge case warning");
     }
 
     #[test]
@@ -206,7 +200,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         assert_eq!(
             output,
@@ -227,18 +221,15 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "path/with spaces/and-dashes.md");
-        assert_eq!(
-            output,
-            "path/with spaces/and-dashes.md:1:1: [MD001] Test"
-        );
+        assert_eq!(output, "path/with spaces/and-dashes.md:1:1: [MD001] Test");
     }
 
     #[test]
     fn test_concise_format_consistency() {
         let formatter = ConciseFormatter::new();
-        
+
         // Test that the format is consistent with the expected pattern
         let warnings = vec![
             LintWarning {
@@ -265,12 +256,12 @@ mod tests {
                 }),
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let lines: Vec<&str> = output.lines().collect();
-        
+
         assert_eq!(lines.len(), 2);
-        
+
         // Each line should follow the pattern: file:line:col: [RULE] message
         for line in lines {
             assert!(line.contains(":"));
@@ -282,7 +273,7 @@ mod tests {
     #[test]
     fn test_severity_ignored() {
         let formatter = ConciseFormatter::new();
-        
+
         // Test that severity doesn't affect output (concise format doesn't show severity)
         let warnings = vec![
             LintWarning {
@@ -306,10 +297,10 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let lines: Vec<&str> = output.lines().collect();
-        
+
         // Both should have same format regardless of severity
         assert!(lines[0].starts_with("test.md:1:1: [MD001]"));
         assert!(lines[1].starts_with("test.md:2:1: [MD002]"));

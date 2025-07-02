@@ -1,4 +1,4 @@
-use rumdl::config::{normalize_key, ConfigSource};
+use rumdl::config::{ConfigSource, normalize_key};
 use rumdl::markdownlint_config::MarkdownlintConfig;
 
 #[test]
@@ -63,9 +63,7 @@ fn test_markdownlint_config_mapping() {
     for (rumdl_key, ml_key) in &expected_rules {
         assert!(
             rumdl_config.rules.contains_key(*rumdl_key),
-            "Missing mapping for {} (from {})",
-            rumdl_key,
-            ml_key
+            "Missing mapping for {rumdl_key} (from {ml_key})"
         );
     }
 
@@ -203,5 +201,5 @@ fn test_markdownlint_config_provenance_debug_output() {
 
 // Helper to parse from string for test
 fn load_markdownlint_config_from_str(s: &str) -> Result<rumdl::markdownlint_config::MarkdownlintConfig, String> {
-    serde_json::from_str(s).map_err(|e| format!("Failed to parse JSON: {}", e))
+    serde_json::from_str(s).map_err(|e| format!("Failed to parse JSON: {e}"))
 }

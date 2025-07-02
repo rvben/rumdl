@@ -1,6 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::code_fence_utils::CodeFenceStyle;
-use crate::utils::range_utils::{calculate_match_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use toml;
 
 mod md048_config;
@@ -309,7 +309,7 @@ mod tests {
         let content = "```\ncode\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -319,7 +319,7 @@ mod tests {
         let content = "~~~\ncode\n~~~";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2); // Opening and closing fence
         assert!(result[0].message.contains("use ``` instead of ~~~"));
         assert_eq!(result[0].line, 1);
@@ -332,7 +332,7 @@ mod tests {
         let content = "~~~\ncode\n~~~";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -342,7 +342,7 @@ mod tests {
         let content = "```\ncode\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2); // Opening and closing fence
         assert!(result[0].message.contains("use ~~~ instead of ```"));
     }
@@ -353,7 +353,7 @@ mod tests {
         let content = "```\ncode\n```\n\n~~~\nmore code\n~~~";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // First fence is backtick, so tildes should be flagged
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 5);
@@ -366,7 +366,7 @@ mod tests {
         let content = "~~~\ncode\n~~~\n\n```\nmore code\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // First fence is tilde, so backticks should be flagged
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 5);
@@ -378,7 +378,7 @@ mod tests {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
         let ctx = LintContext::new("```\ncode\n```");
         let style = rule.detect_style(&ctx);
-        
+
         assert_eq!(style, Some(CodeFenceStyle::Backtick));
     }
 
@@ -387,7 +387,7 @@ mod tests {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
         let ctx = LintContext::new("~~~\ncode\n~~~");
         let style = rule.detect_style(&ctx);
-        
+
         assert_eq!(style, Some(CodeFenceStyle::Tilde));
     }
 
@@ -396,7 +396,7 @@ mod tests {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
         let ctx = LintContext::new("No code fences here");
         let style = rule.detect_style(&ctx);
-        
+
         assert_eq!(style, None);
     }
 
@@ -406,7 +406,7 @@ mod tests {
         let content = "```\ncode\n```";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "~~~\ncode\n~~~");
     }
 
@@ -416,7 +416,7 @@ mod tests {
         let content = "~~~\ncode\n~~~";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "```\ncode\n```");
     }
 
@@ -426,7 +426,7 @@ mod tests {
         let content = "````\ncode with backtick\n```\ncode\n````";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "~~~~\ncode with backtick\n```\ncode\n~~~~");
     }
 
@@ -436,7 +436,7 @@ mod tests {
         let content = "~~~rust\nfn main() {}\n~~~";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "```rust\nfn main() {}\n```");
     }
 
@@ -446,7 +446,7 @@ mod tests {
         let content = "  ```\n  code\n  ```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
     }
 
@@ -456,7 +456,7 @@ mod tests {
         let content = "  ```\n  code\n  ```";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "  ~~~\n  code\n  ~~~");
     }
 
@@ -466,7 +466,7 @@ mod tests {
         let content = "```\ncode with ``` inside\n```";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "~~~\ncode with ``` inside\n~~~");
     }
 
@@ -476,7 +476,7 @@ mod tests {
         let content = "~~~\ncode1\n~~~\n\nText\n\n~~~python\ncode2\n~~~";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 4); // 2 opening + 2 closing fences
     }
 
@@ -486,7 +486,7 @@ mod tests {
         let content = "";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -496,7 +496,7 @@ mod tests {
         let content = "~~~\ncode\n~~~\n";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "```\ncode\n```\n");
     }
 
@@ -506,7 +506,7 @@ mod tests {
         let content = "~~~\ncode\n~~~";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "```\ncode\n```");
     }
 

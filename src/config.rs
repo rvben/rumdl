@@ -365,18 +365,6 @@ line-length = 222
         fs::write(&config_path, config_content).unwrap();
         // Load the config with skip_auto_discovery to avoid environment config files
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        // DEBUG: Print all rule keys and their value keys
-        log::debug!(
-            "[DEBUG] All rules loaded: {:?}",
-            sourced.rules.keys().collect::<Vec<_>>()
-        );
-        for (rule, cfg) in &sourced.rules {
-            log::debug!(
-                "[DEBUG] Rule '{}' value keys: {:?}",
-                rule,
-                cfg.values.keys().collect::<Vec<_>>()
-            );
-        }
         let rule_cfg = sourced.rules.get("MD013").expect("MD013 rule config should exist");
         // Now we should only get the explicitly configured key
         let keys: Vec<_> = rule_cfg.values.keys().cloned().collect();
@@ -469,21 +457,21 @@ line-length = 303
     fn test_invalid_toml_syntax() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         // Invalid TOML with unclosed string
         let config_content = r#"
 [MD013]
 line-length = "unclosed string
 "#;
         fs::write(&config_path, config_content).unwrap();
-        
+
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_err());
         match result.unwrap_err() {
             ConfigError::ParseError(msg) => {
                 // The actual error message from toml parser might vary
                 assert!(msg.contains("expected") || msg.contains("invalid") || msg.contains("unterminated"));
-            },
+            }
             _ => panic!("Expected ParseError"),
         }
     }
@@ -492,17 +480,17 @@ line-length = "unclosed string
     fn test_wrong_type_for_config_value() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         // line-length should be a number, not a string
         let config_content = r#"
 [MD013]
 line-length = "not a number"
 "#;
         fs::write(&config_path, config_content).unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         // The value should be loaded as a string, not converted
         let rule_config = config.rules.get("MD013").unwrap();
         let value = rule_config.values.get("line-length").unwrap();
@@ -513,13 +501,13 @@ line-length = "not a number"
     fn test_empty_config_file() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         // Empty file
         fs::write(&config_path, "").unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         // Should have default values
         assert_eq!(config.global.line_length, 80);
         assert!(config.global.respect_gitignore);
@@ -530,14 +518,14 @@ line-length = "not a number"
     fn test_malformed_pyproject_toml() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join("pyproject.toml");
-        
+
         // Missing closing bracket
         let content = r#"
 [tool.rumdl
 line-length = 120
 "#;
         fs::write(&config_path, content).unwrap();
-        
+
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_err());
     }
@@ -546,7 +534,7 @@ line-length = 120
     fn test_conflicting_config_values() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         // Both enable and disable the same rule - these need to be in a global section
         let config_content = r#"
 [global]
@@ -554,10 +542,10 @@ enable = ["MD013"]
 disable = ["MD013"]
 "#;
         fs::write(&config_path, config_content).unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         // Both should be present - resolution happens at runtime
         assert!(config.global.enable.contains(&"MD013".to_string()));
         assert!(config.global.disable.contains(&"MD013".to_string()));
@@ -567,17 +555,17 @@ disable = ["MD013"]
     fn test_invalid_rule_names() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         let config_content = r#"
 [global]
 enable = ["MD001", "NOT_A_RULE", "md002", "12345"]
 disable = ["MD-001", "MD_002"]
 "#;
         fs::write(&config_path, config_content).unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         // All values should be preserved as-is
         assert_eq!(config.global.enable.len(), 4);
         assert_eq!(config.global.disable.len(), 2);
@@ -587,7 +575,7 @@ disable = ["MD-001", "MD_002"]
     fn test_deeply_nested_config() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         // This should be ignored as we don't support nested tables within rule configs
         let config_content = r#"
 [MD013]
@@ -596,12 +584,15 @@ line-length = 100
 value = 42
 "#;
         fs::write(&config_path, config_content).unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         let rule_config = config.rules.get("MD013").unwrap();
-        assert_eq!(rule_config.values.get("line-length").unwrap(), &toml::Value::Integer(100));
+        assert_eq!(
+            rule_config.values.get("line-length").unwrap(),
+            &toml::Value::Integer(100)
+        );
         // Nested table should not be present
         assert!(!rule_config.values.contains_key("nested"));
     }
@@ -610,7 +601,7 @@ value = 42
     fn test_unicode_in_config() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         let config_content = r#"
 [global]
 include = ["文档/*.md", "ドキュメント/*.md"]
@@ -621,15 +612,15 @@ line-length = 80
 message = "行太长了 🚨"
 "#;
         fs::write(&config_path, config_content).unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         assert_eq!(config.global.include.len(), 2);
         assert_eq!(config.global.exclude.len(), 2);
         assert!(config.global.include[0].contains("文档"));
         assert!(config.global.exclude[1].contains("🚀"));
-        
+
         let rule_config = config.rules.get("MD013").unwrap();
         let message = rule_config.values.get("message").unwrap();
         if let toml::Value::String(s) = message {
@@ -642,21 +633,23 @@ message = "行太长了 🚨"
     fn test_extremely_long_values() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         let long_string = "a".repeat(10000);
-        let config_content = format!(r#"
+        let config_content = format!(
+            r#"
 [global]
-exclude = ["{}"]
+exclude = ["{long_string}"]
 
 [MD013]
 line-length = 999999999
-"#, long_string);
-        
+"#
+        );
+
         fs::write(&config_path, config_content).unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         assert_eq!(config.global.exclude[0].len(), 10000);
         let line_length = get_rule_config_value::<usize>(&config, "MD013", "line-length");
         assert_eq!(line_length, Some(999999999));
@@ -666,7 +659,7 @@ line-length = 999999999
     fn test_config_with_comments() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         let config_content = r#"
 [global]
 # This is a comment
@@ -678,13 +671,13 @@ line-length = 100 # Set to 100 characters
 # ignored = true # This setting is commented out
 "#;
         fs::write(&config_path, config_content).unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         assert_eq!(config.global.enable, vec!["MD001"]);
         assert!(config.global.disable.is_empty()); // Commented out
-        
+
         let rule_config = config.rules.get("MD013").unwrap();
         assert_eq!(rule_config.values.len(), 1); // Only line-length
         assert!(!rule_config.values.contains_key("ignored"));
@@ -694,7 +687,7 @@ line-length = 100 # Set to 100 characters
     fn test_arrays_in_rule_config() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         let config_content = r#"
 [MD002]
 levels = [1, 2, 3]
@@ -702,18 +695,18 @@ tags = ["important", "critical"]
 mixed = [1, "two", true]
 "#;
         fs::write(&config_path, config_content).unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         // Arrays should now be properly parsed
         let rule_config = config.rules.get("MD002").expect("MD002 config should exist");
-        
+
         // Check that arrays are present and correctly parsed
         assert!(rule_config.values.contains_key("levels"));
         assert!(rule_config.values.contains_key("tags"));
         assert!(rule_config.values.contains_key("mixed"));
-        
+
         // Verify array contents
         if let Some(toml::Value::Array(levels)) = rule_config.values.get("levels") {
             assert_eq!(levels.len(), 3);
@@ -723,7 +716,7 @@ mixed = [1, "two", true]
         } else {
             panic!("levels should be an array");
         }
-        
+
         if let Some(toml::Value::Array(tags)) = rule_config.values.get("tags") {
             assert_eq!(tags.len(), 2);
             assert_eq!(tags[0], toml::Value::String("important".to_string()));
@@ -731,7 +724,7 @@ mixed = [1, "two", true]
         } else {
             panic!("tags should be an array");
         }
-        
+
         if let Some(toml::Value::Array(mixed)) = rule_config.values.get("mixed") {
             assert_eq!(mixed.len(), 3);
             assert_eq!(mixed[0], toml::Value::Integer(1));
@@ -749,13 +742,13 @@ mixed = [1, "two", true]
         assert_eq!(normalize_key("md001"), "MD001");
         assert_eq!(normalize_key("Md001"), "MD001");
         assert_eq!(normalize_key("mD001"), "MD001");
-        
+
         // Non-rule names
         assert_eq!(normalize_key("line_length"), "line-length");
         assert_eq!(normalize_key("line-length"), "line-length");
         assert_eq!(normalize_key("LINE_LENGTH"), "line-length");
         assert_eq!(normalize_key("respect_gitignore"), "respect-gitignore");
-        
+
         // Edge cases
         assert_eq!(normalize_key("MD"), "md"); // Too short to be a rule
         assert_eq!(normalize_key("MD00"), "md00"); // Too short
@@ -771,11 +764,11 @@ mixed = [1, "two", true]
     fn test_missing_config_file() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join("nonexistent.toml");
-        
+
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_err());
         match result.unwrap_err() {
-            ConfigError::IoError { .. } => {},
+            ConfigError::IoError { .. } => {}
             _ => panic!("Expected IoError for missing file"),
         }
     }
@@ -784,27 +777,27 @@ mixed = [1, "two", true]
     #[cfg(unix)]
     fn test_permission_denied_config() {
         use std::os::unix::fs::PermissionsExt;
-        
+
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         fs::write(&config_path, "enable = [\"MD001\"]").unwrap();
-        
+
         // Remove read permissions
         let mut perms = fs::metadata(&config_path).unwrap().permissions();
         perms.set_mode(0o000);
         fs::set_permissions(&config_path, perms).unwrap();
-        
+
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
-        
+
         // Restore permissions for cleanup
         let mut perms = fs::metadata(&config_path).unwrap().permissions();
         perms.set_mode(0o644);
         fs::set_permissions(&config_path, perms).unwrap();
-        
+
         assert!(result.is_err());
         match result.unwrap_err() {
-            ConfigError::IoError { .. } => {},
+            ConfigError::IoError { .. } => {}
             _ => panic!("Expected IoError for permission denied"),
         }
     }
@@ -815,17 +808,17 @@ mixed = [1, "two", true]
         // But we test that deeply nested structures don't cause stack overflow
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         let mut config_content = String::from("[MD001]\n");
         for i in 0..100 {
-            config_content.push_str(&format!("key{} = {}\n", i, i));
+            config_content.push_str(&format!("key{i} = {i}\n"));
         }
-        
+
         fs::write(&config_path, config_content).unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         let rule_config = config.rules.get("MD001").unwrap();
         assert_eq!(rule_config.values.len(), 100);
     }
@@ -834,7 +827,7 @@ mixed = [1, "two", true]
     fn test_special_toml_values() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".rumdl.toml");
-        
+
         let config_content = r#"
 [MD001]
 infinity = inf
@@ -845,10 +838,10 @@ local_date = 1979-05-27
 local_time = 07:32:00
 "#;
         fs::write(&config_path, config_content).unwrap();
-        
+
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
-        
+
         // Some values might not be parsed due to parser limitations
         if let Some(rule_config) = config.rules.get("MD001") {
             // Check special float values if present
@@ -861,7 +854,7 @@ local_time = 07:32:00
             if let Some(toml::Value::Float(f)) = rule_config.values.get("not_a_number") {
                 assert!(f.is_nan());
             }
-            
+
             // Check datetime values if present
             if let Some(val) = rule_config.values.get("datetime") {
                 assert!(matches!(val, toml::Value::Datetime(_)));
@@ -1093,7 +1086,7 @@ impl SourcedConfig {
                 log::debug!("[rumdl-config] No explicit config_path provided, will search default locations");
             }
         } else {
-            log::debug!("[rumdl-config] Explicit config_path provided: {:?}", config_path);
+            log::debug!("[rumdl-config] Explicit config_path provided: {config_path:?}");
         }
         let mut sourced_config = SourcedConfig::default();
         let mut loaded_toml_or_pyproject = false;
@@ -1102,7 +1095,7 @@ impl SourcedConfig {
         if let Some(path) = config_path {
             let path_obj = Path::new(path);
             let filename = path_obj.file_name().and_then(|name| name.to_str()).unwrap_or("");
-            log::debug!("[rumdl-config] Trying to load config file: {}", filename);
+            log::debug!("[rumdl-config] Trying to load config file: {filename}");
             let path_str = path.to_string();
 
             // Known markdownlint config files
@@ -1170,7 +1163,7 @@ impl SourcedConfig {
             // 3. Discover and load .rumdl.toml / rumdl.toml (overrides pyproject)
             for filename in [".rumdl.toml", "rumdl.toml"] {
                 if std::path::Path::new(filename).exists() {
-                    log::debug!("[rumdl-config] Found {} in current directory", filename);
+                    log::debug!("[rumdl-config] Found {filename} in current directory");
                     let content = std::fs::read_to_string(filename).map_err(|e| ConfigError::IoError {
                         source: e,
                         path: filename.to_string(),
@@ -1181,7 +1174,7 @@ impl SourcedConfig {
                     loaded_toml_or_pyproject = true;
                     break; // Load only the first one found
                 } else {
-                    log::debug!("[rumdl-config] {} not found in current directory", filename);
+                    log::debug!("[rumdl-config] {filename} not found in current directory");
                 }
             }
 
@@ -1353,7 +1346,7 @@ pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry)
     for rule in sourced.rules.keys() {
         if !known_rules.contains(rule) {
             warnings.push(ConfigValidationWarning {
-                message: format!("Unknown rule in config: {}", rule),
+                message: format!("Unknown rule in config: {rule}"),
                 rule: Some(rule.clone()),
                 key: None,
             });
@@ -1365,7 +1358,7 @@ pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry)
             for key in rule_cfg.values.keys() {
                 if !valid_keys.contains(key) {
                     warnings.push(ConfigValidationWarning {
-                        message: format!("Unknown option for rule {}: {}", rule, key),
+                        message: format!("Unknown option for rule {rule}: {key}"),
                         rule: Some(rule.clone()),
                         key: Some(key.clone()),
                     });
@@ -1395,7 +1388,7 @@ pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry)
     for (section, key) in &sourced.unknown_keys {
         if section.contains("[global]") {
             warnings.push(ConfigValidationWarning {
-                message: format!("Unknown global option: {}", key),
+                message: format!("Unknown global option: {key}"),
                 rule: None,
                 key: Some(key.clone()),
             });
@@ -1435,7 +1428,7 @@ fn toml_value_type_matches(expected: &toml::Value, actual: &toml::Value) -> bool
 /// Parses pyproject.toml content and extracts the [tool.rumdl] section if present.
 fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfigFragment>, ConfigError> {
     let doc: toml::Value = toml::from_str(content)
-        .map_err(|e| ConfigError::ParseError(format!("{}: Failed to parse TOML: {}", path, e)))?;
+        .map_err(|e| ConfigError::ParseError(format!("{path}: Failed to parse TOML: {e}")))?;
     let mut fragment = SourcedConfigFragment::default();
     let source = ConfigSource::PyprojectToml;
     let file = Some(path.to_string());
@@ -1646,18 +1639,14 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
         || !fragment.global.include.value.is_empty()
         || !fragment.global.exclude.value.is_empty()
         || !fragment.rules.is_empty();
-    if has_any {
-        Ok(Some(fragment))
-    } else {
-        Ok(None)
-    }
+    if has_any { Ok(Some(fragment)) } else { Ok(None) }
 }
 
 /// Parses rumdl.toml / .rumdl.toml content.
 fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, ConfigError> {
     let doc = content
         .parse::<DocumentMut>()
-        .map_err(|e| ConfigError::ParseError(format!("{}: Failed to parse TOML: {}", path, e)))?;
+        .map_err(|e| ConfigError::ParseError(format!("{path}: Failed to parse TOML: {e}")))?;
     let mut fragment = SourcedConfigFragment::default();
     let source = ConfigSource::RumdlToml;
     let file = Some(path.to_string());
@@ -1790,7 +1779,7 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                     _ => {
                         // Add to unknown_keys for potential validation later
                         // fragment.unknown_keys.push(("[global]".to_string(), key.to_string()));
-                        log::warn!("[WARN] Unknown key in [global] section of {}: {}", path, key);
+                        log::warn!("[WARN] Unknown key in [global] section of {path}: {key}");
                     }
                 }
             }
@@ -1818,15 +1807,24 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                         let mut values = Vec::new();
                         for item in formatted_array.iter() {
                             match item {
-                                toml_edit::Value::String(formatted) => values.push(toml::Value::String(formatted.value().clone())),
-                                toml_edit::Value::Integer(formatted) => values.push(toml::Value::Integer(*formatted.value())),
-                                toml_edit::Value::Float(formatted) => values.push(toml::Value::Float(*formatted.value())),
-                                toml_edit::Value::Boolean(formatted) => values.push(toml::Value::Boolean(*formatted.value())),
-                                toml_edit::Value::Datetime(formatted) => values.push(toml::Value::Datetime(*formatted.value())),
+                                toml_edit::Value::String(formatted) => {
+                                    values.push(toml::Value::String(formatted.value().clone()))
+                                }
+                                toml_edit::Value::Integer(formatted) => {
+                                    values.push(toml::Value::Integer(*formatted.value()))
+                                }
+                                toml_edit::Value::Float(formatted) => {
+                                    values.push(toml::Value::Float(*formatted.value()))
+                                }
+                                toml_edit::Value::Boolean(formatted) => {
+                                    values.push(toml::Value::Boolean(*formatted.value()))
+                                }
+                                toml_edit::Value::Datetime(formatted) => {
+                                    values.push(toml::Value::Datetime(*formatted.value()))
+                                }
                                 _ => {
                                     log::warn!(
-                                        "[WARN] Skipping unsupported array element type in key '{}.{}' in {}",
-                                        norm_rule_name, norm_rk, path
+                                        "[WARN] Skipping unsupported array element type in key '{norm_rule_name}.{norm_rk}' in {path}"
                                     );
                                 }
                             }
@@ -1835,17 +1833,13 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                     }
                     Some(toml_edit::Value::InlineTable(_)) => {
                         log::warn!(
-                                "[WARN] Skipping inline table value for key '{}.{}' in {}. Table conversion not yet fully implemented in parser.",
-                                norm_rule_name, norm_rk, path
-                            );
+                            "[WARN] Skipping inline table value for key '{norm_rule_name}.{norm_rk}' in {path}. Table conversion not yet fully implemented in parser."
+                        );
                         None
                     }
                     None => {
                         log::warn!(
-                            "[WARN] Skipping non-value item for key '{}.{}' in {}. Expected simple value.",
-                            norm_rule_name,
-                            norm_rk,
-                            path
+                            "[WARN] Skipping non-value item for key '{norm_rule_name}.{norm_rk}' in {path}. Expected simple value."
                         );
                         None
                     }
@@ -1860,10 +1854,7 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
             }
         } else if item.is_value() {
             log::warn!(
-                "[WARN] Ignoring top-level value key in {}: '{}'. Expected a table like [{}].",
-                path,
-                key,
-                key
+                "[WARN] Ignoring top-level value key in {path}: '{key}'. Expected a table like [{key}]."
             );
         }
     }
@@ -1875,6 +1866,6 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
 fn load_from_markdownlint(path: &str) -> Result<SourcedConfigFragment, ConfigError> {
     // Use the unified loader from markdownlint_config.rs
     let ml_config = crate::markdownlint_config::load_markdownlint_config(path)
-        .map_err(|e| ConfigError::ParseError(format!("{}: {}", path, e)))?;
+        .map_err(|e| ConfigError::ParseError(format!("{path}: {e}")))?;
     Ok(ml_config.map_to_sourced_rumdl_config_fragment(Some(path)))
 }

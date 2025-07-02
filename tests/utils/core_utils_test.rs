@@ -1,5 +1,5 @@
-use rumdl::utils::fast_hash;
 use rumdl::utils::StrExt;
+use rumdl::utils::fast_hash;
 
 #[test]
 fn test_trailing_spaces() {

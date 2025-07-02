@@ -469,10 +469,10 @@ mod tests {
     fn test_fix_handles_very_long_lines() {
         let rule = MD030ListMarkerSpace::default();
         let long_content = "a".repeat(1000);
-        let content = format!("*  {}", long_content);
+        let content = format!("*  {long_content}");
         let ctx = LintContext::new(&content);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = format!("* {}", long_content);
+        let expected = format!("* {long_content}");
         assert_eq!(fixed, expected);
     }
 
@@ -491,7 +491,7 @@ mod tests {
         let rule = MD030ListMarkerSpace::default();
         let mut lines = Vec::new();
         for i in 0..1000 {
-            lines.push(format!("*  Item {}", i));
+            lines.push(format!("*  Item {i}"));
         }
         let content = lines.join("\n");
         let ctx = LintContext::new(&content);
@@ -501,13 +501,13 @@ mod tests {
         let duration = start.elapsed();
 
         // Should complete in reasonable time (less than 1 second)
-        assert!(duration.as_secs() < 1, "Fix took too long: {:?}", duration);
+        assert!(duration.as_secs() < 1, "Fix took too long: {duration:?}");
 
         // Verify all items were fixed
         let fixed_lines: Vec<&str> = fixed.lines().collect();
         assert_eq!(fixed_lines.len(), 1000);
         for (i, line) in fixed_lines.iter().enumerate() {
-            assert_eq!(*line, format!("* Item {}", i));
+            assert_eq!(*line, format!("* Item {i}"));
         }
     }
 }

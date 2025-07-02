@@ -1,7 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_block_utils::CodeBlockStyle;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -309,7 +309,7 @@ impl MD046CodeBlockStyle {
                                     severity: Severity::Warning,
                                     fix: Some(Fix {
                                         range: (line_start_byte..line_start_byte),
-                                        replacement: format!("{}\n\n", open_marker),
+                                        replacement: format!("{open_marker}\n\n"),
                                     }),
                                 });
 
@@ -353,11 +353,11 @@ impl MD046CodeBlockStyle {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    message: format!("Code block opened with '{}' but never closed", fence_marker),
+                    message: format!("Code block opened with '{fence_marker}' but never closed"),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: (ctx.content.len()..ctx.content.len()),
-                        replacement: format!("\n{}", fence_marker),
+                        replacement: format!("\n{fence_marker}"),
                     }),
                 });
             }
@@ -883,7 +883,7 @@ mod tests {
         let content = "```\ncode\n```\n\nMore text\n\n```\nmore code\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // All blocks are fenced, so consistent style should be OK
         assert_eq!(result.len(), 0);
     }
@@ -894,7 +894,7 @@ mod tests {
         let content = "Text\n\n    code\n    more code\n\nMore text\n\n    another block";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // All blocks are indented, so consistent style should be OK
         assert_eq!(result.len(), 0);
     }
@@ -905,9 +905,9 @@ mod tests {
         let content = "```\nfenced code\n```\n\nText\n\n    indented code\n\nMore";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Mixed styles should be flagged
-        assert!(result.len() > 0);
+        assert!(!result.is_empty());
     }
 
     #[test]
@@ -916,9 +916,9 @@ mod tests {
         let content = "Text\n\n    indented code\n    more code\n\nMore text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Indented blocks should be flagged when fenced style is required
-        assert!(result.len() > 0);
+        assert!(!result.is_empty());
         assert!(result[0].message.contains("Use fenced code blocks"));
     }
 
@@ -928,9 +928,9 @@ mod tests {
         let content = "Text\n\n```\nfenced code\n```\n\nMore text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Fenced blocks should be flagged when indented style is required
-        assert!(result.len() > 0);
+        assert!(!result.is_empty());
         assert!(result[0].message.contains("Use fenced code blocks"));
     }
 
@@ -940,7 +940,7 @@ mod tests {
         let content = "```\ncode without closing fence";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("never closed"));
     }
@@ -951,7 +951,7 @@ mod tests {
         let content = "```\nouter\n```\n\ninner text\n\n```\ncode\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // This should parse as two separate code blocks
         assert_eq!(result.len(), 0);
     }
@@ -962,7 +962,7 @@ mod tests {
         let content = "Text\n\n    code line 1\n    code line 2\n\nMore text";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert!(fixed.contains("```\ncode line 1\ncode line 2\n```"));
     }
 
@@ -972,7 +972,7 @@ mod tests {
         let content = "Text\n\n```\ncode line 1\ncode line 2\n```\n\nMore text";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert!(fixed.contains("    code line 1\n    code line 2"));
         assert!(!fixed.contains("```"));
     }
@@ -983,7 +983,7 @@ mod tests {
         let content = "```\ncode without closing";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Should add closing fence
         assert!(fixed.ends_with("```"));
     }
@@ -994,7 +994,7 @@ mod tests {
         let content = "- List item\n    code in list\n    more code\n- Next item";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Code in lists should not be flagged
         assert_eq!(result.len(), 0);
     }
@@ -1004,7 +1004,7 @@ mod tests {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "```\ncode\n```";
         let style = rule.detect_style(content);
-        
+
         assert_eq!(style, Some(CodeBlockStyle::Fenced));
     }
 
@@ -1013,7 +1013,7 @@ mod tests {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "Text\n\n    code\n\nMore";
         let style = rule.detect_style(content);
-        
+
         assert_eq!(style, Some(CodeBlockStyle::Indented));
     }
 
@@ -1022,7 +1022,7 @@ mod tests {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "No code blocks here";
         let style = rule.detect_style(content);
-        
+
         assert_eq!(style, None);
     }
 
@@ -1032,7 +1032,7 @@ mod tests {
         let content = "~~~\ncode\n~~~";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Tilde fences should be accepted as fenced blocks
         assert_eq!(result.len(), 0);
     }
@@ -1043,7 +1043,7 @@ mod tests {
         let content = "```rust\nfn main() {}\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -1053,7 +1053,7 @@ mod tests {
         let content = "";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -1070,7 +1070,7 @@ mod tests {
         let content = "```markdown\n# Example\n\n```\ncode\n```\n\nText\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Nested code blocks in markdown documentation should be allowed
         assert_eq!(result.len(), 0);
     }
@@ -1081,7 +1081,7 @@ mod tests {
         let content = "```\ncode\n```\n";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, content);
     }
 }

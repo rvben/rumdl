@@ -1,5 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use crate::utils::table_utils::TableUtils;
 
 /// Rule MD056: Table column count
@@ -66,7 +66,7 @@ impl MD056TableColumnCount {
         }
 
         for (i, cell) in cells.iter().enumerate() {
-            result.push_str(&format!(" {} ", cell));
+            result.push_str(&format!(" {cell} "));
             if i < cells.len() - 1 || has_trailing_pipe {
                 result.push('|');
             }
@@ -124,7 +124,7 @@ impl Rule for MD056TableColumnCount {
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
-                        message: format!("Table row has {} cells, but expected {}", count, expected_count),
+                        message: format!("Table row has {count} cells, but expected {expected_count}"),
                         line: start_line,
                         column: start_col,
                         end_line,
@@ -198,7 +198,7 @@ mod tests {
 | Cell 4   | Cell 5   | Cell 6   |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -211,7 +211,7 @@ mod tests {
 | Cell 4   | Cell 5   | Cell 6   |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 3);
         assert!(result[0].message.contains("has 2 cells, but expected 3"));
@@ -226,7 +226,7 @@ mod tests {
 | Cell 5   | Cell 6   |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 3);
         assert!(result[0].message.contains("has 4 cells, but expected 2"));
@@ -240,7 +240,7 @@ mod tests {
 | Cell 1   | Cell 2   | Cell 3   |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
         assert!(result[0].message.contains("has 2 cells, but expected 3"));
@@ -255,7 +255,7 @@ mod tests {
 | Cell 4   | Cell 5   | Cell 6   |";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert!(fixed.contains("| Cell 1 | Cell 2 |  |"));
     }
 
@@ -268,7 +268,7 @@ mod tests {
 | Cell 5   | Cell 6   |";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert!(fixed.contains("| Cell 1 | Cell 2 |"));
         assert!(!fixed.contains("Cell 3"));
         assert!(!fixed.contains("Cell 4"));
@@ -283,7 +283,7 @@ Cell 1   | Cell 2   |
 Cell 4   | Cell 5   | Cell 6   |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 3);
     }
@@ -297,7 +297,7 @@ Cell 4   | Cell 5   | Cell 6   |";
 | Cell 4   | Cell 5   | Cell 6";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 3);
     }
@@ -310,7 +310,7 @@ Just regular text
 No pipes here";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -323,7 +323,7 @@ No pipes here";
 | Cell 1   |          | Cell 3   |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -342,7 +342,7 @@ Some text in between.
 | Data 5         | Data 6         | Data 7         |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 9);
         assert!(result[0].message.contains("has 2 cells, but expected 3"));
@@ -358,7 +358,7 @@ Some text in between.
 | `ls` | List files |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should handle escaped pipes correctly
         assert_eq!(result.len(), 0);
     }
@@ -369,7 +369,7 @@ Some text in between.
         let content = "";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -387,7 +387,7 @@ Some text in between.
 | Data | Here  |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should not check tables inside code blocks
         assert_eq!(result.len(), 0);
     }
@@ -401,7 +401,7 @@ Some text in between.
 | Cell 1   | Cell 2";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         let lines: Vec<&str> = fixed.lines().collect();
         assert!(!lines[2].ends_with('|'));
         assert!(lines[2].contains("Cell 1"));
@@ -417,7 +417,7 @@ Some text in between.
 | Cell 2  |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -430,7 +430,7 @@ Some text in between.
 | Left | Center |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 4);
     }
@@ -444,7 +444,7 @@ Some text in between.
 | 佐藤 | 30   |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 4);
     }
@@ -457,7 +457,7 @@ Some text in between.
 | Data  | This is an extremely long cell content that goes on and on   |";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("has 2 cells, but expected 3"));
     }
@@ -471,7 +471,7 @@ Some text in between.
 ";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert!(fixed.ends_with('\n'));
         assert!(fixed.contains("| 1 | 2 |  |"));
     }
@@ -484,7 +484,7 @@ Some text in between.
 | 1 | 2 |";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert!(!fixed.ends_with('\n'));
         assert!(fixed.contains("| 1 | 2 |  |"));
     }

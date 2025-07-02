@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{calculate_match_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
@@ -100,7 +100,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: format!("Malformed quote: {}", description),
+                        message: format!("Malformed quote: {description}"),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: {
@@ -441,7 +441,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "> Two spaces\n");
-        
+
         let content_no_newline = ">  Two spaces";
         let ctx2 = LintContext::new(content_no_newline);
         let fixed2 = rule.fix(&ctx2).unwrap();
@@ -461,19 +461,19 @@ mod tests {
     #[test]
     fn test_looks_like_blockquote_attempt() {
         let rule = MD027MultipleSpacesBlockquote;
-        
+
         // Should return true for genuine attempts
         assert!(rule.looks_like_blockquote_attempt(
-            ">>This is a real blockquote attempt with text", 
+            ">>This is a real blockquote attempt with text",
             "> > This is a real blockquote attempt with text"
         ));
-        
+
         // Should return false for too short
         assert!(!rule.looks_like_blockquote_attempt(">>>", "> > >"));
-        
+
         // Should return false for no alphabetic content
         assert!(!rule.looks_like_blockquote_attempt(">>123", "> > 123"));
-        
+
         // Should return false for code-like content
         assert!(!rule.looks_like_blockquote_attempt(">>#header", "> > #header"));
     }
@@ -483,7 +483,7 @@ mod tests {
         let rule = MD027MultipleSpacesBlockquote;
         let regex = Regex::new(r"^(\s*)>>([^\s>].*|$)").unwrap();
         let cap = regex.captures(">>content").unwrap();
-        
+
         let result = rule.extract_blockquote_fix_from_match(&cap, "missing spaces in nested blockquote", ">>content");
         assert!(result.is_some());
         let (fixed, desc) = result.unwrap();

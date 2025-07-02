@@ -127,17 +127,13 @@ fn test_complex_unicode_scenarios() {
             let lsp_fixed = apply_warning_fixes(content, &warnings);
             assert!(
                 lsp_fixed.is_ok(),
-                "LSP fix failed for content with {}: '{}'",
-                description,
-                content
+                "LSP fix failed for content with {description}: '{content}'"
             );
 
             assert_eq!(
                 cli_fixed,
                 lsp_fixed.unwrap(),
-                "CLI/LSP inconsistency for content with {}: '{}'",
-                description,
-                content
+                "CLI/LSP inconsistency for content with {description}: '{content}'"
             );
         }
     }

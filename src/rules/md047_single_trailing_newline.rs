@@ -129,7 +129,6 @@ impl Rule for MD047SingleTrailingNewline {
         self
     }
 
-
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,

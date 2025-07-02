@@ -42,7 +42,7 @@ fn test_markdownlint_config_cli_output_matches() {
     );
 
     let toml_str = String::from_utf8_lossy(&output.stdout);
-    println!("TOML output:\n{}", toml_str); // Print the actual output for debugging
+    println!("TOML output:\n{toml_str}"); // Print the actual output for debugging
 
     // Parse the TOML output
     let toml_value: toml::Value = toml::from_str(&toml_str).expect("Failed to parse TOML output");
@@ -90,7 +90,7 @@ line-length = 88
     );
 
     let toml_str = String::from_utf8_lossy(&output.stdout);
-    println!("TOML output:\n{}", toml_str); // For debugging
+    println!("TOML output:\n{toml_str}"); // For debugging
 
     // Parse the TOML output
     let toml_value: toml::Value = toml::from_str(&toml_str).expect("Failed to parse TOML output");
@@ -126,11 +126,10 @@ fn test_config_command_prints_source_markdownlint_json() {
     // Check both stdout and stderr for the message
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{}\n{}", stdout, stderr);
+    let combined = format!("{stdout}\n{stderr}");
     assert!(
         combined.contains("from markdownlint"),
-        "Expected output to mention 'from markdownlint', got: {}",
-        combined
+        "Expected output to mention 'from markdownlint', got: {combined}"
     );
 
     // In the expected output, update the provenance for global config values to [from default]
@@ -171,12 +170,10 @@ fn test_invalid_markdownlint_json_prints_helpful_error() {
     // Accept any error message that contains 'Failed to parse JSON' and the filename
     assert!(
         stderr.contains("Failed to parse JSON"),
-        "Expected helpful parse error message, got: {}",
-        stderr
+        "Expected helpful parse error message, got: {stderr}"
     );
     assert!(
         stderr.contains(config_path.to_str().unwrap()),
-        "Error message should include the config filename, got: {}",
-        stderr
+        "Error message should include the config filename, got: {stderr}"
     );
 }

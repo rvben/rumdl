@@ -393,7 +393,7 @@ impl Rule for MD051LinkFragments {
                         column: link.start_col + 1, // Convert to 1-indexed
                         end_line: link.line,
                         end_column: link.end_col + 1, // Convert to 1-indexed
-                        message: format!("Link anchor '#{}' does not exist in document headings", fragment),
+                        message: format!("Link anchor '#{fragment}' does not exist in document headings"),
                         severity: Severity::Warning,
                         fix: None,
                     });
@@ -448,7 +448,7 @@ mod tests {
         let content = "# Introduction\n\nSee [introduction](#introduction) for details.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -458,9 +458,13 @@ mod tests {
         let content = "# Introduction\n\nSee [missing](#missing-section) for details.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Link anchor '#missing-section' does not exist"));
+        assert!(
+            result[0]
+                .message
+                .contains("Link anchor '#missing-section' does not exist")
+        );
     }
 
     #[test]
@@ -469,7 +473,7 @@ mod tests {
         let content = "# Introduction\n## Setup\n### Installation\n\n[intro](#introduction) [setup](#setup) [install](#installation)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -479,7 +483,7 @@ mod tests {
         let content = "# Introduction\n\n[external](https://example.com#section)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -489,32 +493,35 @@ mod tests {
         let content = "# Introduction\n\n[other file](other.md#section)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn test_heading_to_fragment_conversion() {
         let rule = MD051LinkFragments::new();
-        
+
         // Simple text
         assert_eq!(rule.heading_to_fragment_fast("Hello World"), "hello-world");
-        
+
         // With punctuation
         assert_eq!(rule.heading_to_fragment_fast("Hello, World!"), "hello-world");
-        
+
         // With markdown formatting
-        assert_eq!(rule.heading_to_fragment_fast("**Bold** and *italic*"), "bold-and-italic");
-        
+        assert_eq!(
+            rule.heading_to_fragment_fast("**Bold** and *italic*"),
+            "bold-and-italic"
+        );
+
         // With code
         assert_eq!(rule.heading_to_fragment_fast("Using `code` here"), "using-code-here");
-        
+
         // With ampersand
         assert_eq!(rule.heading_to_fragment_fast("This & That"), "this--that");
-        
+
         // Leading/trailing spaces and hyphens
         assert_eq!(rule.heading_to_fragment_fast("  Spaces  "), "spaces");
-        
+
         // Multiple spaces
         assert_eq!(rule.heading_to_fragment_fast("Multiple   Spaces"), "multiple-spaces");
     }
@@ -526,7 +533,7 @@ mod tests {
         let content = "# Document\n\n## Table of Contents\n\n- [Missing](#missing)\n- [Also Missing](#also-missing)\n\n## Real Section";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Links in TOC should be ignored
         assert_eq!(result.len(), 0);
     }
@@ -537,7 +544,7 @@ mod tests {
         let content = "# UPPERCASE Heading\n\n[link](#uppercase-heading)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -547,7 +554,7 @@ mod tests {
         let content = "Main Title\n==========\n\nSubtitle\n--------\n\n[main](#main-title) [sub](#subtitle)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -557,7 +564,7 @@ mod tests {
         let content = "# Title\n\n[empty link](#)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -567,9 +574,13 @@ mod tests {
         let content = "# Title\n\n[link][ref]\n\n[ref]: #missing-section";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Link anchor '#missing-section' does not exist"));
+        assert!(
+            result[0]
+                .message
+                .contains("Link anchor '#missing-section' does not exist")
+        );
     }
 
     #[test]
@@ -578,30 +589,32 @@ mod tests {
         assert!(MD051LinkFragments::has_file_extension("file.md"));
         assert!(MD051LinkFragments::has_file_extension("README.MD"));
         assert!(MD051LinkFragments::has_file_extension("docs/guide.markdown"));
-        
+
         // Web files
         assert!(MD051LinkFragments::has_file_extension("index.html"));
         assert!(MD051LinkFragments::has_file_extension("page.htm"));
-        
+
         // Other files
         assert!(MD051LinkFragments::has_file_extension("script.js"));
         assert!(MD051LinkFragments::has_file_extension("config.json"));
         assert!(MD051LinkFragments::has_file_extension("document.pdf"));
-        
+
         // With query parameters
         assert!(MD051LinkFragments::has_file_extension("file.md?version=2"));
-        assert!(MD051LinkFragments::has_file_extension("doc.html?param=value&other=test"));
-        
+        assert!(MD051LinkFragments::has_file_extension(
+            "doc.html?param=value&other=test"
+        ));
+
         // Hidden files with extensions
         assert!(MD051LinkFragments::has_file_extension(".config.json"));
         assert!(MD051LinkFragments::has_file_extension(".eslintrc.js"));
-        
+
         // Not file extensions
         assert!(!MD051LinkFragments::has_file_extension("folder"));
         assert!(!MD051LinkFragments::has_file_extension("folder/subfolder"));
         assert!(!MD051LinkFragments::has_file_extension(".gitignore"));
         assert!(!MD051LinkFragments::has_file_extension(".bashrc"));
-        
+
         // Edge cases
         assert!(MD051LinkFragments::has_file_extension("file.backup"));
         assert!(MD051LinkFragments::has_file_extension("archive.tar.gz"));
@@ -610,27 +623,30 @@ mod tests {
     #[test]
     fn test_strip_markdown_formatting() {
         let rule = MD051LinkFragments::new();
-        
+
         // Bold
         assert_eq!(rule.strip_markdown_formatting_fast("**bold**"), "bold");
         assert_eq!(rule.strip_markdown_formatting_fast("__bold__"), "bold");
-        
+
         // Italic
         assert_eq!(rule.strip_markdown_formatting_fast("*italic*"), "italic");
         assert_eq!(rule.strip_markdown_formatting_fast("_italic_"), "italic");
-        
+
         // Strikethrough
         assert_eq!(rule.strip_markdown_formatting_fast("~~strike~~"), "strike");
-        
+
         // Code
         assert_eq!(rule.strip_markdown_formatting_fast("`code`"), "code");
-        
+
         // Links
         assert_eq!(rule.strip_markdown_formatting_fast("[text](url)"), "text");
-        
+
         // Mixed
-        assert_eq!(rule.strip_markdown_formatting_fast("**bold** and *italic*"), "bold and italic");
-        
+        assert_eq!(
+            rule.strip_markdown_formatting_fast("**bold** and *italic*"),
+            "bold and italic"
+        );
+
         // No formatting
         assert_eq!(rule.strip_markdown_formatting_fast("plain text"), "plain text");
     }
@@ -638,23 +654,23 @@ mod tests {
     #[test]
     fn test_is_external_url_fast() {
         let rule = MD051LinkFragments::new();
-        
+
         // HTTP/HTTPS
         assert!(rule.is_external_url_fast("http://example.com"));
         assert!(rule.is_external_url_fast("https://example.com"));
-        
+
         // FTP
         assert!(rule.is_external_url_fast("ftp://files.com"));
-        
+
         // WWW
         assert!(rule.is_external_url_fast("www.example.com"));
-        
+
         // Not external
         assert!(!rule.is_external_url_fast("file.md"));
         assert!(!rule.is_external_url_fast("#section"));
         assert!(!rule.is_external_url_fast("../relative/path.md"));
         assert!(!rule.is_external_url_fast("/absolute/path.md"));
-        
+
         // Edge cases
         assert!(!rule.is_external_url_fast(""));
         assert!(!rule.is_external_url_fast("ht"));
@@ -667,7 +683,7 @@ mod tests {
         let content = "No headings here\n\n[link](#section)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should warn about missing anchor when no headings exist
         assert_eq!(result.len(), 1);
     }
@@ -679,7 +695,7 @@ mod tests {
         let content = "# FAQ: What's New & Improved?\n\n[faq](#faq-what-s-new--improved)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -689,7 +705,7 @@ mod tests {
         let content = "# Title\n\n[link1](#missing1) [link2](#missing2) [link3](#missing3)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 3);
         assert!(result[0].message.contains("#missing1"));
         assert!(result[1].message.contains("#missing2"));
@@ -702,7 +718,7 @@ mod tests {
         let content = "# Title\n\nSome text [invalid](#missing) more text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 3);
         assert_eq!(result[0].column, 11); // 1-indexed position of '['

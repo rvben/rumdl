@@ -134,7 +134,7 @@ impl Rule for MD043RequiredHeadings {
             if idx > 0 {
                 result.push_str("\n\n");
             }
-            result.push_str(&format!("# {}", heading));
+            result.push_str(&format!("# {heading}"));
         }
 
         Ok(result)

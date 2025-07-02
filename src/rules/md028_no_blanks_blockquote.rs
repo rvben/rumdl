@@ -3,7 +3,7 @@
 /// See [docs/md028.md](../../docs/md028.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 #[derive(Clone)]
 pub struct MD028NoBlanksBlockquote;
@@ -262,7 +262,7 @@ mod tests {
         let rule = MD028NoBlanksBlockquote;
         let ctx1 = LintContext::new("No blockquotes here");
         assert!(rule.should_skip(&ctx1));
-        
+
         let ctx2 = LintContext::new("> Has blockquote");
         assert!(!rule.should_skip(&ctx2));
     }
@@ -300,7 +300,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.ends_with('\n'));
-        
+
         let content_no_newline = "> Quote\n>\n> More";
         let ctx2 = LintContext::new(content_no_newline);
         let fixed2 = rule.fix(&ctx2).unwrap();
@@ -313,7 +313,7 @@ mod tests {
         let ctx = LintContext::new("> test");
         let doc_structure = DocumentStructure::new("> test");
         assert!(rule.has_relevant_elements(&ctx, &doc_structure));
-        
+
         let ctx2 = LintContext::new("no blockquote");
         let doc_structure2 = DocumentStructure::new("no blockquote");
         assert!(!rule.has_relevant_elements(&ctx2, &doc_structure2));
@@ -326,7 +326,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, ">>> Deep nest\n>>> \n>>> More deep");
     }
