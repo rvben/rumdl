@@ -136,6 +136,7 @@ rumdl vscode --force
 ```
 
 The extension provides:
+
 - 🔍 Real-time linting as you type
 - 💡 Quick fixes for common issues
 - 🎨 Code formatting on save
@@ -247,9 +248,11 @@ rumdl <command> [options] [file or directory...]
 Lint Markdown files and print warnings/errors (main subcommand)
 
 **Arguments:**
+
 - `[PATHS...]`: Files or directories to lint. If provided, these paths take precedence over include patterns
 
 **Options:**
+
 - `-f, --fix`: Automatically fix issues where possible
 - `-l, --list-rules`: List all available rules
 - `-d, --disable <rules>`: Disable specific rules (comma-separated)
@@ -269,6 +272,7 @@ Lint Markdown files and print warnings/errors (main subcommand)
 Create a default configuration file in the current directory
 
 **Options:**
+
 - `--pyproject`: Generate configuration for `pyproject.toml` instead of `.rumdl.toml`
 
 #### `import <FILE> [OPTIONS]`
@@ -276,9 +280,11 @@ Create a default configuration file in the current directory
 Import and convert markdownlint configuration files to rumdl format
 
 **Arguments:**
+
 - `<FILE>`: Path to markdownlint config file (JSON/YAML)
 
 **Options:**
+
 - `-o, --output <path>`: Output file path (default: `.rumdl.toml`)
 - `--format <format>`: Output format: `toml` or `json` (default: `toml`)
 - `--dry-run`: Show converted config without writing to file
@@ -288,6 +294,7 @@ Import and convert markdownlint configuration files to rumdl format
 Show information about a rule or list all rules
 
 **Arguments:**
+
 - `[rule]`: Rule name or ID (optional). If provided, shows details for that rule. If omitted, lists all available rules
 
 #### `config [OPTIONS] [COMMAND]`
@@ -295,10 +302,12 @@ Show information about a rule or list all rules
 Show configuration or query a specific key
 
 **Options:**
+
 - `--defaults`: Show only the default configuration values
 - `--output <format>`: Output format (e.g. `toml`, `json`)
 
 **Subcommands:**
+
 - `get <key>`: Query a specific config key (e.g. `global.exclude` or `MD013.line_length`)
 - `file`: Show the absolute path of the configuration file that was loaded
 
@@ -307,6 +316,7 @@ Show configuration or query a specific key
 Start the Language Server Protocol server for editor integration
 
 **Options:**
+
 - `--port <PORT>`: TCP port to listen on (for debugging)
 - `--stdio`: Use stdio for communication (default)
 - `-v, --verbose`: Enable verbose logging
@@ -316,6 +326,7 @@ Start the Language Server Protocol server for editor integration
 Install the rumdl VS Code extension
 
 **Options:**
+
 - `--force`: Force reinstall even if already installed
 - `--status`: Show installation status without installing
 
@@ -403,6 +414,7 @@ rumdl can be configured in several ways:
 rumdl provides seamless compatibility with existing markdownlint configurations:
 
 **Automatic Discovery**: rumdl automatically detects and loads markdownlint config files:
+
 - `.markdownlint.json` / `.markdownlint.jsonc`
 - `.markdownlint.yaml` / `.markdownlint.yml`
 - `markdownlint.json` / `markdownlint.yaml`
