@@ -17,41 +17,6 @@
 
 </div>
 
-## Table of Contents
-
-- [rumdl - A high-performance Markdown linter, written in Rust](#rumdl---a-high-performance-markdown-linter-written-in-rust)
-  - [A modern Markdown linter and formatter, built for speed with Rust](#a-modern-markdown-linter-and-formatter-built-for-speed-with-rust)
-  - [Table of Contents](#table-of-contents)
-  - [Quick Start](#quick-start)
-  - [Overview](#overview)
-  - [Performance](#performance)
-  - [Installation](#installation)
-    - [Using Cargo (Rust)](#using-cargo-rust)
-    - [Using pip (Python)](#using-pip-python)
-    - [Download binary](#download-binary)
-    - [VS Code Extension](#vs-code-extension)
-  - [Usage](#usage)
-  - [Pre-commit Integration](#pre-commit-integration)
-  - [Rules](#rules)
-  - [Command-line Interface](#command-line-interface)
-    - [Commands](#commands)
-    - [Usage Examples](#usage-examples)
-  - [Configuration](#configuration)
-    - [Configuration File Example](#configuration-file-example)
-    - [Initializing Configuration](#initializing-configuration)
-    - [Configuration in pyproject.toml](#configuration-in-pyprojecttoml)
-    - [Configuration Output](#configuration-output)
-      - [Effective Configuration (`rumdl config`)](#effective-configuration-rumdl-config)
-      - [Example output](#example-output)
-    - [Defaults Only (`rumdl config --defaults`)](#defaults-only-rumdl-config---defaults)
-  - [Output Style](#output-style)
-    - [Output Format](#output-format)
-  - [Development](#development)
-    - [Prerequisites](#prerequisites)
-    - [Building](#building)
-    - [Testing](#testing)
-  - [License](#license)
-
 ## Quick Start
 
 ```bash
@@ -70,7 +35,9 @@ rumdl init
 
 ## Overview
 
-rumdl is a high-performance Markdown linter and fixer that helps ensure consistency and best practices in your Markdown files. It offers:
+rumdl is a high-performance Markdown linter and fixer that helps ensure consistency and best practices in your Markdown files. Inspired by [ruff](https://github.com/astral-sh/ruff)'s approach to Python linting, rumdl brings similar speed and developer experience improvements to the Markdown ecosystem.
+
+It offers:
 
 - ⚡️ **Built for speed** with Rust - significantly faster than alternatives
 - 🔍 **54 lint rules** covering common Markdown issues
@@ -82,13 +49,37 @@ rumdl is a high-performance Markdown linter and fixer that helps ensure consiste
 - 📏 **Modern CLI** with detailed error reporting
 - 🔄 **CI/CD friendly** with non-zero exit code on errors
 
-## Performance
+## Table of Contents
 
-rumdl is designed for speed and efficiency:
-
-![Performance Comparison](assets/performance_overview.png)
-
-rumdl is **4.3x faster** on average than markdownlint for typical markdown files, with performance improvements ranging from 3.4x to 5.4x depending on project size.
+- [Quick Start](#quick-start)
+- [Overview](#overview)
+- [Installation](#installation)
+  - [Using Cargo (Rust)](#using-cargo-rust)
+  - [Using pip (Python)](#using-pip-python)
+  - [Using uv](#using-uv)
+  - [Download binary](#download-binary)
+  - [VS Code Extension](#vs-code-extension)
+- [Usage](#usage)
+- [Pre-commit Integration](#pre-commit-integration)
+- [Rules](#rules)
+- [Command-line Interface](#command-line-interface)
+  - [Commands](#commands)
+  - [Usage Examples](#usage-examples)
+- [Configuration](#configuration)
+  - [Configuration File Example](#configuration-file-example)
+  - [Initializing Configuration](#initializing-configuration)
+  - [Configuration in pyproject.toml](#configuration-in-pyprojecttoml)
+  - [Configuration Output](#configuration-output)
+    - [Effective Configuration (`rumdl config`)](#effective-configuration-rumdl-config)
+    - [Example output](#example-output)
+  - [Defaults Only (`rumdl config --defaults`)](#defaults-only-rumdl-config---defaults)
+- [Output Style](#output-style)
+  - [Output Format](#output-format)
+- [Development](#development)
+  - [Prerequisites](#prerequisites)
+  - [Building](#building)
+  - [Testing](#testing)
+- [License](#license)
 
 ## Installation
 
@@ -104,6 +95,18 @@ cargo install rumdl
 
 ```bash
 pip install rumdl
+```
+
+### Using uv
+
+For faster installation and better dependency management with [uv](https://github.com/astral-sh/uv):
+
+```bash
+# Install directly
+uv tool install rumdl
+
+# Or run without installing
+uv tool run rumdl check .
 ```
 
 ### Download binary
