@@ -64,18 +64,21 @@ The extension will automatically detect and use your project's `.rumdl.toml` con
 ### Extension Not Working
 
 1. Check if the extension is installed:
+
    ```bash
    rumdl vscode --status
    ```
 
 2. Ensure VS Code's `code` command is in your PATH:
-   - On macOS: Open VS Code, press Cmd+Shift+P, and run "Shell Command: Install 'code' command in PATH"
-   - On Windows: This should be automatic during VS Code installation
-   - On Linux: Add VS Code's bin directory to your PATH
+
+- On macOS: Open VS Code, press Cmd+Shift+P, and run "Shell Command: Install 'code' command in PATH"
+- On Windows: This should be automatic during VS Code installation
+- On Linux: Add VS Code's bin directory to your PATH
 
 3. Check the extension logs:
-   - Open VS Code's Output panel (View → Output)
-   - Select "rumdl" from the dropdown
+
+- Open VS Code's Output panel (View → Output)
+- Select "rumdl" from the dropdown
 
 ### VS Code Not Found
 
@@ -83,6 +86,7 @@ If you get a "VS Code not found" error, make sure:
 
 1. VS Code is installed
 2. The `code` command is available in your terminal:
+
    ```bash
    code --version
    ```
