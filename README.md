@@ -35,7 +35,9 @@ rumdl init
 
 ## Overview
 
-rumdl is a high-performance Markdown linter and fixer that helps ensure consistency and best practices in your Markdown files. Inspired by [ruff](https://github.com/astral-sh/ruff)'s approach to Python linting, rumdl brings similar speed and developer experience improvements to the Markdown ecosystem.
+rumdl is a high-performance Markdown linter and fixer that helps ensure consistency and best practices
+in your Markdown files. Inspired by [ruff](https://github.com/astral-sh/ruff)'s approach to Python linting,
+rumdl brings similar speed and developer experience improvements to the Markdown ecosystem.
 
 It offers:
 
@@ -68,11 +70,11 @@ It offers:
 - [Configuration](#configuration)
   - [Configuration File Example](#configuration-file-example)
   - [Initializing Configuration](#initializing-configuration)
-  - [Configuration in pyproject.toml](#configuration-in-pyprojecttoml)
+  - [Configuration in pyproject.toml](#configuration-in-pyproject-toml)
   - [Configuration Output](#configuration-output)
     - [Effective Configuration (`rumdl config`)](#effective-configuration-rumdl-config)
     - [Example output](#example-output)
-  - [Defaults Only (`rumdl config --defaults`)](#defaults-only-rumdl-config---defaults)
+  - [Defaults Only (`rumdl config --defaults`)](#defaults-only-rumdl-config-defaults)
 - [Output Style](#output-style)
   - [Output Format](#output-format)
 - [Development](#development)

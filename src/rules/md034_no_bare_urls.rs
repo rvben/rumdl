@@ -18,18 +18,17 @@ lazy_static! {
     static ref URL_QUICK_CHECK: Regex = Regex::new(r#"(?:https?|ftp)://|@"#).unwrap();
 
     // Use fancy-regex for look-behind/look-ahead
-    static ref URL_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftp)://[^
-\s<>\[\]()\\'\"]+)(?![\w\]\)\>])"#).unwrap();
-    static ref URL_FIX_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftp)://[^
-\s<>\[\]()\\'\"]*[^
-\s<>\[\]()\\'\".,;:!?])(?![\w\]\)\>])"#).unwrap();
+    // Updated to support IPv6 addresses in square brackets
+    static ref URL_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftp)://(?:\[[0-9a-fA-F:%]+\]|[^\s<>\[\]()\\'\"]+)(?::\d+)?(?:/[^\s<>\[\]()\\'\"]*)?(?:\?[^\s<>\[\]()\\'\"]*)?(?:#[^\s<>\[\]()\\'\"]*)?)"#).unwrap();
+    static ref URL_FIX_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftp)://(?:\[[0-9a-fA-F:%]+\]|[^\s<>\[\]()\\'\"]+)(?::\d+)?(?:/[^\s<>\[\]()\\'\"]*)?(?:\?[^\s<>\[\]()\\'\"]*)?(?:#[^\s<>\[\]()\\'\"]*)?)"#).unwrap();
 
     // Pattern to match markdown link format - capture destination in Group 1
     // Updated to handle nested brackets in badge links like [![badge](img)](link)
     static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap();
 
     // Pattern to match angle bracket link format (URLs and emails)
-    static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r#"<((?:https?|ftp)://[^>]+|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#).unwrap();
+    // Updated to support IPv6 addresses
+    static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r#"<((?:https?|ftp)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#).unwrap();
 
     // Pattern to match code fences
     static ref CODE_FENCE_RE: Regex = Regex::new(r#"^(`{3,}|~{3,})"#).unwrap();
@@ -47,14 +46,22 @@ lazy_static! {
     // Updated to match markdownlint's behavior: URLs can have domains without dots
     // Handles URL components properly: scheme://domain[:port][/path][?query][#fragment]
     // Will post-process to remove trailing sentence punctuation
-    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://[^\s<>\[\]()\\'\"`]+(?:\.[^\s<>\[\]()\\'\"`]+)*(?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
+    // Now supports IPv6 addresses in square brackets
+    // Note: We need two separate patterns - one for IPv6 and one for regular URLs
+    // Updated to avoid matching partial IPv6 patterns (e.g., "https://::1]" without opening bracket)
+    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`:\]]+(?::\d+)?)(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
+    
+    // Special pattern just for IPv6 URLs to handle them separately
+    // Note: This is permissive to match markdownlint behavior, allowing technically invalid IPv6 for examples
+    static ref IPV6_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
 
     // Add regex for email addresses - matches markdownlint behavior
     // Detects email addresses that should be autolinked like URLs
     static ref EMAIL_REGEX: Regex = Regex::new(r#"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"#).unwrap();
 
     // Add regex for reference definitions
-    static ref REFERENCE_DEF_RE: Regex = Regex::new(r"^\s*\[[^\]]+\]:\s*https?://\S+$").unwrap();
+    // Updated to support IPv6 addresses
+    static ref REFERENCE_DEF_RE: Regex = Regex::new(r"^\s*\[[^\]]+\]:\s*(?:https?|ftp)://\S+$").unwrap();
 
     // Pattern to match URLs inside HTML attributes (src, href, srcset, etc.)
     static ref HTML_ATTRIBUTE_URL: Regex = Regex::new(r#"(?:src|href|srcset|content|data-\w+)\s*=\s*["']([^"']*)["']"#).unwrap();
@@ -154,9 +161,41 @@ impl MD034NoBareUrls {
         }
 
         // Now find all URLs in the content and check if they're excluded
+        // First find IPv6 URLs (they need special handling due to square brackets)
+        let mut all_url_matches = Vec::new();
+        
+        // Collect IPv6 URLs
+        for url_match in IPV6_URL_REGEX.find_iter(content) {
+            all_url_matches.push((url_match.start(), url_match.end()));
+        }
+        
+        // Collect regular URLs (but skip if they overlap with IPv6 URLs)
         for url_match in SIMPLE_URL_REGEX.find_iter(content) {
-            let url_start = url_match.start();
-            let mut url_end = url_match.end();
+            let start = url_match.start();
+            let end = url_match.end();
+            let matched_str = &content[start..end];
+            
+            // Skip invalid IPv6 patterns (e.g., "https://::1]" without opening bracket)
+            if matched_str.contains("::") && !matched_str.contains('[') && matched_str.contains(']') {
+                continue;
+            }
+            
+            // Check if this overlaps with any IPv6 URL we already found
+            let overlaps = all_url_matches.iter().any(|(ipv6_start, ipv6_end)| {
+                start < *ipv6_end && end > *ipv6_start
+            });
+            
+            if !overlaps {
+                all_url_matches.push((start, end));
+            }
+        }
+        
+        // Sort by start position
+        all_url_matches.sort_by_key(|&(start, _)| start);
+        
+        // Process all URL matches
+        for (url_start, url_end_orig) in all_url_matches {
+            let mut url_end = url_end_orig;
 
             // Trim trailing punctuation that's likely sentence punctuation
             let raw_url = &content[url_start..url_end];
@@ -619,6 +658,7 @@ mod tests {
         assert!(URL_QUICK_CHECK.is_match("This is a URL: https://example.com"));
         assert!(!URL_QUICK_CHECK.is_match("This has no URL"));
     }
+
 
     #[test]
     fn test_multiple_badges_and_links_on_one_line() {
