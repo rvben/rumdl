@@ -35,6 +35,7 @@ mod md035_test;
 mod md036_test;
 mod md037_test;
 mod md038_test;
+mod md038_nested_backticks_test;
 mod md039_test;
 mod md040_test;
 mod md041_test;
