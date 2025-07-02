@@ -95,7 +95,7 @@ impl MD051LinkFragments {
 
         for c in text.to_lowercase().chars() {
             match c {
-                // Keep alphanumeric characters and underscores
+                // Keep ASCII alphanumeric characters and underscores
                 'a'..='z' | '0'..='9' | '_' => {
                     fragment.push(c);
                     prev_was_hyphen = false;
@@ -108,6 +108,11 @@ impl MD051LinkFragments {
                         fragment.push('-'); // Make it double
                     }
                     prev_was_hyphen = true;
+                }
+                // Keep Unicode letters and numbers
+                c if c.is_alphabetic() || c.is_numeric() => {
+                    fragment.push(c);
+                    prev_was_hyphen = false;
                 }
                 // Spaces and other characters become single hyphen (but avoid consecutive hyphens)
                 _ => {
