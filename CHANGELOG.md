@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.92] - 2025-07-02
 
+### Fixed
+- MD036: Align with markdownlint behavior - emphasis ending with punctuation (e.g., `**Note:**`) is no longer flagged
+
 ## [0.0.91] - 2025-07-02
 
 ## [0.0.90] - 2025-07-01
