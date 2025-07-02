@@ -911,7 +911,7 @@ impl<T: Clone> SourcedValue<T> {
         new_value: T,
         new_source: ConfigSource,
         new_file: Option<String>,
-        // TODO: Add new_line Option<usize> if needed later
+        new_line: Option<usize>,
     ) {
         // Helper function to get precedence, defined locally or globally
         fn source_precedence(src: ConfigSource) -> u8 {
@@ -931,7 +931,7 @@ impl<T: Clone> SourcedValue<T> {
                 value: new_value,
                 source: new_source,
                 file: new_file,
-                line: None, // Placeholder for now
+                line: new_line,
             });
         }
     }
@@ -1006,21 +1006,25 @@ impl SourcedConfig {
             fragment.global.enable.value,
             fragment.global.enable.source,
             fragment.global.enable.overrides.first().and_then(|o| o.file.clone()),
+            fragment.global.enable.overrides.first().and_then(|o| o.line),
         );
         self.global.disable.merge_override(
             fragment.global.disable.value,
             fragment.global.disable.source,
             fragment.global.disable.overrides.first().and_then(|o| o.file.clone()),
+            fragment.global.disable.overrides.first().and_then(|o| o.line),
         );
         self.global.include.merge_override(
             fragment.global.include.value,
             fragment.global.include.source,
             fragment.global.include.overrides.first().and_then(|o| o.file.clone()),
+            fragment.global.include.overrides.first().and_then(|o| o.line),
         );
         self.global.exclude.merge_override(
             fragment.global.exclude.value,
             fragment.global.exclude.source,
             fragment.global.exclude.overrides.first().and_then(|o| o.file.clone()),
+            fragment.global.exclude.overrides.first().and_then(|o| o.line),
         );
         self.global.respect_gitignore.merge_override(
             fragment.global.respect_gitignore.value,
@@ -1031,6 +1035,12 @@ impl SourcedConfig {
                 .overrides
                 .first()
                 .and_then(|o| o.file.clone()),
+            fragment
+                .global
+                .respect_gitignore
+                .overrides
+                .first()
+                .and_then(|o| o.line),
         );
 
         // Merge output_format if present
@@ -1040,6 +1050,7 @@ impl SourcedConfig {
                     output_format_fragment.value,
                     output_format_fragment.source,
                     output_format_fragment.overrides.first().and_then(|o| o.file.clone()),
+                    output_format_fragment.overrides.first().and_then(|o| o.line),
                 );
             } else {
                 self.global.output_format = Some(output_format_fragment);
@@ -1056,10 +1067,12 @@ impl SourcedConfig {
                     .entry(key.clone())
                     .or_insert_with(|| SourcedValue::new(sourced_value_fragment.value.clone(), ConfigSource::Default));
                 let file_from_fragment = sourced_value_fragment.overrides.first().and_then(|o| o.file.clone());
+                let line_from_fragment = sourced_value_fragment.overrides.first().and_then(|o| o.line);
                 sv_entry.merge_override(
                     sourced_value_fragment.value,  // Use the value from the fragment
                     sourced_value_fragment.source, // Use the source from the fragment
                     file_from_fragment,            // Pass the file path from the fragment override
+                    line_from_fragment,            // Pass the line number from the fragment override
                 );
             }
         }
@@ -1202,22 +1215,23 @@ impl SourcedConfig {
             sourced_config
                 .global
                 .enable
-                .merge_override(cli.enable.value.clone(), ConfigSource::Cli, None);
+                .merge_override(cli.enable.value.clone(), ConfigSource::Cli, None, None);
             sourced_config
                 .global
                 .disable
-                .merge_override(cli.disable.value.clone(), ConfigSource::Cli, None);
+                .merge_override(cli.disable.value.clone(), ConfigSource::Cli, None, None);
             sourced_config
                 .global
                 .exclude
-                .merge_override(cli.exclude.value.clone(), ConfigSource::Cli, None);
+                .merge_override(cli.exclude.value.clone(), ConfigSource::Cli, None, None);
             sourced_config
                 .global
                 .include
-                .merge_override(cli.include.value.clone(), ConfigSource::Cli, None);
+                .merge_override(cli.include.value.clone(), ConfigSource::Cli, None, None);
             sourced_config.global.respect_gitignore.merge_override(
                 cli.respect_gitignore.value,
                 ConfigSource::Cli,
+                None,
                 None,
             );
             // No rule-specific CLI overrides implemented yet

@@ -8,6 +8,9 @@ pub struct MD044Config {
 
     #[serde(default = "default_code_blocks")]
     pub code_blocks: bool,
+
+    #[serde(default = "default_html_comments")]
+    pub html_comments: bool,
 }
 
 impl Default for MD044Config {
@@ -15,11 +18,16 @@ impl Default for MD044Config {
         Self {
             names: Vec::new(),
             code_blocks: default_code_blocks(),
+            html_comments: default_html_comments(),
         }
     }
 }
 
 fn default_code_blocks() -> bool {
+    true
+}
+
+fn default_html_comments() -> bool {
     true
 }
 

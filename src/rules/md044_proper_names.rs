@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex};
 mod md044_config;
 use md044_config::MD044Config;
 
-lazy_static! {}
+lazy_static! {
+    static ref HTML_COMMENT_REGEX: Regex = Regex::new(r"<!--([\s\S]*?)-->").unwrap();
+}
 
 type WarningPosition = (usize, usize, String); // (line, column, found_name)
 
@@ -71,8 +73,6 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 #[derive(Clone)]
 pub struct MD044ProperNames {
     config: MD044Config,
-    #[allow(dead_code)] // TODO: Implement HTML comment checking in future
-    html_comments: bool,
     // Cache the combined regex pattern
     combined_regex: Arc<Mutex<Option<Regex>>>,
     // Cache for name violations by content hash
@@ -81,10 +81,13 @@ pub struct MD044ProperNames {
 
 impl MD044ProperNames {
     pub fn new(names: Vec<String>, code_blocks: bool) -> Self {
-        let config = MD044Config { names, code_blocks };
+        let config = MD044Config { 
+            names, 
+            code_blocks,
+            html_comments: true, // Default to checking HTML comments
+        };
         let mut instance = Self {
             config,
-            html_comments: true, // Default to checking HTML comments
             combined_regex: Arc::new(Mutex::new(None)),
             content_cache: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -97,7 +100,6 @@ impl MD044ProperNames {
     pub fn from_config_struct(config: MD044Config) -> Self {
         let mut instance = Self {
             config,
-            html_comments: true,
             combined_regex: Arc::new(Mutex::new(None)),
             content_cache: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -204,6 +206,19 @@ impl MD044ProperNames {
                 continue;
             }
 
+            // Check if we should skip HTML comments
+            let in_html_comment = if !self.config.html_comments {
+                // Check if this position is within an HTML comment
+                self.is_in_html_comment(content, byte_pos)
+            } else {
+                false
+            };
+
+            if in_html_comment {
+                byte_pos += line.len() + 1;
+                continue;
+            }
+
             // Early return: skip lines that don't contain any potential matches
             let line_lower = line.to_lowercase();
             let has_line_matches = self.config.names.iter().any(|name| {
@@ -241,6 +256,18 @@ impl MD044ProperNames {
         // Store in cache
         self.content_cache.lock().unwrap().insert(hash, violations.clone());
         violations
+    }
+
+    // Check if a byte position is within an HTML comment
+    fn is_in_html_comment(&self, content: &str, byte_pos: usize) -> bool {
+        for comment_match in HTML_COMMENT_REGEX.find_iter(content) {
+            if let Ok(m) = comment_match {
+                if m.start() <= byte_pos && byte_pos < m.end() {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     // Get the proper name that should be used for a found name
@@ -530,6 +557,7 @@ javascript in code block
         let config = MD044Config {
             names: vec!["GitHub".to_string(), "GitLab".to_string(), "DevOps".to_string()],
             code_blocks: true,
+            html_comments: true,
         };
         let rule = MD044ProperNames::from_config_struct(config);
 
@@ -705,5 +733,93 @@ Third line with RUST and PYTHON."#;
         // Results should be identical
         assert_eq!(result1[0].line, result2[0].line);
         assert_eq!(result1[0].column, result2[0].column);
+    }
+
+    #[test]
+    fn test_html_comments_not_checked_when_disabled() {
+        let config = MD044Config {
+            names: vec!["JavaScript".to_string()],
+            code_blocks: true,
+            html_comments: false, // Don't check HTML comments
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = r#"Regular javascript here.
+<!-- This javascript in HTML comment should be ignored -->
+More javascript outside."#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 2, "Should only flag javascript outside HTML comments");
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[1].line, 3);
+    }
+
+    #[test]
+    fn test_html_comments_checked_when_enabled() {
+        let config = MD044Config {
+            names: vec!["JavaScript".to_string()],
+            code_blocks: true,
+            html_comments: true, // Check HTML comments
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = r#"Regular javascript here.
+<!-- This javascript in HTML comment should be checked -->
+More javascript outside."#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 3, "Should flag all javascript occurrences including in HTML comments");
+    }
+
+    #[test]
+    fn test_multiline_html_comments() {
+        let config = MD044Config {
+            names: vec!["Python".to_string(), "JavaScript".to_string()],
+            code_blocks: true,
+            html_comments: false,
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = r#"Regular python here.
+<!--
+This is a multiline comment
+with javascript and python
+that should be ignored
+-->
+More javascript outside."#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 2, "Should only flag names outside HTML comments");
+        assert_eq!(result[0].line, 1); // python
+        assert_eq!(result[1].line, 7); // javascript
+    }
+
+    #[test]
+    fn test_fix_preserves_html_comments_when_disabled() {
+        let config = MD044Config {
+            names: vec!["JavaScript".to_string()],
+            code_blocks: true,
+            html_comments: false,
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = r#"javascript here.
+<!-- javascript in comment -->
+More javascript."#;
+
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        let expected = r#"JavaScript here.
+<!-- javascript in comment -->
+More JavaScript."#;
+
+        assert_eq!(fixed, expected, "Should not fix names inside HTML comments when disabled");
     }
 }

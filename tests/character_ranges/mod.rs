@@ -229,7 +229,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD042" => Some(Box::new(MD042NoEmptyLinks)),
         "MD043" => Some(Box::new(MD043RequiredHeadings::new(vec![]))),
         "MD044" => Some(Box::new(MD044ProperNames::new(vec![], false))),
-        "MD045" => Some(Box::new(MD045NoAltText)),
+        "MD045" => Some(Box::new(MD045NoAltText::new())),
         "MD047" => Some(Box::new(MD047SingleTrailingNewline)),
         "MD051" => Some(Box::new(MD051LinkFragments)),
         "MD053" => Some(Box::new(MD053LinkImageReferenceDefinitions {})),
