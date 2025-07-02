@@ -3,7 +3,7 @@
 //!
 //! See [docs/md035.md](../../docs/md035.md) for full documentation, configuration, and examples.
 
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use lazy_static::lazy_static;
@@ -141,7 +141,7 @@ impl Rule for MD035HRStyle {
                         message: if has_indentation {
                             "Horizontal rule should not be indented".to_string()
                         } else {
-                            format!("Horizontal rule style should be \"{}\"", expected_style)
+                            format!("Horizontal rule style should be \"{expected_style}\"")
                         },
                         severity: Severity::Warning,
                         fix: Some(Fix {
@@ -227,7 +227,7 @@ mod tests {
         assert!(MD035HRStyle::is_horizontal_rule("* * *"));
         assert!(MD035HRStyle::is_horizontal_rule("_ _ _"));
         assert!(MD035HRStyle::is_horizontal_rule("  ---  ")); // With surrounding whitespace
-        
+
         // Invalid horizontal rules
         assert!(!MD035HRStyle::is_horizontal_rule("--")); // Too few characters
         assert!(!MD035HRStyle::is_horizontal_rule("**"));
@@ -242,18 +242,18 @@ mod tests {
     #[test]
     fn test_is_potential_setext_heading() {
         let lines = vec!["Heading 1", "=========", "Content", "Heading 2", "---", "More content"];
-        
+
         // Valid Setext headings
         assert!(MD035HRStyle::is_potential_setext_heading(&lines, 1)); // ========= under "Heading 1"
         assert!(MD035HRStyle::is_potential_setext_heading(&lines, 4)); // --- under "Heading 2"
-        
+
         // Not Setext headings
         assert!(!MD035HRStyle::is_potential_setext_heading(&lines, 0)); // First line can't be underline
         assert!(!MD035HRStyle::is_potential_setext_heading(&lines, 2)); // "Content" is not an underline
-        
+
         let lines2 = vec!["", "---", "Content"];
         assert!(!MD035HRStyle::is_potential_setext_heading(&lines2, 1)); // Empty line above
-        
+
         let lines3 = vec!["***", "---"];
         assert!(!MD035HRStyle::is_potential_setext_heading(&lines3, 1)); // HR above
     }
@@ -263,19 +263,19 @@ mod tests {
         // Single style (with blank lines to avoid Setext interpretation)
         let lines = vec!["Content", "", "---", "", "More", "", "---", "", "Text"];
         assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("---".to_string()));
-        
+
         // Multiple styles, one more prevalent
         let lines = vec!["Content", "", "---", "", "More", "", "***", "", "Text", "", "---"];
         assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("---".to_string()));
-        
+
         // Multiple styles, tie broken by first encountered
         let lines = vec!["Content", "", "***", "", "More", "", "---", "", "Text"];
         assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("***".to_string()));
-        
+
         // No horizontal rules
         let lines = vec!["Just", "Regular", "Content"];
         assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), None);
-        
+
         // Exclude Setext headings
         let lines = vec!["Heading", "---", "Content", "", "***"];
         assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("***".to_string()));
@@ -287,7 +287,7 @@ mod tests {
         let content = "Content\n\n---\n\nMore\n\n***\n\nText\n\n---";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should flag the *** as it doesn't match the most prevalent style ---
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 7);
@@ -300,7 +300,7 @@ mod tests {
         let content = "Content\n\n***\n\nMore\n\n___\n\nText";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should flag both *** and ___ as they don't match ---
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 3);
@@ -314,7 +314,7 @@ mod tests {
         let content = "Content\n\n  ---\n\nMore";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 3);
         assert_eq!(result[0].message, "Horizontal rule should not be indented");
@@ -326,7 +326,7 @@ mod tests {
         let content = "Heading\n---\nContent\n***";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should not flag the --- under "Heading" as it's a Setext heading
         assert_eq!(result.len(), 0);
     }
@@ -337,7 +337,7 @@ mod tests {
         let content = "Content\n\n---\n\nMore\n\n***\n\nText\n\n---";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         let expected = "Content\n\n---\n\nMore\n\n---\n\nText\n\n---";
         assert_eq!(fixed, expected);
     }
@@ -348,7 +348,7 @@ mod tests {
         let content = "Content\n\n---\n\nMore\n\n___\n\nText";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         let expected = "Content\n\n***\n\nMore\n\n***\n\nText";
         assert_eq!(fixed, expected);
     }
@@ -359,7 +359,7 @@ mod tests {
         let content = "Heading 1\n=========\nHeading 2\n---\nContent\n\n---";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         let expected = "Heading 1\n=========\nHeading 2\n---\nContent\n\n***";
         assert_eq!(fixed, expected);
     }
@@ -370,7 +370,7 @@ mod tests {
         let content = "Content\n\n  ***\n\nMore\n\n    ___\n\nText";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         let expected = "Content\n\n---\n\nMore\n\n---\n\nText";
         assert_eq!(fixed, expected);
     }
@@ -381,7 +381,7 @@ mod tests {
         let content = "Content\n\n- - -\n\nMore\n\n_ _ _\n\nText";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
         assert!(result[0].message.contains("Horizontal rule style should be \"* * *\""));
     }
@@ -392,7 +392,7 @@ mod tests {
         let content = "Content\n\n---\n\nMore\n\n***\n\nText";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Empty style should behave like "consistent"
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 7);
@@ -404,7 +404,7 @@ mod tests {
         let content = "Content\n---\nMore\n---\nText\n---";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // All HRs are the same style, should not flag anything
         assert_eq!(result.len(), 0);
     }
@@ -415,7 +415,7 @@ mod tests {
         let content = "Just regular content\nNo horizontal rules here";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -425,7 +425,7 @@ mod tests {
         let content = "Content\n\n---\n\nMore\n\n- - -\n\nText";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should flag the spaced style as inconsistent
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 7);
@@ -437,7 +437,7 @@ mod tests {
         let content = "Content\n\n---   \n\nMore";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Trailing whitespace is OK for HRs
         assert_eq!(result.len(), 0);
     }
@@ -448,7 +448,7 @@ mod tests {
         let content = "Content\n-----\nMore\n--------\nText";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Extra characters in the same style should not be flagged
         assert_eq!(result.len(), 0);
     }
@@ -458,7 +458,7 @@ mod tests {
         let rule = MD035HRStyle::new("consistent".to_string());
         let (name, config) = rule.default_config_section().unwrap();
         assert_eq!(name, "MD035");
-        
+
         let table = config.as_table().unwrap();
         assert_eq!(table.get("style").unwrap().as_str().unwrap(), "consistent");
     }

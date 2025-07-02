@@ -49,15 +49,13 @@ fn validate_commonmark_compliance(content: &str, filename: &str, dir_path: &std:
     // Check that the command produced output indicating it processed the file
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    println!("STDOUT: {}", stdout);
-    println!("STDERR: {}", stderr);
+    println!("STDOUT: {stdout}");
+    println!("STDERR: {stderr}");
 
     // If there's an error message unrelated to rule violations, fail the test
     assert!(
         !stderr.contains("Error:"),
-        "rumdl command error on file: {}: {}",
-        filename,
-        stderr
+        "rumdl command error on file: {filename}: {stderr}"
     );
 
     // Read the fixed content
@@ -125,7 +123,7 @@ fn verify_commonmark_elements(content: &str, filename: &str) {
             assert!(!content.is_empty(), "Empty content");
         }
         _ => {
-            panic!("Unknown test file: {}", filename);
+            panic!("Unknown test file: {filename}");
         }
     }
 }
@@ -199,8 +197,7 @@ Final paragraph with a footnote[^1] and a horizontal rule:
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !stderr.contains("Error:"),
-        "rumdl command error on complex markdown: {}",
-        stderr
+        "rumdl command error on complex markdown: {stderr}"
     );
 
     // Read the fixed content

@@ -3,7 +3,7 @@
 /// See [docs/md031.md](../../docs/md031.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -223,7 +223,7 @@ impl Rule for MD031BlanksAroundFences {
 
         // Preserve original trailing newline if it existed
         let final_result = if had_trailing_newline && !fixed.ends_with('\n') {
-            format!("{}\n", fixed)
+            format!("{fixed}\n")
         } else {
             fixed
         };

@@ -125,7 +125,7 @@ fn test_performance_code_block_utils() {
     // Create a smaller document with code elements
     let mut content = String::new();
     for i in 0..50 {
-        content.push_str(&format!("Line {}\n", i));
+        content.push_str(&format!("Line {i}\n"));
 
         if i % 10 == 0 {
             content.push_str("```\nCode block content\nMore code\n```\n");
@@ -152,8 +152,8 @@ fn test_performance_code_block_utils() {
     assert!(info.has_code_blocks());
     assert!(info.has_code_spans());
 
-    println!("CodeBlockInfo creation time: {:?}", create_time);
-    println!("is_in_code_block check time for all lines: {:?}", is_in_code_block_time);
+    println!("CodeBlockInfo creation time: {create_time:?}");
+    println!("is_in_code_block check time for all lines: {is_in_code_block_time:?}");
 
     // Simple verification that our test code works
     let total_lines = content.lines().count();

@@ -189,9 +189,7 @@ impl MD057ExistingRelativeLinks {
                     end_line: line_num,
                     end_column: column + url.len(),
                     message: format!(
-                        "Relative link '{
-            }' does not exist",
-                        url
+                        "Relative link '{url}' does not exist"
                     ),
                     severity: Severity::Warning,
                     fix: None, // No automatic fix for missing files

@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn test_azure_formatter_default() {
-        let _formatter = AzureFormatter::default();
+        let _formatter = AzureFormatter;
         // No fields to test, just ensure it constructs
     }
 
@@ -83,7 +83,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
         assert_eq!(
             output,
@@ -116,7 +116,7 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let expected = "##vso[task.logissue type=warning;sourcepath=test.md;linenumber=5;columnnumber=1;code=MD001]First warning\n##vso[task.logissue type=warning;sourcepath=test.md;linenumber=10;columnnumber=3;code=MD013]Second warning";
         assert_eq!(output, expected);
@@ -138,7 +138,7 @@ mod tests {
                 replacement: "\n# Heading\n".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "doc.md");
         // Azure format doesn't show fix indicator
         assert_eq!(
@@ -160,7 +160,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
         assert_eq!(
             output,
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn test_edge_cases() {
         let formatter = AzureFormatter::new();
-        
+
         // Test large line/column numbers
         let warnings = vec![LintWarning {
             line: 99999,
@@ -183,7 +183,7 @@ mod tests {
             severity: Severity::Error,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "large.md");
         assert_eq!(
             output,
@@ -204,7 +204,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         // Note: Azure DevOps should handle special characters in messages
         assert_eq!(
@@ -226,7 +226,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "path/with spaces/and-dashes.md");
         assert_eq!(
             output,
@@ -247,9 +247,9 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         // Verify Azure DevOps logging command structure
         assert!(output.starts_with("##vso[task.logissue "));
         assert!(output.contains("type=warning"));
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn test_severity_always_warning() {
         let formatter = AzureFormatter::new();
-        
+
         // Test that all severities are output as "warning" in Azure format
         let warnings = vec![
             LintWarning {
@@ -287,10 +287,10 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let lines: Vec<&str> = output.lines().collect();
-        
+
         // Both should use type=warning regardless of severity
         assert!(lines[0].contains("type=warning"));
         assert!(lines[1].contains("type=warning"));
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn test_semicolons_in_parameters() {
         let formatter = AzureFormatter::new();
-        
+
         // Test that semicolons in the code don't break the format
         let warnings = vec![LintWarning {
             line: 1,
@@ -311,7 +311,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file;with;semicolons.md");
         // The format should still be parseable by Azure DevOps
         assert_eq!(
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn test_brackets_in_message() {
         let formatter = AzureFormatter::new();
-        
+
         // Test that brackets in the message don't break the format
         let warnings = vec![LintWarning {
             line: 1,
@@ -335,7 +335,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         assert_eq!(
             output,

@@ -28,11 +28,11 @@ fn main() {
 
     println!("📋 Benchmark Configuration:");
     println!("   Rules to test: {}", rules.len());
-    println!("   File count: {}", file_count);
-    println!("   Content size: {}", content_size);
+    println!("   File count: {file_count}");
+    println!("   Content size: {content_size}");
     println!("   CPU cores: {}", num_cpus::get());
     if let Some(threads) = thread_count {
-        println!("   Thread override: {}", threads);
+        println!("   Thread override: {threads}");
     }
     println!();
 
@@ -43,7 +43,7 @@ fn main() {
 
     println!("📄 Generated Test Files:");
     println!("   Total files: {}", test_files.len());
-    println!("   Total content: {} bytes ({} lines)", total_content_size, total_lines);
+    println!("   Total content: {total_content_size} bytes ({total_lines} lines)");
     println!("   Average file size: {} bytes", total_content_size / test_files.len());
     println!();
 
@@ -128,8 +128,7 @@ fn run_file_parallel_comparison(
     // Verify correctness (warnings should be the same)
     if sequential_total_warnings != parallel_total_warnings {
         println!(
-            "⚠️  WARNING: Different warning counts! Sequential: {}, Parallel: {}",
-            sequential_total_warnings, parallel_total_warnings
+            "⚠️  WARNING: Different warning counts! Sequential: {sequential_total_warnings}, Parallel: {parallel_total_warnings}"
         );
     }
 
@@ -151,10 +150,10 @@ fn run_file_parallel_comparison(
 
     if comparison.speedup_factor > 1.0 {
         let improvement = (comparison.speedup_factor - 1.0) * 100.0;
-        println!("   ✅ Performance improvement: {:.1}%", improvement);
+        println!("   ✅ Performance improvement: {improvement:.1}%");
     } else {
         let degradation = (1.0 - comparison.speedup_factor) * 100.0;
-        println!("   ❌ Performance degradation: {:.1}%", degradation);
+        println!("   ❌ Performance degradation: {degradation:.1}%");
         if comparison.parallel_overhead > std::time::Duration::ZERO {
             println!(
                 "   Parallel overhead: {:.3}ms",
@@ -170,8 +169,8 @@ fn run_file_parallel_comparison(
 
     println!();
     println!("📊 Throughput Analysis:");
-    println!("   Sequential: {:.2} MB/s", sequential_throughput);
-    println!("   Parallel: {:.2} MB/s", parallel_throughput);
+    println!("   Sequential: {sequential_throughput:.2} MB/s");
+    println!("   Parallel: {parallel_throughput:.2} MB/s");
     println!(
         "   Throughput improvement: {:.1}%",
         (parallel_throughput / sequential_throughput - 1.0) * 100.0

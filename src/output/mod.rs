@@ -72,13 +72,12 @@ impl FromStr for OutputFormat {
             "azure" => Ok(OutputFormat::Azure),
             "sarif" => Ok(OutputFormat::Sarif),
             "junit" => Ok(OutputFormat::Junit),
-            _ => Err(format!("Unknown output format: {}", s)),
+            _ => Err(format!("Unknown output format: {s}")),
         }
     }
 }
 
 impl OutputFormat {
-
     /// Create a formatter instance for this format
     pub fn create_formatter(&self) -> Box<dyn OutputFormatter> {
         match self {
@@ -120,10 +119,10 @@ impl OutputWriter {
         }
 
         if self.use_stderr {
-            eprint!("{}", content);
+            eprint!("{content}");
             io::stderr().flush()?;
         } else {
-            print!("{}", content);
+            print!("{content}");
             io::stdout().flush()?;
         }
         Ok(())
@@ -136,9 +135,9 @@ impl OutputWriter {
         }
 
         if self.use_stderr {
-            eprintln!("{}", content);
+            eprintln!("{content}");
         } else {
-            println!("{}", content);
+            println!("{content}");
         }
         Ok(())
     }
@@ -149,7 +148,7 @@ impl OutputWriter {
             return Ok(());
         }
 
-        eprintln!("{}", content);
+        eprintln!("{content}");
         Ok(())
     }
 }
@@ -157,7 +156,7 @@ impl OutputWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rule::{Severity, Fix};
+    use crate::rule::{Fix, Severity};
 
     fn create_test_warning(line: usize, message: &str) -> LintWarning {
         LintWarning {
@@ -204,12 +203,12 @@ mod tests {
         assert_eq!(OutputFormat::from_str("azure").unwrap(), OutputFormat::Azure);
         assert_eq!(OutputFormat::from_str("sarif").unwrap(), OutputFormat::Sarif);
         assert_eq!(OutputFormat::from_str("junit").unwrap(), OutputFormat::Junit);
-        
+
         // Case insensitive
         assert_eq!(OutputFormat::from_str("TEXT").unwrap(), OutputFormat::Text);
         assert_eq!(OutputFormat::from_str("GitHub").unwrap(), OutputFormat::GitHub);
         assert_eq!(OutputFormat::from_str("JSON-LINES").unwrap(), OutputFormat::JsonLines);
-        
+
         // Invalid format
         assert!(OutputFormat::from_str("invalid").is_err());
         assert!(OutputFormat::from_str("").is_err());
@@ -232,13 +231,13 @@ mod tests {
             OutputFormat::Sarif,
             OutputFormat::Junit,
         ];
-        
+
         for format in &formats {
             let formatter = format.create_formatter();
             // Test that formatter can format warnings
             let warnings = vec![create_test_warning(1, "Test warning")];
             let output = formatter.format_warnings(&warnings, "test.md");
-            assert!(!output.is_empty(), "Formatter {:?} should produce output", format);
+            assert!(!output.is_empty(), "Formatter {format:?} should produce output");
         }
     }
 
@@ -248,12 +247,12 @@ mod tests {
         assert!(!writer1.use_stderr);
         assert!(!writer1._quiet);
         assert!(!writer1.silent);
-        
+
         let writer2 = OutputWriter::new(true, true, false);
         assert!(writer2.use_stderr);
         assert!(writer2._quiet);
         assert!(!writer2.silent);
-        
+
         let writer3 = OutputWriter::new(false, false, true);
         assert!(!writer3.use_stderr);
         assert!(!writer3._quiet);
@@ -263,7 +262,7 @@ mod tests {
     #[test]
     fn test_output_writer_silent_mode() {
         let writer = OutputWriter::new(false, false, true);
-        
+
         // All write methods should succeed but not produce output when silent
         assert!(writer.write("test").is_ok());
         assert!(writer.writeln("test").is_ok());
@@ -274,7 +273,7 @@ mod tests {
     fn test_output_writer_write_methods() {
         // Test non-silent mode
         let writer = OutputWriter::new(false, false, false);
-        
+
         // These should succeed (we can't easily test the actual output)
         assert!(writer.write("test").is_ok());
         assert!(writer.writeln("test line").is_ok());
@@ -284,11 +283,11 @@ mod tests {
     #[test]
     fn test_output_writer_stderr_mode() {
         let writer = OutputWriter::new(true, false, false);
-        
+
         // Should write to stderr instead of stdout
         assert!(writer.write("stderr test").is_ok());
         assert!(writer.writeln("stderr line").is_ok());
-        
+
         // write_error always goes to stderr
         assert!(writer.write_error("error").is_ok());
     }
@@ -302,7 +301,7 @@ mod tests {
                 "test".to_string()
             }
         }
-        
+
         let formatter = TestFormatter;
         assert_eq!(formatter.format_summary(10, 5, 1000), None);
         assert!(!formatter.use_colors());
@@ -315,7 +314,7 @@ mod tests {
             create_test_warning(5, "Second warning"),
             create_test_warning_with_fix(10, "Third warning with fix", "fixed content"),
         ];
-        
+
         // Test with different formatters
         let text_formatter = TextFormatter::new();
         let output = text_formatter.format_warnings(&warnings, "test.md");
@@ -332,13 +331,13 @@ mod tests {
         let output = formatter.format_warnings(&empty_warnings, "test.md");
         // Most formatters should handle empty warnings gracefully
         assert!(output.is_empty() || output.trim().is_empty());
-        
+
         // Very long file path
         let long_path = "a/".repeat(100) + "file.md";
         let warnings = vec![create_test_warning(1, "Test")];
         let output = formatter.format_warnings(&warnings, &long_path);
         assert!(!output.is_empty());
-        
+
         // Unicode in messages
         let unicode_warning = LintWarning {
             line: 1,
@@ -357,7 +356,7 @@ mod tests {
     #[test]
     fn test_severity_variations() {
         let severities = [Severity::Error, Severity::Warning];
-        
+
         for severity in &severities {
             let warning = LintWarning {
                 line: 1,
@@ -365,14 +364,17 @@ mod tests {
                 end_line: 1,
                 end_column: 5,
                 rule_name: Some("MD001"),
-                message: format!("Test {} message", match severity {
-                    Severity::Error => "error",
-                    Severity::Warning => "warning",
-                }),
+                message: format!(
+                    "Test {} message",
+                    match severity {
+                        Severity::Error => "error",
+                        Severity::Warning => "warning",
+                    }
+                ),
                 severity: *severity,
                 fix: None,
             };
-            
+
             let formatter = TextFormatter::new();
             let output = formatter.format_warnings(&[warning], "test.md");
             assert!(!output.is_empty());
@@ -398,7 +400,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         };
-        
+
         let formats = [
             OutputFormat::Text,
             OutputFormat::Concise,
@@ -412,11 +414,14 @@ mod tests {
             OutputFormat::Sarif,
             OutputFormat::Junit,
         ];
-        
+
         for format in &formats {
             let formatter = format.create_formatter();
             let output = formatter.format_warnings(&[warning.clone()], "test.md");
-            assert!(!output.is_empty(), "Format {:?} should handle warnings without rule names", format);
+            assert!(
+                !output.is_empty(),
+                "Format {format:?} should handle warnings without rule names"
+            );
         }
     }
 }

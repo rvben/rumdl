@@ -313,7 +313,8 @@ fn test_md009_indented_code_non_strict() {
 #[test]
 fn test_md009_fix_complex_document() {
     let rule = MD009TrailingSpaces::default();
-    let content = "# Title   \n\nParagraph  \n\n- List   \n  - Nested  \n\n```\ncode   \n```\n\n> Quote   \n>    \n\nEnd  ";
+    let content =
+        "# Title   \n\nParagraph  \n\n- List   \n  - Nested  \n\n```\ncode   \n```\n\n> Quote   \n>    \n\nEnd  ";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(

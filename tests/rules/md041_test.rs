@@ -8,7 +8,7 @@ fn test_valid_first_line_heading() {
     let content = "# First heading\nSome text";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    println!("Valid test result: {:?}", result);
+    println!("Valid test result: {result:?}");
     assert!(result.is_empty());
 }
 
@@ -63,6 +63,6 @@ fn test_custom_level() {
     let content = "## Second level heading\nSome text";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    println!("Custom level test result: {:?}", result);
+    println!("Custom level test result: {result:?}");
     assert!(result.is_empty());
 }

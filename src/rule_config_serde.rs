@@ -1,9 +1,9 @@
-use serde::de::DeserializeOwned;
 /// Serde-based configuration system for rules
 ///
 /// This module provides a modern, type-safe configuration system inspired by Ruff's approach.
 /// It eliminates manual TOML construction and provides automatic serialization/deserialization.
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 /// Trait for rule configurations
 pub trait RuleConfig: Serialize + DeserializeOwned + Default + Clone {
@@ -118,9 +118,9 @@ mod tests {
         assert_eq!(json_int, serde_json::json!(42));
 
         // Float
-        let toml_float = toml::Value::Float(3.14);
+        let toml_float = toml::Value::Float(1.234);
         let json_float = toml_value_to_json(&toml_float).unwrap();
-        assert_eq!(json_float, serde_json::json!(3.14));
+        assert_eq!(json_float, serde_json::json!(1.234));
 
         // Boolean
         let toml_bool = toml::Value::Boolean(true);
@@ -144,7 +144,7 @@ mod tests {
         toml_table.insert("key2".to_string(), toml::Value::Integer(123));
         let toml_tbl = toml::Value::Table(toml_table);
         let json_tbl = toml_value_to_json(&toml_tbl).unwrap();
-        
+
         let expected = serde_json::json!({
             "key1": "value1",
             "key2": 123
@@ -175,9 +175,9 @@ mod tests {
         assert_eq!(toml_int, toml::Value::Integer(42));
 
         // Float
-        let json_float = serde_json::json!(3.14);
+        let json_float = serde_json::json!(1.234);
         let toml_float = json_to_toml_value(&json_float).unwrap();
-        assert_eq!(toml_float, toml::Value::Float(3.14));
+        assert_eq!(toml_float, toml::Value::Float(1.234));
 
         // String
         let json_str = serde_json::Value::String("test".to_string());
@@ -219,7 +219,7 @@ mod tests {
     fn test_load_rule_config_default() {
         // Create empty config
         let config = crate::config::Config::default();
-        
+
         // Load config for test rule - should return default
         let rule_config: TestRuleConfig = load_rule_config(&config);
         assert_eq!(rule_config, TestRuleConfig::default());
@@ -233,18 +233,21 @@ mod tests {
         rule_values.insert("enabled".to_string(), toml::Value::Boolean(true));
         rule_values.insert("indent".to_string(), toml::Value::Integer(4));
         rule_values.insert("style".to_string(), toml::Value::String("consistent".to_string()));
-        rule_values.insert("items".to_string(), toml::Value::Array(vec![
-            toml::Value::String("item1".to_string()),
-            toml::Value::String("item2".to_string()),
-        ]));
-        
-        config.rules.insert("TEST001".to_string(), crate::config::RuleConfig {
-            values: rule_values,
-        });
-        
+        rule_values.insert(
+            "items".to_string(),
+            toml::Value::Array(vec![
+                toml::Value::String("item1".to_string()),
+                toml::Value::String("item2".to_string()),
+            ]),
+        );
+
+        config
+            .rules
+            .insert("TEST001".to_string(), crate::config::RuleConfig { values: rule_values });
+
         // Load config
         let rule_config: TestRuleConfig = load_rule_config(&config);
-        assert_eq!(rule_config.enabled, true);
+        assert!(rule_config.enabled);
         assert_eq!(rule_config.indent, 4);
         assert_eq!(rule_config.style, "consistent");
         assert_eq!(rule_config.items, vec!["item1", "item2"]);
@@ -257,14 +260,14 @@ mod tests {
         let mut rule_values = BTreeMap::new();
         rule_values.insert("enabled".to_string(), toml::Value::Boolean(true));
         rule_values.insert("style".to_string(), toml::Value::String("custom".to_string()));
-        
-        config.rules.insert("TEST001".to_string(), crate::config::RuleConfig {
-            values: rule_values,
-        });
-        
+
+        config
+            .rules
+            .insert("TEST001".to_string(), crate::config::RuleConfig { values: rule_values });
+
         // Load config - missing fields should use defaults from TestRuleConfig::default()
         let rule_config: TestRuleConfig = load_rule_config(&config);
-        assert_eq!(rule_config.enabled, true); // from config
+        assert!(rule_config.enabled); // from config
         assert_eq!(rule_config.indent, 0); // default i64
         assert_eq!(rule_config.style, "custom"); // from config
         assert_eq!(rule_config.items, Vec::<String>::new()); // default empty vec
@@ -278,16 +281,19 @@ mod tests {
             table.insert("string".to_string(), toml::Value::String("test".to_string()));
             table.insert("number".to_string(), toml::Value::Integer(42));
             table.insert("bool".to_string(), toml::Value::Boolean(true));
-            table.insert("array".to_string(), toml::Value::Array(vec![
-                toml::Value::String("a".to_string()),
-                toml::Value::String("b".to_string()),
-            ]));
+            table.insert(
+                "array".to_string(),
+                toml::Value::Array(vec![
+                    toml::Value::String("a".to_string()),
+                    toml::Value::String("b".to_string()),
+                ]),
+            );
             table
         });
-        
+
         let json = toml_value_to_json(&original).unwrap();
         let back_to_toml = json_to_toml_value(&json).unwrap();
-        
+
         assert_eq!(original, back_to_toml);
     }
 
@@ -297,28 +303,34 @@ mod tests {
         let empty_arr = toml::Value::Array(vec![]);
         let json_arr = toml_value_to_json(&empty_arr).unwrap();
         assert_eq!(json_arr, serde_json::json!([]));
-        
+
         // Empty table
         let empty_table = toml::Value::Table(toml::map::Map::new());
         let json_table = toml_value_to_json(&empty_table).unwrap();
         assert_eq!(json_table, serde_json::json!({}));
-        
+
         // Nested structures
         let nested = toml::Value::Table({
             let mut outer = toml::map::Map::new();
-            outer.insert("inner".to_string(), toml::Value::Table({
-                let mut inner = toml::map::Map::new();
-                inner.insert("value".to_string(), toml::Value::Integer(123));
-                inner
-            }));
+            outer.insert(
+                "inner".to_string(),
+                toml::Value::Table({
+                    let mut inner = toml::map::Map::new();
+                    inner.insert("value".to_string(), toml::Value::Integer(123));
+                    inner
+                }),
+            );
             outer
         });
         let json_nested = toml_value_to_json(&nested).unwrap();
-        assert_eq!(json_nested, serde_json::json!({
-            "inner": {
-                "value": 123
-            }
-        }));
+        assert_eq!(
+            json_nested,
+            serde_json::json!({
+                "inner": {
+                    "value": 123
+                }
+            })
+        );
     }
 
     #[test]
@@ -326,10 +338,10 @@ mod tests {
         // NaN and infinity are not valid JSON numbers
         let nan = serde_json::Number::from_f64(f64::NAN);
         assert!(nan.is_none());
-        
+
         let inf = serde_json::Number::from_f64(f64::INFINITY);
         assert!(inf.is_none());
-        
+
         // Valid float
         let valid_float = toml::Value::Float(1.23);
         let json_float = toml_value_to_json(&valid_float).unwrap();

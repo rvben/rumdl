@@ -50,7 +50,7 @@ Another paragraph
     // Regular ATX headings
     assert_eq!(levels[0], Some(1)); // # Heading 1
     assert_eq!(levels[1], Some(2)); // ## Heading 2
-                                    // Setext heading with = is level 1
+    // Setext heading with = is level 1
     assert_eq!(levels[2], Some(1)); // Setext heading
 
     // Test list detection

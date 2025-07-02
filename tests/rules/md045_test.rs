@@ -40,7 +40,10 @@ fn test_multiple_images() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "![Alt text](image1.png)\n![TODO: Add image description](image2.png)\n![TODO: Add image description](image3.png)");
+    assert_eq!(
+        fixed,
+        "![Alt text](image1.png)\n![TODO: Add image description](image2.png)\n![TODO: Add image description](image3.png)"
+    );
 }
 
 #[test]
@@ -65,7 +68,10 @@ fn test_mixed_content() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Images\n\nSome text here\n\n![Alt text](image1.png)\n\nMore text\n\n![TODO: Add image description](image2.png)");
+    assert_eq!(
+        fixed,
+        "# Images\n\nSome text here\n\n![Alt text](image1.png)\n\nMore text\n\n![TODO: Add image description](image2.png)"
+    );
 }
 
 #[test]

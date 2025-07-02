@@ -25,11 +25,7 @@ pub fn detect_line_ending(content: &str) -> &'static str {
     let crlf_count = content.matches("\r\n").count();
     let lf_count = content.matches('\n').count() - crlf_count;
 
-    if crlf_count > lf_count {
-        "\r\n"
-    } else {
-        "\n"
-    }
+    if crlf_count > lf_count { "\r\n" } else { "\n" }
 }
 pub use range_utils::LineIndex;
 

@@ -245,10 +245,10 @@ lines_below = 2
     }
 
     let elapsed = start_time.elapsed();
-    println!("100 config loads took: {:?}", elapsed);
+    println!("100 config loads took: {elapsed:?}");
 
     // Should be reasonably fast
-    assert!(elapsed.as_millis() < 500, "Config loading too slow: {:?}", elapsed);
+    assert!(elapsed.as_millis() < 500, "Config loading too slow: {elapsed:?}");
 
     println!("✅ Configuration performance test passed");
 }
@@ -289,7 +289,7 @@ disable = ["MD025"]
     if config.global.enable.contains(&"MD022".to_string()) {
         // If enable list is specified, only those rules should be active
         // (unless also in disable list)
-        println!("Enabled rules: {:?}", enabled_rule_names);
+        println!("Enabled rules: {enabled_rule_names:?}");
     }
 
     // Test with content
@@ -307,7 +307,7 @@ Content here.
         total_warnings += warnings.len();
     }
 
-    println!("Total warnings from filtered rules: {}", total_warnings);
+    println!("Total warnings from filtered rules: {total_warnings}");
 
     println!("✅ Dynamic rule filtering working correctly");
 }

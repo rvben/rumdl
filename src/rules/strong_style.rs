@@ -42,14 +42,14 @@ mod tests {
     #[test]
     fn test_strong_style_clone() {
         let style = StrongStyle::Asterisk;
-        let cloned = style.clone();
+        let cloned = style;
         assert_eq!(style, cloned);
     }
 
     #[test]
     fn test_strong_style_debug() {
         let style = StrongStyle::Underscore;
-        let debug_str = format!("{:?}", style);
+        let debug_str = format!("{style:?}");
         assert_eq!(debug_str, "Underscore");
     }
 }

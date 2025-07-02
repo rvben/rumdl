@@ -1,6 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::range_utils::{calculate_trailing_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_trailing_range};
 use crate::utils::regex_cache::get_cached_regex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -154,7 +154,7 @@ impl Rule for MD009TrailingSpaces {
                 message: if trailing_spaces == 1 {
                     "Trailing space found".to_string()
                 } else {
-                    format!("{} trailing spaces found", trailing_spaces)
+                    format!("{trailing_spaces} trailing spaces found")
                 },
                 severity: Severity::Warning,
                 fix: Some(Fix {
@@ -250,7 +250,6 @@ impl Rule for MD009TrailingSpaces {
         RuleCategory::Whitespace
     }
 
-
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let default_config = MD009Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;
@@ -320,7 +319,7 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // In strict mode, all trailing spaces are flagged
         assert_eq!(result.len(), 5);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Line with spaces\nCode block:\n```\nCode with spaces\n```");
     }
@@ -350,12 +349,15 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 2);
         assert_eq!(result[1].line, 3);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         // Line 1: keeps 2 spaces
         // Line 2: normalized from 3 to 2 spaces
         // Line 3: last line without newline, spaces removed
-        assert_eq!(fixed, "Line with two spaces  \nLine with three spaces  \nLine with one space");
+        assert_eq!(
+            fixed,
+            "Line with two spaces  \nLine with three spaces  \nLine with one space"
+        );
     }
 
     #[test]
@@ -367,7 +369,7 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].message, "Empty line has trailing spaces");
         assert_eq!(result[1].message, "Empty line has trailing spaces");
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Normal line\n\n\nAnother line");
     }
@@ -381,7 +383,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
         assert_eq!(result[0].message, "Empty blockquote line needs a space after >");
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "> Quote\n> \n> More quote");
     }
@@ -389,7 +391,7 @@ mod tests {
     #[test]
     fn test_last_line_handling() {
         let rule = MD009TrailingSpaces::new(2, false);
-        
+
         // Content without final newline
         let content = "First line  \nLast line  ";
         let ctx = LintContext::new(content);
@@ -397,10 +399,10 @@ mod tests {
         // Last line without newline should have trailing spaces removed
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "First line  \nLast line");
-        
+
         // Content with final newline
         let content_with_newline = "First line  \nLast line  \n";
         let ctx = LintContext::new(content_with_newline);
@@ -474,16 +476,20 @@ Code block
     fn test_from_config() {
         let mut config = crate::config::Config::default();
         let mut rule_config = crate::config::RuleConfig::default();
-        rule_config.values.insert("br_spaces".to_string(), toml::Value::Integer(3));
-        rule_config.values.insert("strict".to_string(), toml::Value::Boolean(true));
+        rule_config
+            .values
+            .insert("br_spaces".to_string(), toml::Value::Integer(3));
+        rule_config
+            .values
+            .insert("strict".to_string(), toml::Value::Boolean(true));
         config.rules.insert("MD009".to_string(), rule_config);
-        
+
         let rule = MD009TrailingSpaces::from_config(&config);
         let content = "Line   ";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        
+
         // In strict mode, should remove all spaces
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Line");
@@ -494,7 +500,7 @@ Code block
         let rule = MD009TrailingSpaces::default();
         let mut content = String::new();
         for i in 0..1000 {
-            content.push_str(&format!("Line {} with spaces  \n", i));
+            content.push_str(&format!("Line {i} with spaces  \n"));
         }
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
@@ -521,7 +527,7 @@ Code block
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 2);
         assert_eq!(result[1].line, 3);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         // The fix adds a single space after empty blockquote markers
         assert_eq!(fixed, "> > Nested  \n> >  \n> Normal");

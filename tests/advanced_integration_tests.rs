@@ -152,7 +152,7 @@ fn test_init_load_apply_config() {
     // Create a markdown file with a long line
     let markdown_path = temp_dir.path().join("test.md");
     let long_line = "A ".repeat(100);
-    fs::write(&markdown_path, format!("# Test\n\n{}\n", long_line)).unwrap();
+    fs::write(&markdown_path, format!("# Test\n\n{long_line}\n")).unwrap();
 
     // Run rumdl on the file (should use the config automatically)
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
@@ -291,7 +291,7 @@ fn test_cli_options() {
     let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
     // Accept exit code 0 or 1 if output is correct and only deprecation warning is in stderr
     let code = assert.get_output().status.code().unwrap_or(-1);
-    assert!(code == 0 || code == 1, "Unexpected exit code: {}", code);
+    assert!(code == 0 || code == 1, "Unexpected exit code: {code}");
     assert!(default_output.contains("MD022"));
     assert!(default_output.contains("MD033"));
     // Allow deprecation warning in stderr
@@ -312,14 +312,12 @@ fn test_cli_options() {
     // Accept exit code 0 (no issues found) or 1 (issues found, but not expected here)
     assert!(
         disabled_code == 0,
-        "Expected exit code 0 (no issues found), got {}. Output: {}",
-        disabled_code,
-        disabled_output
+        "Expected exit code 0 (no issues found), got {disabled_code}. Output: {disabled_output}"
     );
     assert!(!disabled_output.contains("MD022"));
     assert!(!disabled_output.contains("MD033"));
     assert!(!disabled_output.contains("MD032")); // Also check MD032 is disabled
-                                                 // MD030 should NOT be reported for *Bad item, because it is not a valid list item per CommonMark/markdownlint
+    // MD030 should NOT be reported for *Bad item, because it is not a valid list item per CommonMark/markdownlint
     assert!(!disabled_output.contains("MD030"));
 
     // Test with enabled rules (using --no-config and enable via CLI)

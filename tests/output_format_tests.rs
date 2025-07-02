@@ -56,13 +56,12 @@ fn test_output_format_singular() {
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("Single file output:\n{}", stdout);
+    println!("Single file output:\n{stdout}");
 
     // Check for singular "file" in the output
     assert!(
         stdout.contains("issues in 1 file"),
-        "Expected output to contain 'issues in 1 file', but got:\n{}",
-        stdout
+        "Expected output to contain 'issues in 1 file', but got:\n{stdout}"
     );
 
     // Make sure it doesn't use plural for single file
@@ -85,13 +84,12 @@ fn test_output_format_plural() {
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("Multiple files output:\n{}", stdout);
+    println!("Multiple files output:\n{stdout}");
 
     // Check for plural "files" in the output
     assert!(
         stdout.contains("issues in 2 files"),
-        "Expected output to contain 'issues in 2 files', but got:\n{}",
-        stdout
+        "Expected output to contain 'issues in 2 files', but got:\n{stdout}"
     );
 }
 
@@ -108,13 +106,12 @@ fn test_output_format_fix_mode_singular() {
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("Fix mode single file output:\n{}", stdout);
+    println!("Fix mode single file output:\n{stdout}");
 
     // Check for singular "file" in the fixed output
     assert!(
         stdout.contains("issues in 1 file"),
-        "Expected output to contain 'issues in 1 file', but got:\n{}",
-        stdout
+        "Expected output to contain 'issues in 1 file', but got:\n{stdout}"
     );
 
     // Make sure it doesn't use plural for single file
@@ -144,13 +141,12 @@ fn test_output_format_fix_mode_plural() {
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("Fix mode multiple files output:\n{}", stdout);
+    println!("Fix mode multiple files output:\n{stdout}");
 
     // Check for plural "files" in the fixed output
     assert!(
         stdout.contains("issues in 2 files"),
-        "Expected output to contain 'issues in 2 files', but got:\n{}",
-        stdout
+        "Expected output to contain 'issues in 2 files', but got:\n{stdout}"
     );
 
     // Verify only the Fixed line is shown, not the Issues line
@@ -220,7 +216,7 @@ fn test_multi_issue_output_format() {
         .expect("Failed to execute command");
 
     let stdout_normal = String::from_utf8_lossy(&output_normal.stdout);
-    println!("Multi-issue normal mode output:\n{}", stdout_normal);
+    println!("Multi-issue normal mode output:\n{stdout_normal}");
 
     // Verify each type of expected issue is detected and marked as fixable
     assert!(
@@ -248,8 +244,7 @@ fn test_multi_issue_output_format() {
     let normal_mode_fixable_issues = stdout_normal.matches("[*]").count();
     assert!(
         normal_mode_fixable_issues >= 5,
-        "Expected at least 5 fixable issues marked with [*], found {}",
-        normal_mode_fixable_issues
+        "Expected at least 5 fixable issues marked with [*], found {normal_mode_fixable_issues}"
     );
 
     // Now run in fix mode to check fixed issue labeling
@@ -259,14 +254,13 @@ fn test_multi_issue_output_format() {
         .expect("Failed to execute command");
 
     let stdout_fix = String::from_utf8_lossy(&output_fix.stdout);
-    println!("Multi-issue fix mode output:\n{}", stdout_fix);
+    println!("Multi-issue fix mode output:\n{stdout_fix}");
 
     // Verify each fixable issue is labeled as fixed
     let fix_mode_fixed_issues = stdout_fix.matches("[fixed]").count();
     assert!(
         fix_mode_fixed_issues >= 5,
-        "Expected at least 5 issues marked as [fixed], found {}",
-        fix_mode_fixed_issues
+        "Expected at least 5 issues marked as [fixed], found {fix_mode_fixed_issues}"
     );
 
     // Verify all the fixable issues are marked as fixed
@@ -293,8 +287,7 @@ fn test_multi_issue_output_format() {
 
         assert_eq!(
             fix_mode_fixed_issues, summary_fixed_count,
-            "The count of [fixed] labels ({}) should match the summary count ({})",
-            fix_mode_fixed_issues, summary_fixed_count
+            "The count of [fixed] labels ({fix_mode_fixed_issues}) should match the summary count ({summary_fixed_count})"
         );
     }
 }
@@ -321,7 +314,7 @@ fn test_fixable_issues_labeling() {
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("Fixable issue output:\n{}", stdout);
+    println!("Fixable issue output:\n{stdout}");
 
     // Verify MD037 emphasis spaces issue is reported
     assert!(stdout.contains("[MD037]"), "Should detect spaces around emphasis issue");
@@ -342,7 +335,7 @@ fn test_fixable_issues_labeling() {
         .expect("Failed to execute command");
 
     let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
-    println!("Fixable issue with --fix output:\n{}", fix_stdout);
+    println!("Fixable issue with --fix output:\n{fix_stdout}");
 
     // Verify the issue is marked as fixed
     assert!(
@@ -393,7 +386,7 @@ fn test_truly_unfixable_issues_labeling() {
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("Truly unfixable issue output:\n{}", stdout);
+    println!("Truly unfixable issue output:\n{stdout}");
 
     // Verify MD013 line length issue is reported
     assert!(
@@ -417,7 +410,7 @@ fn test_truly_unfixable_issues_labeling() {
         .expect("Failed to execute command");
 
     let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
-    println!("Truly unfixable issue with --fix output:\n{}", fix_stdout);
+    println!("Truly unfixable issue with --fix output:\n{fix_stdout}");
 
     // Verify the issue is still reported and NOT marked as fixed
     assert!(
@@ -468,7 +461,7 @@ fn test_mixed_fixable_unfixable_issues() {
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("Mixed issues output:\n{}", stdout);
+    println!("Mixed issues output:\n{stdout}");
 
     // Check for fixable issues
     assert!(
@@ -512,7 +505,7 @@ fn test_mixed_fixable_unfixable_issues() {
         .expect("Failed to execute command");
 
     let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
-    println!("Mixed issues with --fix output:\n{}", fix_stdout);
+    println!("Mixed issues with --fix output:\n{fix_stdout}");
 
     // Check that fixable issues are fixed
     assert!(
@@ -581,7 +574,7 @@ fn test_color_output_disabled() {
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("No color output:\n{}", stdout);
+    println!("No color output:\n{stdout}");
 
     // ANSI color codes start with ESC character (27) followed by [
     // In Rust strings, this looks like \x1b[
@@ -605,13 +598,12 @@ fn test_quiet_mode_output() {
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("Quiet mode output:\n{}", stdout);
+    println!("Quiet mode output:\n{stdout}");
 
     // Verify output is suppressed
     assert!(
         stdout.is_empty(),
-        "Quiet mode should suppress standard output, got: {}",
-        stdout
+        "Quiet mode should suppress standard output, got: {stdout}"
     );
 
     // Run with --quiet and --fix to ensure it still fixes issues but doesn't output
@@ -623,8 +615,7 @@ fn test_quiet_mode_output() {
     let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
     assert!(
         fix_stdout.is_empty(),
-        "Quiet mode with fix should suppress standard output, got: {}",
-        fix_stdout
+        "Quiet mode with fix should suppress standard output, got: {fix_stdout}"
     );
 
     // Verify that fix was still applied by checking the content of the fixed file
@@ -649,7 +640,7 @@ fn test_verbose_mode_output() {
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("Verbose mode output:\n{}", stdout);
+    println!("Verbose mode output:\n{stdout}");
 
     // Verify verbose output includes file processing messages
     assert!(
@@ -747,7 +738,7 @@ fn test_rule_with_configuration() {
         .expect("Failed to execute command");
 
     let default_stdout = String::from_utf8_lossy(&default_output.stdout);
-    println!("Default configuration output:\n{}", default_stdout);
+    println!("Default configuration output:\n{default_stdout}");
 
     // Check that line length issues are reported with default config (limit 80)
     assert!(
@@ -774,7 +765,7 @@ line_length = 70
         .expect("Failed to execute command");
 
     let custom_stdout = String::from_utf8_lossy(&custom_output.stdout);
-    println!("Custom configuration output:\n{}", custom_stdout);
+    println!("Custom configuration output:\n{custom_stdout}");
 
     // Custom config should detect more issues (since limit is lower)
     assert!(
@@ -814,7 +805,7 @@ fn test_fixed_content_validation() {
         .expect("Failed to execute command");
 
     let check_stdout = String::from_utf8_lossy(&check_output.stdout);
-    println!("Pre-fix output:\n{}", check_stdout);
+    println!("Pre-fix output:\n{check_stdout}");
 
     // Verify the file has the MD047 issue (missing newline)
     assert!(
@@ -829,7 +820,7 @@ fn test_fixed_content_validation() {
         .expect("Failed to execute command");
 
     let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
-    println!("Fix output:\n{}", fix_stdout);
+    println!("Fix output:\n{fix_stdout}");
 
     // Check that content was actually modified
     let fixed_content = fs::read_to_string(&test_file).unwrap();
@@ -848,7 +839,7 @@ fn test_fixed_content_validation() {
         .expect("Failed to execute command");
 
     let recheck_stdout = String::from_utf8_lossy(&recheck_output.stdout);
-    println!("Post-fix check output:\n{}", recheck_stdout);
+    println!("Post-fix check output:\n{recheck_stdout}");
 
     // The specific fixed issue should not be reported again
     assert!(!recheck_stdout.contains("[MD047]"), "MD047 issue should be fixed");

@@ -1,6 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -325,7 +325,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!("Unused link/image reference: [{}]", definition),
+                message: format!("Unused link/image reference: [{definition}]"),
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     // Remove the entire line including the newline
@@ -420,7 +420,7 @@ mod tests {
         let content = "[text][ref]\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -430,7 +430,7 @@ mod tests {
         let content = "[unused]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Unused link/image reference: [unused]"));
     }
@@ -441,7 +441,7 @@ mod tests {
         let content = "![alt][img]\n\n[img]: image.jpg";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -451,7 +451,7 @@ mod tests {
         let content = "[Text][REF]\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -461,7 +461,7 @@ mod tests {
         let content = "[ref]\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -471,7 +471,7 @@ mod tests {
         let content = "[ref][]\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -481,9 +481,9 @@ mod tests {
         let content = "[unused1]: url1\n[unused2]: url2\n[unused3]: url3";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 3);
-        
+
         // The warnings might not be in the same order, so collect all messages
         let messages: Vec<String> = result.iter().map(|w| w.message.clone()).collect();
         assert!(messages.iter().any(|m| m.contains("unused1")));
@@ -497,7 +497,7 @@ mod tests {
         let content = "[used]\n\n[used]: url1\n[unused]: url2";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("unused"));
     }
@@ -508,7 +508,7 @@ mod tests {
         let content = "[ref]: https://example.com\n  \"Title on next line\"";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1); // Still unused
     }
 
@@ -518,7 +518,7 @@ mod tests {
         let content = "```\n[ref]\n```\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Reference used only in code block is still considered unused
         assert_eq!(result.len(), 1);
     }
@@ -529,7 +529,7 @@ mod tests {
         let content = "`[ref]`\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Reference in inline code is not a usage
         assert_eq!(result.len(), 1);
     }
@@ -540,7 +540,7 @@ mod tests {
         let content = "[example\\-ref]\n\n[example-ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should match despite escaping
         assert_eq!(result.len(), 0);
     }
@@ -551,7 +551,7 @@ mod tests {
         let content = "[ref]: url1\n[ref]: url2\n\n[ref]";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Both definitions are used (Markdown uses the first one)
         assert_eq!(result.len(), 0);
     }
@@ -562,7 +562,7 @@ mod tests {
         let content = "[used]\n\n[used]: url1\n[unused]: url2\n\nMore content";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert!(fixed.contains("[used]: url1"));
         assert!(!fixed.contains("[unused]: url2"));
         assert!(fixed.contains("More content"));
@@ -574,7 +574,7 @@ mod tests {
         let content = "Content\n\n[unused]: url\n\nMore content";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "Content\n\nMore content");
     }
 
@@ -584,7 +584,7 @@ mod tests {
         let content = "[unused1]: url1\n[unused2]: url2\n[unused3]: url3";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         assert_eq!(fixed, "");
     }
 
@@ -594,7 +594,7 @@ mod tests {
         let content = "[ref-with_special.chars]\n\n[ref-with_special.chars]: url";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -604,7 +604,7 @@ mod tests {
         let content = "[ref1]: url1\n[ref2]: url2\nSome text\n[ref3]: url3";
         let doc = DocumentStructure::new(content);
         let defs = rule.find_definitions(content, &doc);
-        
+
         assert_eq!(defs.len(), 3);
         assert!(defs.contains_key("ref1"));
         assert!(defs.contains_key("ref2"));
@@ -618,7 +618,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let doc = DocumentStructure::new(content);
         let usages = rule.find_usages(content, &doc, &ctx);
-        
+
         assert!(usages.contains("ref1"));
         assert!(usages.contains("ref2"));
         assert!(usages.contains("ref3"));
@@ -627,17 +627,11 @@ mod tests {
     #[test]
     fn test_clean_up_blank_lines() {
         let rule = MD053LinkImageReferenceDefinitions::new();
-        
+
         // Test multiple consecutive blank lines
-        assert_eq!(
-            rule.clean_up_blank_lines("text\n\n\n\nmore text"),
-            "text\n\nmore text"
-        );
-        
+        assert_eq!(rule.clean_up_blank_lines("text\n\n\n\nmore text"), "text\n\nmore text");
+
         // Test leading/trailing blank lines
-        assert_eq!(
-            rule.clean_up_blank_lines("\n\ntext\n\n"),
-            "text"
-        );
+        assert_eq!(rule.clean_up_blank_lines("\n\ntext\n\n"), "text");
     }
 }

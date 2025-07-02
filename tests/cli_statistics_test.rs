@@ -22,9 +22,7 @@ This line has trailing spaces
     fs::write(&test_file, content).unwrap();
 
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
-    cmd.arg("check")
-        .arg("--statistics")
-        .arg(&test_file);
+    cmd.arg("check").arg("--statistics").arg(&test_file);
 
     cmd.assert()
         .failure()
@@ -58,9 +56,7 @@ More content.
     fs::write(&test_file, content).unwrap();
 
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
-    cmd.arg("check")
-        .arg("--statistics")
-        .arg(&test_file);
+    cmd.arg("check").arg("--statistics").arg(&test_file);
 
     cmd.assert()
         .success()
@@ -71,21 +67,19 @@ More content.
 #[test]
 fn test_statistics_multiple_files() {
     let temp_dir = tempdir().unwrap();
-    
+
     // Create multiple files with violations
     let file1 = temp_dir.path().join("file1.md");
     fs::write(&file1, "# Heading\nNo space after heading").unwrap();
-    
+
     let file2 = temp_dir.path().join("file2.md");
     fs::write(&file2, "* item 1\n+ item 2\n- item 3").unwrap();
-    
+
     let file3 = temp_dir.path().join("file3.md");
     fs::write(&file3, "Trailing spaces  \nMore content").unwrap();
 
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
-    cmd.arg("check")
-        .arg("--statistics")
-        .arg(temp_dir.path());
+    cmd.arg("check").arg("--statistics").arg(temp_dir.path());
 
     cmd.assert()
         .failure()
@@ -102,10 +96,7 @@ fn test_statistics_with_quiet_mode() {
     fs::write(&test_file, "# Heading\nNo space").unwrap();
 
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
-    cmd.arg("check")
-        .arg("--statistics")
-        .arg("--quiet")
-        .arg(&test_file);
+    cmd.arg("check").arg("--statistics").arg("--quiet").arg(&test_file);
 
     cmd.assert()
         .failure()

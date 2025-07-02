@@ -385,7 +385,7 @@ Here's an [undefined link][broken] and an ![undefined image][missing].
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
-    
+
     // Check that we found the right undefined references
     let messages: Vec<String> = result.iter().map(|w| w.message.clone()).collect();
     assert!(messages.contains(&"Reference 'broken' not found".to_string()));

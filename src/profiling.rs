@@ -73,7 +73,7 @@ impl Profiler {
 
         // Sort measurements by total time (descending)
         let mut sorted_measurements: Vec<_> = self.measurements.iter().collect();
-        sorted_measurements.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+        sorted_measurements.sort_by(|a, b| b.1.0.cmp(&a.1.0));
 
         // Calculate total time across all sections
         let total_time: Duration = sorted_measurements.iter().map(|(_, (duration, _))| duration).sum();
@@ -98,8 +98,7 @@ impl Profiler {
             let percentage = (total_seconds / total_time.as_secs_f64()) * 100.0;
 
             report.push_str(&format!(
-                "{:<42} | {:<14.6} | {:<5} | {:<13.3} | {:<8.2}%\n",
-                section, total_seconds, calls, avg_ms, percentage
+                "{section:<42} | {total_seconds:<14.6} | {calls:<5} | {avg_ms:<13.3} | {percentage:<8.2}%\n"
             ));
         }
 
@@ -216,13 +215,13 @@ mod tests {
     #[test]
     fn test_profiler_start_stop_timer() {
         let mut profiler = Profiler::new();
-        
+
         // Force profiling to be enabled for this test
         if PROFILING_ENABLED {
             profiler.start_timer("test_section");
             thread::sleep(Duration::from_millis(10));
             profiler.stop_timer("test_section");
-            
+
             assert!(profiler.measurements.contains_key("test_section"));
             let (duration, count) = profiler.measurements.get("test_section").unwrap();
             assert!(*count == 1);
@@ -233,7 +232,7 @@ mod tests {
     #[test]
     fn test_profiler_multiple_measurements() {
         let mut profiler = Profiler::new();
-        
+
         if PROFILING_ENABLED {
             // Multiple measurements of same section
             for _ in 0..3 {
@@ -241,7 +240,7 @@ mod tests {
                 thread::sleep(Duration::from_millis(5));
                 profiler.stop_timer("test_section");
             }
-            
+
             assert!(profiler.measurements.contains_key("test_section"));
             let (duration, count) = profiler.measurements.get("test_section").unwrap();
             assert_eq!(*count, 3);
@@ -252,16 +251,16 @@ mod tests {
     #[test]
     fn test_profiler_get_report() {
         let mut profiler = Profiler::new();
-        
+
         if PROFILING_ENABLED {
             profiler.start_timer("section1");
             thread::sleep(Duration::from_millis(20));
             profiler.stop_timer("section1");
-            
+
             profiler.start_timer("section2");
             thread::sleep(Duration::from_millis(10));
             profiler.stop_timer("section2");
-            
+
             let report = profiler.get_report();
             assert!(report.contains("Profiling Report"));
             assert!(report.contains("section1"));
@@ -276,13 +275,13 @@ mod tests {
     #[test]
     fn test_profiler_reset() {
         let mut profiler = Profiler::new();
-        
+
         if PROFILING_ENABLED {
             profiler.start_timer("test_section");
             profiler.stop_timer("test_section");
-            
+
             assert!(!profiler.measurements.is_empty());
-            
+
             profiler.reset();
             assert!(profiler.measurements.is_empty());
             assert!(profiler.active_timers.is_empty());
@@ -292,7 +291,7 @@ mod tests {
     #[test]
     fn test_profiler_stop_without_start() {
         let mut profiler = Profiler::new();
-        
+
         // Should not panic
         profiler.stop_timer("nonexistent_section");
         assert!(profiler.measurements.is_empty());
@@ -302,11 +301,11 @@ mod tests {
     fn test_global_start_stop_timer() {
         if PROFILING_ENABLED {
             reset(); // Clear any previous measurements
-            
+
             start_timer("global_test");
             thread::sleep(Duration::from_millis(10));
             stop_timer("global_test");
-            
+
             let report = get_report();
             assert!(report.contains("global_test"));
         }
@@ -327,7 +326,7 @@ mod tests {
         if PROFILING_ENABLED {
             start_timer("test_reset");
             stop_timer("test_reset");
-            
+
             reset();
             let report = get_report();
             assert!(!report.contains("test_reset"));
@@ -338,12 +337,12 @@ mod tests {
     fn test_scoped_timer() {
         if PROFILING_ENABLED {
             reset();
-            
+
             {
                 let _timer = ScopedTimer::new("scoped_test");
                 thread::sleep(Duration::from_millis(10));
             } // Timer should stop here
-            
+
             let report = get_report();
             assert!(report.contains("scoped_test"));
         }
@@ -361,7 +360,7 @@ mod tests {
     fn test_empty_report() {
         let profiler = Profiler::new();
         let report = profiler.get_report();
-        
+
         if PROFILING_ENABLED {
             assert_eq!(report, "Profiling disabled or no measurements recorded.");
         }
@@ -370,21 +369,25 @@ mod tests {
     #[test]
     fn test_report_formatting() {
         let mut profiler = Profiler::new();
-        
+
         if PROFILING_ENABLED {
             // Create predictable measurements
-            profiler.measurements.insert("test1".to_string(), (Duration::from_secs(1), 10));
-            profiler.measurements.insert("test2".to_string(), (Duration::from_millis(500), 5));
-            
+            profiler
+                .measurements
+                .insert("test1".to_string(), (Duration::from_secs(1), 10));
+            profiler
+                .measurements
+                .insert("test2".to_string(), (Duration::from_millis(500), 5));
+
             let report = profiler.get_report();
-            
+
             // Check report structure
             assert!(report.contains("Section"));
             assert!(report.contains("Total Time (s)"));
             assert!(report.contains("Calls"));
             assert!(report.contains("Avg Time (ms)"));
             assert!(report.contains("% of Total"));
-            
+
             // Check that test1 appears before test2 (sorted by duration)
             let test1_pos = report.find("test1").unwrap();
             let test2_pos = report.find("test2").unwrap();
@@ -396,28 +399,28 @@ mod tests {
     fn test_concurrent_access() {
         use std::sync::Arc;
         use std::sync::Barrier;
-        
+
         if PROFILING_ENABLED {
             reset();
-            
+
             let barrier = Arc::new(Barrier::new(3));
             let mut handles = vec![];
-            
+
             for i in 0..3 {
                 let b = barrier.clone();
                 let handle = thread::spawn(move || {
                     b.wait();
-                    start_timer(&format!("thread_{}", i));
+                    start_timer(&format!("thread_{i}"));
                     thread::sleep(Duration::from_millis(10));
-                    stop_timer(&format!("thread_{}", i));
+                    stop_timer(&format!("thread_{i}"));
                 });
                 handles.push(handle);
             }
-            
+
             for handle in handles {
                 handle.join().unwrap();
             }
-            
+
             let report = get_report();
             assert!(report.contains("thread_0"));
             assert!(report.contains("thread_1"));

@@ -23,7 +23,7 @@ fn test_large_repository_simulation() {
     ];
 
     for (filename, content) in &test_files {
-        println!("Testing file: {}", filename);
+        println!("Testing file: {filename}");
         let start_time = Instant::now();
 
         let ctx = LintContext::new(content);
@@ -460,13 +460,13 @@ fn create_large_content(lines: usize) -> String {
         if i % 100 == 1 {
             content.push_str(&format!("# Section {}\n", i / 100 + 1));
         } else if i % 20 == 1 {
-            content.push_str(&format!("## Subsection {}\n", i));
+            content.push_str(&format!("## Subsection {i}\n"));
         } else if i % 5 == 0 {
             content.push_str("```rust\n");
-            content.push_str(&format!("let var_{} = {};\n", i, i));
+            content.push_str(&format!("let var_{i} = {i};\n"));
             content.push_str("```\n");
         } else {
-            content.push_str(&format!("This is line {} with some content.\n", i));
+            content.push_str(&format!("This is line {i} with some content.\n"));
         }
     }
 

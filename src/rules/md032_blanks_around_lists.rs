@@ -1,7 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::document_structure_from_str;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -308,7 +308,7 @@ impl MD032BlanksAroundLists {
                         message: "List should be preceded by blank line".to_string(),
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range_with_length(start_line, 1, 0),
-                            replacement: format!("{}\n", prefix),
+                            replacement: format!("{prefix}\n"),
                         }),
                     });
                 }
@@ -349,7 +349,7 @@ impl MD032BlanksAroundLists {
                         message: "List should be followed by blank line".to_string(),
                         fix: Some(Fix {
                             range: line_index.line_col_to_byte_range_with_length(end_line + 1, 1, 0),
-                            replacement: format!("{}\n", prefix),
+                            replacement: format!("{prefix}\n"),
                         }),
                     });
                 }
@@ -619,7 +619,7 @@ mod tests {
     fn check_warnings_have_fixes(content: &str) {
         let warnings = lint(content);
         for warning in &warnings {
-            assert!(warning.fix.is_some(), "Warning should have fix: {:?}", warning);
+            assert!(warning.fix.is_some(), "Warning should have fix: {warning:?}");
         }
     }
 
@@ -717,8 +717,7 @@ mod tests {
         assert_eq!(
             warnings.len(),
             2,
-            "Expected 2 warnings for list block (lines 2-5) missing surrounding blanks. Got: {:?}",
-            warnings
+            "Expected 2 warnings for list block (lines 2-5) missing surrounding blanks. Got: {warnings:?}"
         );
         if warnings.len() == 2 {
             assert_eq!(warnings[0].line, 2, "Warning 1 should be on line 2 (start)");
@@ -734,8 +733,7 @@ mod tests {
         let expected_fixed = "Text\n\n* Item 1\n  Content\n* Item 2\n  More content\n\nText";
         assert_eq!(
             fixed_content, expected_fixed,
-            "Fix did not produce the expected output. Got:\n{}",
-            fixed_content
+            "Fix did not produce the expected output. Got:\n{fixed_content}"
         );
 
         // Verify fix resolves the issue
@@ -747,7 +745,7 @@ mod tests {
     fn test_nested_list() {
         let content = "Text\n- Item 1\n  - Nested 1\n- Item 2\nText";
         let warnings = lint(content);
-        assert_eq!(warnings.len(), 2, "Nested list block warnings. Got: {:?}", warnings); // Needs blank before line 2, after line 4
+        assert_eq!(warnings.len(), 2, "Nested list block warnings. Got: {warnings:?}"); // Needs blank before line 2, after line 4
         if warnings.len() == 2 {
             assert_eq!(warnings[0].line, 2);
             assert_eq!(warnings[1].line, 4);
@@ -771,8 +769,7 @@ mod tests {
         assert_eq!(
             warnings.len(),
             2,
-            "List with internal blanks warnings. Got: {:?}",
-            warnings
+            "List with internal blanks warnings. Got: {warnings:?}"
         );
         if warnings.len() == 2 {
             assert_eq!(warnings[0].line, 2);
@@ -806,7 +803,7 @@ mod tests {
     fn test_ignore_front_matter() {
         let content = "---\ntitle: Test\n---\n- List Item\nText";
         let warnings = lint(content);
-        assert_eq!(warnings.len(), 1, "Front matter test warnings. Got: {:?}", warnings);
+        assert_eq!(warnings.len(), 1, "Front matter test warnings. Got: {warnings:?}");
         if !warnings.is_empty() {
             assert_eq!(warnings[0].line, 4); // Warning on last line of list
             assert!(warnings[0].message.contains("followed by blank line"));
@@ -827,7 +824,7 @@ mod tests {
     fn test_multiple_lists() {
         let content = "Text\n- List 1 Item 1\n- List 1 Item 2\nText 2\n* List 2 Item 1\nText 3";
         let warnings = lint(content);
-        assert_eq!(warnings.len(), 4, "Multiple lists warnings. Got: {:?}", warnings);
+        assert_eq!(warnings.len(), 4, "Multiple lists warnings. Got: {warnings:?}");
 
         // Test that warnings have fixes
         check_warnings_have_fixes(content);
@@ -859,8 +856,7 @@ mod tests {
         assert_eq!(
             warnings.len(),
             2,
-            "Expected 2 warnings for blockquoted list. Got: {:?}",
-            warnings
+            "Expected 2 warnings for blockquoted list. Got: {warnings:?}"
         );
         if warnings.len() == 2 {
             assert_eq!(warnings[0].line, 2);
@@ -874,8 +870,7 @@ mod tests {
         // Check expected output preserves the space after >
         assert_eq!(
             fixed_content, "> Quote line 1\n> \n> - List item 1\n> - List item 2\n> \n> Quote line 2",
-            "Fix for blockquoted list failed. Got:\n{}",
-            fixed_content
+            "Fix for blockquoted list failed. Got:\n{fixed_content}"
         );
 
         // Verify fix resolves the issue
@@ -918,8 +913,7 @@ mod tests {
         let fixed_content = fix(content);
         assert_eq!(
             fixed_content, "Text\n\n- Item 1\n- Item 2\n\nText",
-            "Fix added extra blank after. Got:\n{}",
-            fixed_content
+            "Fix added extra blank after. Got:\n{fixed_content}"
         );
 
         let content2 = "Text\n- Item 1\n- Item 2\n\nText"; // Missing blank before
@@ -938,8 +932,7 @@ mod tests {
         let fixed_content2 = fix(content2);
         assert_eq!(
             fixed_content2, "Text\n\n- Item 1\n- Item 2\n\nText",
-            "Fix added extra blank before. Got:\n{}",
-            fixed_content2
+            "Fix added extra blank before. Got:\n{fixed_content2}"
         );
     }
 
@@ -1238,8 +1231,7 @@ mod tests {
         assert_eq!(
             warnings.len(),
             0,
-            "Should not warn for properly formatted list with multi-line items. Got: {:?}",
-            warnings
+            "Should not warn for properly formatted list with multi-line items. Got: {warnings:?}"
         );
 
         let fixed_content = fix(content);

@@ -49,12 +49,12 @@ impl MD052ReferenceLinkImages {
     pub fn new() -> Self {
         Self
     }
-    
+
     /// Check if a position is inside any code span
     fn is_in_code_span(line: usize, col: usize, code_spans: &[crate::lint_context::CodeSpan]) -> bool {
-        code_spans.iter().any(|span| {
-            span.line == line && col >= span.start_col && col < span.end_col
-        })
+        code_spans
+            .iter()
+            .any(|span| span.line == line && col >= span.start_col && col < span.end_col)
     }
 
     fn extract_references(&self, content: &str) -> HashSet<String> {
@@ -111,7 +111,7 @@ impl MD052ReferenceLinkImages {
             if !link.is_reference {
                 continue; // Skip inline links
             }
-            
+
             // Skip links inside code spans
             if Self::is_in_code_span(link.line, link.start_col, &ctx.code_spans) {
                 continue;
@@ -151,7 +151,7 @@ impl MD052ReferenceLinkImages {
             if !image.is_reference {
                 continue; // Skip inline images
             }
-            
+
             // Skip images inside code spans
             if Self::is_in_code_span(image.line, image.start_col, &ctx.code_spans) {
                 continue;
@@ -241,12 +241,12 @@ impl MD052ReferenceLinkImages {
                         if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
                             let full_match = cap.get(0).unwrap();
                             let col = full_match.start();
-                            
+
                             // Skip if inside code span
                             if Self::is_in_code_span(line_num + 1, col, &ctx.code_spans) {
                                 continue;
                             }
-                            
+
                             let match_len = full_match.end() - full_match.start();
                             undefined.push((line_num, col, match_len, reference.to_string()));
                             reported_refs.insert(reference_lower, true);
@@ -289,7 +289,7 @@ impl Rule for MD052ReferenceLinkImages {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!("Reference '{}' not found", reference),
+                message: format!("Reference '{reference}' not found"),
                 severity: Severity::Warning,
                 fix: None,
             });
@@ -327,7 +327,7 @@ mod tests {
         let content = "[text][ref]\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -337,7 +337,7 @@ mod tests {
         let content = "[text][undefined]";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Reference 'undefined' not found"));
     }
@@ -348,7 +348,7 @@ mod tests {
         let content = "![alt][img]\n\n[img]: image.jpg";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -358,7 +358,7 @@ mod tests {
         let content = "![alt][missing]";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Reference 'missing' not found"));
     }
@@ -369,7 +369,7 @@ mod tests {
         let content = "[Text][REF]\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -379,7 +379,7 @@ mod tests {
         let content = "[ref]\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -389,7 +389,7 @@ mod tests {
         let content = "[undefined]";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Reference 'undefined' not found"));
     }
@@ -400,7 +400,7 @@ mod tests {
         let content = "[text](https://example.com)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -410,7 +410,7 @@ mod tests {
         let content = "![alt](image.jpg)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -420,7 +420,7 @@ mod tests {
         let content = "```\n[undefined]\n```\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -431,7 +431,7 @@ mod tests {
         let content = "`[undefined]`";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // TODO: Shortcut reference detection should check inline code spans
         assert_eq!(result.len(), 0);
     }
@@ -442,7 +442,7 @@ mod tests {
         let content = "[link1][ref1] [link2][ref2] [link3][ref3]";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 3);
         assert!(result[0].message.contains("ref1"));
         assert!(result[1].message.contains("ref2"));
@@ -455,7 +455,7 @@ mod tests {
         let content = "[valid][ref] [invalid][missing]\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("missing"));
     }
@@ -466,7 +466,7 @@ mod tests {
         let content = "[text][]\n\n[ref]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Empty reference should use the link text as reference
         assert_eq!(result.len(), 1);
     }
@@ -477,7 +477,7 @@ mod tests {
         let content = "\\[not a link\\]";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -487,7 +487,7 @@ mod tests {
         let content = "- [undefined]\n* [another]\n+ [third]";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // List items that look like shortcut references should be ignored
         assert_eq!(result.len(), 0);
     }
@@ -498,7 +498,7 @@ mod tests {
         let content = "## Output\n\n[undefined]\n\n## Normal Section\n\n[missing]";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Only the reference outside the Output section should be flagged
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("missing"));
@@ -510,7 +510,7 @@ mod tests {
         let content = "[link][ref]\n\n```\n[ref]: https://example.com\n```";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Reference defined in code block should not count
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("ref"));
@@ -522,7 +522,7 @@ mod tests {
         let content = "[first][missing] [second][missing] [third][missing]";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should only report once per unique reference
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("missing"));
@@ -534,7 +534,7 @@ mod tests {
         let content = "[text][ref-with-hyphens]\n\n[ref-with-hyphens]: https://example.com";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -543,17 +543,17 @@ mod tests {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[ref1]: url1\n[Ref2]: url2\n[REF3]: url3";
         let refs = rule.extract_references(content);
-        
+
         assert_eq!(refs.len(), 3);
         assert!(refs.contains("ref1"));
         assert!(refs.contains("ref2"));
         assert!(refs.contains("ref3"));
     }
-    
+
     #[test]
     fn test_inline_code_not_flagged() {
         let rule = MD052ReferenceLinkImages::new();
-        
+
         // Test that arrays in inline code are not flagged as references
         let content = r#"# Test
 
@@ -565,19 +565,19 @@ But this [reference] should be flagged.
 
 And this `[inline code]` should not be flagged.
 "#;
-        
+
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
-        
+
         // Should only flag [reference], not the ones in backticks
         assert_eq!(warnings.len(), 1, "Should only flag one undefined reference");
         assert!(warnings[0].message.contains("'reference'"));
     }
-    
+
     #[test]
     fn test_code_block_references_ignored() {
         let rule = MD052ReferenceLinkImages::new();
-        
+
         let content = r#"# Test
 
 ```markdown
@@ -587,10 +587,10 @@ And this `[inline code]` should not be flagged.
 
 [real-undefined] reference outside
 "#;
-        
+
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
-        
+
         // Should only flag [real-undefined], not the ones in code block
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("'real-undefined'"));

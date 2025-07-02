@@ -332,8 +332,7 @@ impl MD029OrderedListPrefix {
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             message: format!(
-                                "Ordered list item number {} does not match style (expected {})",
-                                actual_num, expected_num
+                                "Ordered list item number {actual_num} does not match style (expected {expected_num})"
                             ),
                             line: line_num + 1,
                             column: number_start + 1,

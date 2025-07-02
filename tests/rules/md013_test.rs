@@ -305,18 +305,18 @@ fn test_multiple_violations_same_file() {
 fn test_configuration_different_line_lengths() {
     let content = "This is a line that is exactly sixty characters long in total";
     assert_eq!(content.chars().count(), 61);
-    
+
     // Test with limit of 50 - should fail
     let rule50 = MD013LineLength::new(50, true, true, true, false);
     let ctx = LintContext::new(content);
     let result50 = rule50.check(&ctx).unwrap();
     assert_eq!(result50.len(), 1);
-    
+
     // Test with limit of 70 - should pass
     let rule70 = MD013LineLength::new(70, true, true, true, false);
     let result70 = rule70.check(&ctx).unwrap();
     assert!(result70.is_empty());
-    
+
     // Test with limit of 100 - should pass
     let rule100 = MD013LineLength::new(100, true, true, true, false);
     let result100 = rule100.check(&ctx).unwrap();
@@ -327,13 +327,13 @@ fn test_configuration_different_line_lengths() {
 fn test_code_blocks_configurable() {
     let content = "```\nThis is a very long line inside a code block that exceeds the limit significantly\n```";
     let ctx = LintContext::new(content);
-    
+
     // With code_blocks = true (check code blocks)
     let rule_check = MD013LineLength::new(50, true, true, true, false);
     let result_check = rule_check.check(&ctx).unwrap();
     assert_eq!(result_check.len(), 1);
     assert_eq!(result_check[0].line, 2);
-    
+
     // With code_blocks = false (don't check code blocks)
     let rule_skip = MD013LineLength::new(50, false, true, true, false);
     let result_skip = rule_skip.check(&ctx).unwrap();
@@ -344,12 +344,12 @@ fn test_code_blocks_configurable() {
 fn test_tables_configurable() {
     let content = "| This is a very long table cell | Another very long table cell that exceeds limit |";
     let ctx = LintContext::new(content);
-    
-    // With tables = true (check tables) 
+
+    // With tables = true (check tables)
     let rule_check = MD013LineLength::new(50, true, true, true, false);
     let result_check = rule_check.check(&ctx).unwrap();
     assert!(result_check.is_empty()); // Tables are skipped when tables=true
-    
+
     // With tables = false (don't skip tables)
     let rule_no_skip = MD013LineLength::new(50, true, false, true, false);
     let result_no_skip = rule_no_skip.check(&ctx).unwrap();
@@ -360,12 +360,12 @@ fn test_tables_configurable() {
 fn test_headings_configurable() {
     let content = "# This is a very long heading that exceeds the maximum character limit significantly";
     let ctx = LintContext::new(content);
-    
+
     // With headings = true (skip headings)
     let rule_skip = MD013LineLength::new(50, true, true, true, false);
     let result_skip = rule_skip.check(&ctx).unwrap();
     assert!(result_skip.is_empty());
-    
+
     // With headings = false (check headings)
     let rule_check = MD013LineLength::new(50, true, true, false, false);
     let result_check = rule_check.check(&ctx).unwrap();
@@ -377,12 +377,12 @@ fn test_headings_configurable() {
 fn test_urls_configurable_with_strict() {
     let long_url = "https://example.com/this/is/a/very/long/url/that/exceeds/the/character/limit/significantly";
     let ctx = LintContext::new(long_url);
-    
+
     // Non-strict mode - URL should be ignored
     let rule_lenient = MD013LineLength::new(50, true, true, true, false);
     let result_lenient = rule_lenient.check(&ctx).unwrap();
     assert!(result_lenient.is_empty());
-    
+
     // Strict mode - URL should be flagged
     let rule_strict = MD013LineLength::new(50, true, true, true, true);
     let result_strict = rule_strict.check(&ctx).unwrap();
@@ -393,14 +393,14 @@ fn test_urls_configurable_with_strict() {
 fn test_strict_mode_vs_non_strict_mode() {
     let content = "https://example.com/very/long/url/exceeding/limit\n![This is a very long image reference][long-ref]\n[ref]: https://example.com/another/long/url\nThis is a normal line that is way too long and should always be flagged";
     let ctx = LintContext::new(content);
-    
+
     // Non-strict mode
     let rule_lenient = MD013LineLength::new(30, true, true, true, false);
     let result_lenient = rule_lenient.check(&ctx).unwrap();
     assert_eq!(result_lenient.len(), 1); // Only the normal line
     assert_eq!(result_lenient[0].line, 4);
-    
-    // Strict mode  
+
+    // Strict mode
     let rule_strict = MD013LineLength::new(30, true, true, true, true);
     let result_strict = rule_strict.check(&ctx).unwrap();
     assert_eq!(result_strict.len(), 4); // All lines flagged
@@ -414,7 +414,10 @@ fn test_fix_trailing_whitespace() {
     let content = "This line has trailing whitespace that makes it too long     \nThis line is OK";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "This line has trailing whitespace that makes it too long\nThis line is OK");
+    assert_eq!(
+        fixed,
+        "This line has trailing whitespace that makes it too long\nThis line is OK"
+    );
 }
 
 #[test]
@@ -423,7 +426,10 @@ fn test_fix_multiple_lines_with_whitespace() {
     let content = "First line spaces     \nSecond line space    \nThird line is fine\nFourth line space     ";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "First line spaces\nSecond line space\nThird line is fine\nFourth line space");
+    assert_eq!(
+        fixed,
+        "First line spaces\nSecond line space\nThird line is fine\nFourth line space"
+    );
 }
 
 #[test]
@@ -432,7 +438,10 @@ fn test_fix_preserves_intentional_trailing_spaces() {
     let content = "This line has two trailing spaces for hard break  \nThis line has excessive trailing spaces that should be trimmed     ";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "This line has two trailing spaces for hard break  \nThis line has excessive trailing spaces that should be trimmed");
+    assert_eq!(
+        fixed,
+        "This line has two trailing spaces for hard break  \nThis line has excessive trailing spaces that should be trimmed"
+    );
 }
 
 #[test]
@@ -450,7 +459,10 @@ fn test_fix_code_blocks_not_modified() {
     let content = "```\nThis is a long line in code     \n```\nThis normal line is too long with spaces    ";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "```\nThis is a long line in code     \n```\nThis normal line is too long with spaces");
+    assert_eq!(
+        fixed,
+        "```\nThis is a long line in code     \n```\nThis normal line is too long with spaces"
+    );
 }
 
 #[test]
@@ -480,7 +492,10 @@ fn test_fix_urls_not_modified() {
     let content = "https://example.com/very/long/url/that/exceeds/limit\nNormal line with trailing spaces    ";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "https://example.com/very/long/url/that/exceeds/limit\nNormal line with trailing spaces");
+    assert_eq!(
+        fixed,
+        "https://example.com/very/long/url/that/exceeds/limit\nNormal line with trailing spaces"
+    );
 }
 
 #[test]
@@ -492,7 +507,7 @@ fn test_unicode_characters_counted_correctly() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
-    
+
     // Add one more emoji to exceed limit
     let content_long = "Hello 👋 World 🌍 Test 🚀";
     assert_eq!(content_long.chars().count(), 22);
@@ -536,7 +551,10 @@ fn test_fix_applies_from_end_to_beginning() {
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
     // All lines should have trailing spaces removed
-    assert_eq!(fixed, "First line with spaces\nSecond line with spaces\nThird line with spaces");
+    assert_eq!(
+        fixed,
+        "First line with spaces\nSecond line with spaces\nThird line with spaces"
+    );
 }
 
 #[test]
@@ -559,8 +577,8 @@ fn test_fix_only_when_trimming_helps() {
     let ctx1 = LintContext::new(content1);
     let fixed1 = rule.fix(&ctx1).unwrap();
     assert_eq!(fixed1, content1); // No fix because trimming doesn't help
-    
-    // This line becomes OK after trimming  
+
+    // This line becomes OK after trimming
     let content2 = "This line becomes OK after trimming the spaces     ";
     let ctx2 = LintContext::new(content2);
     let fixed2 = rule.fix(&ctx2).unwrap();
@@ -585,7 +603,7 @@ fn test_no_fix_for_lines_without_trailing_whitespace() {
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content); // No change
-    
+
     // Verify it was still flagged
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 1);

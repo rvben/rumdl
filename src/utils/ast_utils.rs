@@ -116,7 +116,7 @@ pub fn parse_markdown_ast(content: &str) -> MarkdownAst {
         }
         Ok(Err(err)) => {
             // Parsing failed with an error
-            log::debug!("Failed to parse markdown AST in ast_utils: {:?}", err);
+            log::debug!("Failed to parse markdown AST in ast_utils: {err:?}");
             MarkdownAst::Root(markdown::mdast::Root {
                 children: vec![],
                 position: None,
@@ -163,18 +163,18 @@ fn content_has_problematic_lists(content: &str) -> bool {
     for i in 0..lines.len().saturating_sub(1) {
         let line1 = lines[i];
         let line2 = lines[i + 1];
-        
+
         // Get the full line for marker check
         let trimmed1 = line1.trim_start();
         let trimmed2 = line2.trim_start();
-        
+
         let is_list1 = trimmed1.starts_with("* ") || trimmed1.starts_with("+ ") || trimmed1.starts_with("- ");
         let is_list2 = trimmed2.starts_with("* ") || trimmed2.starts_with("+ ") || trimmed2.starts_with("- ");
-        
+
         if is_list1 && is_list2 {
             let marker1 = trimmed1.chars().next().unwrap_or(' ');
             let marker2 = trimmed2.chars().next().unwrap_or(' ');
-            
+
             // If different markers (even with different indentation), this could cause issues
             if marker1 != marker2 {
                 return true;
@@ -276,7 +276,7 @@ mod tests {
         // Should return the same Arc (cached)
         assert!(Arc::ptr_eq(&ast1, &ast2));
         assert_eq!(cache.len(), 1);
-        
+
         // Test usage stats
         let stats = cache.get_stats();
         let content_hash = crate::utils::fast_hash(content);
@@ -309,10 +309,10 @@ mod tests {
         let mut cache = AstCache::new();
         cache.get_or_parse("# Test");
         cache.get_or_parse("## Another");
-        
+
         assert_eq!(cache.len(), 2);
         assert!(!cache.is_empty());
-        
+
         cache.clear();
         assert_eq!(cache.len(), 0);
         assert!(cache.is_empty());
@@ -332,15 +332,15 @@ mod tests {
         // Mixed list markers that would cause panic
         let problematic = "* Item 1\n- Item 2\n+ Item 3";
         assert!(content_has_problematic_lists(problematic));
-        
+
         // Consistent markers should be fine
         let ok_content = "* Item 1\n* Item 2\n* Item 3";
         assert!(!content_has_problematic_lists(ok_content));
-        
+
         // Different marker types separated by content
         let separated = "* Item 1\n\nSome text\n\n- Item 2";
         assert!(!content_has_problematic_lists(separated));
-        
+
         // Edge case: markers with different indentation
         let indented = "* Item 1\n  - Subitem";
         assert!(content_has_problematic_lists(indented));
@@ -350,20 +350,20 @@ mod tests {
     fn test_parse_malformed_markdown() {
         // Test various malformed markdown that might cause issues
         let test_cases = vec![
-            "",  // Empty
-            "\n\n\n",  // Only newlines
-            "```",  // Unclosed code block
-            "```\ncode\n```extra```",  // Multiple code blocks
-            "[link]()",  // Empty link URL
-            "![]()",  // Empty image
-            "|table|without|header|",  // Malformed table
-            "> > > deeply nested quotes",  // Deep nesting
-            "# \n## \n### ",  // Empty headings
-            "*unclosed emphasis",  // Unclosed emphasis
-            "**unclosed strong",  // Unclosed strong
-            "[unclosed link",  // Unclosed link
-            "![unclosed image",  // Unclosed image
-            "---\ntitle: test",  // Unclosed front matter
+            "",                           // Empty
+            "\n\n\n",                     // Only newlines
+            "```",                        // Unclosed code block
+            "```\ncode\n```extra```",     // Multiple code blocks
+            "[link]()",                   // Empty link URL
+            "![]()",                      // Empty image
+            "|table|without|header|",     // Malformed table
+            "> > > deeply nested quotes", // Deep nesting
+            "# \n## \n### ",              // Empty headings
+            "*unclosed emphasis",         // Unclosed emphasis
+            "**unclosed strong",          // Unclosed strong
+            "[unclosed link",             // Unclosed link
+            "![unclosed image",           // Unclosed image
+            "---\ntitle: test",           // Unclosed front matter
         ];
 
         for content in test_cases {
@@ -378,7 +378,7 @@ mod tests {
         // This should trigger the problematic list detection
         let content = "* First\n- Second\n+ Third";
         let ast = parse_markdown_ast(content);
-        
+
         // Should return empty AST due to problematic pattern
         if let MarkdownAst::Root(root) = ast {
             assert!(root.children.is_empty());
@@ -395,7 +395,7 @@ mod tests {
         assert!(ast_contains_node_type(&ast, "heading"));
         assert!(ast_contains_node_type(&ast, "link"));
         assert!(!ast_contains_node_type(&ast, "table"));
-        
+
         // Test with empty AST
         let empty_ast = MarkdownAst::Root(markdown::mdast::Root {
             children: vec![],
@@ -408,7 +408,7 @@ mod tests {
     fn test_ast_contains_nested_nodes() {
         let content = "> # Heading in blockquote\n> \n> With a [link](url)";
         let ast = parse_markdown_ast(content);
-        
+
         assert!(ast_contains_node_type(&ast, "blockquote"));
         assert!(ast_contains_node_type(&ast, "heading"));
         assert!(ast_contains_node_type(&ast, "link"));
@@ -421,7 +421,7 @@ mod tests {
 
         let headings = extract_nodes_by_type(&ast, "heading");
         assert_eq!(headings.len(), 2);
-        
+
         // Test extracting non-existent type
         let tables = extract_nodes_by_type(&ast, "table");
         assert_eq!(tables.len(), 0);
@@ -431,7 +431,7 @@ mod tests {
     fn test_extract_multiple_node_types() {
         let content = "# Heading\n\n*emphasis* and **strong** and `code`\n\n[link](url) and ![image](img.png)";
         let ast = parse_markdown_ast(content);
-        
+
         assert_eq!(extract_nodes_by_type(&ast, "heading").len(), 1);
         assert_eq!(extract_nodes_by_type(&ast, "emphasis").len(), 1);
         assert_eq!(extract_nodes_by_type(&ast, "strong").len(), 1);
@@ -449,14 +449,14 @@ mod tests {
         });
 
         assert_eq!(get_text_content(&ast), content);
-        
+
         // Test inline code
         let code_ast = MarkdownAst::InlineCode(markdown::mdast::InlineCode {
             value: "code".to_string(),
             position: None,
         });
         assert_eq!(get_text_content(&code_ast), "code");
-        
+
         // Test code block
         let block_ast = MarkdownAst::Code(markdown::mdast::Code {
             value: "fn main() {}".to_string(),
@@ -477,12 +477,10 @@ mod tests {
                     position: None,
                 }),
                 MarkdownAst::Strong(markdown::mdast::Strong {
-                    children: vec![
-                        MarkdownAst::Text(markdown::mdast::Text {
-                            value: "world".to_string(),
-                            position: None,
-                        }),
-                    ],
+                    children: vec![MarkdownAst::Text(markdown::mdast::Text {
+                        value: "world".to_string(),
+                        position: None,
+                    })],
                     position: None,
                 }),
                 MarkdownAst::Text(markdown::mdast::Text {
@@ -492,7 +490,7 @@ mod tests {
             ],
             position: None,
         });
-        
+
         assert_eq!(get_text_content(&paragraph), "Hello world!");
     }
 
@@ -500,18 +498,18 @@ mod tests {
     fn test_global_cache_functions() {
         // Clear cache first to ensure clean state
         clear_ast_cache();
-        
+
         let content = "# Global cache test";
         let ast1 = get_cached_ast(content);
         let ast2 = get_cached_ast(content);
-        
+
         // Should be the same instance
         assert!(Arc::ptr_eq(&ast1, &ast2));
-        
+
         // Check stats
         let stats = get_ast_cache_stats();
         assert!(!stats.is_empty());
-        
+
         // Clear and verify
         clear_ast_cache();
         let stats_after = get_ast_cache_stats();
@@ -522,10 +520,10 @@ mod tests {
     fn test_unicode_content() {
         let unicode_content = "# 你好世界\n\n这是一个测试。\n\n## Ñoño\n\n🚀 Emoji content!";
         let ast = parse_markdown_ast(unicode_content);
-        
+
         assert!(matches!(ast, MarkdownAst::Root(_)));
         assert!(ast_contains_node_type(&ast, "heading"));
-        
+
         // Extract headings and verify count
         let headings = extract_nodes_by_type(&ast, "heading");
         assert_eq!(headings.len(), 2);
@@ -536,12 +534,12 @@ mod tests {
         // Generate a large document
         let mut content = String::new();
         for i in 0..1000 {
-            content.push_str(&format!("# Heading {}\n\nParagraph {}\n\n", i, i));
+            content.push_str(&format!("# Heading {i}\n\nParagraph {i}\n\n"));
         }
-        
+
         let ast = parse_markdown_ast(&content);
         assert!(matches!(ast, MarkdownAst::Root(_)));
-        
+
         // Should have 1000 headings
         let headings = extract_nodes_by_type(&ast, "heading");
         assert_eq!(headings.len(), 1000);
@@ -551,7 +549,7 @@ mod tests {
     fn test_deeply_nested_structure() {
         let content = "> > > > > Deeply nested blockquote\n> > > > > > Even deeper";
         let ast = parse_markdown_ast(content);
-        
+
         assert!(matches!(ast, MarkdownAst::Root(_)));
         assert!(ast_contains_node_type(&ast, "blockquote"));
     }
@@ -580,9 +578,9 @@ code block
 
 ---
 "#;
-        
+
         let ast = parse_markdown_ast(comprehensive_content);
-        
+
         // Test all node type detections
         assert!(ast_contains_node_type(&ast, "heading"));
         assert!(ast_contains_node_type(&ast, "blockquote"));
@@ -605,19 +603,19 @@ code block
 |----------|----------|
 | Cell 1   | Cell 2   |
 | Cell 3   | Cell 4   |"#;
-        
+
         let ast = parse_markdown_ast(table_content);
         assert!(ast_contains_node_type(&ast, "table"));
-        
+
         let tables = extract_nodes_by_type(&ast, "table");
         assert_eq!(tables.len(), 1);
-        
+
         // Test more complex table with alignment
         let complex_table = r#"| Left | Center | Right |
 |:-----|:------:|------:|
 | L    |   C    |     R |
 | Left |  Mid   | Right |"#;
-        
+
         let ast2 = parse_markdown_ast(complex_table);
         assert!(ast_contains_node_type(&ast2, "table"));
     }
@@ -630,11 +628,9 @@ code block
             position: None,
         });
         assert_eq!(get_text_content(&empty_text), "");
-        
+
         // Test with node that has no children method
-        let thematic_break = MarkdownAst::ThematicBreak(markdown::mdast::ThematicBreak {
-            position: None,
-        });
+        let thematic_break = MarkdownAst::ThematicBreak(markdown::mdast::ThematicBreak { position: None });
         assert_eq!(get_text_content(&thematic_break), "");
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::output::OutputFormatter;
 use crate::rule::LintWarning;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// JSON formatter for machine-readable output
 #[derive(Default)]
@@ -131,7 +131,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         // In collecting mode, it returns empty string
         let output = formatter.format_warnings(&warnings, "test.md");
         assert_eq!(output, "");
@@ -150,16 +150,19 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
         let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0]["file"], "README.md");
         assert_eq!(parsed[0]["line"], 10);
         assert_eq!(parsed[0]["column"], 5);
         assert_eq!(parsed[0]["rule"], "MD001");
-        assert_eq!(parsed[0]["message"], "Heading levels should only increment by one level at a time");
+        assert_eq!(
+            parsed[0]["message"],
+            "Heading levels should only increment by one level at a time"
+        );
         assert_eq!(parsed[0]["severity"], "warning");
         assert_eq!(parsed[0]["fixable"], false);
         assert!(parsed[0]["fix"].is_null());
@@ -181,10 +184,10 @@ mod tests {
                 replacement: "\n# Heading\n".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "doc.md");
         let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0]["file"], "doc.md");
         assert_eq!(parsed[0]["line"], 15);
@@ -227,15 +230,15 @@ mod tests {
                 }),
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0]["rule"], "MD001");
         assert_eq!(parsed[0]["message"], "First warning");
         assert_eq!(parsed[0]["fixable"], false);
-        
+
         assert_eq!(parsed[1]["rule"], "MD013");
         assert_eq!(parsed[1]["message"], "Second warning");
         assert_eq!(parsed[1]["fixable"], true);
@@ -254,10 +257,10 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
         let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(parsed[0]["rule"], "unknown");
     }
 
@@ -280,11 +283,11 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let all_warnings = vec![("test.md".to_string(), warnings)];
         let output = format_all_warnings_as_json(&all_warnings);
         let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0]["file"], "test.md");
         assert_eq!(parsed[0]["rule"], "MD001");
@@ -314,7 +317,7 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let warnings2 = vec![LintWarning {
             line: 10,
             column: 1,
@@ -328,15 +331,12 @@ mod tests {
                 replacement: "fixed".to_string(),
             }),
         }];
-        
-        let all_warnings = vec![
-            ("file1.md".to_string(), warnings1),
-            ("file2.md".to_string(), warnings2),
-        ];
-        
+
+        let all_warnings = vec![("file1.md".to_string(), warnings1), ("file2.md".to_string(), warnings2)];
+
         let output = format_all_warnings_as_json(&all_warnings);
         let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(parsed.len(), 3);
         assert_eq!(parsed[0]["file"], "file1.md");
         assert_eq!(parsed[0]["rule"], "MD001");
@@ -350,25 +350,23 @@ mod tests {
     #[test]
     fn test_json_output_is_valid() {
         let formatter = JsonFormatter::new();
-        let warnings = vec![
-            LintWarning {
-                line: 1,
-                column: 1,
-                end_line: 1,
-                end_column: 5,
-                rule_name: Some("MD001"),
-                message: "Test with \"quotes\" and special chars".to_string(),
-                severity: Severity::Warning,
-                fix: None,
-            },
-        ];
-        
+        let warnings = vec![LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            rule_name: Some("MD001"),
+            message: "Test with \"quotes\" and special chars".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        }];
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         // Verify it's valid JSON
         let result: Result<Vec<Value>, _> = serde_json::from_str(&output);
         assert!(result.is_ok());
-        
+
         // Verify pretty printing works
         assert!(output.contains("\n"));
         assert!(output.contains("  "));
@@ -377,7 +375,7 @@ mod tests {
     #[test]
     fn test_edge_cases() {
         let formatter = JsonFormatter::new();
-        
+
         // Test with large values
         let warnings = vec![LintWarning {
             line: 99999,
@@ -392,15 +390,20 @@ mod tests {
                 replacement: "Multi\nline\nreplacement".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "large.md");
         let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
-        
+
         assert_eq!(parsed[0]["line"], 99999);
         assert_eq!(parsed[0]["column"], 12345);
         assert_eq!(parsed[0]["fix"]["range"]["start"], 999999);
         assert_eq!(parsed[0]["fix"]["range"]["end"], 1000000);
         assert!(parsed[0]["message"].as_str().unwrap().contains("newlines\tand tabs"));
-        assert!(parsed[0]["fix"]["replacement"].as_str().unwrap().contains("Multi\nline\nreplacement"));
+        assert!(
+            parsed[0]["fix"]["replacement"]
+                .as_str()
+                .unwrap()
+                .contains("Multi\nline\nreplacement")
+        );
     }
 }

@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use toml;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
@@ -35,10 +35,10 @@ impl MD012NoMultipleBlanks {
         let front_matter_regions = Self::compute_front_matter_regions(lines);
         println!("Lines:");
         for (i, line) in lines.iter().enumerate() {
-            println!("  {}: {:?}", i, line);
+            println!("  {i}: {line:?}");
         }
-        println!("Code block regions: {:?}", code_regions);
-        println!("Front matter regions: {:?}", front_matter_regions);
+        println!("Code block regions: {code_regions:?}");
+        println!("Front matter regions: {front_matter_regions:?}");
         (code_regions, front_matter_regions)
     }
 
@@ -378,7 +378,6 @@ impl Rule for MD012NoMultipleBlanks {
         self
     }
 
-
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let default_config = MD012Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;
@@ -599,9 +598,11 @@ mod tests {
     fn test_config_from_toml() {
         let mut config = crate::config::Config::default();
         let mut rule_config = crate::config::RuleConfig::default();
-        rule_config.values.insert("maximum".to_string(), toml::Value::Integer(3));
+        rule_config
+            .values
+            .insert("maximum".to_string(), toml::Value::Integer(3));
         config.rules.insert("MD012".to_string(), rule_config);
-        
+
         let rule = MD012NoMultipleBlanks::from_config(&config);
         let content = "Line 1\n\n\n\nLine 2"; // 3 blank lines
         let ctx = LintContext::new(content);

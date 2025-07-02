@@ -1,4 +1,4 @@
-use rumdl::config::{normalize_key, Config, GlobalConfig, RuleConfig};
+use rumdl::config::{Config, GlobalConfig, RuleConfig, normalize_key};
 use rumdl::rule::Rule;
 use rumdl::rules::*;
 use std::collections::BTreeMap;

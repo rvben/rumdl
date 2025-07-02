@@ -1,7 +1,7 @@
+use rumdl::MD046CodeBlockStyle;
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::code_block_utils::CodeBlockStyle;
-use rumdl::MD046CodeBlockStyle;
 
 #[test]
 fn test_consistent_fenced_blocks() {
@@ -251,9 +251,11 @@ fn test_nested_code_block_different_languages() {
 
     assert_eq!(result.len(), 1, "Should detect nested opening");
     assert_eq!(result[0].line, 1, "Should flag the opening python block");
-    assert!(result[0]
-        .message
-        .contains("Code block '```' should be closed before starting new one at line 3"));
+    assert!(
+        result[0]
+            .message
+            .contains("Code block '```' should be closed before starting new one at line 3")
+    );
 }
 
 #[test]

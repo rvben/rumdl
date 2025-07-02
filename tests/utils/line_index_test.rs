@@ -81,12 +81,12 @@ fn test_tab_indented_code_block_detection() {
 fn test_nested_code_blocks() {
     // In standard Markdown, nested fences don't close the outer block
     let content = "# Heading\n\n```markdown\n# Example markdown\n\n```code\nnested code\n```\n\nStill in outer block\n```\n\nText after.";
-    println!("Test content:\n{}", content);
+    println!("Test content:\n{content}");
 
     // Print each line with line numbers for clarity
     println!("\nContent by line numbers:");
     content.lines().enumerate().for_each(|(i, line)| {
-        println!("Line {}: '{}'", i, line);
+        println!("Line {i}: '{line}'");
     });
 
     let index = LineIndex::new(content.to_string());

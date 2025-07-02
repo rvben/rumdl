@@ -274,7 +274,7 @@ impl MD022BlanksAroundHeadings {
 
         // Preserve original trailing newline behavior
         if had_trailing_newline && !joined.ends_with('\n') && !joined.ends_with("\r\n") {
-            format!("{}{}", joined, line_ending)
+            format!("{joined}{line_ending}")
         } else if !had_trailing_newline && (joined.ends_with('\n') || joined.ends_with("\r\n")) {
             // Remove trailing newline if original didn't have one
             if joined.ends_with("\r\n") {

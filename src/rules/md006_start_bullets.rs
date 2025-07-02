@@ -86,7 +86,7 @@ impl MD006StartBullets {
                             let trimmed = line.trim_start();
                             let bullet_part = if let Some(captures) = BULLET_PATTERN.captures(trimmed) {
                                 let marker = captures.get(2).map_or("*", |m| m.as_str());
-                                format!("{} ", marker)
+                                format!("{marker} ")
                             } else {
                                 "* ".to_string()
                             };
@@ -104,8 +104,7 @@ impl MD006StartBullets {
                                 end_line: item_line,
                                 end_column: end_col,
                                 message: format!(
-                                    "Consider starting bulleted lists at the beginning of the line (found {} leading spaces)",
-                                    indent
+                                    "Consider starting bulleted lists at the beginning of the line (found {indent} leading spaces)"
                                 ),
                                 severity: Severity::Warning,
                                 rule_name: Some(self.name()),
@@ -426,8 +425,7 @@ mod tests {
         let result_valid = rule.check_with_structure(&ctx_valid, &structure_valid).unwrap();
         assert!(
             result_valid.is_empty(),
-            "Properly formatted lists should not generate warnings, found: {:?}",
-            result_valid
+            "Properly formatted lists should not generate warnings, found: {result_valid:?}"
         );
 
         // Test with improperly indented list - adjust expectations based on actual implementation
@@ -452,8 +450,7 @@ mod tests {
         // Assert that standard nesting does NOT generate warnings
         assert!(
             result.is_empty(),
-            "Standard nesting (* Item ->   * Item) should NOT generate warnings, found: {:?}",
-            result
+            "Standard nesting (* Item ->   * Item) should NOT generate warnings, found: {result:?}"
         );
     }
 }

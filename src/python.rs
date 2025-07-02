@@ -36,7 +36,7 @@ mod tests {
     use tempfile::TempDir;
 
     // Tests that don't require Python runtime
-    
+
     #[test]
     fn test_check_file_with_valid_input() {
         // Create a temporary markdown file
@@ -77,18 +77,22 @@ mod tests {
     fn test_error_handling_missing_rumdl_binary() {
         // Save the current PATH
         let original_path = std::env::var("PATH").unwrap_or_default();
-        
+
         // Set PATH to empty to ensure rumdl binary won't be found
-        unsafe { std::env::set_var("PATH", ""); }
-        
+        unsafe {
+            std::env::set_var("PATH", "");
+        }
+
         let result = check_file("any_file.md");
-        
+
         // Restore original PATH
-        unsafe { std::env::set_var("PATH", original_path); }
-        
+        unsafe {
+            std::env::set_var("PATH", original_path);
+        }
+
         // The function should return an error when rumdl binary is not found
         assert!(result.is_err());
-        
+
         // Check that the error message contains expected text
         if let Err(e) = result {
             let error_str = e.to_string();
@@ -101,10 +105,10 @@ mod tests {
         // This test verifies that the command is constructed correctly
         // Create a test file path
         let _test_path = "/tmp/test_file.md";
-        
+
         // Test with a path containing spaces
         let path_with_spaces = "/tmp/test file with spaces.md";
-        
+
         // Only run if rumdl binary exists
         if std::process::Command::new("rumdl").arg("--version").output().is_ok() {
             let result = check_file(path_with_spaces);
@@ -119,7 +123,7 @@ mod tests {
         // 0: Success (no lint errors)
         // 1: Default error code or lint errors found
         // Other: Specific error conditions
-        
+
         // Only run if rumdl binary exists
         if std::process::Command::new("rumdl").arg("--version").output().is_ok() {
             // Test with non-existent file should return non-zero
@@ -190,19 +194,23 @@ mod tests {
                 rumdl(py, &module).unwrap();
 
                 let version: String = module.getattr("__version__").unwrap().extract().unwrap();
-                
+
                 // Version should match Cargo.toml version
                 assert_eq!(version, env!("CARGO_PKG_VERSION"));
-                
+
                 // Version should follow semver format (basic check)
                 let parts: Vec<&str> = version.split('.').collect();
                 assert!(parts.len() >= 2); // At least major.minor
-                
+
                 // Each part should be parseable as a number
                 for part in parts {
                     // Handle pre-release versions like "1.0.0-alpha"
                     let num_part = part.split('-').next().unwrap();
-                    assert!(num_part.parse::<u32>().is_ok(), "Version part '{}' is not a valid number", num_part);
+                    assert!(
+                        num_part.parse::<u32>().is_ok(),
+                        "Version part '{}' is not a valid number",
+                        num_part
+                    );
                 }
             });
         }
@@ -226,10 +234,10 @@ mod tests {
                         locals
                     }),
                 );
-                
+
                 assert!(dir_result.is_ok());
                 let attrs: Vec<String> = dir_result.unwrap().extract().unwrap();
-                
+
                 // Check for expected attributes
                 assert!(attrs.contains(&"__version__".to_string()));
                 assert!(attrs.contains(&"check_file".to_string()));

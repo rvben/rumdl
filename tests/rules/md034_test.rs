@@ -102,10 +102,7 @@ fn test_multiple_protocols() {
     let rule = MD034NoBareUrls;
     let content = "http://example.com\nhttps://secure.com\nftp://files.com";
     let ctx = LintContext::new(content);
-    let debug_str = format!(
-        "test_multiple_protocols\nMD034 test content: {}\n",
-        content
-    );
+    let debug_str = format!("test_multiple_protocols\nMD034 test content: {content}\n");
     let _ = write("/tmp/md034_ast_debug.txt", debug_str);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "All bare URLs should be flagged");
@@ -118,10 +115,7 @@ fn test_mixed_content() {
     let rule = MD034NoBareUrls;
     let content = "# Heading\nVisit https://example.com\n> Quote with https://another.com";
     let ctx = LintContext::new(content);
-    let debug_str = format!(
-        "test_mixed_content\nMD034 test content: {}\n",
-        content
-    );
+    let debug_str = format!("test_mixed_content\nMD034 test content: {content}\n");
     let _ = write("/tmp/md034_ast_debug.txt", debug_str);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Bare URLs should be flagged");
@@ -171,11 +165,11 @@ fn test_multiple_badges_and_links_on_one_line() {
 #[test]
 fn debug_ast_multiple_urls() {
     let content = "Visit https://example.com and http://another.com";
-    let ctx = LintContext::new(content);
-    let debug_str = format!("MD034 test content: {}\n", content);
+    let _ctx = LintContext::new(content);
+    let debug_str = format!("MD034 test content: {content}\n");
     match write("/tmp/md034_ast_debug.txt", debug_str) {
         Ok(_) => (),
-        Err(e) => panic!("Failed to write AST debug file: {}", e),
+        Err(e) => panic!("Failed to write AST debug file: {e}"),
     }
     // No assertion: this is for manual inspection
 }
@@ -230,26 +224,24 @@ fn test_md034_edge_cases() {
     for (content, expected) in cases.iter() {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), *expected, "Failed for content: {}", content);
+        assert_eq!(result.len(), *expected, "Failed for content: {content}");
         let fixed = rule.fix(&ctx).unwrap();
 
         // If we expect warnings, the fix should change the content
         if *expected > 0 {
-            assert_ne!(fixed, *content, "Fix should change content with warnings: {}", content);
+            assert_ne!(fixed, *content, "Fix should change content with warnings: {content}");
             // The fixed version should have no warnings
             let ctx_fixed = LintContext::new(&fixed);
             let result_fixed = rule.check(&ctx_fixed).unwrap();
             assert_eq!(
                 result_fixed.len(),
                 0,
-                "Fixed content should have no warnings: {}",
-                fixed
+                "Fixed content should have no warnings: {fixed}"
             );
         } else {
             assert_eq!(
                 fixed, *content,
-                "Fix should not change content without warnings: {}",
-                content
+                "Fix should not change content without warnings: {content}"
             );
         }
     }
@@ -383,12 +375,16 @@ fn test_bare_email_addresses() {
     assert_eq!(result[0].line, 1);
     assert_eq!(result[1].line, 1);
 
-    assert!(result[0]
-        .message
-        .contains("Email address without angle brackets or link formatting"));
-    assert!(result[1]
-        .message
-        .contains("Email address without angle brackets or link formatting"));
+    assert!(
+        result[0]
+            .message
+            .contains("Email address without angle brackets or link formatting")
+    );
+    assert!(
+        result[1]
+            .message
+            .contains("Email address without angle brackets or link formatting")
+    );
 
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Contact us at <support@example.com> or <admin@test.org>");
@@ -421,19 +417,18 @@ fn test_email_addresses_various_formats() {
     for (content, expected_count, expected_fix) in test_cases.iter() {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), *expected_count, "Failed for content: {}", content);
+        assert_eq!(result.len(), *expected_count, "Failed for content: {content}");
 
         if *expected_count > 0 {
             assert!(
                 result.iter().any(|w| w
                     .message
                     .contains("Email address without angle brackets or link formatting")),
-                "Email detection failed for: {}",
-                content
+                "Email detection failed for: {content}"
             );
 
             let fixed = rule.fix(&ctx).unwrap();
-            assert_eq!(fixed, *expected_fix, "Fix failed for: {}", content);
+            assert_eq!(fixed, *expected_fix, "Fix failed for: {content}");
         }
     }
 }
@@ -457,7 +452,7 @@ fn test_email_exclusions() {
     for (content, expected_count) in test_cases.iter() {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), *expected_count, "Failed for content: {}", content);
+        assert_eq!(result.len(), *expected_count, "Failed for content: {content}");
     }
 }
 
@@ -499,19 +494,18 @@ fn test_localhost_variations() {
     for (content, expected_count, expected_fix) in test_cases.iter() {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), *expected_count, "Failed for content: {}", content);
+        assert_eq!(result.len(), *expected_count, "Failed for content: {content}");
 
         if *expected_count > 0 {
             assert!(
                 result
                     .iter()
                     .any(|w| w.message.contains("URL without angle brackets or link formatting")),
-                "Localhost/protocol detection failed for: {}",
-                content
+                "Localhost/protocol detection failed for: {content}"
             );
 
             let fixed = rule.fix(&ctx).unwrap();
-            assert_eq!(fixed, *expected_fix, "Fix failed for: {}", content);
+            assert_eq!(fixed, *expected_fix, "Fix failed for: {content}");
         }
     }
 }

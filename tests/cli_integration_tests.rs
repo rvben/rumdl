@@ -322,8 +322,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // --- Test Case 1: Exclude directory ---
     println!("--- Running Test Case 1: Exclude directory ---");
     let (success1, stdout1, stderr1) = run_cmd(&[".", "--exclude", "docs/temp", "--verbose"]);
-    println!("Test Case 1 Stdout:\\n{}", stdout1);
-    println!("Test Case 1 Stderr:\\n{}", stderr1);
+    println!("Test Case 1 Stdout:\\n{stdout1}");
+    println!("Test Case 1 Stderr:\\n{stderr1}");
     assert!(success1, "Test Case 1 failed");
     let norm_stdout1 = normalize(&stdout1);
     assert!(
@@ -346,8 +346,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // --- Test Case 2: Include specific file ---
     println!("--- Running Test Case 2: Include specific file ---");
     let (success2, stdout2, stderr2) = run_cmd(&[".", "--include", "docs/doc1.md", "--verbose"]);
-    println!("Test Case 2 Stdout:\\n{}", stdout2);
-    println!("Test Case 2 Stderr:\\n{}", stderr2);
+    println!("Test Case 2 Stdout:\\n{stdout2}");
+    println!("Test Case 2 Stderr:\\n{stderr2}");
     assert!(success2, "Test Case 2 failed");
     let norm_stdout2 = normalize(&stdout2);
     assert!(
@@ -375,8 +375,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // This should exclude README.md in root AND subfolder/README.md
     println!("--- Running Test Case 3: Exclude glob pattern ---");
     let (success3, stdout3, stderr3) = run_cmd(&[".", "--exclude", "**/README.md", "--verbose"]);
-    println!("Test Case 3 Stdout:\\n{}", stdout3);
-    println!("Test Case 3 Stderr:\\n{}", stderr3);
+    println!("Test Case 3 Stdout:\\n{stdout3}");
+    println!("Test Case 3 Stderr:\\n{stderr3}");
     assert!(success3, "Test Case 3 failed");
     let norm_stdout3 = normalize(&stdout3);
     assert!(
@@ -404,8 +404,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // Should only include docs/doc1.md (not docs/temp/temp.md)
     println!("--- Running Test Case 4: Include glob pattern ---");
     let (success4, stdout4, stderr4) = run_cmd(&[".", "--include", "docs/*.md", "--verbose"]);
-    println!("Test Case 4 Stdout:\\n{}", stdout4);
-    println!("Test Case 4 Stderr:\\n{}", stderr4);
+    println!("Test Case 4 Stdout:\\n{stdout4}");
+    println!("Test Case 4 Stderr:\\n{stderr4}");
     assert!(success4, "Test Case 4 failed");
     let norm_stdout4 = normalize(&stdout4);
     assert!(
@@ -440,8 +440,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
         "docs/temp/temp.md",
         "--verbose",
     ]);
-    println!("Test Case 5 Stdout:\\n{}", stdout5);
-    println!("Test Case 5 Stderr:\\n{}", stderr5);
+    println!("Test Case 5 Stdout:\\n{stdout5}");
+    println!("Test Case 5 Stderr:\\n{stderr5}");
     assert!(success5, "Test Case 5 failed");
     let norm_stdout5 = normalize(&stdout5);
     assert!(
@@ -469,8 +469,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- Running Test Case 6: Specific Exclude Overrides Broader Include ---");
     let (success6, stdout6, stderr6) =
         run_cmd(&[".", "--include", "subfolder/*.md", "--exclude", "subfolder/README.md"]); // Pass only the args slice
-    println!("Test Case 6 Stdout:\n{}", stdout6);
-    println!("Test Case 6 Stderr:{}", stderr6);
+    println!("Test Case 6 Stdout:\n{stdout6}");
+    println!("Test Case 6 Stderr:{stderr6}");
     assert!(success6, "Case 6: Command failed"); // Use success6
     assert!(
         stdout6.contains("No markdown files found to check."),
@@ -484,8 +484,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // --- Test Case 7: Root Exclude ---
     println!("--- Running Test Case 7: Root Exclude ---");
     let (success7, stdout7, stderr7) = run_cmd(&[".", "--exclude", "README.md", "--verbose"]); // No globstar
-    println!("Test Case 7 Stdout:\\n{}", stdout7);
-    println!("Test Case 7 Stderr:{}", stderr7);
+    println!("Test Case 7 Stdout:\\n{stdout7}");
+    println!("Test Case 7 Stderr:{stderr7}");
     assert!(success7, "Test Case 7 failed");
     let norm_stdout7 = normalize(&stdout7);
     assert!(
@@ -505,8 +505,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // Should exclude everything
     println!("--- Running Test Case 8: Deep Glob Exclude ---");
     let (success8, stdout8, stderr8) = run_cmd(&[".", "--exclude", "**/*", "--verbose"]);
-    println!("Test Case 8 Stdout:\\n{}", stdout8);
-    println!("Test Case 8 Stderr:\\n{}", stderr8);
+    println!("Test Case 8 Stdout:\\n{stdout8}");
+    println!("Test Case 8 Stderr:\\n{stderr8}");
     assert!(success8, "Test Case 8 failed");
     let norm_stdout8 = normalize(&stdout8);
     // Check that *none* of the files were processed
@@ -518,8 +518,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // --- Test Case 9: Exclude multiple patterns ---
     println!("--- Running Test Case 9: Exclude multiple patterns ---");
     let (success9, stdout9, stderr9) = run_cmd(&[".", "--exclude", "README.md,src/*", "--verbose"]);
-    println!("Test Case 9 Stdout:\n{}", stdout9);
-    println!("Test Case 9 Stderr:{}\n", stderr9);
+    println!("Test Case 9 Stdout:\n{stdout9}");
+    println!("Test Case 9 Stderr:{stderr9}\n");
     assert!(success9, "Test Case 9 failed");
     let norm_stdout9 = normalize(&stdout9);
     assert!(
@@ -542,8 +542,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // --- Test Case 10: Include multiple patterns ---
     println!("--- Running Test Case 10: Include multiple patterns ---");
     let (success10, stdout10, stderr10) = run_cmd(&[".", "--include", "README.md,src/*", "--verbose"]);
-    println!("Test Case 10 Stdout:\n{}", stdout10);
-    println!("Test Case 10 Stderr:{}\n", stderr10);
+    println!("Test Case 10 Stdout:\n{stdout10}");
+    println!("Test Case 10 Stderr:{stderr10}\n");
     assert!(success10, "Test Case 10 failed");
     let norm_stdout10 = normalize(&stdout10);
     assert!(
@@ -694,8 +694,8 @@ exclude = ["docs/*"] # Exclude all docs via config
     let (success17, stdout17, stderr17) = run_cmd(
         &[".", "--include", "docs/doc1.md", "--verbose"], // ADDED "." path for discovery mode
     );
-    println!("Test Case 17 Stdout:\n{}", stdout17);
-    println!("Test Case 17 Stderr:{}\n", stderr17);
+    println!("Test Case 17 Stdout:\n{stdout17}");
+    println!("Test Case 17 Stderr:{stderr17}\n");
     assert!(success17, "Test Case 17 failed");
     let norm_stdout17 = normalize(&stdout17);
     // ASSERTION REVERTED: Expect file to be included by CLI override
@@ -966,26 +966,21 @@ line_length = 123
 
     // Test global.exclude
     let (success, stdout, stderr) = run_cmd(&["config", "get", "global.exclude"]);
-    assert!(success, "config get global.exclude should succeed, stderr: {}", stderr);
+    assert!(success, "config get global.exclude should succeed, stderr: {stderr}");
     assert!(
         stdout.contains("global.exclude = [\"docs/temp\", \"node_modules\"] [from .rumdl.toml]"),
-        "Unexpected output: {}. Stderr: {}",
-        stdout,
-        stderr
+        "Unexpected output: {stdout}. Stderr: {stderr}"
     );
 
     // Test MD013.line_length
     let (success, stdout, stderr) = run_cmd(&["config", "get", "MD013.line_length"]);
     assert!(
         success,
-        "config get MD013.line_length should succeed, stderr: {}",
-        stderr
+        "config get MD013.line_length should succeed, stderr: {stderr}"
     );
     assert!(
         stdout.contains("MD013.line-length = 123 [from .rumdl.toml]"),
-        "Unexpected output: {}. Stderr: {}",
-        stdout,
-        stderr
+        "Unexpected output: {stdout}. Stderr: {stderr}"
     );
 
     // Test unknown key
@@ -993,24 +988,21 @@ line_length = 123
     assert!(!success, "config get global.unknown should fail");
     assert!(
         stderr.contains("Unknown global key: unknown"),
-        "Unexpected stderr: {}",
-        stderr
+        "Unexpected stderr: {stderr}"
     );
 
     let (success, _stdout, stderr) = run_cmd(&["config", "get", "MD999.line_length"]);
     assert!(!success, "config get MD999.line_length should fail");
     assert!(
         stderr.contains("Unknown config key: MD999.line-length"),
-        "Unexpected stderr: {}",
-        stderr
+        "Unexpected stderr: {stderr}"
     );
 
     let (success, _stdout, stderr) = run_cmd(&["config", "get", "notavalidkey"]);
     assert!(!success, "config get notavalidkey should fail");
     assert!(
         stderr.contains("Key must be in the form global.key or MDxxx.key"),
-        "Unexpected stderr: {}",
-        stderr
+        "Unexpected stderr: {stderr}"
     );
 }
 
@@ -1166,7 +1158,6 @@ exclude = ["docs/temp"]
     let provenance_colored = "\x1b[2m[from default]\x1b[0m";
     assert!(
         stdout.contains(provenance_colored),
-        "Provenance annotation [from default] should be colored dim/gray (found: {:?})",
-        stdout
+        "Provenance annotation [from default] should be colored dim/gray (found: {stdout:?})"
     );
 }

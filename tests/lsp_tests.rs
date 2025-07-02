@@ -9,8 +9,8 @@
 
 #![allow(deprecated)]
 
-use rumdl::lsp::types::{warning_to_code_action, warning_to_diagnostic, RumdlLspConfig};
 use rumdl::lsp::RumdlLanguageServer;
+use rumdl::lsp::types::{RumdlLspConfig, warning_to_code_action, warning_to_diagnostic};
 use rumdl::rule::{Fix, LintWarning, Severity};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService};

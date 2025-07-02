@@ -199,13 +199,13 @@ fn test_performance_with_many_references() {
 
     // Add 100 reference definitions
     for i in 1..101 {
-        content.push_str(&format!("[ref{}]: http://example.com/{}\n", i, i));
+        content.push_str(&format!("[ref{i}]: http://example.com/{i}\n"));
     }
 
     // Use only 50 of them
     content.push('\n');
     for i in 1..51 {
-        content.push_str(&format!("[link{}][ref{}]\n", i, i));
+        content.push_str(&format!("[link{i}][ref{i}]\n"));
     }
 
     let ctx = LintContext::new(&content);
@@ -321,15 +321,15 @@ fn test_performance_fix() {
 
     // Create content with many references
     for i in 1..101 {
-        content.push_str(&format!("# Section {}\n\n", i));
+        content.push_str(&format!("# Section {i}\n\n"));
         if i % 2 == 0 {
-            content.push_str(&format!("[link{}][ref{}]\n\n", i, i));
+            content.push_str(&format!("[link{i}][ref{i}]\n\n"));
         }
     }
 
     // Add reference definitions (half used, half unused)
     for i in 1..101 {
-        content.push_str(&format!("[ref{}]: http://example.com/{}\n", i, i));
+        content.push_str(&format!("[ref{i}]: http://example.com/{i}\n"));
     }
 
     let ctx = LintContext::new(&content);
@@ -341,21 +341,19 @@ fn test_performance_fix() {
     for i in 1..101 {
         if i % 2 == 1 {
             assert!(
-                !fixed.contains(&format!("[ref{}]:", i)),
-                "Unused reference [ref{}] should be removed",
-                i
+                !fixed.contains(&format!("[ref{i}]:")),
+                "Unused reference [ref{i}] should be removed"
             );
         } else {
             assert!(
-                fixed.contains(&format!("[ref{}]:", i)),
-                "Used reference [ref{}] should be kept",
-                i
+                fixed.contains(&format!("[ref{i}]:")),
+                "Used reference [ref{i}] should be kept"
             );
         }
     }
 
     // Verify performance is reasonable
-    println!("MD053 fix performance test completed in {:?}", duration);
+    println!("MD053 fix performance test completed in {duration:?}");
     assert!(
         duration.as_millis() < 1000,
         "Fix operation should complete in under 1000ms"

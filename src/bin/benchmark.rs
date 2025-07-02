@@ -24,7 +24,7 @@ fn main() {
 
     println!("📋 Benchmark Configuration:");
     println!("   Rules to test: {}", rules.len());
-    println!("   Test type: {}", test_type);
+    println!("   Test type: {test_type}");
     println!("   CPU cores: {}", num_cpus::get());
     println!();
 
@@ -117,7 +117,7 @@ fn save_baseline_results(results: &std::collections::HashMap<String, rumdl::perf
     use std::fs;
 
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let filename = format!("benchmark_baseline_{}.txt", timestamp);
+    let filename = format!("benchmark_baseline_{timestamp}.txt");
 
     let mut output = String::new();
     output.push_str("RUMDL Performance Baseline Results\n");
@@ -164,7 +164,7 @@ fn save_baseline_results(results: &std::collections::HashMap<String, rumdl::perf
     }
 
     match fs::write(&filename, output) {
-        Ok(_) => println!("📄 Baseline results saved to: {}", filename),
-        Err(e) => eprintln!("❌ Failed to save baseline results: {}", e),
+        Ok(_) => println!("📄 Baseline results saved to: {filename}"),
+        Err(e) => eprintln!("❌ Failed to save baseline results: {e}"),
     }
 }

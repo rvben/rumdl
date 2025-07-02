@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 use colored::*;
-use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
+use ignore::overrides::OverrideBuilder;
 use memmap2::Mmap;
 use rayon::prelude::*;
 use std::collections::HashSet;
@@ -21,8 +21,8 @@ use rumdl::rules::code_block_utils::CodeBlockStyle;
 use rumdl::rules::code_fence_utils::CodeFenceStyle;
 use rumdl::rules::strong_style::StrongStyle;
 
-use rumdl_config::normalize_key;
 use rumdl_config::ConfigSource;
+use rumdl_config::normalize_key;
 
 /// Threshold for using memory-mapped I/O (1MB)
 const MMAP_THRESHOLD: u64 = 1024 * 1024;
@@ -457,7 +457,7 @@ fn find_markdown_files(
 
     // Debug: Log exclude patterns
     if args.verbose {
-        eprintln!("Exclude patterns: {:?}", final_exclude_patterns);
+        eprintln!("Exclude patterns: {final_exclude_patterns:?}");
     }
     // --- End Pattern Determination ---
 
@@ -471,7 +471,7 @@ fn find_markdown_files(
             // If we add excludes later, these includes ensure *only* matching files are considered.
             // If no excludes are added, these effectively define the set of files to walk.
             if let Err(e) = override_builder.add(pattern) {
-                eprintln!("Warning: Invalid include pattern '{}': {}", pattern, e);
+                eprintln!("Warning: Invalid include pattern '{pattern}': {e}");
             }
         }
 
@@ -481,10 +481,10 @@ fn find_markdown_files(
             let exclude_rule = if pattern.starts_with('!') {
                 pattern.clone() // Already formatted
             } else {
-                format!("!{}", pattern)
+                format!("!{pattern}")
             };
             if let Err(e) = override_builder.add(&exclude_rule) {
-                eprintln!("Warning: Invalid exclude pattern '{}': {}", pattern, e);
+                eprintln!("Warning: Invalid exclude pattern '{pattern}': {e}");
             }
         }
 
@@ -494,7 +494,7 @@ fn find_markdown_files(
                 walk_builder.overrides(overrides);
             }
             Err(e) => {
-                eprintln!("Error building path overrides: {}", e);
+                eprintln!("Error building path overrides: {e}");
             }
         };
     }
@@ -536,7 +536,7 @@ fn find_markdown_files(
                     file_paths.push(cleaned_path);
                 }
             }
-            Err(err) => eprintln!("Error walking directory: {}", err),
+            Err(err) => eprintln!("Error walking directory: {err}"),
         }
     }
 
@@ -600,10 +600,10 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
             // In non-fix mode, show issues summary with simplified count when appropriate
             let files_display = if files_with_issues == total_files_processed {
                 // Just show the number if all files have issues
-                format!("{}", files_with_issues)
+                format!("{files_with_issues}")
             } else {
                 // Show the fraction if only some files have issues
-                format!("{}/{}", files_with_issues, total_files_processed)
+                format!("{files_with_issues}/{total_files_processed}")
             };
 
             println!(
@@ -618,8 +618,7 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
             if !args._fix && total_fixable_issues > 0 {
                 // Display the exact count of fixable issues
                 println!(
-                    "Run with `--fix` to automatically fix {} of the {} issues",
-                    total_fixable_issues, total_issues
+                    "Run with `--fix` to automatically fix {total_fixable_issues} of the {total_issues} issues"
                 );
             }
         }
@@ -746,14 +745,14 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
                         let vals: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
                         format!("[{}]", vals.join(", "))
                     }
-                    toml::Value::String(s) => format!("\"{}\"", s),
+                    toml::Value::String(s) => format!("\"{s}\""),
                     toml::Value::Boolean(b) => b.to_string(),
                     toml::Value::Integer(i) => i.to_string(),
                     toml::Value::Float(f) => f.to_string(),
                     _ => sv.value.to_string(),
                 };
                 lines.push((
-                    format!("{} = {}", key, value_str),
+                    format!("{key} = {value_str}"),
                     format!("[from {}]", format_provenance(sv.source)),
                 ));
             }
@@ -773,21 +772,21 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
                             let vals: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
                             format!("[{}]", vals.join(", "))
                         }
-                        toml::Value::String(s) => format!("\"{}\"", s),
+                        toml::Value::String(s) => format!("\"{s}\""),
                         toml::Value::Boolean(b) => b.to_string(),
                         toml::Value::Integer(i) => i.to_string(),
                         toml::Value::Float(f) => f.to_string(),
                         _ => v.to_string(),
                     };
                     lines.push((
-                        format!("{} = {}", key, value_str),
+                        format!("{key} = {value_str}"),
                         format!("[from {}]", format_provenance(rumdl_config::ConfigSource::Default)),
                     ));
                 }
             }
         }
         if !lines.is_empty() {
-            all_lines.push((format!("[{}]", rule_name), String::new()));
+            all_lines.push((format!("[{rule_name}]"), String::new()));
             all_lines.extend(lines);
             all_lines.push((String::new(), String::new()));
         }
@@ -799,14 +798,14 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
         } else if !right.is_empty() {
             println!("{:<width$} {}", left, right.dimmed(), width = max_left);
         } else {
-            println!("{:<width$} {}", left, right, width = max_left);
+            println!("{left:<max_left$} {right}");
         }
     }
 }
 
 fn format_toml_value(val: &toml::Value) -> String {
     match val {
-        toml::Value::String(s) => format!("\"{}\"", s),
+        toml::Value::String(s) => format!("\"{s}\""),
         toml::Value::Integer(i) => i.to_string(),
         toml::Value::Float(f) => f.to_string(),
         toml::Value::Boolean(b) => b.to_string(),
@@ -897,7 +896,7 @@ fn offer_vscode_extension_install() {
                 if answer == "a" || answer == "all" {
                     // Install in all editors
                     for (cmd, editor_name) in &available_editors {
-                        println!("\nInstalling for {}...", editor_name);
+                        println!("\nInstalling for {editor_name}...");
                         match VsCodeExtension::with_command(cmd) {
                             Ok(vscode) => {
                                 if let Err(e) = vscode.install(false) {
@@ -912,7 +911,7 @@ fn offer_vscode_extension_install() {
                 } else if let Ok(num) = answer.parse::<usize>() {
                     if num > 0 && num <= available_editors.len() {
                         let (cmd, editor_name) = available_editors[num - 1];
-                        println!("\nInstalling for {}...", editor_name);
+                        println!("\nInstalling for {editor_name}...");
                         match VsCodeExtension::with_command(cmd) {
                             Ok(vscode) => {
                                 if let Err(e) = vscode.install(false) {
@@ -969,7 +968,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     // Check if [tool.rumdl] section already exists
                                     if content.contains("[tool.rumdl]") {
                                         println!("The pyproject.toml file already contains a [tool.rumdl] section.");
-                                        println!("Please edit the file manually to avoid overwriting existing configuration.");
+                                        println!(
+                                            "Please edit the file manually to avoid overwriting existing configuration."
+                                        );
                                     }
 
                                     // Append with a blank line for separation
@@ -1109,7 +1110,7 @@ build-backend = \"setuptools.build_meta\"
                             rule.description()
                         );
                     } else {
-                        eprintln!("Rule '{}' not found.", rule_query);
+                        eprintln!("Rule '{rule_query}' not found.");
                         std::process::exit(1);
                     }
                 } else {
@@ -1200,7 +1201,12 @@ build-backend = \"setuptools.build_meta\"
                                         if let Some(ref output_format) = final_config.global.output_format {
                                             Some((
                                                 toml::Value::String(output_format.clone()),
-                                                sourced.global.output_format.as_ref().map(|v| v.source).unwrap_or(ConfigSource::Default),
+                                                sourced
+                                                    .global
+                                                    .output_format
+                                                    .as_ref()
+                                                    .map(|v| v.source)
+                                                    .unwrap_or(ConfigSource::Default),
                                             ))
                                         } else {
                                             None
@@ -1218,7 +1224,7 @@ build-backend = \"setuptools.build_meta\"
                                 );
                                 // Successfully handled 'get', exit the command processing
                             } else {
-                                eprintln!("Unknown global key: {}", field_part);
+                                eprintln!("Unknown global key: {field_part}");
                                 std::process::exit(1);
                             }
                         }
@@ -1254,15 +1260,14 @@ build-backend = \"setuptools.build_meta\"
                                         if let Some(v) = table.get(&normalized_field) {
                                             let value_str = format_toml_value(v);
                                             println!(
-                                                "{}.{} = {} [from default]",
-                                                normalized_rule_name, normalized_field, value_str
+                                                "{normalized_rule_name}.{normalized_field} = {value_str} [from default]"
                                             );
                                             // Successfully handled 'get', exit the command processing
                                             return;
                                         }
                                     }
                                 }
-                                eprintln!("Unknown config key: {}.{}", normalized_rule_name, normalized_field);
+                                eprintln!("Unknown config key: {normalized_rule_name}.{normalized_field}");
                                 std::process::exit(1);
                             }
                         }
@@ -1291,7 +1296,7 @@ build-backend = \"setuptools.build_meta\"
                                 Err(_) => {
                                     // If canonicalize fails, it might be a file that doesn't exist anymore
                                     // or a relative path that can't be resolved. Just print as-is.
-                                    println!("{}", file_path);
+                                    println!("{file_path}");
                                 }
                             }
                         }
@@ -1358,18 +1363,18 @@ build-backend = \"setuptools.build_meta\"
                             }
 
                             match toml::to_string_pretty(&default_config) {
-                                Ok(s) => println!("{}", s),
+                                Ok(s) => println!("{s}"),
                                 Err(e) => {
-                                    eprintln!("Failed to serialize config to TOML: {}", e);
+                                    eprintln!("Failed to serialize config to TOML: {e}");
                                     std::process::exit(1);
                                 }
                             }
                         } else {
                             let config_to_print: rumdl_config::Config = final_sourced_to_print.into();
                             match toml::to_string_pretty(&config_to_print) {
-                                Ok(s) => println!("{}", s),
+                                Ok(s) => println!("{s}"),
                                 Err(e) => {
-                                    eprintln!("Failed to serialize config to TOML: {}", e);
+                                    eprintln!("Failed to serialize config to TOML: {e}");
                                     std::process::exit(1);
                                 }
                             }
@@ -1399,7 +1404,7 @@ build-backend = \"setuptools.build_meta\"
                     if let Some(port) = port {
                         // TCP mode for debugging
                         if let Err(e) = rumdl::lsp::start_tcp_server(*port).await {
-                            eprintln!("Failed to start LSP server on port {}: {}", port, e);
+                            eprintln!("Failed to start LSP server on port {port}: {e}");
                             std::process::exit(1);
                         }
                     } else {
@@ -1407,7 +1412,7 @@ build-backend = \"setuptools.build_meta\"
                         // Note: stdio flag is for explicit documentation, behavior is the same
                         let _ = stdio; // Suppress unused variable warning
                         if let Err(e) = rumdl::lsp::start_server().await {
-                            eprintln!("Failed to start LSP server: {}", e);
+                            eprintln!("Failed to start LSP server: {e}");
                             std::process::exit(1);
                         }
                     }
@@ -1468,7 +1473,7 @@ build-backend = \"setuptools.build_meta\"
                         // Add rule-specific settings
                         for (rule_name, rule_config) in &fragment.rules {
                             if !rule_config.values.is_empty() {
-                                output.push_str(&format!("[{}]\n", rule_name));
+                                output.push_str(&format!("[{rule_name}]\n"));
                                 for (key, sourced_value) in &rule_config.values {
                                     // Skip the generic "value" key if we have more specific keys
                                     if key == "value" && rule_config.values.len() > 1 {
@@ -1476,21 +1481,21 @@ build-backend = \"setuptools.build_meta\"
                                     }
 
                                     match &sourced_value.value {
-                                        toml::Value::String(s) => output.push_str(&format!("{} = \"{}\"\n", key, s)),
-                                        toml::Value::Integer(i) => output.push_str(&format!("{} = {}\n", key, i)),
-                                        toml::Value::Float(f) => output.push_str(&format!("{} = {}\n", key, f)),
-                                        toml::Value::Boolean(b) => output.push_str(&format!("{} = {}\n", key, b)),
+                                        toml::Value::String(s) => output.push_str(&format!("{key} = \"{s}\"\n")),
+                                        toml::Value::Integer(i) => output.push_str(&format!("{key} = {i}\n")),
+                                        toml::Value::Float(f) => output.push_str(&format!("{key} = {f}\n")),
+                                        toml::Value::Boolean(b) => output.push_str(&format!("{key} = {b}\n")),
                                         toml::Value::Array(arr) => {
                                             // Format arrays properly for TOML
                                             let arr_str = arr
                                                 .iter()
                                                 .map(|v| match v {
-                                                    toml::Value::String(s) => format!("\"{}\"", s),
-                                                    _ => format!("{}", v),
+                                                    toml::Value::String(s) => format!("\"{s}\""),
+                                                    _ => format!("{v}"),
                                                 })
                                                 .collect::<Vec<_>>()
                                                 .join(", ");
-                                            output.push_str(&format!("{} = [{}]\n", key, arr_str));
+                                            output.push_str(&format!("{key} = [{arr_str}]\n"));
                                         }
                                         _ => {
                                             // Use proper TOML serialization for complex values
@@ -1498,7 +1503,7 @@ build-backend = \"setuptools.build_meta\"
                                                 // Remove the table wrapper if it's just a value
                                                 let clean_value = toml_str.trim();
                                                 if !clean_value.starts_with('[') {
-                                                    output.push_str(&format!("{} = {}", key, clean_value));
+                                                    output.push_str(&format!("{key} = {clean_value}"));
                                                 } else {
                                                     output.push_str(&format!("{} = {:?}\n", key, sourced_value.value));
                                                 }
@@ -1622,7 +1627,7 @@ build-backend = \"setuptools.build_meta\"
 
                 if *dry_run {
                     // Just print the converted config
-                    println!("{}", output_content);
+                    println!("{output_content}");
                 } else {
                     // Write to output file
                     let output_path = output.as_deref().unwrap_or(if format == "json" {
@@ -1638,8 +1643,8 @@ build-backend = \"setuptools.build_meta\"
 
                     match fs::write(output_path, output_content) {
                         Ok(_) => {
-                            println!("Converted markdownlint config from '{}' to '{}'", file, output_path);
-                            println!("You can now use: rumdl check --config {} .", output_path);
+                            println!("Converted markdownlint config from '{file}' to '{output_path}'");
+                            println!("You can now use: rumdl check --config {output_path} .");
                         }
                         Err(e) => {
                             eprintln!("{}: Failed to write to '{}': {}", "Error".red().bold(), output_path, e);
@@ -1684,7 +1689,10 @@ build-backend = \"setuptools.build_meta\"
                         stderr: false,
                         silent: false,
                     };
-                    eprintln!("{}: Deprecation warning: Running 'rumdl .' or 'rumdl [PATHS...]' without a subcommand is deprecated and will be removed in a future release. Please use 'rumdl check .' instead.", "[rumdl]".yellow().bold());
+                    eprintln!(
+                        "{}: Deprecation warning: Running 'rumdl .' or 'rumdl [PATHS...]' without a subcommand is deprecated and will be removed in a future release. Please use 'rumdl check .' instead.",
+                        "[rumdl]".yellow().bold()
+                    );
                     run_check(&args, cli.config.as_deref(), cli.no_config);
                 } else {
                     eprintln!(
@@ -1697,7 +1705,7 @@ build-backend = \"setuptools.build_meta\"
         }
     });
     if let Err(e) = result {
-        eprintln!("[rumdl panic handler] Uncaught panic: {:?}", e);
+        eprintln!("[rumdl panic handler] Uncaught panic: {e:?}");
         std::process::exit(1);
     } else {
         Ok(())
@@ -1721,11 +1729,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
         .or(config.global.output_format.as_deref())
         .or_else(|| {
             // Legacy support: map --output json to --output-format json
-            if args.output == "json" {
-                Some("json")
-            } else {
-                None
-            }
+            if args.output == "json" { Some("json") } else { None }
         })
         .unwrap_or("text");
 
@@ -1741,7 +1745,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     let mut content = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut content) {
         if !args.silent {
-            eprintln!("Error reading from stdin: {}", e);
+            eprintln!("Error reading from stdin: {e}");
         }
         process::exit(1);
     }
@@ -1790,7 +1794,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
         };
 
         output_writer.writeln(&output).unwrap_or_else(|e| {
-            eprintln!("Error writing output: {}", e);
+            eprintln!("Error writing output: {e}");
         });
     } else {
         // Use formatter for line-by-line output
@@ -1798,7 +1802,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
         if !all_warnings.is_empty() {
             let formatted = formatter.format_warnings(&all_warnings, "<stdin>");
             output_writer.writeln(&formatted).unwrap_or_else(|e| {
-                eprintln!("Error writing output: {}", e);
+                eprintln!("Error writing output: {e}");
             });
         }
 
@@ -1832,11 +1836,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     let discovery_dir = if !args.paths.is_empty() {
         let path = std::path::Path::new(&args.paths[0]);
         if path.is_absolute() {
-            if path.is_dir() {
-                Some(path)
-            } else {
-                path.parent()
-            }
+            if path.is_dir() { Some(path) } else { path.parent() }
         } else {
             // For relative paths, use current directory for discovery
             None
@@ -1872,11 +1872,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
         .or(config.global.output_format.as_deref())
         .or_else(|| {
             // Legacy support: map --output json to --output-format json
-            if args.output == "json" {
-                Some("json")
-            } else {
-                None
-            }
+            if args.output == "json" { Some("json") } else { None }
         })
         .unwrap_or("text");
 
@@ -1958,7 +1954,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
         };
 
         output_writer.writeln(&output).unwrap_or_else(|e| {
-            eprintln!("Error writing output: {}", e);
+            eprintln!("Error writing output: {e}");
         });
 
         // Exit with appropriate code
@@ -1981,12 +1977,12 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     } else {
         false
     };
-    
+
     let use_parallel = file_paths.len() > 1 && !args._fix && !single_small_file; // Don't parallelize fixes or small files
 
     // Collect all warnings for statistics if requested
     let mut all_warnings_for_stats = Vec::new();
-    
+
     let (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed) =
         if use_parallel {
             // Parallel processing for multiple files without fixes
@@ -2024,7 +2020,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
                     files_with_issues += 1;
                     total_issues += issues_found;
                 }
-                
+
                 if args.statistics {
                     all_warnings_for_stats.extend(warnings);
                 }
@@ -2048,15 +2044,16 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
             let mut total_files_processed = 0;
 
             for file_path in &file_paths {
-                let (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings) = process_file_with_formatter(
-                    file_path,
-                    &enabled_rules,
-                    args._fix,
-                    args.verbose && !args.silent,
-                    quiet,
-                    &output_format,
-                    &output_writer,
-                );
+                let (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings) =
+                    process_file_with_formatter(
+                        file_path,
+                        &enabled_rules,
+                        args._fix,
+                        args.verbose && !args.silent,
+                        quiet,
+                        &output_format,
+                        &output_writer,
+                    );
 
                 total_files_processed += 1;
                 total_issues_fixed += issues_fixed;
@@ -2067,7 +2064,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
                     files_with_issues += 1;
                     total_issues += issues_found;
                 }
-                
+
                 if args.statistics {
                     all_warnings_for_stats.extend(warnings);
                 }
@@ -2104,12 +2101,12 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     if args.statistics && !quiet && !all_warnings_for_stats.is_empty() {
         print_statistics(&all_warnings_for_stats);
     }
-    
+
     // Print profiling information if enabled and not in quiet mode
     if args.profile && !quiet {
         match std::panic::catch_unwind(rumdl::profiling::get_report) {
             Ok(report) => {
-                output_writer.writeln(&format!("\n{}", report)).ok();
+                output_writer.writeln(&format!("\n{report}")).ok();
             }
             Err(_) => {
                 output_writer.writeln("\nProfiling information not available").ok();
@@ -2126,46 +2123,46 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
 // Print statistics summary
 fn print_statistics(warnings: &[rumdl::rule::LintWarning]) {
     use std::collections::HashMap;
-    
+
     // Group warnings by rule name
     let mut rule_counts: HashMap<&str, usize> = HashMap::new();
     let mut fixable_counts: HashMap<&str, usize> = HashMap::new();
-    
+
     for warning in warnings {
         let rule_name = warning.rule_name.unwrap_or("unknown");
         *rule_counts.entry(rule_name).or_insert(0) += 1;
-        
+
         if warning.fix.is_some() {
             *fixable_counts.entry(rule_name).or_insert(0) += 1;
         }
     }
-    
+
     // Sort rules by count (descending)
     let mut sorted_rules: Vec<_> = rule_counts.iter().collect();
     sorted_rules.sort_by(|a, b| b.1.cmp(a.1));
-    
+
     println!("\n{}", "Rule Violation Statistics:".bold().underline());
-    println!("{:<8} {:<12} {:<8} {}", "Rule", "Violations", "Fixable", "Percentage");
+    println!("{:<8} {:<12} {:<8} Percentage", "Rule", "Violations", "Fixable");
     println!("{}", "-".repeat(50));
-    
+
     let total_warnings = warnings.len();
     for (rule, count) in sorted_rules {
         let fixable = fixable_counts.get(rule).unwrap_or(&0);
         let percentage = (*count as f64 / total_warnings as f64) * 100.0;
-        
+
         println!(
             "{:<8} {:<12} {:<8} {:>6.1}%",
             rule,
             count,
-            if *fixable > 0 { 
-                format!("{}", fixable) 
-            } else { 
-                "-".to_string() 
+            if *fixable > 0 {
+                format!("{fixable}")
+            } else {
+                "-".to_string()
             },
             percentage
         );
     }
-    
+
     println!("{}", "-".repeat(50));
     println!(
         "{:<8} {:<12} {:<8} {:>6.1}%",
@@ -2202,7 +2199,7 @@ fn process_file_with_formatter(
         let formatted = formatter.format_warnings(&all_warnings, file_path);
         if !formatted.is_empty() {
             output_writer.writeln(&formatted).unwrap_or_else(|e| {
-                eprintln!("Error writing output: {}", e);
+                eprintln!("Error writing output: {e}");
             });
         }
     }
@@ -2254,7 +2251,7 @@ fn process_file_with_formatter(
             if !output.is_empty() {
                 output.pop(); // Remove trailing newline
                 output_writer.writeln(&output).unwrap_or_else(|e| {
-                    eprintln!("Error writing output: {}", e);
+                    eprintln!("Error writing output: {e}");
                 });
             }
         }
@@ -2262,7 +2259,6 @@ fn process_file_with_formatter(
 
     (true, total_warnings, warnings_fixed, fixable_warnings, all_warnings)
 }
-
 
 // Inner processing logic that returns warnings
 fn process_file_inner(
@@ -2275,7 +2271,7 @@ fn process_file_inner(
 
     let start_time = Instant::now();
     if verbose && !quiet {
-        println!("Processing file: {}", file_path);
+        println!("Processing file: {file_path}");
     }
 
     // Read file content efficiently
@@ -2283,7 +2279,7 @@ fn process_file_inner(
         Ok(content) => content,
         Err(e) => {
             if !quiet {
-                eprintln!("Error reading file {}: {}", file_path, e);
+                eprintln!("Error reading file {file_path}: {e}");
             }
             return (Vec::new(), String::new(), 0, 0);
         }
@@ -2330,12 +2326,12 @@ fn process_file_inner(
     let lint_time = lint_end_time.duration_since(lint_start);
 
     if verbose && !quiet {
-        println!("Linting took: {:?}", lint_time);
+        println!("Linting took: {lint_time:?}");
     }
 
     let total_time = start_time.elapsed();
     if verbose && !quiet {
-        println!("Total processing time for {}: {:?}", file_path, total_time);
+        println!("Total processing time for {file_path}: {total_time:?}");
     }
 
     (all_warnings, content, total_warnings, fixable_warnings)
@@ -2418,7 +2414,7 @@ fn process_file_collect_warnings(
     quiet: bool,
 ) -> Vec<rumdl::rule::LintWarning> {
     if verbose && !quiet {
-        println!("Processing file: {}", file_path);
+        println!("Processing file: {file_path}");
     }
 
     // Read file content efficiently
@@ -2426,7 +2422,7 @@ fn process_file_collect_warnings(
         Ok(content) => content,
         Err(e) => {
             if !quiet {
-                eprintln!("Error reading file {}: {}", file_path, e);
+                eprintln!("Error reading file {file_path}: {e}");
             }
             return Vec::new();
         }

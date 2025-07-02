@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn test_github_formatter_default() {
-        let _formatter = GitHubFormatter::default();
+        let _formatter = GitHubFormatter;
         // No fields to test, just ensure it constructs
     }
 
@@ -84,7 +84,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "README.md");
         assert_eq!(
             output,
@@ -117,7 +117,7 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let expected = "::warning file=test.md,line=5,col=1,title=MD001::First warning\n::warning file=test.md,line=10,col=3,title=MD013::Second warning";
         assert_eq!(output, expected);
@@ -139,7 +139,7 @@ mod tests {
                 replacement: "\n# Heading\n".to_string(),
             }),
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "doc.md");
         // GitHub format doesn't show fix indicator
         assert_eq!(
@@ -161,7 +161,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file.md");
         assert_eq!(
             output,
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn test_edge_cases() {
         let formatter = GitHubFormatter::new();
-        
+
         // Test large line/column numbers
         let warnings = vec![LintWarning {
             line: 99999,
@@ -184,7 +184,7 @@ mod tests {
             severity: Severity::Error,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "large.md");
         assert_eq!(
             output,
@@ -205,7 +205,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         // Note: GitHub Actions should handle special characters in messages
         assert_eq!(
@@ -227,7 +227,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "path/with spaces/and-dashes.md");
         assert_eq!(
             output,
@@ -248,9 +248,9 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
-        
+
         // Verify GitHub Actions annotation structure
         assert!(output.starts_with("::warning "));
         assert!(output.contains("file=test.md"));
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn test_severity_always_warning() {
         let formatter = GitHubFormatter::new();
-        
+
         // Test that all severities are output as "warning" in GitHub format
         let warnings = vec![
             LintWarning {
@@ -287,10 +287,10 @@ mod tests {
                 fix: None,
             },
         ];
-        
+
         let output = formatter.format_warnings(&warnings, "test.md");
         let lines: Vec<&str> = output.lines().collect();
-        
+
         // Both should use ::warning regardless of severity
         assert!(lines[0].starts_with("::warning "));
         assert!(lines[1].starts_with("::warning "));
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn test_commas_in_parameters() {
         let formatter = GitHubFormatter::new();
-        
+
         // Test that commas in the title don't break the format
         let warnings = vec![LintWarning {
             line: 1,
@@ -311,7 +311,7 @@ mod tests {
             severity: Severity::Warning,
             fix: None,
         }];
-        
+
         let output = formatter.format_warnings(&warnings, "file,with,commas.md");
         // The format should still be parseable by GitHub Actions
         assert_eq!(

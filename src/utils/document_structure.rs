@@ -485,8 +485,8 @@ impl DocumentStructure {
         let mut current_block_start = 0;
         let mut current_language = None;
         let mut current_fence_char = ' ';
-        let mut current_fence_length = 0;  // Track fence length for proper nesting
-        let mut current_fence_indent = 0;  // Track fence indentation
+        let mut current_fence_length = 0; // Track fence length for proper nesting
+        let mut current_fence_indent = 0; // Track fence indentation
         let lines: Vec<&str> = content.lines().collect();
 
         let mut i = 0;
@@ -568,11 +568,12 @@ impl DocumentStructure {
                 if let Some(captures) = FENCED_END.captures(line) {
                     let indent = captures.get(1).map_or("", |m| m.as_str());
                     let fence = captures.get(2).map_or("", |m| m.as_str());
-                    
+
                     // CommonMark: closing fence must have same or less indentation than opening
-                    if fence.chars().next() == Some(current_fence_char) 
-                        && fence.len() >= current_fence_length 
-                        && indent.len() <= current_fence_indent {
+                    if fence.starts_with(current_fence_char)
+                        && fence.len() >= current_fence_length
+                        && indent.len() <= current_fence_indent
+                    {
                         code_blocks.push(CodeBlock {
                             start_line: current_block_start,
                             end_line: i + 1,
@@ -1304,7 +1305,7 @@ impl DocumentStructure {
 
             // HTML block ends when we find the matching closing tag
             if let Some(ref tag) = tag_name {
-                let closing_tag = format!("</{}", tag);
+                let closing_tag = format!("</{tag}");
                 if trimmed.contains(&closing_tag) {
                     return i;
                 }
@@ -1444,7 +1445,7 @@ mod tests {
         assert!(structure.has_code_blocks);
         assert_eq!(structure.code_blocks.len(), 1);
     }
-    
+
     #[test]
     fn test_nested_code_blocks() {
         let content = r#"```markdown
@@ -1456,17 +1457,20 @@ mod tests {
 
 2. Second item
 ```"#;
-        
+
         let structure = DocumentStructure::new(content);
-        
+
         // Should have exactly one code block (the outer markdown block)
         assert_eq!(structure.code_blocks.len(), 1);
         assert_eq!(structure.code_blocks[0].start_line, 1);
         assert_eq!(structure.code_blocks[0].end_line, 9);
-        
+
         // Lines 2-8 should be inside the code block
         for line in 2..=8 {
-            assert!(structure.is_in_code_block(line), "Line {} should be in code block", line);
+            assert!(
+                structure.is_in_code_block(line),
+                "Line {line} should be in code block"
+            );
         }
     }
 

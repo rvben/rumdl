@@ -1,3 +1,4 @@
+use crate::LintContext;
 /// Rule MD004: Use consistent style for unordered list markers
 ///
 /// See [docs/md004.md](../../docs/md004.md) for full documentation, configuration, and examples.
@@ -50,7 +51,6 @@
 /// Consistent list markers improve readability and reduce distraction, especially in large documents or when collaborating with others. This rule helps enforce a uniform style across all unordered lists.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::DocumentStructureExtensions;
-use crate::LintContext;
 use toml;
 
 mod md004_config;
@@ -150,8 +150,7 @@ impl Rule for MD004UnorderedListStyle {
                                             end_line: line,
                                             end_column: col + 1,
                                             message: format!(
-                                                "List marker '{}' does not match expected style '{}'",
-                                                marker, first
+                                                "List marker '{marker}' does not match expected style '{first}'"
                                             ),
                                             severity: Severity::Warning,
                                             rule_name: Some(self.name()),
@@ -182,8 +181,7 @@ impl Rule for MD004UnorderedListStyle {
                                         end_line: line,
                                         end_column: col + 1,
                                         message: format!(
-                                            "List marker '{}' does not match expected style '{}'",
-                                            marker, target_marker
+                                            "List marker '{marker}' does not match expected style '{target_marker}'"
                                         ),
                                         severity: Severity::Warning,
                                         rule_name: Some(self.name()),
@@ -453,7 +451,10 @@ mod tests {
         let content = "* Item 1\n  - Nested 1\n    + Double nested\n  - Nested 2\n* Item 2";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "* Item 1\n  * Nested 1\n    * Double nested\n  * Nested 2\n* Item 2");
+        assert_eq!(
+            fixed,
+            "* Item 1\n  * Nested 1\n    * Double nested\n  * Nested 2\n* Item 2"
+        );
     }
 
     #[test]
@@ -519,7 +520,10 @@ mod tests {
         let content = "* Item with **bold** and *italic*\n+ Item with `code`\n* Item with [link](url)";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "- Item with **bold** and *italic*\n- Item with `code`\n- Item with [link](url)");
+        assert_eq!(
+            fixed,
+            "- Item with **bold** and *italic*\n- Item with `code`\n- Item with [link](url)"
+        );
     }
 
     #[test]
@@ -568,9 +572,11 @@ mod tests {
     fn test_from_config() {
         let mut config = crate::config::Config::default();
         let mut rule_config = crate::config::RuleConfig::default();
-        rule_config.values.insert("style".to_string(), toml::Value::String("plus".to_string()));
+        rule_config
+            .values
+            .insert("style".to_string(), toml::Value::String("plus".to_string()));
         config.rules.insert("MD004".to_string(), rule_config);
-        
+
         let rule = MD004UnorderedListStyle::from_config(&config);
         let content = "* Item 1\n- Item 2";
         let ctx = LintContext::new(content);
@@ -597,7 +603,17 @@ mod tests {
         let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
         let mut content = String::new();
         for i in 0..1000 {
-            content.push_str(&format!("{}Item {}\n", if i % 3 == 0 { "* " } else if i % 3 == 1 { "- " } else { "+ " }, i));
+            content.push_str(&format!(
+                "{}Item {}\n",
+                if i % 3 == 0 {
+                    "* "
+                } else if i % 3 == 1 {
+                    "- "
+                } else {
+                    "+ "
+                },
+                i
+            ));
         }
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();

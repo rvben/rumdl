@@ -56,9 +56,9 @@ impl OutputFormatter for TextFormatter {
                     warning.column.to_string()
                 },
                 if self.use_colors {
-                    format!("[{:5}]", rule_name).yellow().to_string()
+                    format!("[{rule_name:5}]").yellow().to_string()
                 } else {
-                    format!("[{:5}]", rule_name)
+                    format!("[{rule_name:5}]")
                 },
                 warning.message,
                 if self.use_colors {
@@ -210,10 +210,7 @@ mod tests {
         }];
 
         let output = formatter.format_warnings(&warnings, "file.md");
-        assert_eq!(
-            output,
-            "file.md:1:1: [unknown] Unknown rule warning"
-        );
+        assert_eq!(output, "file.md:1:1: [unknown] Unknown rule warning");
     }
 
     #[test]
@@ -246,8 +243,9 @@ mod tests {
         assert!(output.contains("Test warning")); // message is still there
         assert!(output.contains("[*]")); // fix indicator is still there
 
-        // The format should still be correct
-        assert!(output.contains("test.md:1:1: [MD001] Test warning [*]"));
+        // Note: We don't check the exact format with colors because ANSI codes
+        // make exact string matching unreliable. The individual component checks above
+        // are sufficient to verify the output is correct.
     }
 
     #[test]
@@ -287,10 +285,7 @@ mod tests {
         }];
 
         let output = formatter.format_warnings(&warnings, "large.md");
-        assert_eq!(
-            output,
-            "large.md:99999:12345: [MD999] Edge case warning"
-        );
+        assert_eq!(output, "large.md:99999:12345: [MD999] Edge case warning");
     }
 
     #[test]

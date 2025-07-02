@@ -8,3 +8,4 @@ benchmark
 *.log
 node_modules
 parity_corpus
+.cleanup_archive/

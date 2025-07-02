@@ -34,7 +34,7 @@ fn main() {
 
         // Calculate average time
         let avg_time = times.iter().sum::<u128>() / times.len() as u128;
-        println!("  Average LintContext creation: {} μs", avg_time);
+        println!("  Average LintContext creation: {avg_time} μs");
 
         println!();
     }
@@ -44,11 +44,11 @@ fn generate_many_code_spans(lines: usize) -> String {
     let mut content = String::new();
     for i in 0..lines {
         if i % 3 == 0 {
-            content.push_str(&format!("Line {} with `code span {}` and more `inline code`\n", i, i));
+            content.push_str(&format!("Line {i} with `code span {i}` and more `inline code`\n"));
         } else if i % 3 == 1 {
-            content.push_str(&format!("Regular line {} with no code\n", i));
+            content.push_str(&format!("Regular line {i} with no code\n"));
         } else {
-            content.push_str(&format!("Line {} with ``nested `backticks` here``\n", i));
+            content.push_str(&format!("Line {i} with ``nested `backticks` here``\n"));
         }
     }
     content
@@ -59,7 +59,7 @@ fn generate_nested_content(lines: usize) -> String {
     content.push_str("# Header with `code`\n\n");
 
     for i in 0..lines / 4 {
-        content.push_str(&format!("Paragraph {} with `inline code` and [link](url)\n", i));
+        content.push_str(&format!("Paragraph {i} with `inline code` and [link](url)\n"));
         content.push_str("```rust\n");
         content.push_str("fn example() {\n");
         content.push_str("    // Code block content\n");
@@ -68,7 +68,7 @@ fn generate_nested_content(lines: usize) -> String {
     }
 
     for i in 0..lines / 4 {
-        content.push_str(&format!("- List item {} with `code`\n", i));
+        content.push_str(&format!("- List item {i} with `code`\n"));
         content.push_str("  - Nested with `more code`\n");
     }
 
@@ -80,16 +80,16 @@ fn generate_mixed_content(lines: usize) -> String {
 
     for i in 0..lines {
         match i % 10 {
-            0 => content.push_str(&format!("# Heading {} with `code`\n", i)),
+            0 => content.push_str(&format!("# Heading {i} with `code`\n")),
             1 => content.push_str("Regular text with `inline code` and **emphasis**\n"),
-            2 => content.push_str(&format!("URL: https://example.com/path/{}\n", i)),
-            3 => content.push_str(&format!("Email: user{}@example.com\n", i)),
+            2 => content.push_str(&format!("URL: https://example.com/path/{i}\n")),
+            3 => content.push_str(&format!("Email: user{i}@example.com\n")),
             4 => content.push_str("```\ncode block\n```\n"),
-            5 => content.push_str(&format!("HTML: <div>content {}</div>\n", i)),
-            6 => content.push_str(&format!("- List with `code {}` item\n", i)),
+            5 => content.push_str(&format!("HTML: <div>content {i}</div>\n")),
+            6 => content.push_str(&format!("- List with `code {i}` item\n")),
             7 => content.push_str("Emphasis *with `code`* inside\n"),
-            8 => content.push_str(&format!("> Blockquote with `code {}`\n", i)),
-            _ => content.push_str(&format!("Plain text line {}\n", i)),
+            8 => content.push_str(&format!("> Blockquote with `code {i}`\n")),
+            _ => content.push_str(&format!("Plain text line {i}\n")),
         }
     }
 

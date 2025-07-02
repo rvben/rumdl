@@ -460,13 +460,13 @@ mod tests {
 let x = 1;
 ```
 More text";
-        
+
         assert!(!CodeBlockUtils::is_in_code_block(content, 0));
         assert!(CodeBlockUtils::is_in_code_block(content, 1));
         assert!(CodeBlockUtils::is_in_code_block(content, 2));
         assert!(!CodeBlockUtils::is_in_code_block(content, 3)); // Closing ``` ends the block
         assert!(!CodeBlockUtils::is_in_code_block(content, 4));
-        
+
         // Test with alternate fence
         let content2 = "Text\n~~~\ncode\n~~~\nEnd";
         assert!(!CodeBlockUtils::is_in_code_block(content2, 0));
@@ -474,13 +474,13 @@ More text";
         assert!(CodeBlockUtils::is_in_code_block(content2, 2));
         assert!(!CodeBlockUtils::is_in_code_block(content2, 3)); // Closing ~~~ ends the block
         assert!(!CodeBlockUtils::is_in_code_block(content2, 4));
-        
+
         // Test indented code block
         let content3 = "Normal\n    indented code\nNormal";
         assert!(!CodeBlockUtils::is_in_code_block(content3, 0));
         assert!(CodeBlockUtils::is_in_code_block(content3, 1));
         assert!(!CodeBlockUtils::is_in_code_block(content3, 2));
-        
+
         // Test out of bounds
         assert!(!CodeBlockUtils::is_in_code_block("test", 10));
     }
@@ -492,7 +492,7 @@ More text";
         assert!(CodeBlockUtils::is_code_block_delimiter("  ```"));
         assert!(CodeBlockUtils::is_code_block_delimiter("~~~"));
         assert!(CodeBlockUtils::is_code_block_delimiter("~~~python"));
-        
+
         assert!(!CodeBlockUtils::is_code_block_delimiter("Normal text"));
         assert!(!CodeBlockUtils::is_code_block_delimiter("``"));
         assert!(!CodeBlockUtils::is_code_block_delimiter("~"));
@@ -506,7 +506,7 @@ More text";
         assert!(CodeBlockUtils::is_code_block_start("~~~"));
         assert!(CodeBlockUtils::is_code_block_start("~~~python"));
         assert!(CodeBlockUtils::is_code_block_start("  ```"));
-        
+
         assert!(!CodeBlockUtils::is_code_block_start("Normal text"));
         assert!(!CodeBlockUtils::is_code_block_start(""));
     }
@@ -517,7 +517,7 @@ More text";
         assert!(CodeBlockUtils::is_code_block_end("~~~"));
         assert!(CodeBlockUtils::is_code_block_end("  ```"));
         assert!(CodeBlockUtils::is_code_block_end("```  "));
-        
+
         // Language specifiers make it a start, not end
         assert!(!CodeBlockUtils::is_code_block_end("```rust"));
         assert!(!CodeBlockUtils::is_code_block_end("~~~python"));
@@ -532,7 +532,7 @@ More text";
         assert!(CodeBlockUtils::is_indented_code_block("\tcode")); // 1 tab = 4 spaces
         assert!(CodeBlockUtils::is_indented_code_block("\t\tcode")); // 2 tabs = 8 spaces
         assert!(CodeBlockUtils::is_indented_code_block("  \tcode")); // 2 spaces + 1 tab = 6 spaces
-        
+
         assert!(!CodeBlockUtils::is_indented_code_block("   code")); // Only 3 spaces
         assert!(!CodeBlockUtils::is_indented_code_block("normal text"));
         assert!(!CodeBlockUtils::is_indented_code_block(""));
@@ -540,12 +540,27 @@ More text";
 
     #[test]
     fn test_get_language_specifier() {
-        assert_eq!(CodeBlockUtils::get_language_specifier("```rust"), Some("rust".to_string()));
-        assert_eq!(CodeBlockUtils::get_language_specifier("~~~python"), Some("python".to_string()));
-        assert_eq!(CodeBlockUtils::get_language_specifier("```javascript"), Some("javascript".to_string()));
-        assert_eq!(CodeBlockUtils::get_language_specifier("  ```rust"), Some("rust".to_string()));
-        assert_eq!(CodeBlockUtils::get_language_specifier("```rust ignore"), Some("rust ignore".to_string()));
-        
+        assert_eq!(
+            CodeBlockUtils::get_language_specifier("```rust"),
+            Some("rust".to_string())
+        );
+        assert_eq!(
+            CodeBlockUtils::get_language_specifier("~~~python"),
+            Some("python".to_string())
+        );
+        assert_eq!(
+            CodeBlockUtils::get_language_specifier("```javascript"),
+            Some("javascript".to_string())
+        );
+        assert_eq!(
+            CodeBlockUtils::get_language_specifier("  ```rust"),
+            Some("rust".to_string())
+        );
+        assert_eq!(
+            CodeBlockUtils::get_language_specifier("```rust ignore"),
+            Some("rust ignore".to_string())
+        );
+
         assert_eq!(CodeBlockUtils::get_language_specifier("```"), None);
         assert_eq!(CodeBlockUtils::get_language_specifier("~~~"), None);
         assert_eq!(CodeBlockUtils::get_language_specifier("Normal text"), None);
@@ -559,20 +574,20 @@ More text";
 let x = 1;
 ```
 More text";
-        
+
         let result = CodeBlockUtils::identify_code_block_lines(content);
         assert_eq!(result, vec![false, true, true, true, false]);
-        
+
         // Test with alternate fence
         let content2 = "Text\n~~~\ncode\n~~~\nEnd";
         let result2 = CodeBlockUtils::identify_code_block_lines(content2);
         assert_eq!(result2, vec![false, true, true, true, false]);
-        
+
         // Test with indented code
         let content3 = "Normal\n    code\n    more code\nNormal";
         let result3 = CodeBlockUtils::identify_code_block_lines(content3);
         assert_eq!(result3, vec![false, true, true, false]);
-        
+
         // Test with list items (should not be treated as code)
         let content4 = "List:\n    * Item 1\n    * Item 2";
         let result4 = CodeBlockUtils::identify_code_block_lines(content4);
@@ -591,15 +606,15 @@ More text";
     fn test_code_block_info() {
         let content = "Normal\n```\ncode\n```\nText";
         let info = CodeBlockInfo::new(content);
-        
+
         assert!(!info.is_in_code_block(0));
         assert!(info.is_in_code_block(1));
         assert!(info.is_in_code_block(2));
         assert!(info.is_in_code_block(3));
         assert!(!info.is_in_code_block(4));
-        
+
         assert!(info.has_code_blocks());
-        
+
         // Test out of bounds
         assert!(!info.is_in_code_block(100));
     }
@@ -608,10 +623,10 @@ More text";
     fn test_code_block_info_code_spans() {
         let content = "Text with `inline code` here";
         let info = CodeBlockInfo::new(content);
-        
+
         assert!(info.has_code_spans());
         assert!(!info.has_code_blocks());
-        
+
         // Test position inside code span
         assert!(info.is_in_code_span(0, 11)); // Start of `inline
         assert!(info.is_in_code_span(0, 15)); // Inside inline code
@@ -623,7 +638,7 @@ More text";
     fn test_compute_code_blocks() {
         let content = "Normal\n```\ncode\n```\n    indented";
         let states = compute_code_blocks(content);
-        
+
         assert_eq!(states[0], CodeBlockState::None);
         assert_eq!(states[1], CodeBlockState::Fenced);
         assert_eq!(states[2], CodeBlockState::Fenced);
@@ -635,13 +650,13 @@ More text";
     fn test_compute_code_spans() {
         let content = "Text `code` and ``double`` backticks";
         let spans = compute_code_spans(content);
-        
+
         assert_eq!(spans.len(), 2);
         // First span: `code`
         assert_eq!(&content[spans[0].0..spans[0].1], "`code`");
         // Second span: ``double``
         assert_eq!(&content[spans[1].0..spans[1].1], "``double``");
-        
+
         // Test escaped backticks
         let content2 = r"Text \`not code\` but `real code`";
         let spans2 = compute_code_spans(content2);
@@ -654,7 +669,7 @@ More text";
         assert_eq!(CodeBlockStyle::Fenced.to_string(), "fenced");
         assert_eq!(CodeBlockStyle::Indented.to_string(), "indented");
         assert_eq!(CodeBlockStyle::Consistent.to_string(), "consistent");
-        
+
         assert_eq!(CodeBlockStyle::default(), CodeBlockStyle::Consistent);
     }
 
@@ -672,7 +687,7 @@ More text";
         let content = "```rust\nlet 你好 = \"世界\";\n```";
         let result = CodeBlockUtils::identify_code_block_lines(content);
         assert_eq!(result, vec![true, true, true]);
-        
+
         assert_eq!(CodeBlockUtils::get_language_specifier("```🦀"), Some("🦀".to_string()));
     }
 
@@ -681,11 +696,11 @@ More text";
         // Empty content
         assert_eq!(CodeBlockUtils::identify_code_block_lines(""), Vec::<bool>::new());
         assert!(!CodeBlockUtils::is_in_code_block("", 0));
-        
+
         // Just delimiters
         assert_eq!(CodeBlockUtils::identify_code_block_lines("```"), vec![true]);
         assert_eq!(CodeBlockUtils::identify_code_block_lines("~~~"), vec![true]);
-        
+
         // Mixed fence types (should not close each other)
         let content = "```\ncode\n~~~\nmore\n```";
         let result = CodeBlockUtils::identify_code_block_lines(content);

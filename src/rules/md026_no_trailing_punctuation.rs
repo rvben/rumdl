@@ -209,7 +209,7 @@ impl MD026NoTrailingPunctuation {
                 );
             }
 
-            return format!("{}{}{}{}", indentation, hashes, space, fixed_content);
+            return format!("{indentation}{hashes}{space}{fixed_content}");
         }
 
         // Fallback if no regex matches
@@ -495,7 +495,10 @@ mod tests {
         let content = "# What is Rust?\n# How does it work?\n# Is it fast?";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Question marks in questions should be allowed by default");
+        assert!(
+            result.is_empty(),
+            "Question marks in questions should be allowed by default"
+        );
     }
 
     #[test]
@@ -504,7 +507,10 @@ mod tests {
         let content = "# FAQ:\n# API Reference:\n# Step 1:\n# Version 2.0:";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Colons in categorical headings should be allowed by default");
+        assert!(
+            result.is_empty(),
+            "Colons in categorical headings should be allowed by default"
+        );
     }
 
     #[test]
@@ -593,11 +599,11 @@ mod tests {
     fn test_regex_caching() {
         let rule1 = MD026NoTrailingPunctuation::new(Some("!".to_string()));
         let rule2 = MD026NoTrailingPunctuation::new(Some("!".to_string()));
-        
+
         // Both should get the same cached regex
         let _regex1 = rule1.get_punctuation_regex().unwrap();
         let _regex2 = rule2.get_punctuation_regex().unwrap();
-        
+
         // Check cache has the entry
         let cache = PUNCTUATION_REGEX_CACHE.read().unwrap();
         assert!(cache.contains_key("!"));
@@ -607,9 +613,11 @@ mod tests {
     fn test_config_from_toml() {
         let mut config = crate::config::Config::default();
         let mut rule_config = crate::config::RuleConfig::default();
-        rule_config.values.insert("punctuation".to_string(), toml::Value::String("!?".to_string()));
+        rule_config
+            .values
+            .insert("punctuation".to_string(), toml::Value::String("!?".to_string()));
         config.rules.insert("MD026".to_string(), rule_config);
-        
+
         let rule = MD026NoTrailingPunctuation::from_config(&config);
         let content = "# Title!\n# Another?";
         let ctx = LintContext::new(content);
@@ -634,7 +642,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Title\n");
-        
+
         let content_no_newline = "# Title.";
         let ctx2 = LintContext::new(content_no_newline);
         let fixed2 = rule.fix(&ctx2).unwrap();

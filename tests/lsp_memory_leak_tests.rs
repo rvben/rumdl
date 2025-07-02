@@ -32,7 +32,7 @@ Final content.
 "#;
 
     for i in 0..10 {
-        fs::write(project_path.join(format!("test{}.md", i)), test_content).unwrap();
+        fs::write(project_path.join(format!("test{i}.md")), test_content).unwrap();
     }
 
     // Start LSP server
@@ -57,7 +57,9 @@ Final content.
         "Content-Length: {}\r\n\r\n{}",
         initialize_request.len(),
         initialize_request
-    ).is_err() {
+    )
+    .is_err()
+    {
         println!("LSP process terminated early, skipping test");
         let _ = lsp_process.wait();
         return;
@@ -119,8 +121,7 @@ Final content.
         // Send textDocument/didChange with error handling
         let updated_content = "# Updated Content\\n\\nThis is updated content.";
         let did_change = format!(
-            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":2}},"contentChanges":[{{"text":"{}"}}]}}}}"#,
-            file_uri, updated_content
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{file_uri}","version":2}},"contentChanges":[{{"text":"{updated_content}"}}]}}}}"#
         );
         if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_change.len(), did_change).is_err() {
             println!("LSP process terminated during operation");
@@ -129,8 +130,7 @@ Final content.
 
         // Send textDocument/didClose with error handling
         let did_close = format!(
-            r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
-            file_uri
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{file_uri}"}}}}}}"#
         );
         if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_close.len(), did_close).is_err() {
             println!("LSP process terminated during operation");
@@ -152,19 +152,19 @@ Final content.
         let min_memory = *samples.iter().min().unwrap();
 
         println!("Memory usage analysis:");
-        println!("  Initial: {} KB", initial_memory);
-        println!("  Final: {} KB", final_memory);
-        println!("  Max: {} KB", max_memory);
-        println!("  Min: {} KB", min_memory);
+        println!("  Initial: {initial_memory} KB");
+        println!("  Final: {final_memory} KB");
+        println!("  Max: {max_memory} KB");
+        println!("  Min: {min_memory} KB");
         println!("  Growth: {} KB", final_memory as i64 - initial_memory as i64);
 
         // Check for memory leaks (growth should be reasonable)
         let growth_ratio = final_memory as f64 / initial_memory as f64;
-        assert!(growth_ratio < 3.0, "Memory usage grew too much: {}x", growth_ratio);
+        assert!(growth_ratio < 3.0, "Memory usage grew too much: {growth_ratio}x");
 
         // Check that memory doesn't continuously grow
         let trend = calculate_memory_trend(&samples);
-        assert!(trend < 200.0, "Memory trend too steep: {} KB/sample", trend);
+        assert!(trend < 200.0, "Memory trend too steep: {trend} KB/sample");
     } else {
         println!("No memory samples collected, LSP process may have terminated early");
     }
@@ -187,7 +187,7 @@ fn test_lsp_memory_stress_with_large_files() {
     let mut large_content = String::new();
     for i in 0..500 {
         // Reduced size
-        large_content.push_str(&format!("# Heading {}\n\nContent for section {}.\n\n", i, i));
+        large_content.push_str(&format!("# Heading {i}\n\nContent for section {i}.\n\n"));
     }
 
     fs::write(project_path.join("large.md"), &large_content).unwrap();
@@ -250,7 +250,7 @@ fn test_lsp_memory_stress_with_large_files() {
     // Make multiple edits with error handling
     for i in 0..5 {
         // Reduced iterations
-        let edit_content = format!("# Updated Heading {}\\n\\nUpdated content.", i);
+        let edit_content = format!("# Updated Heading {i}\\n\\nUpdated content.");
         let did_change = format!(
             r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":{}}},"contentChanges":[{{"text":"{}"}}]}}}}"#,
             file_uri,
@@ -268,8 +268,7 @@ fn test_lsp_memory_stress_with_large_files() {
 
     // Close file with error handling
     let did_close = format!(
-        r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
-        file_uri
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{file_uri}"}}}}}}"#
     );
     let _ = writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_close.len(), did_close);
 
@@ -278,18 +277,17 @@ fn test_lsp_memory_stress_with_large_files() {
     let after_close_memory = get_process_memory(lsp_process.id()).unwrap_or(after_edits_memory);
 
     println!("Large file memory analysis:");
-    println!("  Initial: {} KB", initial_memory);
-    println!("  After open: {} KB", after_open_memory);
-    println!("  After edits: {} KB", after_edits_memory);
-    println!("  After close: {} KB", after_close_memory);
+    println!("  Initial: {initial_memory} KB");
+    println!("  After open: {after_open_memory} KB");
+    println!("  After edits: {after_edits_memory} KB");
+    println!("  After close: {after_close_memory} KB");
 
     // Memory should be released after closing (or at least not grow excessively)
     if after_edits_memory > 0 && initial_memory > 0 {
         let total_growth = after_edits_memory as f64 / initial_memory as f64;
         assert!(
             total_growth < 10.0,
-            "Memory usage grew too much with large file: {}x",
-            total_growth
+            "Memory usage grew too much with large file: {total_growth}x"
         );
     }
 
@@ -309,8 +307,8 @@ fn test_lsp_concurrent_document_handling() {
 
     // Create multiple test files (reduced number)
     for i in 0..10 {
-        let content = format!("# Document {}\n\nContent for document {}.\n", i, i);
-        fs::write(project_path.join(format!("doc{}.md", i)), content).unwrap();
+        let content = format!("# Document {i}\n\nContent for document {i}.\n");
+        fs::write(project_path.join(format!("doc{i}.md")), content).unwrap();
     }
 
     // Start LSP server
@@ -353,10 +351,9 @@ fn test_lsp_concurrent_document_handling() {
     // Open all documents simultaneously with error handling
     for i in 0..10 {
         let file_uri = format!("file://{}/doc{}.md", project_path.display(), i);
-        let content = format!("# Document {}\\n\\nContent for document {}.", i, i);
+        let content = format!("# Document {i}\\n\\nContent for document {i}.");
         let did_open = format!(
-            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"markdown","version":1,"text":"{}"}}}}}}"#,
-            file_uri, content
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{file_uri}","languageId":"markdown","version":1,"text":"{content}"}}}}}}"#
         );
         if writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_open.len(), did_open).is_err() {
             println!("LSP process terminated during document opening");
@@ -371,8 +368,7 @@ fn test_lsp_concurrent_document_handling() {
     for i in 0..10 {
         let file_uri = format!("file://{}/doc{}.md", project_path.display(), i);
         let did_close = format!(
-            r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
-            file_uri
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{file_uri}"}}}}}}"#
         );
         let _ = writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_close.len(), did_close);
     }
@@ -381,9 +377,9 @@ fn test_lsp_concurrent_document_handling() {
     let after_close_memory = get_process_memory(lsp_process.id()).unwrap_or(after_open_memory);
 
     println!("Concurrent document memory analysis:");
-    println!("  Initial: {} KB", initial_memory);
-    println!("  After opening 10 docs: {} KB", after_open_memory);
-    println!("  After closing all docs: {} KB", after_close_memory);
+    println!("  Initial: {initial_memory} KB");
+    println!("  After opening 10 docs: {after_open_memory} KB");
+    println!("  After closing all docs: {after_close_memory} KB");
 
     // Memory checks (more lenient for reliability)
     if after_open_memory > initial_memory && initial_memory > 0 {

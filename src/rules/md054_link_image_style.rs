@@ -229,13 +229,12 @@ impl Rule for MD054LinkImageStyle {
                 let m = cap.get(0).unwrap();
                 let start = m.start();
                 let end = m.end();
-                
+
                 // Check if this overlaps with any existing match
                 let overlaps = filtered_matches.iter().any(|existing| {
-                    (start >= existing.start && start < existing.end) ||
-                    (end > existing.start && end <= existing.end)
+                    (start >= existing.start && start < existing.end) || (end > existing.start && end <= existing.end)
                 });
-                
+
                 if !overlaps {
                     // Check if followed by '(', '[', '[]', or ']['
                     let after = &line[end..];
@@ -255,7 +254,7 @@ impl Rule for MD054LinkImageStyle {
             // Check each match
             for m in filtered_matches {
                 let match_start_char = line[..m.start].chars().count();
-                
+
                 if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.is_style_allowed(m.style) {
                     let match_len = line[m.start..m.end].chars().count();
                     let (start_line, start_col, end_line, end_col) =
@@ -316,7 +315,7 @@ mod tests {
         let content = "[inline](url) [ref][] [ref] <autolink> [full][ref] [url](url)\n\n[ref]: url";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -326,7 +325,7 @@ mod tests {
         let content = "[allowed](url) [not][ref] <https://bad.com> [bad][] [shortcut]\n\n[ref]: url\n[shortcut]: url";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 4);
         assert!(result[0].message.contains("'full'"));
         assert!(result[1].message.contains("'autolink'"));
@@ -340,7 +339,7 @@ mod tests {
         let content = "<https://good.com> [bad](url) [bad][ref]\n\n[ref]: url";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
         assert!(result[0].message.contains("'inline'"));
         assert!(result[1].message.contains("'full'"));
@@ -352,7 +351,7 @@ mod tests {
         let content = "[https://example.com](https://example.com) [text](https://example.com)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // First is url_inline (allowed), second is inline (allowed)
         assert_eq!(result.len(), 0);
     }
@@ -363,7 +362,7 @@ mod tests {
         let content = "[https://example.com](https://example.com)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("'url_inline'"));
     }
@@ -374,7 +373,7 @@ mod tests {
         let content = "[shortcut] [full][ref]\n\n[shortcut]: url\n[ref]: url2";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Only shortcut should be flagged
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("'shortcut'"));
@@ -386,7 +385,7 @@ mod tests {
         let content = "[collapsed][] [bad][ref]\n\n[collapsed]: url\n[ref]: url2";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("'full'"));
     }
@@ -397,7 +396,7 @@ mod tests {
         let content = "```\n[ignored](url) <https://ignored.com>\n```\n\n[checked](url)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Only the link outside code block should be checked
         assert_eq!(result.len(), 0);
     }
@@ -408,7 +407,7 @@ mod tests {
         let content = "`[ignored](url)` and `<https://ignored.com>` but [checked](url)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Only the link outside code spans should be checked
         assert_eq!(result.len(), 0);
     }
@@ -419,7 +418,7 @@ mod tests {
         let content = "[ref]: https://example.com\n[ref2]: <https://example2.com>";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Reference definitions should be ignored
         assert_eq!(result.len(), 0);
     }
@@ -430,7 +429,7 @@ mod tests {
         let content = "<!-- [ignored](url) -->\n  <!-- <https://ignored.com> -->";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -440,7 +439,7 @@ mod tests {
         let content = "[café ☕](https://café.com) [emoji 😀](url) [한글](url) [עברית](url)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // All should be detected as inline (allowed)
         assert_eq!(result.len(), 0);
     }
@@ -451,7 +450,7 @@ mod tests {
         let content = "Line 1\n\nLine 3 with <https://bad.com> here";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 3);
         assert_eq!(result[0].column, 13); // Position of '<'
@@ -463,7 +462,7 @@ mod tests {
         let content = "[ok](url) but <bad> and [also][bad]\n\n[bad]: url";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
         assert!(result[0].message.contains("'autolink'"));
         assert!(result[1].message.contains("'full'"));
@@ -475,7 +474,7 @@ mod tests {
         let content = "";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -485,7 +484,7 @@ mod tests {
         let content = "Just plain text without any links";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 0);
     }
 
@@ -495,7 +494,7 @@ mod tests {
         let content = "[link](url)";
         let ctx = LintContext::new(content);
         let result = rule.fix(&ctx);
-        
+
         assert!(result.is_err());
         if let Err(LintError::FixFailed(msg)) = result {
             assert!(msg.contains("does not support automatic fixing"));
@@ -509,7 +508,7 @@ mod tests {
         let content = "[text][ref] not detected as [shortcut]\n\n[ref]: url\n[shortcut]: url2";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert_eq!(result.len(), 2);
         assert!(result[0].message.contains("'full'"));
         assert!(result[1].message.contains("'shortcut'"));
@@ -522,7 +521,7 @@ mod tests {
         let content = "[text][ more text\n[text](url) is inline";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Only second line should have inline link
         assert_eq!(result.len(), 0);
     }
@@ -534,7 +533,7 @@ mod tests {
         let content = "[👨‍👩‍👧‍👦 family](url) [café☕](https://café.com)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Both should be detected as inline (allowed)
         assert_eq!(result.len(), 0);
     }

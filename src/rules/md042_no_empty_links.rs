@@ -55,7 +55,7 @@ impl Rule for MD042NoEmptyLinks {
                     if link.is_reference {
                         format!("[Link text]{}", &ctx.content[link.byte_offset + 1..link.byte_end])
                     } else {
-                        format!("[Link text]({})", effective_url)
+                        format!("[Link text]({effective_url})")
                     }
                 } else if link.is_reference {
                     // Keep the reference format
@@ -354,14 +354,20 @@ mod tests {
         // This is a formatting character, not a whitespace character
         let ctx = LintContext::new("[\u{200B}](https://example.com)");
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Zero-width space is not considered whitespace by trim()");
+        assert!(
+            result.is_empty(),
+            "Zero-width space is not considered whitespace by trim()"
+        );
 
         // Test with zero-width space between spaces
-        // Since trim() doesn't consider zero-width space as whitespace, 
+        // Since trim() doesn't consider zero-width space as whitespace,
         // " \u{200B} " becomes "\u{200B}" after trimming, which is NOT empty
         let ctx = LintContext::new("[ \u{200B} ](https://example.com)");
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Zero-width space remains after trim(), so link is not empty");
+        assert!(
+            result.is_empty(),
+            "Zero-width space remains after trim(), so link is not empty"
+        );
     }
 
     #[test]
@@ -408,7 +414,10 @@ mod tests {
         // Test actual shortcut-style links are not detected (since they don't match the pattern)
         let ctx = LintContext::new("[example]\n\n[example]: https://example.com");
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Shortcut links without [] or () are not parsed as links");
+        assert!(
+            result.is_empty(),
+            "Shortcut links without [] or () are not parsed as links"
+        );
     }
 
     #[test]
@@ -457,18 +466,21 @@ Code block should be ignored:
 [ref1]: https://ref1.com
 [ref2]: https://ref2.com
 "#;
-        
+
         let ctx = LintContext::new(content);
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
-        
+
         // Count the empty links
-        let empty_link_lines = vec![3, 7, 8, 10, 18];
+        let empty_link_lines = [3, 7, 8, 10, 18];
         assert_eq!(result.len(), empty_link_lines.len(), "Should find all empty links");
-        
+
         // Verify line numbers
         for (i, &expected_line) in empty_link_lines.iter().enumerate() {
-            assert_eq!(result[i].line, expected_line, "Empty link {} should be on line {}", i, expected_line);
+            assert_eq!(
+                result[i].line, expected_line,
+                "Empty link {i} should be on line {expected_line}"
+            );
         }
     }
 }

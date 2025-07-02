@@ -13,14 +13,13 @@ fn test_performance_with_large_content() {
     // Add many sections with various issues
     for i in 1..=100 {
         content.push_str(&format!(
-            "## Section {}\n\
+            "## Section {i}\n\
             Content with trailing spaces   \n\
-            (https://example{}.com)[reversed link {}]\n\
+            (https://example{i}.com)[reversed link {i}]\n\
             ```\n\
             code block\n\
             ```\n\
-            More content\n\n",
-            i, i, i
+            More content\n\n"
         ));
     }
 
@@ -145,7 +144,7 @@ fn test_many_small_issues() {
     let mut content = String::new();
 
     for i in 1..=200 {
-        content.push_str(&format!("Line {} has trailing spaces   \n", i)); // 3 spaces = invalid
+        content.push_str(&format!("Line {i} has trailing spaces   \n")); // 3 spaces = invalid
     }
 
     let rule = MD009TrailingSpaces::default();
@@ -196,9 +195,7 @@ fn test_many_small_issues() {
         let trailing_spaces = line.len() - line.trim_end().len();
         assert!(
             trailing_spaces <= 2,
-            "Line should have at most 2 trailing spaces (valid line break), found {}: '{}'",
-            trailing_spaces,
-            line
+            "Line should have at most 2 trailing spaces (valid line break), found {trailing_spaces}: '{line}'"
         );
     }
 }

@@ -29,35 +29,33 @@ fn test_cli_lsp_consistency(rule: &dyn Rule, content: &str, test_name: &str) {
                     // Both should produce the same result
                     assert_eq!(
                         cli_fixed, lsp_fixed,
-                        "{}: CLI and LSP fixes produced different results.\nOriginal: {:?}\nCLI: {:?}\nLSP: {:?}",
-                        test_name, content, cli_fixed, lsp_fixed
+                        "{test_name}: CLI and LSP fixes produced different results.\nOriginal: {content:?}\nCLI: {cli_fixed:?}\nLSP: {lsp_fixed:?}"
                     );
 
-                    println!("✓ {}: Consistency verified", test_name);
+                    println!("✓ {test_name}: Consistency verified");
                 }
                 Err(lsp_error) => {
                     // If LSP fix failed, warnings might not have proper fixes
                     // This is acceptable if there are no warning-level fixes
                     let has_fixes = warnings.iter().any(|w| w.fix.is_some());
                     if has_fixes {
-                        panic!("{}: LSP fix failed but warnings have fixes: {}", test_name, lsp_error);
+                        panic!("{test_name}: LSP fix failed but warnings have fixes: {lsp_error}");
                     } else {
-                        println!("○ {}: No warning-level fixes available (CLI-only rule)", test_name);
+                        println!("○ {test_name}: No warning-level fixes available (CLI-only rule)");
                     }
                 }
             }
         }
         (Ok(_), Err(warnings_error)) => {
             panic!(
-                "{}: CLI fix succeeded but check failed: {:?}",
-                test_name, warnings_error
+                "{test_name}: CLI fix succeeded but check failed: {warnings_error:?}"
             );
         }
         (Err(cli_error), Ok(_)) => {
-            println!("○ {}: CLI fix not implemented: {:?}", test_name, cli_error);
+            println!("○ {test_name}: CLI fix not implemented: {cli_error:?}");
         }
         (Err(_), Err(_)) => {
-            println!("○ {}: Neither CLI nor LSP fixes implemented", test_name);
+            println!("○ {test_name}: Neither CLI nor LSP fixes implemented");
         }
     }
 }
@@ -85,7 +83,7 @@ fn test_md030_list_marker_space_consistency() {
     ];
 
     for (content, description) in test_cases {
-        test_cli_lsp_consistency(&rule, content, &format!("MD030: {}", description));
+        test_cli_lsp_consistency(&rule, content, &format!("MD030: {description}"));
     }
 }
 
@@ -101,7 +99,7 @@ fn test_md019_multiple_space_atx_consistency() {
     ];
 
     for (content, description) in test_cases {
-        test_cli_lsp_consistency(&rule, content, &format!("MD019: {}", description));
+        test_cli_lsp_consistency(&rule, content, &format!("MD019: {description}"));
     }
 }
 
@@ -117,7 +115,7 @@ fn test_md009_trailing_spaces_consistency() {
     ];
 
     for (content, description) in test_cases {
-        test_cli_lsp_consistency(&rule, content, &format!("MD009: {}", description));
+        test_cli_lsp_consistency(&rule, content, &format!("MD009: {description}"));
     }
 }
 
@@ -132,7 +130,7 @@ fn test_md010_hard_tabs_consistency() {
     ];
 
     for (content, description) in test_cases {
-        test_cli_lsp_consistency(&rule, content, &format!("MD010: {}", description));
+        test_cli_lsp_consistency(&rule, content, &format!("MD010: {description}"));
     }
 }
 
@@ -148,7 +146,7 @@ fn test_md018_missing_space_atx_consistency() {
     ];
 
     for (content, description) in test_cases {
-        test_cli_lsp_consistency(&rule, content, &format!("MD018: {}", description));
+        test_cli_lsp_consistency(&rule, content, &format!("MD018: {description}"));
     }
 }
 
@@ -164,7 +162,7 @@ fn test_md023_heading_start_left_consistency() {
     ];
 
     for (content, description) in test_cases {
-        test_cli_lsp_consistency(&rule, content, &format!("MD023: {}", description));
+        test_cli_lsp_consistency(&rule, content, &format!("MD023: {description}"));
     }
 }
 
@@ -180,7 +178,7 @@ fn test_md026_trailing_punctuation_consistency() {
     ];
 
     for (content, description) in test_cases {
-        test_cli_lsp_consistency(&rule, content, &format!("MD026: {}", description));
+        test_cli_lsp_consistency(&rule, content, &format!("MD026: {description}"));
     }
 }
 
@@ -196,7 +194,7 @@ fn test_md038_no_space_in_code_consistency() {
     ];
 
     for (content, description) in test_cases {
-        test_cli_lsp_consistency(&rule, content, &format!("MD038: {}", description));
+        test_cli_lsp_consistency(&rule, content, &format!("MD038: {description}"));
     }
 }
 
@@ -215,7 +213,7 @@ fn test_md039_no_space_in_links_consistency() {
     ];
 
     for (content, description) in test_cases {
-        test_cli_lsp_consistency(&rule, content, &format!("MD039: {}", description));
+        test_cli_lsp_consistency(&rule, content, &format!("MD039: {description}"));
     }
 }
 
@@ -318,11 +316,10 @@ fn test_comprehensive_rule_consistency() {
                     Ok(lsp_fixed) => {
                         if cli_fixed == lsp_fixed {
                             consistent_count += 1;
-                            println!("✓ {}: CLI and LSP fixes consistent", rule_name);
+                            println!("✓ {rule_name}: CLI and LSP fixes consistent");
                         } else {
                             panic!(
-                                "{}: Inconsistent results!\nOriginal: {:?}\nCLI: {:?}\nLSP: {:?}",
-                                rule_name, content, cli_fixed, lsp_fixed
+                                "{rule_name}: Inconsistent results!\nOriginal: {content:?}\nCLI: {cli_fixed:?}\nLSP: {lsp_fixed:?}"
                             );
                         }
                     }
@@ -330,33 +327,33 @@ fn test_comprehensive_rule_consistency() {
                         // Check if this is CLI-only (no warning fixes)
                         let has_warning_fixes = warnings.iter().any(|w| w.fix.is_some());
                         if has_warning_fixes {
-                            panic!("{}: LSP fix failed but warnings have fixes", rule_name);
+                            panic!("{rule_name}: LSP fix failed but warnings have fixes");
                         } else {
                             cli_only_count += 1;
-                            println!("○ {}: CLI-only fixes (no warning-level fixes)", rule_name);
+                            println!("○ {rule_name}: CLI-only fixes (no warning-level fixes)");
                         }
                     }
                 }
             }
             (Ok(_), Err(_)) => {
-                panic!("{}: CLI fix succeeded but check failed", rule_name);
+                panic!("{rule_name}: CLI fix succeeded but check failed");
             }
             (Err(_), Ok(_)) => {
                 cli_only_count += 1;
-                println!("○ {}: No CLI fix implemented", rule_name);
+                println!("○ {rule_name}: No CLI fix implemented");
             }
             (Err(_), Err(_)) => {
                 no_fix_count += 1;
-                println!("○ {}: No fixes implemented", rule_name);
+                println!("○ {rule_name}: No fixes implemented");
             }
         }
     }
 
     println!("\n=== Fix Consistency Test Summary ===");
-    println!("Rules tested: {}", tested_count);
-    println!("Consistent fixes: {}", consistent_count);
-    println!("CLI-only fixes: {}", cli_only_count);
-    println!("No fixes: {}", no_fix_count);
+    println!("Rules tested: {tested_count}");
+    println!("Consistent fixes: {consistent_count}");
+    println!("CLI-only fixes: {cli_only_count}");
+    println!("No fixes: {no_fix_count}");
 
     // We expect at least some consistent fixes
     assert!(
@@ -398,7 +395,7 @@ fn test_all_53_rules_systematic_coverage() {
             Some(content) => content,
             None => {
                 test_content_missing += 1;
-                detailed_results.push(format!("⚠ {}: No test content defined", rule_name));
+                detailed_results.push(format!("⚠ {rule_name}: No test content defined"));
                 continue;
             }
         };
@@ -415,12 +412,11 @@ fn test_all_53_rules_systematic_coverage() {
                     Ok(lsp_fixed) => {
                         if cli_fixed == lsp_fixed {
                             consistent_fixes += 1;
-                            detailed_results.push(format!("✅ {}: CLI and LSP fixes consistent", rule_name));
+                            detailed_results.push(format!("✅ {rule_name}: CLI and LSP fixes consistent"));
                         } else {
                             // This is a real inconsistency that needs investigation
                             detailed_results.push(format!(
-                                "❌ {}: INCONSISTENT!\n   Original: {:?}\n   CLI: {:?}\n   LSP: {:?}",
-                                rule_name, test_content, cli_fixed, lsp_fixed
+                                "❌ {rule_name}: INCONSISTENT!\n   Original: {test_content:?}\n   CLI: {cli_fixed:?}\n   LSP: {lsp_fixed:?}"
                             ));
                         }
                     }
@@ -430,34 +426,32 @@ fn test_all_53_rules_systematic_coverage() {
                         if has_warning_fixes {
                             lsp_errors += 1;
                             detailed_results.push(format!(
-                                "⚠ {}: LSP fix failed but warnings have fixes: {}",
-                                rule_name, lsp_error
+                                "⚠ {rule_name}: LSP fix failed but warnings have fixes: {lsp_error}"
                             ));
                         } else {
                             cli_only_fixes += 1;
-                            detailed_results.push(format!("○ {}: CLI-only fixes (no warning-level fixes)", rule_name));
+                            detailed_results.push(format!("○ {rule_name}: CLI-only fixes (no warning-level fixes)"));
                         }
                     }
                 }
             }
             (Ok(_), Err(check_error)) => {
                 detailed_results.push(format!(
-                    "⚠ {}: CLI fix succeeded but check failed: {:?}",
-                    rule_name, check_error
+                    "⚠ {rule_name}: CLI fix succeeded but check failed: {check_error:?}"
                 ));
             }
             (Err(_), Ok(warnings)) => {
                 let has_warning_fixes = warnings.iter().any(|w| w.fix.is_some());
                 if has_warning_fixes {
-                    detailed_results.push(format!("○ {}: No CLI fix but has warning fixes", rule_name));
+                    detailed_results.push(format!("○ {rule_name}: No CLI fix but has warning fixes"));
                 } else {
                     no_fixes += 1;
-                    detailed_results.push(format!("○ {}: No fixes implemented", rule_name));
+                    detailed_results.push(format!("○ {rule_name}: No fixes implemented"));
                 }
             }
             (Err(_), Err(_)) => {
                 no_fixes += 1;
-                detailed_results.push(format!("○ {}: No fixes implemented", rule_name));
+                detailed_results.push(format!("○ {rule_name}: No fixes implemented"));
             }
         }
     }
@@ -465,19 +459,19 @@ fn test_all_53_rules_systematic_coverage() {
     // Print detailed results
     println!("📋 Detailed Results:");
     for result in &detailed_results {
-        println!("{}", result);
+        println!("{result}");
     }
 
     // Print comprehensive summary
     println!("\n📊 === COMPREHENSIVE CLI vs LSP FIX CONSISTENCY REPORT ===");
     println!("Total rules in rumdl: 53");
-    println!("Rules tested: {}", total_tested);
-    println!("Test content missing: {}", test_content_missing);
+    println!("Rules tested: {total_tested}");
+    println!("Test content missing: {test_content_missing}");
     println!("─────────────────────────────────────────────────────");
-    println!("✅ Consistent CLI/LSP fixes: {}", consistent_fixes);
-    println!("○ CLI-only fixes: {}", cli_only_fixes);
-    println!("○ No fixes available: {}", no_fixes);
-    println!("⚠ LSP errors: {}", lsp_errors);
+    println!("✅ Consistent CLI/LSP fixes: {consistent_fixes}");
+    println!("○ CLI-only fixes: {cli_only_fixes}");
+    println!("○ No fixes available: {no_fixes}");
+    println!("⚠ LSP errors: {lsp_errors}");
     println!("─────────────────────────────────────────────────────");
 
     let coverage_tested = total_tested - test_content_missing;
@@ -488,15 +482,13 @@ fn test_all_53_rules_systematic_coverage() {
     };
 
     println!(
-        "📈 Test coverage: {}/{} rules ({:.1}%)",
-        coverage_tested, total_tested, coverage_percentage
+        "📈 Test coverage: {coverage_tested}/{total_tested} rules ({coverage_percentage:.1}%)"
     );
 
     if consistent_fixes > 0 {
         let consistency_rate = (consistent_fixes as f64 / coverage_tested as f64) * 100.0;
         println!(
-            "🎯 Fix consistency rate: {}/{} ({:.1}%)",
-            consistent_fixes, coverage_tested, consistency_rate
+            "🎯 Fix consistency rate: {consistent_fixes}/{coverage_tested} ({consistency_rate:.1}%)"
         );
     }
 
@@ -509,7 +501,7 @@ fn test_all_53_rules_systematic_coverage() {
     let accounted_rules = consistent_fixes + cli_only_fixes + no_fixes;
     let inconsistent_rules = coverage_tested - accounted_rules - lsp_errors;
 
-    println!("❌ Inconsistent fixes: {}", inconsistent_rules);
+    println!("❌ Inconsistent fixes: {inconsistent_rules}");
 
     // For now, allow inconsistencies but track them
     assert_eq!(

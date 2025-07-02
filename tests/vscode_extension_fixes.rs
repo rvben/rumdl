@@ -17,7 +17,7 @@ use rumdl::rules::*;
 /// 3. Returning the result
 fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String> {
     let ctx = LintContext::new(content);
-    let warnings = rule.check(&ctx).map_err(|e| format!("Check failed: {:?}", e))?;
+    let warnings = rule.check(&ctx).map_err(|e| format!("Check failed: {e:?}"))?;
 
     if warnings.is_empty() {
         return Ok(content.to_string());
@@ -71,10 +71,7 @@ fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String>
 /// Helper function to create test cases for each rule
 fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn Rule>)> {
     match rule_name {
-        "MD001" => Some((
-            "# H1\n### H3 (should be H2)",
-            Box::new(MD001HeadingIncrement),
-        )),
+        "MD001" => Some(("# H1\n### H3 (should be H2)", Box::new(MD001HeadingIncrement))),
         "MD002" => Some(("## H2 (should start with H1)", Box::new(MD002FirstHeadingH1::default()))),
         "MD003" => Some(("# ATX\nSetext\n======", Box::new(MD003HeadingStyle::default()))),
         "MD004" => Some((
@@ -92,10 +89,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         "MD007" => Some(("- Item 1\n   - Wrong indent", Box::new(MD007ULIndent::default()))),
         "MD009" => Some(("Line with trailing spaces   ", Box::new(MD009TrailingSpaces::default()))),
         "MD010" => Some(("Line with\ttab", Box::new(MD010NoHardTabs::default()))),
-        "MD011" => Some((
-            "(http://example.com)[Example]",
-            Box::new(MD011NoReversedLinks),
-        )),
+        "MD011" => Some(("(http://example.com)[Example]", Box::new(MD011NoReversedLinks))),
         "MD012" => Some((
             "Content\n\n\n\nToo many blanks",
             Box::new(MD012NoMultipleBlanks::default()),
@@ -107,14 +101,8 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         "MD014" => Some(("```bash\n$ command\n```", Box::new(MD014CommandsShowOutput::default()))),
         "MD018" => Some(("#Missing space", Box::new(MD018NoMissingSpaceAtx))),
         "MD019" => Some(("##  Multiple spaces", Box::new(MD019NoMultipleSpaceAtx::new()))),
-        "MD020" => Some((
-            "##No space in closed##",
-            Box::new(MD020NoMissingSpaceClosedAtx),
-        )),
-        "MD021" => Some((
-            "##  Multiple  spaces  ##",
-            Box::new(MD021NoMultipleSpaceClosedAtx),
-        )),
+        "MD020" => Some(("##No space in closed##", Box::new(MD020NoMissingSpaceClosedAtx))),
+        "MD021" => Some(("##  Multiple  spaces  ##", Box::new(MD021NoMultipleSpaceClosedAtx))),
         "MD022" => Some((
             "Text\n# Heading\nMore text",
             Box::new(MD022BlanksAroundHeadings::default()),
@@ -136,10 +124,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             "1.  Multiple spaces after marker",
             Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1)),
         )),
-        "MD031" => Some((
-            "Text\n```\ncode\n```\nText",
-            Box::new(MD031BlanksAroundFences),
-        )),
+        "MD031" => Some(("Text\n```\ncode\n```\nText", Box::new(MD031BlanksAroundFences))),
         "MD032" => Some(("Text\n* List item\nText", Box::new(MD032BlanksAroundLists::default()))),
         "MD033" => Some(("Text with <div>HTML</div>", Box::new(MD033NoInlineHtml::default()))),
         "MD034" => Some(("Visit https://example.com", Box::new(MD034NoBareUrls))),
@@ -148,16 +133,10 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             "**Bold text as heading**",
             Box::new(MD036NoEmphasisAsHeading::new("!?.,:;".to_string())),
         )),
-        "MD037" => Some((
-            "Text with * spaces around * emphasis",
-            Box::new(MD037NoSpaceInEmphasis),
-        )),
+        "MD037" => Some(("Text with * spaces around * emphasis", Box::new(MD037NoSpaceInEmphasis))),
         "MD038" => Some(("`code `", Box::new(MD038NoSpaceInCode::default()))),
         "MD039" => Some(("[link text ]( url )", Box::new(MD039NoSpaceInLinks))),
-        "MD040" => Some((
-            "```\ncode without language\n```",
-            Box::new(MD040FencedCodeLanguage),
-        )),
+        "MD040" => Some(("```\ncode without language\n```", Box::new(MD040FencedCodeLanguage))),
         "MD041" => Some(("Not a heading", Box::new(MD041FirstLineHeading::default()))),
         "MD042" => Some(("[]()", Box::new(MD042NoEmptyLinks))),
         "MD043" => Some((
@@ -173,10 +152,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             "    indented code",
             Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Fenced)),
         )),
-        "MD047" => Some((
-            "File without trailing newline",
-            Box::new(MD047SingleTrailingNewline),
-        )),
+        "MD047" => Some(("File without trailing newline", Box::new(MD047SingleTrailingNewline))),
         "MD048" => Some((
             "~~~\ncode\n~~~",
             Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Tilde)),
@@ -270,15 +246,14 @@ mod tests {
 
         for (input, expected) in test_cases {
             let result = simulate_vscode_fix(input, &rule).unwrap();
-            assert_eq!(result, expected, "Failed for input: {}", input);
+            assert_eq!(result, expected, "Failed for input: {input}");
 
             // Ensure no duplication of hash symbols
             let hash_count = input.chars().take_while(|&c| c == '#').count();
             let result_hash_count = result.chars().take_while(|&c| c == '#').count();
             assert_eq!(
                 hash_count, result_hash_count,
-                "Hash count should remain the same for: {}",
-                input
+                "Hash count should remain the same for: {input}"
             );
         }
     }
@@ -291,7 +266,7 @@ mod tests {
 
         for (input, expected) in test_cases {
             let result = simulate_vscode_fix(input, &rule).unwrap();
-            assert_eq!(result, expected, "Failed for input: {:?}", input);
+            assert_eq!(result, expected, "Failed for input: {input:?}");
         }
     }
 
@@ -382,7 +357,7 @@ mod tests {
             for (i, line) in lines.iter().enumerate() {
                 for (j, other_line) in lines.iter().enumerate() {
                     if i != j && !line.trim().is_empty() && line == other_line {
-                        panic!("Found duplicated line: {:?}", line);
+                        panic!("Found duplicated line: {line:?}");
                     }
                 }
             }
@@ -479,27 +454,28 @@ mod tests {
                             };
 
                         if has_obvious_duplication || has_size_based_duplication {
-                            panic!("Rule {} has content duplication in VS Code extension fix!\nOriginal: {:?}\nFixed: {:?}",
-                                   rule_name, test_content, fixed_content);
+                            panic!(
+                                "Rule {rule_name} has content duplication in VS Code extension fix!\nOriginal: {test_content:?}\nFixed: {fixed_content:?}"
+                            );
                         }
 
                         passed_tests += 1;
-                        println!("✓ {}: Fix applied successfully", rule_name);
+                        println!("✓ {rule_name}: Fix applied successfully");
                     }
                     Err(e) => {
                         // No fix available or fix failed - this is acceptable
-                        println!("- {}: No fix available ({})", rule_name, e);
+                        println!("- {rule_name}: No fix available ({e})");
                     }
                 }
             } else {
-                println!("⚠ {}: No test case defined", rule_name);
+                println!("⚠ {rule_name}: No test case defined");
             }
         }
 
         println!("\n=== Test Summary ===");
-        println!("Rules tested: {}", tested_rules);
-        println!("Rules with fixes: {}", rules_with_fixes);
-        println!("Tests passed: {}", passed_tests);
+        println!("Rules tested: {tested_rules}");
+        println!("Rules with fixes: {rules_with_fixes}");
+        println!("Tests passed: {passed_tests}");
 
         // We expect at least some rules to have fixes and all of them to pass the duplication test
         assert!(rules_with_fixes > 0, "Expected at least some rules to have fixes");

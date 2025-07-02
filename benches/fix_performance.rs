@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::*;
@@ -10,7 +10,7 @@ fn generate_problematic_content(size: usize) -> String {
     for i in 0..size {
         // MD001 - Heading increment issues
         if i % 10 == 0 {
-            content.push_str(&format!("### Heading {} (should be H1)\n\n", i));
+            content.push_str(&format!("### Heading {i} (should be H1)\n\n"));
         }
 
         // MD002 - First heading should be H1
@@ -20,40 +20,40 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD003 - Heading style inconsistency
         if i % 15 == 0 {
-            content.push_str(&format!("Heading {}\n", i));
+            content.push_str(&format!("Heading {i}\n"));
             content.push_str("=============\n\n");
         }
 
         // MD004 - Unordered list style inconsistency
         if i % 8 == 0 {
-            content.push_str(&format!("* Item {}\n", i));
+            content.push_str(&format!("* Item {i}\n"));
             content.push_str(&format!("- Item {}\n", i + 1));
             content.push_str(&format!("+ Item {}\n\n", i + 2));
         }
 
         // MD005 - List indentation issues
         if i % 12 == 0 {
-            content.push_str(&format!("* Item {}\n", i));
-            content.push_str(&format!("   * Badly indented item {}\n\n", i));
+            content.push_str(&format!("* Item {i}\n"));
+            content.push_str(&format!("   * Badly indented item {i}\n\n"));
         }
 
         // MD006 - Start bullets at beginning
         if i % 20 == 0 {
-            content.push_str(&format!("  * Indented bullet {}\n\n", i));
+            content.push_str(&format!("  * Indented bullet {i}\n\n"));
         }
 
         // MD007 - Unordered list indentation
         if i % 18 == 0 {
-            content.push_str(&format!("* Item {}\n", i));
-            content.push_str(&format!("   * Wrong indent {}\n\n", i));
+            content.push_str(&format!("* Item {i}\n"));
+            content.push_str(&format!("   * Wrong indent {i}\n\n"));
         }
 
         // MD009 - Trailing spaces
-        content.push_str(&format!("Line {} with trailing spaces   \n", i));
+        content.push_str(&format!("Line {i} with trailing spaces   \n"));
 
         // MD010 - Hard tabs
         if i % 25 == 0 {
-            content.push_str(&format!("Line {}\twith\ttabs\n", i));
+            content.push_str(&format!("Line {i}\twith\ttabs\n"));
         }
 
         // MD012 - Multiple blank lines
@@ -63,72 +63,72 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD013 - Line length (create long lines)
         if i % 7 == 0 {
-            content.push_str(&format!("This is a very long line {} that exceeds the default line length limit of 80 characters and should be flagged by MD013 rule for being too long.\n", i));
+            content.push_str(&format!("This is a very long line {i} that exceeds the default line length limit of 80 characters and should be flagged by MD013 rule for being too long.\n"));
         }
 
         // MD018 - No space after hash on atx heading
         if i % 22 == 0 {
-            content.push_str(&format!("#Heading without space {}\n\n", i));
+            content.push_str(&format!("#Heading without space {i}\n\n"));
         }
 
         // MD019 - Multiple spaces after hash on atx heading
         if i % 24 == 0 {
-            content.push_str(&format!("##  Heading with extra spaces {}\n\n", i));
+            content.push_str(&format!("##  Heading with extra spaces {i}\n\n"));
         }
 
         // MD020 - No space inside hashes on closed atx heading
         if i % 26 == 0 {
-            content.push_str(&format!("#Closed heading{}#\n\n", i));
+            content.push_str(&format!("#Closed heading{i}#\n\n"));
         }
 
         // MD021 - Multiple spaces inside hashes on closed atx heading
         if i % 28 == 0 {
-            content.push_str(&format!("# Closed heading {}  #\n\n", i));
+            content.push_str(&format!("# Closed heading {i}  #\n\n"));
         }
 
         // MD022 - Headings should be surrounded by blank lines
         if i % 35 == 0 {
-            content.push_str(&format!("Text before heading\n# Heading {}\nText after heading\n\n", i));
+            content.push_str(&format!("Text before heading\n# Heading {i}\nText after heading\n\n"));
         }
 
         // MD023 - Headings must start at beginning of line
         if i % 40 == 0 {
-            content.push_str(&format!("  # Indented heading {}\n\n", i));
+            content.push_str(&format!("  # Indented heading {i}\n\n"));
         }
 
         // MD026 - Trailing punctuation in headings
         if i % 16 == 0 {
-            content.push_str(&format!("# Heading with punctuation {}!\n\n", i));
+            content.push_str(&format!("# Heading with punctuation {i}!\n\n"));
         }
 
         // MD027 - Multiple spaces after blockquote symbol
         if i % 45 == 0 {
-            content.push_str(&format!(">  Blockquote with extra spaces {}\n\n", i));
+            content.push_str(&format!(">  Blockquote with extra spaces {i}\n\n"));
         }
 
         // MD030 - Spaces after list markers
         if i % 14 == 0 {
-            content.push_str(&format!("-  Item with extra space {}\n\n", i));
+            content.push_str(&format!("-  Item with extra space {i}\n\n"));
         }
 
         // MD031 - Fenced code blocks should be surrounded by blank lines
         if i % 50 == 0 {
-            content.push_str(&format!("Text before\n```\ncode {}\n```\nText after\n\n", i));
+            content.push_str(&format!("Text before\n```\ncode {i}\n```\nText after\n\n"));
         }
 
         // MD032 - Lists should be surrounded by blank lines
         if i % 55 == 0 {
-            content.push_str(&format!("Text before\n* List item {}\nText after\n\n", i));
+            content.push_str(&format!("Text before\n* List item {i}\nText after\n\n"));
         }
 
         // MD033 - Inline HTML
         if i % 17 == 0 {
-            content.push_str(&format!("Text with <b>HTML tags</b> number {}\n", i));
+            content.push_str(&format!("Text with <b>HTML tags</b> number {i}\n"));
         }
 
         // MD034 - Bare URL used
         if i % 19 == 0 {
-            content.push_str(&format!("Visit http://example{}.com for more info\n", i));
+            content.push_str(&format!("Visit http://example{i}.com for more info\n"));
         }
 
         // MD035 - Horizontal rule style
@@ -138,17 +138,17 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD037 - Spaces inside emphasis markers
         if i % 13 == 0 {
-            content.push_str(&format!("Text with * bad emphasis * number {}\n", i));
+            content.push_str(&format!("Text with * bad emphasis * number {i}\n"));
         }
 
         // MD038 - Spaces inside code span elements
         if i % 21 == 0 {
-            content.push_str(&format!("Text with ` bad code ` number {}\n", i));
+            content.push_str(&format!("Text with ` bad code ` number {i}\n"));
         }
 
         // MD039 - Spaces inside link text
         if i % 32 == 0 {
-            content.push_str(&format!("[ Link text ](http://example{}.com)\n", i));
+            content.push_str(&format!("[ Link text ](http://example{i}.com)\n"));
         }
 
         // MD040 - Fenced code language
@@ -158,17 +158,17 @@ fn generate_problematic_content(size: usize) -> String {
 
         // MD042 - No empty links
         if i % 70 == 0 {
-            content.push_str(&format!("[empty link {}]()\n", i));
+            content.push_str(&format!("[empty link {i}]()\n"));
         }
 
         // MD044 - Proper names
         if i % 11 == 0 {
-            content.push_str(&format!("Text mentioning javascript and github number {}\n", i));
+            content.push_str(&format!("Text mentioning javascript and github number {i}\n"));
         }
 
         // MD045 - Images should have alternate text
         if i % 75 == 0 {
-            content.push_str(&format!("![](image{}.png)\n", i));
+            content.push_str(&format!("![](image{i}.png)\n"));
         }
 
         // MD047 - Files should end with a single newline (we'll handle this separately)
@@ -176,26 +176,24 @@ fn generate_problematic_content(size: usize) -> String {
         // MD049 - Emphasis style
         if i % 23 == 0 {
             content.push_str(&format!(
-                "Text with _underscore emphasis_ and *asterisk emphasis* {}\n",
-                i
+                "Text with _underscore emphasis_ and *asterisk emphasis* {i}\n"
             ));
         }
 
         // MD050 - Strong style
         if i % 27 == 0 {
             content.push_str(&format!(
-                "Text with __underscore strong__ and **asterisk strong** {}\n",
-                i
+                "Text with __underscore strong__ and **asterisk strong** {i}\n"
             ));
         }
 
         // MD053 - Link and image reference definitions should be needed
         if i % 80 == 0 {
-            content.push_str(&format!("[unused{}]: http://example{}.com\n", i, i));
+            content.push_str(&format!("[unused{i}]: http://example{i}.com\n"));
         }
 
         // Regular content
-        content.push_str(&format!("Regular paragraph {} with some content.\n\n", i));
+        content.push_str(&format!("Regular paragraph {i} with some content.\n\n"));
     }
 
     content

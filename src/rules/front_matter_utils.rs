@@ -25,7 +25,7 @@ lazy_static! {
 
     // Front matter field pattern
     static ref FRONT_MATTER_FIELD: Regex = Regex::new(r"^([^:]+):\s*(.*)$").unwrap();
-    
+
     // TOML field pattern
     static ref TOML_FIELD_PATTERN: Regex = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap();
 }
@@ -68,14 +68,15 @@ impl FrontMatterUtils {
             }
 
             // Check if current line is a closing delimiter before updating state
-            if i == line_num && i > 0 {
-                if (in_standard_front_matter && STANDARD_FRONT_MATTER_END.is_match(line)) ||
-                   (in_toml_front_matter && TOML_FRONT_MATTER_END.is_match(line)) ||
-                   (in_json_front_matter && JSON_FRONT_MATTER_END.is_match(line)) ||
-                   (in_malformed_front_matter1 && MALFORMED_FRONT_MATTER_END1.is_match(line)) ||
-                   (in_malformed_front_matter2 && MALFORMED_FRONT_MATTER_END2.is_match(line)) {
-                    return false; // Closing delimiter is not part of front matter content
-                }
+            if i == line_num
+                && i > 0
+                && ((in_standard_front_matter && STANDARD_FRONT_MATTER_END.is_match(line))
+                    || (in_toml_front_matter && TOML_FRONT_MATTER_END.is_match(line))
+                    || (in_json_front_matter && JSON_FRONT_MATTER_END.is_match(line))
+                    || (in_malformed_front_matter1 && MALFORMED_FRONT_MATTER_END1.is_match(line))
+                    || (in_malformed_front_matter2 && MALFORMED_FRONT_MATTER_END2.is_match(line)))
+            {
+                return false; // Closing delimiter is not part of front matter content
             }
 
             // Standard YAML front matter handling
@@ -170,12 +171,12 @@ impl FrontMatterUtils {
                     // Handle YAML/JSON-style fields (key: value)
                     if let Some(captures) = FRONT_MATTER_FIELD.captures(line) {
                         let mut key = captures.get(1).unwrap().as_str().trim();
-                        
+
                         // Strip quotes from the key if present (for JSON-style fields in any format)
                         if key.starts_with('"') && key.ends_with('"') && key.len() >= 2 {
                             key = &key[1..key.len() - 1];
                         }
-                        
+
                         if key == field_name {
                             let value = captures.get(2).unwrap().as_str().trim();
                             // Strip quotes if present
@@ -237,7 +238,7 @@ impl FrontMatterUtils {
                         let full_key = if current_prefix.is_empty() {
                             key.to_string()
                         } else {
-                            format!("{}.{}", current_prefix, key)
+                            format!("{current_prefix}.{key}")
                         };
                         fields.insert(full_key, value.to_string());
                     }
@@ -247,7 +248,7 @@ impl FrontMatterUtils {
                     if let Some(captures) = FRONT_MATTER_FIELD.captures(line) {
                         let mut key = captures.get(1).unwrap().as_str().trim();
                         let value = captures.get(2).unwrap().as_str().trim();
-                        
+
                         // Strip quotes from the key if present (for JSON-style fields in any format)
                         if key.starts_with('"') && key.ends_with('"') && key.len() >= 2 {
                             key = &key[1..key.len() - 1];
@@ -258,14 +259,14 @@ impl FrontMatterUtils {
                             if current_prefix.is_empty() {
                                 current_prefix = stripped.to_string();
                             } else {
-                                current_prefix = format!("{}.{}", current_prefix, stripped);
+                                current_prefix = format!("{current_prefix}.{stripped}");
                             }
                         } else {
                             // This is a field with a value
                             let full_key = if current_prefix.is_empty() {
                                 key.to_string()
                             } else {
-                                format!("{}.{}", current_prefix, key)
+                                format!("{current_prefix}.{key}")
                             };
                             // Strip quotes if present
                             let value = value
@@ -524,35 +525,56 @@ mod tests {
     fn test_detect_front_matter_type() {
         // YAML front matter
         let yaml_content = "---\ntitle: Test\n---\nContent";
-        assert_eq!(FrontMatterUtils::detect_front_matter_type(yaml_content), FrontMatterType::Yaml);
-        
+        assert_eq!(
+            FrontMatterUtils::detect_front_matter_type(yaml_content),
+            FrontMatterType::Yaml
+        );
+
         // TOML front matter
         let toml_content = "+++\ntitle = \"Test\"\n+++\nContent";
-        assert_eq!(FrontMatterUtils::detect_front_matter_type(toml_content), FrontMatterType::Toml);
-        
+        assert_eq!(
+            FrontMatterUtils::detect_front_matter_type(toml_content),
+            FrontMatterType::Toml
+        );
+
         // JSON front matter
         let json_content = "{\n\"title\": \"Test\"\n}\nContent";
-        assert_eq!(FrontMatterUtils::detect_front_matter_type(json_content), FrontMatterType::Json);
-        
+        assert_eq!(
+            FrontMatterUtils::detect_front_matter_type(json_content),
+            FrontMatterType::Json
+        );
+
         // Malformed front matter
         let malformed1 = "- --\ntitle: Test\n- --\nContent";
-        assert_eq!(FrontMatterUtils::detect_front_matter_type(malformed1), FrontMatterType::Malformed);
-        
+        assert_eq!(
+            FrontMatterUtils::detect_front_matter_type(malformed1),
+            FrontMatterType::Malformed
+        );
+
         let malformed2 = "-- -\ntitle: Test\n-- -\nContent";
-        assert_eq!(FrontMatterUtils::detect_front_matter_type(malformed2), FrontMatterType::Malformed);
-        
+        assert_eq!(
+            FrontMatterUtils::detect_front_matter_type(malformed2),
+            FrontMatterType::Malformed
+        );
+
         // No front matter
-        assert_eq!(FrontMatterUtils::detect_front_matter_type("# Regular content"), FrontMatterType::None);
+        assert_eq!(
+            FrontMatterUtils::detect_front_matter_type("# Regular content"),
+            FrontMatterType::None
+        );
         assert_eq!(FrontMatterUtils::detect_front_matter_type(""), FrontMatterType::None);
-        
+
         // Incomplete front matter (no closing marker)
-        assert_eq!(FrontMatterUtils::detect_front_matter_type("---\ntitle: Test"), FrontMatterType::None);
+        assert_eq!(
+            FrontMatterUtils::detect_front_matter_type("---\ntitle: Test"),
+            FrontMatterType::None
+        );
     }
 
     #[test]
     fn test_is_in_front_matter() {
         let content = "---\ntitle: Test\nauthor: Me\n---\nContent here";
-        
+
         // The implementation considers opening delimiter and content lines as inside front matter
         // but the closing delimiter triggers the exit from front matter state
         assert!(FrontMatterUtils::is_in_front_matter(content, 0)); // Opening ---
@@ -560,7 +582,7 @@ mod tests {
         assert!(FrontMatterUtils::is_in_front_matter(content, 2)); // author line
         assert!(!FrontMatterUtils::is_in_front_matter(content, 3)); // Closing --- (not part of front matter)
         assert!(!FrontMatterUtils::is_in_front_matter(content, 4)); // Content
-        
+
         // Out of bounds
         assert!(!FrontMatterUtils::is_in_front_matter(content, 100));
     }
@@ -569,15 +591,15 @@ mod tests {
     fn test_extract_front_matter() {
         let content = "---\ntitle: Test\nauthor: Me\n---\nContent";
         let front_matter = FrontMatterUtils::extract_front_matter(content);
-        
+
         assert_eq!(front_matter.len(), 2);
         assert_eq!(front_matter[0], "title: Test");
         assert_eq!(front_matter[1], "author: Me");
-        
+
         // No front matter
         let no_fm = FrontMatterUtils::extract_front_matter("Regular content");
         assert!(no_fm.is_empty());
-        
+
         // Too short content
         let short = FrontMatterUtils::extract_front_matter("---\n---");
         assert!(short.is_empty());
@@ -586,14 +608,14 @@ mod tests {
     #[test]
     fn test_has_front_matter_field() {
         let content = "---\ntitle: Test\nauthor: Me\n---\nContent";
-        
+
         assert!(FrontMatterUtils::has_front_matter_field(content, "title"));
         assert!(FrontMatterUtils::has_front_matter_field(content, "author"));
         assert!(!FrontMatterUtils::has_front_matter_field(content, "date"));
-        
+
         // No front matter
         assert!(!FrontMatterUtils::has_front_matter_field("Regular content", "title"));
-        
+
         // Too short content
         assert!(!FrontMatterUtils::has_front_matter_field("--", "title"));
     }
@@ -602,26 +624,50 @@ mod tests {
     fn test_get_front_matter_field_value() {
         // YAML front matter
         let yaml_content = "---\ntitle: Test Title\nauthor: \"John Doe\"\n---\nContent";
-        assert_eq!(FrontMatterUtils::get_front_matter_field_value(yaml_content, "title"), Some("Test Title"));
-        assert_eq!(FrontMatterUtils::get_front_matter_field_value(yaml_content, "author"), Some("John Doe"));
-        assert_eq!(FrontMatterUtils::get_front_matter_field_value(yaml_content, "nonexistent"), None);
-        
+        assert_eq!(
+            FrontMatterUtils::get_front_matter_field_value(yaml_content, "title"),
+            Some("Test Title")
+        );
+        assert_eq!(
+            FrontMatterUtils::get_front_matter_field_value(yaml_content, "author"),
+            Some("John Doe")
+        );
+        assert_eq!(
+            FrontMatterUtils::get_front_matter_field_value(yaml_content, "nonexistent"),
+            None
+        );
+
         // TOML front matter
         let toml_content = "+++\ntitle = \"Test Title\"\nauthor = \"John Doe\"\n+++\nContent";
-        assert_eq!(FrontMatterUtils::get_front_matter_field_value(toml_content, "title"), Some("Test Title"));
-        assert_eq!(FrontMatterUtils::get_front_matter_field_value(toml_content, "author"), Some("John Doe"));
-        
+        assert_eq!(
+            FrontMatterUtils::get_front_matter_field_value(toml_content, "title"),
+            Some("Test Title")
+        );
+        assert_eq!(
+            FrontMatterUtils::get_front_matter_field_value(toml_content, "author"),
+            Some("John Doe")
+        );
+
         // JSON-style fields in YAML front matter - keys should not include quotes
         let json_style_yaml = "---\n\"title\": \"Test Title\"\n---\nContent";
-        assert_eq!(FrontMatterUtils::get_front_matter_field_value(json_style_yaml, "title"), Some("Test Title"));
-        
+        assert_eq!(
+            FrontMatterUtils::get_front_matter_field_value(json_style_yaml, "title"),
+            Some("Test Title")
+        );
+
         // Actual JSON front matter
         let json_fm = "{\n\"title\": \"Test Title\"\n}\nContent";
-        assert_eq!(FrontMatterUtils::get_front_matter_field_value(json_fm, "title"), Some("Test Title"));
-        
+        assert_eq!(
+            FrontMatterUtils::get_front_matter_field_value(json_fm, "title"),
+            Some("Test Title")
+        );
+
         // No front matter
-        assert_eq!(FrontMatterUtils::get_front_matter_field_value("Regular content", "title"), None);
-        
+        assert_eq!(
+            FrontMatterUtils::get_front_matter_field_value("Regular content", "title"),
+            None
+        );
+
         // Too short content
         assert_eq!(FrontMatterUtils::get_front_matter_field_value("--", "title"), None);
     }
@@ -631,17 +677,17 @@ mod tests {
         // Simple YAML front matter
         let yaml_content = "---\ntitle: Test\nauthor: Me\n---\nContent";
         let fields = FrontMatterUtils::extract_front_matter_fields(yaml_content);
-        
+
         assert_eq!(fields.get("title"), Some(&"Test".to_string()));
         assert_eq!(fields.get("author"), Some(&"Me".to_string()));
-        
+
         // TOML front matter
         let toml_content = "+++\ntitle = \"Test\"\nauthor = \"Me\"\n+++\nContent";
         let toml_fields = FrontMatterUtils::extract_front_matter_fields(toml_content);
-        
+
         assert_eq!(toml_fields.get("title"), Some(&"Test".to_string()));
         assert_eq!(toml_fields.get("author"), Some(&"Me".to_string()));
-        
+
         // No front matter
         let no_fields = FrontMatterUtils::extract_front_matter_fields("Regular content");
         assert!(no_fields.is_empty());
@@ -651,14 +697,14 @@ mod tests {
     fn test_get_front_matter_end_line() {
         let content = "---\ntitle: Test\n---\nContent";
         assert_eq!(FrontMatterUtils::get_front_matter_end_line(content), 3);
-        
+
         // TOML
         let toml_content = "+++\ntitle = \"Test\"\n+++\nContent";
         assert_eq!(FrontMatterUtils::get_front_matter_end_line(toml_content), 3);
-        
+
         // No front matter
         assert_eq!(FrontMatterUtils::get_front_matter_end_line("Regular content"), 0);
-        
+
         // Too short
         assert_eq!(FrontMatterUtils::get_front_matter_end_line("--"), 0);
     }
@@ -669,21 +715,21 @@ mod tests {
         let malformed1 = "- --\ntitle: Test\n- --\nContent";
         let fixed1 = FrontMatterUtils::fix_malformed_front_matter(malformed1);
         assert!(fixed1.starts_with("---\ntitle: Test\n---"));
-        
+
         // Fix malformed type 2
         let malformed2 = "-- -\ntitle: Test\n-- -\nContent";
         let fixed2 = FrontMatterUtils::fix_malformed_front_matter(malformed2);
         assert!(fixed2.starts_with("---\ntitle: Test\n---"));
-        
+
         // Don't change valid front matter
         let valid = "---\ntitle: Test\n---\nContent";
         let unchanged = FrontMatterUtils::fix_malformed_front_matter(valid);
         assert_eq!(unchanged, valid);
-        
+
         // No front matter
         let no_fm = "# Regular content";
         assert_eq!(FrontMatterUtils::fix_malformed_front_matter(no_fm), no_fm);
-        
+
         // Too short
         let short = "--";
         assert_eq!(FrontMatterUtils::fix_malformed_front_matter(short), short);
@@ -698,9 +744,9 @@ author:
   email: john@example.com
 ---
 Content";
-        
+
         let fields = FrontMatterUtils::extract_front_matter_fields(content);
-        
+
         // Note: The current implementation doesn't fully handle nested YAML
         // This test documents the current behavior
         assert!(fields.contains_key("title"));
@@ -713,11 +759,11 @@ Content";
         assert_eq!(FrontMatterUtils::detect_front_matter_type(""), FrontMatterType::None);
         assert!(FrontMatterUtils::extract_front_matter("").is_empty());
         assert_eq!(FrontMatterUtils::get_front_matter_end_line(""), 0);
-        
+
         // Only delimiters
         let only_delim = "---\n---";
         assert!(FrontMatterUtils::extract_front_matter(only_delim).is_empty());
-        
+
         // Multiple front matter sections (only first should be detected)
         let multiple = "---\ntitle: First\n---\n---\ntitle: Second\n---";
         let fm_type = FrontMatterUtils::detect_front_matter_type(multiple);
@@ -729,9 +775,18 @@ Content";
     #[test]
     fn test_unicode_content() {
         let content = "---\ntitle: 你好世界\nauthor: José\n---\nContent";
-        
-        assert_eq!(FrontMatterUtils::detect_front_matter_type(content), FrontMatterType::Yaml);
-        assert_eq!(FrontMatterUtils::get_front_matter_field_value(content, "title"), Some("你好世界"));
-        assert_eq!(FrontMatterUtils::get_front_matter_field_value(content, "author"), Some("José"));
+
+        assert_eq!(
+            FrontMatterUtils::detect_front_matter_type(content),
+            FrontMatterType::Yaml
+        );
+        assert_eq!(
+            FrontMatterUtils::get_front_matter_field_value(content, "title"),
+            Some("你好世界")
+        );
+        assert_eq!(
+            FrontMatterUtils::get_front_matter_field_value(content, "author"),
+            Some("José")
+        );
     }
 }

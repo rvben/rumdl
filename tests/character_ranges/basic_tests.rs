@@ -3,7 +3,7 @@
 //! This module contains basic tests to verify the character range testing framework
 //! works correctly with a few representative rules.
 
-use super::{multi_warning_test, simple_test, test_character_ranges, ExpectedWarning};
+use super::{ExpectedWarning, multi_warning_test, simple_test, test_character_ranges};
 
 #[test]
 fn test_md001_heading_increment() {

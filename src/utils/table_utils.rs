@@ -214,14 +214,14 @@ mod tests {
         assert!(TableUtils::is_potential_table_row("| Cell 1 | Cell 2 |"));
         assert!(TableUtils::is_potential_table_row("Cell 1 | Cell 2"));
         assert!(!TableUtils::is_potential_table_row("| Cell |")); // Only 1 cell, not a table
-        
+
         // Multiple cells
         assert!(TableUtils::is_potential_table_row("| A | B | C | D | E |"));
-        
+
         // With whitespace
         assert!(TableUtils::is_potential_table_row("  | Indented | Table |  "));
         assert!(TableUtils::is_potential_table_row("| Spaces | Around |"));
-        
+
         // Not table rows
         assert!(!TableUtils::is_potential_table_row("- List item"));
         assert!(!TableUtils::is_potential_table_row("* Another list"));
@@ -229,19 +229,19 @@ mod tests {
         assert!(!TableUtils::is_potential_table_row("Regular text"));
         assert!(!TableUtils::is_potential_table_row(""));
         assert!(!TableUtils::is_potential_table_row("   "));
-        
+
         // Code blocks
         assert!(!TableUtils::is_potential_table_row("`code with | pipe`"));
         assert!(!TableUtils::is_potential_table_row("``multiple | backticks``"));
-        
+
         // Single pipe not enough
         assert!(!TableUtils::is_potential_table_row("Just one |"));
         assert!(!TableUtils::is_potential_table_row("| Just one"));
-        
+
         // Very long cells (>100 chars)
         let long_cell = "a".repeat(101);
-        assert!(!TableUtils::is_potential_table_row(&format!("| {} | b |", long_cell)));
-        
+        assert!(!TableUtils::is_potential_table_row(&format!("| {long_cell} | b |")));
+
         // Cells with newlines
         assert!(!TableUtils::is_potential_table_row("| Cell with\nnewline | Other |"));
     }
@@ -253,33 +253,33 @@ mod tests {
         assert!(TableUtils::is_delimiter_row("| --- | --- |"));
         assert!(TableUtils::is_delimiter_row("|:---|---:|"));
         assert!(TableUtils::is_delimiter_row("|:---:|:---:|"));
-        
+
         // With varying dash counts
         assert!(TableUtils::is_delimiter_row("|-|--|"));
         assert!(TableUtils::is_delimiter_row("|-------|----------|"));
-        
+
         // With whitespace
         assert!(TableUtils::is_delimiter_row("|  ---  |  ---  |"));
         assert!(TableUtils::is_delimiter_row("| :--- | ---: |"));
-        
+
         // Multiple columns
         assert!(TableUtils::is_delimiter_row("|---|---|---|---|"));
-        
+
         // Without leading/trailing pipes
         assert!(TableUtils::is_delimiter_row("--- | ---"));
         assert!(TableUtils::is_delimiter_row(":--- | ---:"));
-        
+
         // Not delimiter rows
         assert!(!TableUtils::is_delimiter_row("| Header | Header |"));
         assert!(!TableUtils::is_delimiter_row("Regular text"));
         assert!(!TableUtils::is_delimiter_row(""));
         assert!(!TableUtils::is_delimiter_row("|||"));
         assert!(!TableUtils::is_delimiter_row("| | |"));
-        
+
         // Must have dashes
         assert!(!TableUtils::is_delimiter_row("| : | : |"));
         assert!(!TableUtils::is_delimiter_row("|    |    |"));
-        
+
         // Mixed content
         assert!(!TableUtils::is_delimiter_row("| --- | text |"));
         assert!(!TableUtils::is_delimiter_row("| abc | --- |"));
@@ -292,27 +292,27 @@ mod tests {
         assert_eq!(TableUtils::count_cells("Cell 1 | Cell 2 | Cell 3"), 3);
         assert_eq!(TableUtils::count_cells("| Cell 1 | Cell 2"), 2);
         assert_eq!(TableUtils::count_cells("Cell 1 | Cell 2 |"), 2);
-        
+
         // Single cell
         assert_eq!(TableUtils::count_cells("| Cell |"), 1);
         assert_eq!(TableUtils::count_cells("Cell"), 0); // No pipe
-        
+
         // Empty cells
         assert_eq!(TableUtils::count_cells("|  |  |  |"), 3);
         assert_eq!(TableUtils::count_cells("| | | |"), 3);
-        
+
         // Many cells
         assert_eq!(TableUtils::count_cells("| A | B | C | D | E | F |"), 6);
-        
+
         // Edge cases
         assert_eq!(TableUtils::count_cells("||"), 1); // One empty cell
         assert_eq!(TableUtils::count_cells("|||"), 2); // Two empty cells
-        
+
         // No table
         assert_eq!(TableUtils::count_cells("Regular text"), 0);
         assert_eq!(TableUtils::count_cells(""), 0);
         assert_eq!(TableUtils::count_cells("   "), 0);
-        
+
         // Whitespace handling
         assert_eq!(TableUtils::count_cells("  | A | B |  "), 2);
         assert_eq!(TableUtils::count_cells("|   A   |   B   |"), 2);
@@ -337,7 +337,7 @@ mod tests {
             TableUtils::determine_pipe_style("Cell 1 | Cell 2"),
             Some("no_leading_or_trailing")
         );
-        
+
         // With whitespace
         assert_eq!(
             TableUtils::determine_pipe_style("  | Cell 1 | Cell 2 |  "),
@@ -347,12 +347,12 @@ mod tests {
             TableUtils::determine_pipe_style("  | Cell 1 | Cell 2  "),
             Some("leading_only")
         );
-        
+
         // No pipes
         assert_eq!(TableUtils::determine_pipe_style("Regular text"), None);
         assert_eq!(TableUtils::determine_pipe_style(""), None);
         assert_eq!(TableUtils::determine_pipe_style("   "), None);
-        
+
         // Single pipe cases
         assert_eq!(TableUtils::determine_pipe_style("|"), Some("leading_and_trailing"));
         assert_eq!(TableUtils::determine_pipe_style("| Cell"), Some("leading_only"));
@@ -365,12 +365,12 @@ mod tests {
 |-----------|-----------|
 | Cell 1    | Cell 2    |
 | Cell 3    | Cell 4    |";
-        
+
         let ctx = LintContext::new(content);
-        
+
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 1);
-        
+
         let table = &tables[0];
         assert_eq!(table.start_line, 0);
         assert_eq!(table.end_line, 3);
@@ -392,19 +392,19 @@ More text
 | Table 2 | Col 2 |
 |----------|-------|
 | Data 2   | Data  |";
-        
+
         let ctx = LintContext::new(content);
-        
+
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 2);
-        
+
         // First table
         assert_eq!(tables[0].start_line, 2);
         assert_eq!(tables[0].end_line, 4);
         assert_eq!(tables[0].header_line, 2);
         assert_eq!(tables[0].delimiter_line, 3);
         assert_eq!(tables[0].content_lines, vec![4]);
-        
+
         // Second table
         assert_eq!(tables[1].start_line, 8);
         assert_eq!(tables[1].end_line, 10);
@@ -419,12 +419,12 @@ More text
 |-----------|-----------|
 
 Next paragraph";
-        
+
         let ctx = LintContext::new(content);
-        
+
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 1);
-        
+
         let table = &tables[0];
         assert_eq!(table.start_line, 0);
         assert_eq!(table.end_line, 1); // Just header and delimiter
@@ -442,12 +442,12 @@ Next paragraph";
 | Real | Table |
 |------|-------|
 | Data | Here  |";
-        
+
         let ctx = LintContext::new(content);
-        
+
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 1); // Only the table outside code block
-        
+
         let table = &tables[0];
         assert_eq!(table.header_line, 6);
         assert_eq!(table.delimiter_line, 7);
@@ -459,9 +459,9 @@ Next paragraph";
 No tables here
 - List item with | pipe
 * Another list item";
-        
+
         let ctx = LintContext::new(content);
-        
+
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 0);
     }
@@ -475,9 +475,9 @@ But no delimiter row
 | Proper | Table |
 |---------|-------|
 | Data    | Here  |";
-        
+
         let ctx = LintContext::new(content);
-        
+
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 1); // Only the proper table
         assert_eq!(tables[0].header_line, 4);
@@ -490,22 +490,22 @@ But no delimiter row
         assert!(!TableUtils::is_delimiter_row(""));
         assert_eq!(TableUtils::count_cells(""), 0);
         assert_eq!(TableUtils::determine_pipe_style(""), None);
-        
+
         // Test whitespace only
         assert!(!TableUtils::is_potential_table_row("   "));
         assert!(!TableUtils::is_delimiter_row("   "));
         assert_eq!(TableUtils::count_cells("   "), 0);
         assert_eq!(TableUtils::determine_pipe_style("   "), None);
-        
+
         // Test single character
         assert!(!TableUtils::is_potential_table_row("|"));
         assert!(!TableUtils::is_delimiter_row("|"));
         assert_eq!(TableUtils::count_cells("|"), 0); // Need at least 2 parts
-        
+
         // Test very long lines
         let long_line = format!("| {} |", "a".repeat(200));
         assert!(!TableUtils::is_potential_table_row(&long_line)); // Too long
-        
+
         // Test unicode
         assert!(TableUtils::is_potential_table_row("| 你好 | 世界 |"));
         assert!(TableUtils::is_potential_table_row("| émoji | 🎉 |"));
@@ -521,12 +521,12 @@ But no delimiter row
             delimiter_line: 1,
             content_lines: vec![2, 3, 4, 5],
         };
-        
+
         // Test Debug trait
-        let debug_str = format!("{:?}", block);
+        let debug_str = format!("{block:?}");
         assert!(debug_str.contains("TableBlock"));
         assert!(debug_str.contains("start_line: 0"));
-        
+
         // Test Clone trait
         let cloned = block.clone();
         assert_eq!(cloned.start_line, block.start_line);

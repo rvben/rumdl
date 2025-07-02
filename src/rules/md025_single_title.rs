@@ -2,7 +2,7 @@
 ///
 /// See [docs/md025.md](../../docs/md025.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{calculate_match_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -106,8 +106,8 @@ impl MD025SingleTitle {
         // Check if the heading starts with these patterns
         section_indicators.iter().any(|&indicator| {
             lower_text.starts_with(indicator) ||
-            lower_text.starts_with(&format!("{}:", indicator)) ||
-            lower_text.contains(&format!(" {}", indicator)) ||
+            lower_text.starts_with(&format!("{indicator}:")) ||
+            lower_text.contains(&format!(" {indicator}")) ||
             // Handle appendix numbering like "Appendix A", "Appendix 1"
             (indicator == "appendix" && (
                 lower_text.matches("appendix").count() == 1 && 
@@ -327,7 +327,8 @@ impl Rule for MD025SingleTitle {
                         if matches!(
                             heading.style,
                             crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                        ) && line_num + 1 < ctx.lines.len() {
+                        ) && line_num + 1 < ctx.lines.len()
+                        {
                             fixed_lines.push(ctx.lines[line_num + 1].content.clone());
                             skip_next = true;
                         }
@@ -344,7 +345,8 @@ impl Rule for MD025SingleTitle {
                             if matches!(
                                 heading.style,
                                 crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                            ) && line_num + 1 < ctx.lines.len() {
+                            ) && line_num + 1 < ctx.lines.len()
+                            {
                                 fixed_lines.push(ctx.lines[line_num + 1].content.clone());
                                 skip_next = true;
                             }
@@ -401,13 +403,14 @@ impl Rule for MD025SingleTitle {
 
                             // Add indentation
                             let indentation = " ".repeat(line_info.indent);
-                            fixed_lines.push(format!("{}{}", indentation, replacement));
+                            fixed_lines.push(format!("{indentation}{replacement}"));
 
                             // For Setext headings, skip the original underline
                             if matches!(
                                 heading.style,
                                 crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                            ) && line_num + 1 < ctx.lines.len() {
+                            ) && line_num + 1 < ctx.lines.len()
+                            {
                                 skip_next = true;
                             }
                         }
@@ -420,7 +423,8 @@ impl Rule for MD025SingleTitle {
                     if matches!(
                         heading.style,
                         crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                    ) && line_num + 1 < ctx.lines.len() {
+                    ) && line_num + 1 < ctx.lines.len()
+                    {
                         fixed_lines.push(ctx.lines[line_num + 1].content.clone());
                         skip_next = true;
                     }
@@ -521,7 +525,7 @@ mod tests {
         for case in valid_cases {
             let ctx = crate::lint_context::LintContext::new(case);
             let result = rule.check(&ctx).unwrap();
-            assert!(result.is_empty(), "Should not flag document sections in: {}", case);
+            assert!(result.is_empty(), "Should not flag document sections in: {case}");
         }
 
         // Test invalid cases that should still be flagged
@@ -533,7 +537,7 @@ mod tests {
         for case in invalid_cases {
             let ctx = crate::lint_context::LintContext::new(case);
             let result = rule.check(&ctx).unwrap();
-            assert!(!result.is_empty(), "Should flag non-section headings in: {}", case);
+            assert!(!result.is_empty(), "Should flag non-section headings in: {case}");
         }
     }
 

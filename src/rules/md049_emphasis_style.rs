@@ -41,20 +41,20 @@ impl MD049EmphasisStyle {
     ) {
         // Replace inline code to avoid false positives
         let line_no_code = replace_inline_code(line);
-        
+
         // Find all emphasis markers
         let markers = find_emphasis_markers(&line_no_code);
         if markers.is_empty() {
             return;
         }
-        
+
         // Find single emphasis spans (not strong emphasis)
         let spans = find_single_emphasis_spans(&line_no_code, markers);
-        
+
         for span in spans {
             let marker_char = span.opening.as_char();
             let col = span.opening.start_pos + 1; // Convert to 1-based
-            
+
             emphasis_info.push((line_num, col, marker_char, span.content.clone()));
         }
     }
@@ -72,40 +72,40 @@ impl Rule for MD049EmphasisStyle {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = vec![];
         let content = ctx.content;
-        
+
         // Early return if no emphasis markers
         if !content.contains('*') && !content.contains('_') {
             return Ok(warnings);
         }
-        
+
         // Create document structure to skip code blocks
         let structure = DocumentStructure::new(content);
-        
+
         // Collect all emphasis from the document
         let mut emphasis_info = vec![];
-        
+
         // Track absolute position for fixes
         let mut abs_pos = 0;
-        
+
         for (line_idx, line) in content.lines().enumerate() {
             let line_num = line_idx + 1;
-            
+
             // Skip if in code block or front matter
             if structure.is_in_code_block(line_num) || structure.is_in_front_matter(line_num) {
                 abs_pos += line.len() + 1; // +1 for newline
                 continue;
             }
-            
+
             // Skip if the line doesn't contain any emphasis markers
             if !line.contains('*') && !line.contains('_') {
                 abs_pos += line.len() + 1;
                 continue;
             }
-            
+
             // Collect emphasis with absolute positions
             let line_start = abs_pos;
             self.collect_emphasis_from_line(line, line_num, &mut emphasis_info);
-            
+
             // Update emphasis_info with absolute positions
             let last_emphasis_count = emphasis_info.len();
             for i in (0..last_emphasis_count).rev() {
@@ -117,43 +117,40 @@ impl Rule for MD049EmphasisStyle {
                     break;
                 }
             }
-            
+
             abs_pos += line.len() + 1;
         }
-        
+
         match self.config.style {
             EmphasisStyle::Consistent => {
                 // If we have less than 2 emphasis nodes, no need to check consistency
                 if emphasis_info.len() < 2 {
                     return Ok(warnings);
                 }
-                
+
                 // Use the first emphasis marker found as the target style
                 let target_marker = emphasis_info[0].2;
-                
+
                 // Check all subsequent emphasis nodes for consistency
                 for (line_num, abs_col, marker, content) in emphasis_info.iter().skip(1) {
                     if *marker != target_marker {
                         // Calculate emphasis length (marker + content + marker)
                         let emphasis_len = 1 + content.len() + 1;
-                        
+
                         // Calculate line-relative column (1-based)
-                        let line_start = content.lines()
-                            .take(line_num - 1)
-                            .map(|l| l.len() + 1)
-                            .sum::<usize>();
+                        let line_start = content.lines().take(line_num - 1).map(|l| l.len() + 1).sum::<usize>();
                         let col = abs_col - line_start + 1;
-                        
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             line: *line_num,
                             column: col,
                             end_line: *line_num,
                             end_column: col + emphasis_len,
-                            message: format!("Emphasis should use {} instead of {}", target_marker, marker),
+                            message: format!("Emphasis should use {target_marker} instead of {marker}"),
                             fix: Some(Fix {
                                 range: *abs_col..*abs_col + emphasis_len,
-                                replacement: format!("{}{}{}", target_marker, content, target_marker),
+                                replacement: format!("{target_marker}{content}{target_marker}"),
                             }),
                             severity: Severity::Warning,
                         });
@@ -166,29 +163,31 @@ impl Rule for MD049EmphasisStyle {
                     EmphasisStyle::Underscore => ('*', '_'),
                     EmphasisStyle::Consistent => unreachable!(),
                 };
-                
+
                 for (line_num, abs_col, marker, content) in &emphasis_info {
                     if *marker == wrong_marker {
                         // Calculate emphasis length (marker + content + marker)
                         let emphasis_len = 1 + content.len() + 1;
-                        
+
                         // Calculate line-relative column (1-based)
-                        let line_start = ctx.content.lines()
+                        let line_start = ctx
+                            .content
+                            .lines()
                             .take(line_num - 1)
                             .map(|l| l.len() + 1)
                             .sum::<usize>();
                         let col = abs_col - line_start + 1;
-                        
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             line: *line_num,
                             column: col,
                             end_line: *line_num,
                             end_column: col + emphasis_len,
-                            message: format!("Emphasis should use {} instead of {}", correct_marker, wrong_marker),
+                            message: format!("Emphasis should use {correct_marker} instead of {wrong_marker}"),
                             fix: Some(Fix {
                                 range: *abs_col..*abs_col + emphasis_len,
-                                replacement: format!("{}{}{}", correct_marker, content, correct_marker),
+                                replacement: format!("{correct_marker}{content}{correct_marker}"),
                             }),
                             severity: Severity::Warning,
                         });

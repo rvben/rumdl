@@ -106,7 +106,7 @@ fn test_md024_in_code_blocks() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 6);
-    println!("{:?}", result);
+    println!("{result:?}");
     std::io::stdout().flush().unwrap();
 }
 
@@ -159,7 +159,7 @@ fn test_md024_performance_with_many_headings() {
     // Create a document with 100 unique headings
     let mut content = String::new();
     for i in 1..=100 {
-        content.push_str(&format!("# Heading {}\n\n", i));
+        content.push_str(&format!("# Heading {i}\n\n"));
     }
 
     let ctx = LintContext::new(&content);

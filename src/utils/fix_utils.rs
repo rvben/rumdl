@@ -230,7 +230,7 @@ mod tests {
                 end_column: 7,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: 4..6,  // "  " after "Test"
+                    range: 4..6, // "  " after "Test"
                     replacement: " ".to_string(),
                 }),
                 rule_name: Some("MD009"),
@@ -363,7 +363,8 @@ mod tests {
             end_column: 3,
             severity: Severity::Warning,
             fix: Some(Fix {
-                range: 10..5, // start > end
+                #[allow(clippy::reversed_empty_ranges)]
+                range: 10..5, // start > end - intentionally invalid for testing
                 replacement: "Test".to_string(),
             }),
             rule_name: Some("TEST"),
@@ -377,18 +378,16 @@ mod tests {
     #[test]
     fn test_apply_no_fixes() {
         let content = "No changes needed";
-        let warnings = vec![
-            LintWarning {
-                message: "Warning without fix".to_string(),
-                line: 1,
-                column: 1,
-                end_line: 1,
-                end_column: 5,
-                severity: Severity::Warning,
-                fix: None,
-                rule_name: Some("TEST"),
-            },
-        ];
+        let warnings = vec![LintWarning {
+            message: "Warning without fix".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            severity: Severity::Warning,
+            fix: None,
+            rule_name: Some("TEST"),
+        }];
 
         let result = apply_warning_fixes(content, &warnings).unwrap();
         assert_eq!(result, content);
@@ -532,7 +531,7 @@ mod tests {
                 end_column: 13,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: 5..12,  // "content"
+                    range: 5..12, // "content"
                     replacement: "stuff".to_string(),
                 }),
                 rule_name: Some("MD001"),
@@ -545,7 +544,7 @@ mod tests {
                 end_column: 13,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: 5..12,  // Same range
+                    range: 5..12, // Same range
                     replacement: "stuff".to_string(),
                 }),
                 rule_name: Some("MD002"),

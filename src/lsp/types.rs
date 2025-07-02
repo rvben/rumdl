@@ -215,10 +215,7 @@ mod tests {
         assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::WARNING));
         assert_eq!(diagnostic.source, Some("rumdl".to_string()));
         assert_eq!(diagnostic.message, "Test warning message");
-        assert_eq!(
-            diagnostic.code,
-            Some(NumberOrString::String("MD001".to_string()))
-        );
+        assert_eq!(diagnostic.code, Some(NumberOrString::String("MD001".to_string())));
     }
 
     #[test]
@@ -279,7 +276,7 @@ mod tests {
     fn test_byte_range_to_lsp_range_simple() {
         let text = "Hello\nWorld";
         let range = byte_range_to_lsp_range(text, 0..5).unwrap();
-        
+
         assert_eq!(range.start.line, 0);
         assert_eq!(range.start.character, 0);
         assert_eq!(range.end.line, 0);
@@ -290,7 +287,7 @@ mod tests {
     fn test_byte_range_to_lsp_range_multiline() {
         let text = "Hello\nWorld\nTest";
         let range = byte_range_to_lsp_range(text, 6..11).unwrap(); // "World"
-        
+
         assert_eq!(range.start.line, 1);
         assert_eq!(range.start.character, 0);
         assert_eq!(range.end.line, 1);
@@ -302,7 +299,7 @@ mod tests {
         let text = "Hello 世界\nTest";
         // "世界" starts at byte 6 and each character is 3 bytes
         let range = byte_range_to_lsp_range(text, 6..12).unwrap();
-        
+
         assert_eq!(range.start.line, 0);
         assert_eq!(range.start.character, 6);
         assert_eq!(range.end.line, 0);
@@ -313,7 +310,7 @@ mod tests {
     fn test_byte_range_to_lsp_range_eof() {
         let text = "Hello";
         let range = byte_range_to_lsp_range(text, 0..5).unwrap();
-        
+
         assert_eq!(range.start.line, 0);
         assert_eq!(range.start.character, 0);
         assert_eq!(range.end.line, 0);
@@ -346,13 +343,13 @@ mod tests {
 
         let uri = Url::parse("file:///test.md").unwrap();
         let document_text = "Hello World";
-        
+
         let action = warning_to_code_action(&warning, &uri, document_text).unwrap();
-        
+
         assert_eq!(action.title, "Fix: Missing space");
         assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
         assert_eq!(action.is_preferred, Some(true));
-        
+
         let changes = action.edit.unwrap().changes.unwrap();
         let edits = &changes[&uri];
         assert_eq!(edits.len(), 1);
@@ -374,7 +371,7 @@ mod tests {
 
         let uri = Url::parse("file:///test.md").unwrap();
         let document_text = "Hello World";
-        
+
         let action = warning_to_code_action(&warning, &uri, document_text);
         assert!(action.is_none());
     }
@@ -397,9 +394,9 @@ mod tests {
 
         let uri = Url::parse("file:///test.md").unwrap();
         let document_text = "Hello\nWorld\nTest Line";
-        
+
         let action = warning_to_code_action(&warning, &uri, document_text).unwrap();
-        
+
         let changes = action.edit.unwrap().changes.unwrap();
         let edits = &changes[&uri];
         assert_eq!(edits[0].new_text, "Fixed\nContent");
@@ -422,12 +419,9 @@ mod tests {
 
         let diagnostic = warning_to_diagnostic(&warning);
         assert!(diagnostic.code_description.is_some());
-        
+
         let url = diagnostic.code_description.unwrap().href;
-        assert_eq!(
-            url.as_str(),
-            "https://github.com/rvben/rumdl/blob/main/docs/md013.md"
-        );
+        assert_eq!(url.as_str(), "https://github.com/rvben/rumdl/blob/main/docs/md013.md");
     }
 
     #[test]
@@ -435,7 +429,7 @@ mod tests {
         // Test that partial JSON can be deserialized with defaults
         let json = r#"{"enable_linting": false}"#;
         let config: RumdlLspConfig = serde_json::from_str(json).unwrap();
-        
+
         assert!(!config.enable_linting);
         assert_eq!(config.config_path, None); // Should use default
         assert!(!config.enable_auto_fix); // Should use default

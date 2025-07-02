@@ -1,6 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 /// Rule MD040: Fenced code blocks should have a language
 ///
@@ -114,7 +114,7 @@ impl Rule for MD040FencedCodeLanguage {
                                     let fence_end_byte = fence_start_byte + fence_len;
                                     fence_start_byte..fence_end_byte
                                 },
-                                replacement: format!("{}text", fence_marker),
+                                replacement: format!("{fence_marker}text"),
                             }),
                         });
                     }
@@ -250,7 +250,7 @@ impl Rule for MD040FencedCodeLanguage {
                             // This closes the current code block
                             if fence_needs_language {
                                 // Use the same indentation as the opening fence
-                                result.push_str(&format!("{}{}\n", original_indent, trimmed));
+                                result.push_str(&format!("{original_indent}{trimmed}\n"));
                             } else {
                                 // Preserve original line as-is
                                 result.push_str(line);
@@ -285,11 +285,11 @@ impl Rule for MD040FencedCodeLanguage {
                         if should_preserve_indent {
                             // Preserve indentation for nested contexts
                             original_indent = line_indent;
-                            result.push_str(&format!("{}{}text\n", original_indent, fence_marker));
+                            result.push_str(&format!("{original_indent}{fence_marker}text\n"));
                         } else {
                             // Remove indentation for standalone code blocks
                             original_indent = String::new();
-                            result.push_str(&format!("{}text\n", fence_marker));
+                            result.push_str(&format!("{fence_marker}text\n"));
                         }
                         fence_needs_language = true;
                     } else {
@@ -509,7 +509,10 @@ puts "!"
 ```
 "#;
         let result = run_check(content).unwrap();
-        assert!(result.is_empty(), "Code blocks with language and parameters should pass");
+        assert!(
+            result.is_empty(),
+            "Code blocks with language and parameters should pass"
+        );
     }
 
     #[test]
@@ -663,7 +666,7 @@ code with six tildes
 "#;
         let result = run_check(content).unwrap();
         assert_eq!(result.len(), 2);
-        
+
         let fixed = run_fix(content).unwrap();
         assert!(fixed.contains("````text"));
         assert!(fixed.contains("~~~~~~text"));
@@ -686,7 +689,10 @@ More markdown
 ````
 "#;
         let result = run_check(content).unwrap();
-        assert!(result.is_empty(), "Nested code blocks with different markers should not trigger warnings");
+        assert!(
+            result.is_empty(),
+            "Nested code blocks with different markers should not trigger warnings"
+        );
     }
 
     #[test]
@@ -729,7 +735,10 @@ code
 ```python
 this code block is not closed"#;
         let result = run_check(content).unwrap();
-        assert!(result.is_empty(), "Unclosed code blocks with language should not trigger warnings");
+        assert!(
+            result.is_empty(),
+            "Unclosed code blocks with language should not trigger warnings"
+        );
 
         // Test unclosed code block without language
         let content_no_lang = r#"# Test
@@ -751,7 +760,7 @@ code
 No newline at end"#;
         let fixed = run_fix(content).unwrap();
         assert!(!fixed.ends_with('\n'), "Fix should preserve lack of trailing newline");
-        
+
         let content_with_newline = "# Test\n\n```\ncode\n```\n";
         let fixed = run_fix(content_with_newline).unwrap();
         assert!(fixed.ends_with('\n'), "Fix should preserve trailing newline");
@@ -767,7 +776,10 @@ console.log(`template string with backticks`);
 ```
 "#;
         let result = run_check(content).unwrap();
-        assert!(result.is_empty(), "Backticks inside code blocks should not affect parsing");
+        assert!(
+            result.is_empty(),
+            "Backticks inside code blocks should not affect parsing"
+        );
     }
 
     #[test]
@@ -780,19 +792,19 @@ console.log(`template string with backticks`);
     #[test]
     fn test_should_skip_optimization() {
         let rule = MD040FencedCodeLanguage;
-        
+
         // Document without code fences should skip
         let ctx = LintContext::new("# Just a header\n\nSome text");
         assert!(rule.should_skip(&ctx));
-        
+
         // Document with backtick fences should not skip
         let ctx = LintContext::new("```\ncode\n```");
         assert!(!rule.should_skip(&ctx));
-        
+
         // Document with tilde fences should not skip
         let ctx = LintContext::new("~~~\ncode\n~~~");
         assert!(!rule.should_skip(&ctx));
-        
+
         // Empty document should skip
         let ctx = LintContext::new("");
         assert!(rule.should_skip(&ctx));

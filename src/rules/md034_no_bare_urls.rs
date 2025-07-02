@@ -220,7 +220,7 @@ impl MD034NoBareUrls {
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: url_start..url_end,
-                    replacement: format!("<{}>", url_text),
+                    replacement: format!("<{url_text}>"),
                 }),
             });
         }
@@ -237,11 +237,9 @@ impl MD034NoBareUrls {
                 content.get(email_start - 1..email_start)
             };
             let after = content.get(email_end..email_end + 1);
-            let is_valid_boundary = before.is_none_or(|c| {
-                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-            }) && after.is_none_or(|c| {
-                !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-            });
+            let is_valid_boundary = before
+                .is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".")
+                && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".");
             if !is_valid_boundary {
                 continue;
             }
@@ -282,7 +280,7 @@ impl MD034NoBareUrls {
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: email_start..email_end,
-                    replacement: format!("<{}>", email_text),
+                    replacement: format!("<{email_text}>"),
                 }),
             });
         }
@@ -347,7 +345,7 @@ impl MD034NoBareUrls {
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
-                                replacement: format!("<{}>", url_text),
+                                replacement: format!("<{url_text}>"),
                             }),
                         });
                     }
@@ -363,11 +361,9 @@ impl MD034NoBareUrls {
                         text_str.get(email_start - 1..email_start)
                     };
                     let after = text_str.get(email_end..email_end + 1);
-                    let is_valid_boundary = before.is_none_or(|c| {
-                        !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-                    }) && after.is_none_or(|c| {
-                        !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != "."
-                    });
+                    let is_valid_boundary = before
+                        .is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".")
+                        && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".");
                     if !is_valid_boundary {
                         continue;
                     }
@@ -383,11 +379,12 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: "Email address without angle brackets or link formatting (wrap like: <email>)".to_string(),
+                            message: "Email address without angle brackets or link formatting (wrap like: <email>)"
+                                .to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + email_text.len()),
-                                replacement: format!("<{}>", email_text),
+                                replacement: format!("<{email_text}>"),
                             }),
                         });
                     }
@@ -443,7 +440,7 @@ impl MD034NoBareUrls {
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: offset..(offset + url_text.len()),
-                                replacement: format!("<{}>", url_text),
+                                replacement: format!("<{url_text}>"),
                             }),
                         });
                     }
@@ -635,7 +632,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         if !result.is_empty() {
-            log::debug!("MD034 warnings: {:#?}", result);
+            log::debug!("MD034 warnings: {result:#?}");
         }
         assert!(
             result.is_empty(),
@@ -663,7 +660,7 @@ mod tests {
 
         // Add content with bare URLs (should be detected)
         for i in 0..250 {
-            content.push_str(&format!("Line {} with bare URL https://example{}.com/path\n", i, i));
+            content.push_str(&format!("Line {i} with bare URL https://example{i}.com/path\n"));
         }
 
         // Add content with proper markdown links (should not be detected)
@@ -682,7 +679,7 @@ mod tests {
 
         // Add content with emails
         for i in 0..100 {
-            content.push_str(&format!("Contact user{}@example{}.com for more info\n", i, i));
+            content.push_str(&format!("Contact user{i}@example{i}.com for more info\n"));
         }
 
         println!(
@@ -717,7 +714,7 @@ mod tests {
             avg_check_duration,
             avg_check_duration.as_secs_f64() * 1000.0
         );
-        println!("- Found {} warnings", warnings_count);
+        println!("- Found {warnings_count} warnings");
         println!(
             "- Lines per second: {:.0}",
             content.lines().count() as f64 / avg_check_duration.as_secs_f64()

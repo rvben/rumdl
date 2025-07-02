@@ -14,7 +14,7 @@ fn test_no_hard_tabs() {
 #[test]
 fn test_content_with_no_tabs_various_contexts() {
     let rule = MD010NoHardTabs::default();
-    
+
     // Test various content without tabs
     let content = "# Heading without tabs\n\n    Indented with spaces\n\n- List item\n  - Nested with spaces\n\n```\nCode without tabs\n```";
     let ctx = LintContext::new(content);
@@ -226,15 +226,15 @@ fn test_interaction_list_code_tabs() {
 #[test]
 fn test_multiple_tabs_on_same_line() {
     let rule = MD010NoHardTabs::default();
-    
+
     // Test with multiple separate tabs on same line
     let content = "Start\there\tand\there\twith\ttabs";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 5, "Should detect each tab separately");
-    
+
     // Verify each warning
-    for (_i, warning) in result.iter().enumerate() {
+    for warning in result.iter() {
         assert_eq!(warning.line, 1);
         assert_eq!(warning.message, "Found tab for alignment, use spaces instead");
     }
@@ -243,12 +243,12 @@ fn test_multiple_tabs_on_same_line() {
 #[test]
 fn test_tab_character_in_different_positions() {
     let rule = MD010NoHardTabs::default();
-    
+
     // Test tabs at start, middle, and end
     let content = "\tStart tab\nMiddle\ttab\nEnd tab\t\n\t\tDouble start\nMixed \t \t spaces";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     assert_eq!(result.len(), 6, "Should detect all tabs");
     assert_eq!(result[0].message, "Found leading tab, use 4 spaces instead");
     assert_eq!(result[1].message, "Found tab for alignment, use spaces instead");
@@ -261,33 +261,37 @@ fn test_tab_character_in_different_positions() {
 #[test]
 fn test_mixed_tabs_and_spaces_detailed() {
     let rule = MD010NoHardTabs::default();
-    
+
     // Various mixed indentation patterns
-    let content = "  \tTwo spaces then tab\n\t  Tab then two spaces\n \t \t Space tab space tab\n\t\t  Two tabs then spaces";
+    let content =
+        "  \tTwo spaces then tab\n\t  Tab then two spaces\n \t \t Space tab space tab\n\t\t  Two tabs then spaces";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     assert_eq!(result.len(), 5, "Should detect all tabs");
-    
+
     // Fix test
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "      Two spaces then tab\n      Tab then two spaces\n           Space tab space tab\n          Two tabs then spaces");
+    assert_eq!(
+        fixed,
+        "      Two spaces then tab\n      Tab then two spaces\n           Space tab space tab\n          Two tabs then spaces"
+    );
 }
 
 #[test]
 fn test_empty_lines_with_only_tabs_variations() {
     let rule = MD010NoHardTabs::default();
-    
+
     // Various empty line patterns
     let content = "\t\n\t\t\n\t\t\t\n\t \t\n \t \t \n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     assert_eq!(result.len(), 7, "Should detect all tab groups");
     assert_eq!(result[0].message, "Empty line contains tab");
     assert_eq!(result[1].message, "Empty line contains 2 tabs");
     assert_eq!(result[2].message, "Empty line contains 3 tabs");
-    
+
     // Mixed spaces and tabs on empty lines
     assert_eq!(result[3].message, "Empty line contains tab");
     assert_eq!(result[4].message, "Empty line contains tab");
@@ -299,49 +303,66 @@ fn test_empty_lines_with_only_tabs_variations() {
 fn test_configuration_spaces_per_tab() {
     // Test different spaces_per_tab configurations
     let content = "\tOne tab\n\t\tTwo tabs\n\t\t\tThree tabs";
-    
+
     // Test with 2 spaces per tab
     let rule2 = MD010NoHardTabs::new(2, true);
     let ctx = LintContext::new(content);
     let fixed2 = rule2.fix(&ctx).unwrap();
     assert_eq!(fixed2, "  One tab\n    Two tabs\n      Three tabs");
-    
+
     // Test with 8 spaces per tab
     let rule8 = MD010NoHardTabs::new(8, true);
     let fixed8 = rule8.fix(&ctx).unwrap();
-    assert_eq!(fixed8, "        One tab\n                Two tabs\n                        Three tabs");
+    assert_eq!(
+        fixed8,
+        "        One tab\n                Two tabs\n                        Three tabs"
+    );
 }
 
 #[test]
 fn test_configuration_code_blocks_parameter() {
     let content = "Normal\ttab\n\n```javascript\nfunction\tfoo() {\n\treturn\ttrue;\n}\n```\n\nAnother\ttab";
-    
+
     // Test with code_blocks = true (default)
     let rule_check_code = MD010NoHardTabs::new(4, true);
     let ctx = LintContext::new(content);
     let result_check = rule_check_code.check(&ctx).unwrap();
-    assert_eq!(result_check.len(), 5, "Should check tabs in code blocks when code_blocks=true");
-    
+    assert_eq!(
+        result_check.len(),
+        5,
+        "Should check tabs in code blocks when code_blocks=true"
+    );
+
     // Test with code_blocks = false
     let rule_skip_code = MD010NoHardTabs::new(4, false);
     let result_skip = rule_skip_code.check(&ctx).unwrap();
-    assert_eq!(result_skip.len(), 2, "Should skip tabs in code blocks when code_blocks=false");
-    
+    assert_eq!(
+        result_skip.len(),
+        2,
+        "Should skip tabs in code blocks when code_blocks=false"
+    );
+
     // Verify fix behavior
     let fixed_skip = rule_skip_code.fix(&ctx).unwrap();
-    assert!(fixed_skip.contains("function\tfoo()"), "Should preserve tabs in code blocks");
-    assert!(fixed_skip.contains("Normal    tab"), "Should fix tabs outside code blocks");
+    assert!(
+        fixed_skip.contains("function\tfoo()"),
+        "Should preserve tabs in code blocks"
+    );
+    assert!(
+        fixed_skip.contains("Normal    tab"),
+        "Should fix tabs outside code blocks"
+    );
 }
 
 #[test]
 fn test_consecutive_vs_separate_tabs() {
     let rule = MD010NoHardTabs::default();
-    
+
     // Test grouping of consecutive tabs
     let content = "\t\t\tThree consecutive\nOne\tthen\tanother\t";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     assert_eq!(result.len(), 4, "Should have 1 group for consecutive, 3 separate");
     assert_eq!(result[0].message, "Found 3 leading tabs, use 12 spaces instead");
     assert_eq!(result[1].message, "Found tab for alignment, use spaces instead");
@@ -352,18 +373,21 @@ fn test_consecutive_vs_separate_tabs() {
 #[test]
 fn test_fix_preserves_content_structure() {
     let rule = MD010NoHardTabs::default();
-    
+
     // Complex content with various elements
     let content = "# Header\n\n\tIndented paragraph\n\n- List\n\t- Nested\n\t\t- Double nested\n\n```\n\tCode block\n```\n\n> Quote\n> \tWith tab\n\n| Col1\t| Col2\t|\n|---\t|---\t|\n| Data\t| Data\t|";
-    
+
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    
+
     // Verify structure is preserved
     assert!(fixed.contains("# Header"), "Headers preserved");
     assert!(fixed.contains("    Indented paragraph"), "Indentation converted");
     assert!(fixed.contains("    - Nested"), "List indentation converted");
-    assert!(fixed.contains("        - Double nested"), "Double indentation converted");
+    assert!(
+        fixed.contains("        - Double nested"),
+        "Double indentation converted"
+    );
     assert!(fixed.contains(">     With tab"), "Quote tab converted");
     assert!(fixed.contains("| Col1    | Col2    |"), "Table tabs converted");
 }
@@ -371,20 +395,20 @@ fn test_fix_preserves_content_structure() {
 #[test]
 fn test_edge_cases() {
     let rule = MD010NoHardTabs::default();
-    
+
     // Test edge cases
     let content = "\t"; // Single tab only
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].message, "Empty line contains tab");
-    
+
     // Test file ending with tab
     let content2 = "Text\t";
     let ctx2 = LintContext::new(content2);
     let result2 = rule.check(&ctx2).unwrap();
     assert_eq!(result2.len(), 1);
-    
+
     // Test fix preserves lack of final newline
     let fixed2 = rule.fix(&ctx2).unwrap();
     assert_eq!(fixed2, "Text    ");
@@ -394,15 +418,15 @@ fn test_edge_cases() {
 #[test]
 fn test_inline_code_spans() {
     let rule = MD010NoHardTabs::new(4, false);
-    
+
     // Test tabs in inline code spans
     let content = "Text with `inline\tcode` and\ttab outside";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should detect both tabs (inline code spans are not excluded like code blocks)
     assert_eq!(result.len(), 2, "Should detect tabs in inline code and outside");
-    
+
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Text with `inline    code` and    tab outside");
 }

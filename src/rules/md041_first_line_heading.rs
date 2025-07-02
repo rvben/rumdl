@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
@@ -225,18 +225,21 @@ mod tests {
     #[test]
     fn test_first_line_is_heading_correct_level() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // First line is a level 1 heading (should pass)
         let content = "# My Document\n\nSome content here.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Expected no warnings when first line is a level 1 heading");
+        assert!(
+            result.is_empty(),
+            "Expected no warnings when first line is a level 1 heading"
+        );
     }
 
     #[test]
     fn test_first_line_is_heading_wrong_level() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // First line is a level 2 heading (should fail with level 1 requirement)
         let content = "## My Document\n\nSome content here.";
         let ctx = LintContext::new(content);
@@ -249,7 +252,7 @@ mod tests {
     #[test]
     fn test_first_line_not_heading() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // First line is plain text (should fail)
         let content = "This is not a heading\n\n# This is a heading";
         let ctx = LintContext::new(content);
@@ -262,13 +265,16 @@ mod tests {
     #[test]
     fn test_empty_lines_before_heading() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // Empty lines before first heading (should pass - rule skips empty lines)
         let content = "\n\n# My Document\n\nSome content.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Expected no warnings when empty lines precede a valid heading");
-        
+        assert!(
+            result.is_empty(),
+            "Expected no warnings when empty lines precede a valid heading"
+        );
+
         // Empty lines before non-heading content (should fail)
         let content = "\n\nNot a heading\n\nSome content.";
         let ctx = LintContext::new(content);
@@ -281,18 +287,21 @@ mod tests {
     #[test]
     fn test_front_matter_with_title() {
         let rule = MD041FirstLineHeading::new(1, true);
-        
+
         // Front matter with title field (should pass)
         let content = "---\ntitle: My Document\nauthor: John Doe\n---\n\nSome content here.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Expected no warnings when front matter has title field");
+        assert!(
+            result.is_empty(),
+            "Expected no warnings when front matter has title field"
+        );
     }
 
     #[test]
     fn test_front_matter_without_title() {
         let rule = MD041FirstLineHeading::new(1, true);
-        
+
         // Front matter without title field (should fail)
         let content = "---\nauthor: John Doe\ndate: 2024-01-01\n---\n\nSome content here.";
         let ctx = LintContext::new(content);
@@ -304,7 +313,7 @@ mod tests {
     #[test]
     fn test_front_matter_disabled() {
         let rule = MD041FirstLineHeading::new(1, false);
-        
+
         // Front matter with title field but front_matter_title is false (should fail)
         let content = "---\ntitle: My Document\n---\n\nSome content here.";
         let ctx = LintContext::new(content);
@@ -316,7 +325,7 @@ mod tests {
     #[test]
     fn test_html_comments_before_heading() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // HTML comment before heading (should fail)
         let content = "<!-- This is a comment -->\n# My Document\n\nContent.";
         let ctx = LintContext::new(content);
@@ -329,12 +338,12 @@ mod tests {
     fn test_different_heading_levels() {
         // Test with level 2 requirement
         let rule = MD041FirstLineHeading::new(2, false);
-        
+
         let content = "## Second Level Heading\n\nContent.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Expected no warnings for correct level 2 heading");
-        
+
         // Wrong level
         let content = "# First Level Heading\n\nContent.";
         let ctx = LintContext::new(content);
@@ -346,13 +355,13 @@ mod tests {
     #[test]
     fn test_setext_headings() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // Setext style level 1 heading (should pass)
         let content = "My Document\n===========\n\nContent.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Expected no warnings for setext level 1 heading");
-        
+
         // Setext style level 2 heading (should fail with level 1 requirement)
         let content = "My Document\n-----------\n\nContent.";
         let ctx = LintContext::new(content);
@@ -364,7 +373,7 @@ mod tests {
     #[test]
     fn test_empty_document() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // Empty document (should pass - no warnings)
         let content = "";
         let ctx = LintContext::new(content);
@@ -375,7 +384,7 @@ mod tests {
     #[test]
     fn test_whitespace_only_document() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // Document with only whitespace (should pass - no warnings)
         let content = "   \n\n   \t\n";
         let ctx = LintContext::new(content);
@@ -386,38 +395,44 @@ mod tests {
     #[test]
     fn test_front_matter_then_whitespace() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // Front matter followed by only whitespace (should pass - no warnings)
         let content = "---\ntitle: Test\n---\n\n   \n\n";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Expected no warnings when no content after front matter");
+        assert!(
+            result.is_empty(),
+            "Expected no warnings when no content after front matter"
+        );
     }
 
     #[test]
     fn test_multiple_front_matter_types() {
         let rule = MD041FirstLineHeading::new(1, true);
-        
+
         // TOML front matter with title (should fail - rule only checks for "title:" pattern)
         let content = "+++\ntitle = \"My Document\"\n+++\n\nContent.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("level 1 heading"));
-        
+
         // JSON front matter with title (should fail - doesn't have "title:" pattern, has "\"title\":")
         let content = "{\n\"title\": \"My Document\"\n}\n\nContent.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("level 1 heading"));
-        
+
         // YAML front matter with title field (standard case)
         let content = "---\ntitle: My Document\n---\n\nContent.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Expected no warnings for YAML front matter with title");
-        
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for YAML front matter with title"
+        );
+
         // Test mixed format edge case - YAML-style in TOML
         let content = "+++\ntitle: My Document\n+++\n\nContent.";
         let ctx = LintContext::new(content);
@@ -428,36 +443,42 @@ mod tests {
     #[test]
     fn test_malformed_front_matter() {
         let rule = MD041FirstLineHeading::new(1, true);
-        
+
         // Malformed front matter with title
         let content = "- --\ntitle: My Document\n- --\n\nContent.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Expected no warnings for malformed front matter with title");
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for malformed front matter with title"
+        );
     }
 
     #[test]
     fn test_front_matter_with_heading() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // Front matter without title field followed by correct heading
         let content = "---\nauthor: John Doe\n---\n\n# My Document\n\nContent.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Expected no warnings when first line after front matter is correct heading");
+        assert!(
+            result.is_empty(),
+            "Expected no warnings when first line after front matter is correct heading"
+        );
     }
 
     #[test]
     fn test_fix_suggestion() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // Check that fix suggestion is provided
         let content = "Not a heading\n\nContent.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].fix.is_some());
-        
+
         let fix = result[0].fix.as_ref().unwrap();
         assert!(fix.replacement.contains("# Title"));
     }
@@ -465,9 +486,10 @@ mod tests {
     #[test]
     fn test_complex_document_structure() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // Complex document with various elements
-        let content = "---\nauthor: John\n---\n\n<!-- Comment -->\n\n\n# Valid Heading\n\n## Subheading\n\nContent here.";
+        let content =
+            "---\nauthor: John\n---\n\n<!-- Comment -->\n\n\n# Valid Heading\n\n## Subheading\n\nContent here.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
@@ -477,12 +499,15 @@ mod tests {
     #[test]
     fn test_heading_with_special_characters() {
         let rule = MD041FirstLineHeading::default();
-        
+
         // Heading with special characters and formatting
         let content = "# Welcome to **My** _Document_ with `code`\n\nContent.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Expected no warnings for heading with inline formatting");
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for heading with inline formatting"
+        );
     }
 
     #[test]
@@ -490,20 +515,23 @@ mod tests {
         // Test various level configurations
         for level in 1..=6 {
             let rule = MD041FirstLineHeading::new(level, false);
-            
+
             // Correct level
             let content = format!("{} Heading at Level {}\n\nContent.", "#".repeat(level), level);
             let ctx = LintContext::new(&content);
             let result = rule.check(&ctx).unwrap();
-            assert!(result.is_empty(), "Expected no warnings for correct level {} heading", level);
-            
+            assert!(
+                result.is_empty(),
+                "Expected no warnings for correct level {level} heading"
+            );
+
             // Wrong level
             let wrong_level = if level == 1 { 2 } else { 1 };
             let content = format!("{} Wrong Level Heading\n\nContent.", "#".repeat(wrong_level));
             let ctx = LintContext::new(&content);
             let result = rule.check(&ctx).unwrap();
             assert_eq!(result.len(), 1);
-            assert!(result[0].message.contains(&format!("level {} heading", level)));
+            assert!(result[0].message.contains(&format!("level {level} heading")));
         }
     }
 }

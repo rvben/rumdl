@@ -39,7 +39,7 @@ where
         "backtick" => Ok(CodeFenceStyle::Backtick),
         "tilde" => Ok(CodeFenceStyle::Tilde),
         "consistent" => Ok(CodeFenceStyle::Consistent),
-        _ => Err(serde::de::Error::custom(format!("Invalid code fence style: {}", s))),
+        _ => Err(serde::de::Error::custom(format!("Invalid code fence style: {s}"))),
     }
 }
 

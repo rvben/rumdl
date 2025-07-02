@@ -1,9 +1,9 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rand::rng;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rand::Rng;
-use rumdl::rule::Rule;
+use rand::rng;
 use rumdl::LintContext;
 use rumdl::MD053LinkImageReferenceDefinitions;
+use rumdl::rule::Rule;
 
 fn create_test_content(size: usize, ratio: f64) -> String {
     let mut content = String::with_capacity(size);
@@ -20,9 +20,9 @@ fn create_test_content(size: usize, ratio: f64) -> String {
             // 50% chance to add a reference
             if rng.random::<f64>() < 0.7 {
                 // 70% chance to be a link, 30% to be an image
-                content.push_str(&format!("[Link {}][ref-{}]\n", i, i));
+                content.push_str(&format!("[Link {i}][ref-{i}]\n"));
             } else {
-                content.push_str(&format!("![Image {}][ref-{}]\n", i, i));
+                content.push_str(&format!("![Image {i}][ref-{i}]\n"));
             }
         }
     }
@@ -51,7 +51,7 @@ fn create_test_content(size: usize, ratio: f64) -> String {
     for i in 0..100 {
         if rng.random::<f64>() < ratio {
             // Only add a portion based on ratio
-            content.push_str(&format!("[ref-{}]: https://example.com/ref-{}\n", i, i));
+            content.push_str(&format!("[ref-{i}]: https://example.com/ref-{i}\n"));
         }
     }
 
@@ -66,17 +66,17 @@ fn create_test_content_legacy() -> String {
     for i in 0..200 {
         if i < 100 {
             // Used references
-            content.push_str(&format!("[ref{}]: https://example.com/ref{}\n", i, i));
+            content.push_str(&format!("[ref{i}]: https://example.com/ref{i}\n"));
         } else {
             // Unused references
-            content.push_str(&format!("[unused{}]: https://example.com/unused{}\n", i, i));
+            content.push_str(&format!("[unused{i}]: https://example.com/unused{i}\n"));
         }
     }
 
     // Add reference usages
     content.push_str("\n## Content with References\n\n");
     for i in 0..100 {
-        content.push_str(&format!("This is a paragraph with a [link][ref{}] reference.\n", i));
+        content.push_str(&format!("This is a paragraph with a [link][ref{i}] reference.\n"));
     }
 
     content

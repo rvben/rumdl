@@ -3,7 +3,7 @@
 //! This module contains comprehensive tests for character ranges across
 //! multiple rules and edge cases.
 
-use super::{simple_test, test_character_ranges, ExpectedWarning};
+use super::{ExpectedWarning, simple_test, test_character_ranges};
 
 // MD010 - Hard tabs
 #[test]

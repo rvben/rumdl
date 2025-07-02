@@ -68,15 +68,15 @@ impl ContentGenerator {
 
         // Add multiple sections with various markdown elements
         for i in 1..=20 {
-            content.push_str(&format!("## Section {}\n\n", i));
-            content.push_str(&format!("This is section {} with some content.\n\n", i));
+            content.push_str(&format!("## Section {i}\n\n"));
+            content.push_str(&format!("This is section {i} with some content.\n\n"));
 
             // Add lists
             content.push_str("### Lists\n\n");
             for j in 1..=5 {
-                content.push_str(&format!("- List item {} in section {}\n", j, i));
+                content.push_str(&format!("- List item {j} in section {i}\n"));
                 if j % 2 == 0 {
-                    content.push_str(&format!("  - Nested item {}.{}\n", i, j));
+                    content.push_str(&format!("  - Nested item {i}.{j}\n"));
                 }
             }
             content.push('\n');
@@ -85,8 +85,8 @@ impl ContentGenerator {
             if i % 3 == 0 {
                 content.push_str("### Code Example\n\n");
                 content.push_str("```javascript\n");
-                content.push_str(&format!("function section{}() {{\n", i));
-                content.push_str(&format!("    console.log('Section {}');\n", i));
+                content.push_str(&format!("function section{i}() {{\n"));
+                content.push_str(&format!("    console.log('Section {i}');\n"));
                 content.push_str("    return true;\n");
                 content.push_str("}\n");
                 content.push_str("```\n\n");
@@ -95,17 +95,16 @@ impl ContentGenerator {
             // Add links and URLs
             content.push_str("### Links\n\n");
             content.push_str(&format!(
-                "Visit [section {}](https://example.com/section{}) for details.\n",
-                i, i
+                "Visit [section {i}](https://example.com/section{i}) for details.\n"
             ));
-            content.push_str(&format!("Bare URL: https://example{}.com/path\n", i));
-            content.push_str(&format!("Email: section{}@example.com\n\n", i));
+            content.push_str(&format!("Bare URL: https://example{i}.com/path\n"));
+            content.push_str(&format!("Email: section{i}@example.com\n\n"));
 
             // Add emphasis and formatting
             content.push_str("### Formatting\n\n");
-            content.push_str(&format!("This is **bold text** in section {}.\n", i));
-            content.push_str(&format!("This is *italic text* in section {}.\n", i));
-            content.push_str(&format!("This is `inline code` in section {}.\n\n", i));
+            content.push_str(&format!("This is **bold text** in section {i}.\n"));
+            content.push_str(&format!("This is *italic text* in section {i}.\n"));
+            content.push_str(&format!("This is `inline code` in section {i}.\n\n"));
         }
 
         content
@@ -120,21 +119,20 @@ impl ContentGenerator {
         // Add table of contents
         content.push_str("## Table of Contents\n\n");
         for i in 1..=50 {
-            content.push_str(&format!("- [Section {}](#section-{})\n", i, i));
+            content.push_str(&format!("- [Section {i}](#section-{i})\n"));
         }
         content.push('\n');
 
         // Add many sections with various content
         for i in 1..=50 {
-            content.push_str(&format!("## Section {}\n\n", i));
-            content.push_str(&format!("This is section {} with comprehensive content.\n\n", i));
+            content.push_str(&format!("## Section {i}\n\n"));
+            content.push_str(&format!("This is section {i} with comprehensive content.\n\n"));
 
             // Add subsections
             for j in 1..=3 {
-                content.push_str(&format!("### Subsection {}.{}\n\n", i, j));
+                content.push_str(&format!("### Subsection {i}.{j}\n\n"));
                 content.push_str(&format!(
-                    "Content for subsection {}.{} with multiple paragraphs.\n\n",
-                    i, j
+                    "Content for subsection {i}.{j} with multiple paragraphs.\n\n"
                 ));
                 content.push_str("Lorem ipsum dolor sit amet, consectetur adipiscing elit. ");
                 content.push_str("Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\n");
@@ -142,11 +140,11 @@ impl ContentGenerator {
                 // Add lists with multiple levels
                 content.push_str("#### Lists\n\n");
                 for k in 1..=8 {
-                    content.push_str(&format!("- Item {} in subsection {}.{}\n", k, i, j));
+                    content.push_str(&format!("- Item {k} in subsection {i}.{j}\n"));
                     if k % 2 == 0 {
-                        content.push_str(&format!("  - Nested item {}.{}.{}\n", i, j, k));
+                        content.push_str(&format!("  - Nested item {i}.{j}.{k}\n"));
                         if k % 4 == 0 {
-                            content.push_str(&format!("    - Deep nested item {}.{}.{}\n", i, j, k));
+                            content.push_str(&format!("    - Deep nested item {i}.{j}.{k}\n"));
                         }
                     }
                 }
@@ -156,7 +154,7 @@ impl ContentGenerator {
                 if (i + j) % 3 == 0 {
                     content.push_str("#### Code Example\n\n");
                     content.push_str("```rust\n");
-                    content.push_str(&format!("fn section_{}_{}_function() {{\n", i, j));
+                    content.push_str(&format!("fn section_{i}_{j}_function() {{\n"));
                     content.push_str(&format!("    let value = {};\n", i * j));
                     content.push_str("    println!(\"Processing section {}.{}\", value);\n");
                     content.push_str("    \n");
@@ -190,15 +188,13 @@ impl ContentGenerator {
                 // Add links and URLs
                 content.push_str("#### References\n\n");
                 content.push_str(&format!(
-                    "- [Official docs](https://docs.example.com/section{}/subsection{})\n",
-                    i, j
+                    "- [Official docs](https://docs.example.com/section{i}/subsection{j})\n"
                 ));
                 content.push_str(&format!(
-                    "- [API reference](https://api.example.com/v{}/section{})\n",
-                    j, i
+                    "- [API reference](https://api.example.com/v{j}/section{i})\n"
                 ));
-                content.push_str(&format!("- Bare URL: https://example{}.com/path/{}\n", i, j));
-                content.push_str(&format!("- Contact: section{}@example{}.com\n", i, j));
+                content.push_str(&format!("- Bare URL: https://example{i}.com/path/{j}\n"));
+                content.push_str(&format!("- Contact: section{i}@example{j}.com\n"));
                 content.push('\n');
             }
         }
@@ -215,7 +211,7 @@ impl ContentGenerator {
         // Generate the large content multiple times
         let base_content = Self::large_content();
         for i in 1..=5 {
-            content.push_str(&format!("# Part {} of Huge Document\n\n", i));
+            content.push_str(&format!("# Part {i} of Huge Document\n\n"));
             content.push_str(&base_content);
             content.push_str("\n\n");
         }
@@ -384,8 +380,8 @@ impl PerformanceBenchmark {
         if let (Some(small), Some(large)) = (results.get("small"), results.get("large")) {
             let size_ratio = large.content_size_bytes as f64 / small.content_size_bytes as f64;
             let time_ratio = large.total_execution_time.as_secs_f64() / small.total_execution_time.as_secs_f64();
-            println!("   Content size ratio (large/small): {:.1}x", size_ratio);
-            println!("   Execution time ratio (large/small): {:.1}x", time_ratio);
+            println!("   Content size ratio (large/small): {size_ratio:.1}x");
+            println!("   Execution time ratio (large/small): {time_ratio:.1}x");
             println!(
                 "   Scaling efficiency: {:.1}% (lower is better)",
                 (time_ratio / size_ratio) * 100.0

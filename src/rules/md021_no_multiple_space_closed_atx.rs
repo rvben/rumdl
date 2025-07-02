@@ -2,7 +2,7 @@
 ///
 /// See [docs/md021.md](../../docs/md021.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{calculate_line_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 

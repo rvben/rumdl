@@ -85,7 +85,9 @@ fn test_case_sensitivity() {
 
 #[test]
 fn test_complex_heading_structures() {
-    let ctx = LintContext::new("# Heading 1\n\nSome text\n\nHeading 2\n-------\n\n### Heading 3\n\n[Link to 1](somepath#heading-1)\n[Link to 2](somepath#heading-2)\n[Link to 3](somepath#heading-3)\n[Link to missing](somepath#heading-4)");
+    let ctx = LintContext::new(
+        "# Heading 1\n\nSome text\n\nHeading 2\n-------\n\n### Heading 3\n\n[Link to 1](somepath#heading-1)\n[Link to 2](somepath#heading-2)\n[Link to 3](somepath#heading-3)\n[Link to missing](somepath#heading-4)",
+    );
     let rule = MD051LinkFragments::new();
 
     let result = rule.check(&ctx).unwrap();
@@ -94,7 +96,9 @@ fn test_complex_heading_structures() {
     assert_eq!(result.len(), 1);
 
     // Test with special characters in headings/links
-    let ctx = LintContext::new("# Heading & Special! Characters\n\n[Link](somepath#heading-special-characters)\n[Bad Link](somepath#heading--special-characters)");
+    let ctx = LintContext::new(
+        "# Heading & Special! Characters\n\n[Link](somepath#heading-special-characters)\n[Bad Link](somepath#heading--special-characters)",
+    );
     let result = rule.check(&ctx).unwrap();
 
     // With our improved implementation, only truly invalid fragments should fail
@@ -144,7 +148,9 @@ fn test_heading_to_fragment_edge_cases() {
 
 #[test]
 fn test_fragment_in_code_blocks() {
-    let ctx = LintContext::new("# Real Heading\n\n```markdown\n# Fake Heading\n[Link](somepath#fake-heading)\n```\n\n[Link](somepath#real-heading)");
+    let ctx = LintContext::new(
+        "# Real Heading\n\n```markdown\n# Fake Heading\n[Link](somepath#fake-heading)\n```\n\n[Link](somepath#real-heading)",
+    );
     let rule = MD051LinkFragments::new();
 
     let result = rule.check(&ctx).unwrap();
@@ -288,14 +294,14 @@ fn test_performance_md051() {
 
     // Add 50 headings
     for i in 0..50 {
-        content.push_str(&format!("# Heading {}\n\n", i));
+        content.push_str(&format!("# Heading {i}\n\n"));
         content.push_str("Some content paragraph with details about this section.\n\n");
 
         // Add some subheadings
         if i % 3 == 0 {
-            content.push_str(&format!("## Subheading {}.1\n\n", i));
+            content.push_str(&format!("## Subheading {i}.1\n\n"));
             content.push_str("Subheading content with more details.\n\n");
-            content.push_str(&format!("## Subheading {}.2\n\n", i));
+            content.push_str(&format!("## Subheading {i}.2\n\n"));
             content.push_str("More subheading content here.\n\n");
         }
     }
@@ -333,7 +339,9 @@ fn test_performance_md051() {
 
 #[test]
 fn test_inline_code_spans() {
-    let ctx = LintContext::new("# Real Heading\n\nThis is a real link: [Link](somepath#real-heading)\n\nThis is a code example: `[Example](#missing-section)`");
+    let ctx = LintContext::new(
+        "# Real Heading\n\nThis is a real link: [Link](somepath#real-heading)\n\nThis is a code example: `[Example](#missing-section)`",
+    );
     let rule = MD051LinkFragments::new();
 
     let result = rule.check(&ctx).unwrap();
@@ -463,15 +471,18 @@ fn test_md051_fragment_generation_regression() {
 
     for (heading, expected_fragment) in test_cases {
         // Create a test document with the heading and a link to it
-        let content = format!("# {}\n\n[Link](#{}))", heading, expected_fragment);
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment}))");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
         // If the fragment generation is correct, there should be no warnings
         assert_eq!(
-            result.len(), 0,
+            result.len(),
+            0,
             "Fragment generation failed for heading '{}': expected fragment '{}' should be found, but got {} warnings: {:?}",
-            heading, expected_fragment, result.len(),
+            heading,
+            expected_fragment,
+            result.len(),
             result.iter().map(|w| &w.message).collect::<Vec<_>>()
         );
     }
@@ -835,7 +846,7 @@ fn test_performance_stress_case() {
 
     // Add many cross-file links (should be ignored)
     for i in 0..100 {
-        content.push_str(&format!("- [Link {}](file{}.md#section)\n", i, i));
+        content.push_str(&format!("- [Link {i}](file{i}.md#section)\n"));
     }
 
     // Add some fragment-only links
@@ -1098,7 +1109,7 @@ fn test_performance_with_many_links() {
 
     // Add many cross-file links (should be ignored)
     for i in 0..100 {
-        content.push_str(&format!("- [Link {}](file{}.md#section)\n", i, i));
+        content.push_str(&format!("- [Link {i}](file{i}.md#section)\n"));
     }
 
     // Add some fragment-only links

@@ -3,7 +3,7 @@ use crate::rule_config_serde::RuleConfig;
 /// Rule MD010: No tabs
 ///
 /// See [docs/md010.md](../../docs/md010.md) for full documentation, configuration, and examples.
-use crate::utils::range_utils::{calculate_match_range, LineIndex};
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -170,7 +170,7 @@ impl Rule for MD010NoHardTabs {
                     if tab_count == 1 {
                         "Empty line contains tab".to_string()
                     } else {
-                        format!("Empty line contains {} tabs", tab_count)
+                        format!("Empty line contains {tab_count} tabs")
                     }
                 } else if is_leading {
                     if tab_count == 1 {
@@ -185,7 +185,7 @@ impl Rule for MD010NoHardTabs {
                 } else if tab_count == 1 {
                     "Found tab for alignment, use spaces instead".to_string()
                 } else {
-                    format!("Found {} tabs for alignment, use spaces instead", tab_count)
+                    format!("Found {tab_count} tabs for alignment, use spaces instead")
                 };
 
                 warnings.push(LintWarning {
@@ -253,7 +253,6 @@ impl Rule for MD010NoHardTabs {
     fn category(&self) -> RuleCategory {
         RuleCategory::Whitespace
     }
-
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let default_config = MD010Config::default();
@@ -348,7 +347,7 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 5);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Normal  line\n```\nCode\twith\ttab\n```\nAnother  line");
     }
@@ -422,10 +421,10 @@ mod tests {
     fn test_tab_positions() {
         let tabs = MD010NoHardTabs::find_tab_positions("a\tb\tc");
         assert_eq!(tabs, vec![1, 3]);
-        
+
         let tabs = MD010NoHardTabs::find_tab_positions("\t\tabc");
         assert_eq!(tabs, vec![0, 1]);
-        
+
         let tabs = MD010NoHardTabs::find_tab_positions("no tabs");
         assert!(tabs.is_empty());
     }
@@ -434,10 +433,10 @@ mod tests {
     fn test_group_consecutive_tabs() {
         let groups = MD010NoHardTabs::group_consecutive_tabs(&[0, 1, 2, 5, 6]);
         assert_eq!(groups, vec![(0, 3), (5, 7)]);
-        
+
         let groups = MD010NoHardTabs::group_consecutive_tabs(&[1, 3, 5]);
         assert_eq!(groups, vec![(1, 2), (3, 4), (5, 6)]);
-        
+
         let groups = MD010NoHardTabs::group_consecutive_tabs(&[]);
         assert!(groups.is_empty());
     }
@@ -468,7 +467,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "        Tab");
-        
+
         // Also test code blocks config
         let rule_code_blocks = MD010NoHardTabs::new(2, false);
         let content_with_code = "```\n\tTab in code\n```";
@@ -483,7 +482,7 @@ mod tests {
         let rule = MD010NoHardTabs::default();
         let mut content = String::new();
         for i in 0..1000 {
-            content.push_str(&format!("Line {}\twith\ttabs\n", i));
+            content.push_str(&format!("Line {i}\twith\ttabs\n"));
         }
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
@@ -502,13 +501,13 @@ mod tests {
     #[test]
     fn test_edge_cases() {
         let rule = MD010NoHardTabs::default();
-        
+
         // Tab at end of line
         let content = "Text\t";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        
+
         // Only tabs
         let content = "\t\t\t";
         let ctx = LintContext::new(content);
@@ -522,7 +521,7 @@ mod tests {
         let lines = vec!["Normal", "<!-- Start", "Middle", "End -->", "After"];
         let result = MD010NoHardTabs::find_html_comment_lines(&lines);
         assert_eq!(result, vec![false, true, true, true, false]);
-        
+
         let lines = vec!["<!-- Single line comment -->", "Normal"];
         let result = MD010NoHardTabs::find_html_comment_lines(&lines);
         assert_eq!(result, vec![true, false]);

@@ -1,5 +1,5 @@
 use rumdl::lint_context::LintContext;
-use rumdl::{rule::Rule, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD053LinkImageReferenceDefinitions};
+use rumdl::{MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD053LinkImageReferenceDefinitions, rule::Rule};
 use std::time::Instant;
 
 #[test]
@@ -7,7 +7,7 @@ fn test_optimized_rules_performance() {
     // Generate a large markdown content with HTML and emphasis
     let mut content = String::with_capacity(100_000);
     for i in 0..1000 {
-        content.push_str(&format!("Line {} with <span>HTML</span> and *emphasis*\n", i));
+        content.push_str(&format!("Line {i} with <span>HTML</span> and *emphasis*\n"));
     }
 
     // Add reference definitions
@@ -15,12 +15,12 @@ fn test_optimized_rules_performance() {
     for i in 0..200 {
         // 100 used references
         if i < 100 {
-            content.push_str(&format!("[ref{}]: https://example.com/ref{}\n", i, i));
+            content.push_str(&format!("[ref{i}]: https://example.com/ref{i}\n"));
             // Add usages for these references
-            content.push_str(&format!("Here is a [link][ref{}] to example {}\n", i, i));
+            content.push_str(&format!("Here is a [link][ref{i}] to example {i}\n"));
         } else {
             // 100 unused references (should be detected by MD053)
-            content.push_str(&format!("[unused{}]: https://example.com/unused{}\n", i, i));
+            content.push_str(&format!("[unused{i}]: https://example.com/unused{i}\n"));
         }
     }
 

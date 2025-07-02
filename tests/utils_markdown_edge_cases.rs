@@ -99,9 +99,9 @@ fn test_indentation_edge_cases() {
     let unordered_count = lists
         .iter()
         .filter(|l| {
-            l.metadata.as_ref().is_some_and(|m| {
-                m.contains("minus") || m.contains("asterisk") || m.contains("plus")
-            })
+            l.metadata
+                .as_ref()
+                .is_some_and(|m| m.contains("minus") || m.contains("asterisk") || m.contains("plus"))
         })
         .count();
     let ordered_count = lists
@@ -220,9 +220,9 @@ Unclosed code block
     let malformed_ordered = lists
         .iter()
         .filter(|l| {
-            l.metadata.as_ref().is_some_and(|m| {
-                m.contains("ordered:no_space") || m.contains("ordered:wrong_marker")
-            })
+            l.metadata
+                .as_ref()
+                .is_some_and(|m| m.contains("ordered:no_space") || m.contains("ordered:wrong_marker"))
         })
         .count();
     assert_eq!(
@@ -403,17 +403,17 @@ fn test_performance_with_large_document() {
 
     // Add 100 headings, lists and code blocks
     for i in 1..=100 {
-        content.push_str(&format!("# Heading {}\n\n", i));
-        content.push_str(&format!("Paragraph {} with some content.\n\n", i));
+        content.push_str(&format!("# Heading {i}\n\n"));
+        content.push_str(&format!("Paragraph {i} with some content.\n\n"));
 
         // Add lists
-        content.push_str(&format!("- List item {}.1\n", i));
-        content.push_str(&format!("- List item {}.2\n", i));
-        content.push_str(&format!("- List item {}.3\n\n", i));
+        content.push_str(&format!("- List item {i}.1\n"));
+        content.push_str(&format!("- List item {i}.2\n"));
+        content.push_str(&format!("- List item {i}.3\n\n"));
 
         // Add code blocks
         content.push_str("```\n");
-        content.push_str(&format!("Code block {} content\n", i));
+        content.push_str(&format!("Code block {i} content\n"));
         content.push_str("```\n\n");
     }
 
@@ -434,7 +434,6 @@ fn test_performance_with_large_document() {
     // Verify performance - should process in under 500ms
     assert!(
         duration.as_millis() < 500,
-        "Processing should take less than 500ms, took {:?}",
-        duration
+        "Processing should take less than 500ms, took {duration:?}"
     );
 }

@@ -21,7 +21,7 @@ fn test_line_ending_compatibility() {
     ];
 
     for (name, content) in test_cases {
-        println!("Testing {} line endings...", name);
+        println!("Testing {name} line endings...");
 
         let ctx = LintContext::new(content);
 
@@ -39,12 +39,12 @@ fn test_line_ending_compatibility() {
 
             // Verify that line numbers are calculated correctly
             for warning in &warnings {
-                assert!(warning.line > 0, "Line number should be positive for {}", name);
+                assert!(warning.line > 0, "Line number should be positive for {name}");
                 // Column is usize, so it's always non-negative
             }
         }
 
-        println!("  {} warnings found for {} line endings", total_warnings, name);
+        println!("  {total_warnings} warnings found for {name} line endings");
     }
 
     println!("✅ Line ending compatibility test passed");
@@ -102,7 +102,7 @@ Some content here.
         // Should process without errors (len() is always non-negative)
         let _ = warnings; // Acknowledge that we checked the file
 
-        println!("  Processed file: {}", filename);
+        println!("  Processed file: {filename}");
     }
 
     // Test files in nested directories
@@ -120,7 +120,7 @@ Some content here.
 
             let _ = warnings; // Should process nested file without errors
 
-            println!("  Processed nested file: {}/{}", dir, filename);
+            println!("  Processed nested file: {dir}/{filename}");
         }
     }
 
@@ -149,7 +149,7 @@ fn test_unicode_content_handling() {
     ];
 
     for (name, content) in unicode_test_cases {
-        println!("Testing {} content...", name);
+        println!("Testing {name} content...");
 
         let ctx = LintContext::new(content);
 
@@ -175,13 +175,12 @@ fn test_unicode_content_handling() {
                 // Column is usize, so it's always non-negative
                 assert!(
                     !warning.message.is_empty(),
-                    "Warning message should not be empty for {}",
-                    name
+                    "Warning message should not be empty for {name}"
                 );
             }
         }
 
-        println!("  {} content processed successfully", name);
+        println!("  {name} content processed successfully");
     }
 
     println!("✅ Unicode content handling test passed");
@@ -200,7 +199,7 @@ fn test_platform_specific_newlines_in_fixes() {
     ];
 
     for (platform, content, expected_line_ending) in test_cases {
-        println!("Testing {} platform newlines...", platform);
+        println!("Testing {platform} platform newlines...");
 
         let ctx = LintContext::new(content);
         let rule = MD022BlanksAroundHeadings::default();
@@ -224,8 +223,7 @@ fn test_platform_specific_newlines_in_fixes() {
 
                     assert!(
                         has_proper_line_endings,
-                        "Fix should use consistent line endings for {} platform",
-                        platform
+                        "Fix should use consistent line endings for {platform} platform"
                     );
 
                     // Check for actual reversed line endings (not overlapping CRLF sequences)
@@ -248,10 +246,10 @@ fn test_platform_specific_newlines_in_fixes() {
                         "Should not have genuine reversed line endings"
                     );
 
-                    println!("  {} platform fix generated successfully", platform);
+                    println!("  {platform} platform fix generated successfully");
                 }
                 Err(_) => {
-                    println!("  {} platform fix not available (rule may not support fixes)", platform);
+                    println!("  {platform} platform fix not available (rule may not support fixes)");
                 }
             }
         }
@@ -281,7 +279,7 @@ fn test_file_encoding_detection() {
     let test_files = vec![(utf8_bom_path, "UTF-8 with BOM"), (utf8_path, "Regular UTF-8")];
 
     for (file_path, description) in test_files {
-        println!("Testing {} file...", description);
+        println!("Testing {description} file...");
 
         let content = fs::read_to_string(&file_path).unwrap();
         let ctx = LintContext::new(&content);
@@ -298,7 +296,7 @@ fn test_file_encoding_detection() {
             assert!(!content.is_empty(), "BOM file should have content");
         }
 
-        println!("  {} file processed successfully", description);
+        println!("  {description} file processed successfully");
     }
 
     println!("✅ File encoding detection test passed");
@@ -316,14 +314,14 @@ fn test_path_separator_normalization() {
     ];
 
     for (style_name, path_str) in path_styles {
-        println!("Testing {} paths...", style_name);
+        println!("Testing {style_name} paths...");
 
         // Convert to PathBuf to normalize separators
         let path = PathBuf::from(path_str);
         let normalized = path.to_string_lossy();
 
-        println!("  Original: {}", path_str);
-        println!("  Normalized: {}", normalized);
+        println!("  Original: {path_str}");
+        println!("  Normalized: {normalized}");
 
         // Verify that the path is valid
         assert!(!normalized.is_empty(), "Normalized path should not be empty");
@@ -370,10 +368,9 @@ fn test_large_file_cross_platform() {
     let line_ending = if cfg!(windows) { "\r\n" } else { "\n" };
 
     for i in 0..1000 {
-        large_content.push_str(&format!("# Heading {}{}", i, line_ending));
+        large_content.push_str(&format!("# Heading {i}{line_ending}"));
         large_content.push_str(&format!(
-            "{}Content for section {}.{}{}",
-            line_ending, i, line_ending, line_ending
+            "{line_ending}Content for section {i}.{line_ending}{line_ending}"
         ));
     }
 
@@ -415,14 +412,14 @@ fn test_concurrent_file_access() {
     let file_count = 10;
 
     for i in 0..file_count {
-        let file_path = base_path.join(format!("concurrent_test_{}.md", i));
+        let file_path = base_path.join(format!("concurrent_test_{i}.md"));
         fs::write(&file_path, test_content).unwrap();
     }
 
     // Test concurrent reading
     let handles: Vec<_> = (0..file_count)
         .map(|i| {
-            let file_path = base_path.join(format!("concurrent_test_{}.md", i));
+            let file_path = base_path.join(format!("concurrent_test_{i}.md"));
             std::thread::spawn(move || {
                 let content = fs::read_to_string(&file_path).unwrap();
                 let ctx = LintContext::new(&content);
@@ -439,7 +436,7 @@ fn test_concurrent_file_access() {
         total_warnings += warnings.len();
     }
 
-    println!("  Concurrent access completed with {} total warnings", total_warnings);
+    println!("  Concurrent access completed with {total_warnings} total warnings");
 
     println!("✅ Concurrent file access test passed");
 }

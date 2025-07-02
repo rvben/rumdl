@@ -1,6 +1,6 @@
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
-use rumdl::rules::{md004_unordered_list_style::UnorderedListStyle, MD004UnorderedListStyle};
+use rumdl::rules::{MD004UnorderedListStyle, md004_unordered_list_style::UnorderedListStyle};
 
 #[test]
 fn test_check_consistent_valid() {
@@ -374,7 +374,7 @@ fn test_performance_md004() {
             _ => "+",
         };
 
-        content.push_str(&format!("{} Top level item {}\n", marker, i));
+        content.push_str(&format!("{marker} Top level item {i}\n"));
 
         // Add 3 second-level items
         for j in 0..3 {
@@ -384,7 +384,7 @@ fn test_performance_md004() {
                 _ => "+",
             };
 
-            content.push_str(&format!("  {} Second level item {}.{}\n", marker, i, j));
+            content.push_str(&format!("  {marker} Second level item {i}.{j}\n"));
 
             // Add 2 third-level items
             for k in 0..2 {
@@ -394,7 +394,7 @@ fn test_performance_md004() {
                     _ => "+",
                 };
 
-                content.push_str(&format!("    {} Third level item {}.{}.{}\n", marker, i, j, k));
+                content.push_str(&format!("    {marker} Third level item {i}.{j}.{k}\n"));
             }
         }
 
@@ -472,7 +472,7 @@ fn test_sublist_style_matching() {
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 2); // - and + in sublists don't match asterisk
-    
+
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "* Parent 1\n  * Child 1\n  * Child 2\n* Parent 2\n  * Child 3");
 }
@@ -485,9 +485,12 @@ fn test_deeply_nested_sublist_style_matching() {
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 2); // - at level 3 and + at level 4 don't match
-    
+
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "* Level 1\n  * Level 2\n    * Level 3\n      * Level 4\n        * Level 5");
+    assert_eq!(
+        fixed,
+        "* Level 1\n  * Level 2\n    * Level 3\n      * Level 4\n        * Level 5"
+    );
 }
 
 #[test]
@@ -517,7 +520,10 @@ fn test_fix_preserves_list_content() {
     let ctx = LintContext::new(content);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "- Item with **bold** text\n- Item with `code` text\n- Item with [link](url)");
+    assert_eq!(
+        fixed,
+        "- Item with **bold** text\n- Item with `code` text\n- Item with [link](url)"
+    );
 }
 
 #[test]
@@ -528,9 +534,12 @@ fn test_multiple_lists_in_blockquotes() {
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 2); // - and + don't match first marker *
-    
+
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "> * Quoted item 1\n> * Quoted item 2\n>\n> * New list item 1\n> * New list item 2");
+    assert_eq!(
+        fixed,
+        "> * Quoted item 1\n> * Quoted item 2\n>\n> * New list item 1\n> * New list item 2"
+    );
 }
 
 #[test]
@@ -548,13 +557,13 @@ fn test_nested_blockquotes_with_lists() {
 fn test_fix_method_comprehensive() {
     // Comprehensive test of fix method with various scenarios
     let content = "# Header\n\n* Item 1\n  - Subitem 1.1\n  + Subitem 1.2\n\n> - Quoted item\n> * Another quoted\n\n```\n* Code block item (should not change)\n- Another code item\n```\n\n* Item 2\n  * Subitem 2.1";
-    
+
     let ctx = LintContext::new(content);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
     let fixed = rule.fix(&ctx).unwrap();
-    
+
     let expected = "# Header\n\n* Item 1\n  * Subitem 1.1\n  * Subitem 1.2\n\n> * Quoted item\n> * Another quoted\n\n```\n* Code block item (should not change)\n- Another code item\n```\n\n* Item 2\n  * Subitem 2.1";
-    
+
     assert_eq!(fixed, expected);
 }
 
@@ -562,21 +571,21 @@ fn test_fix_method_comprehensive() {
 fn test_check_method_comprehensive() {
     // Comprehensive test of check method with various scenarios
     let content = "* Valid item\n- Invalid item\n  + Invalid nested\n  * Valid nested\n\n> - Invalid quoted\n\n```\n- Ignored in code\n```";
-    
+
     let ctx = LintContext::new(content);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
     let warnings = rule.check(&ctx).unwrap();
-    
+
     // Should have 3 warnings: line 2 (-), line 3 (+), and quoted line (-)
     assert_eq!(warnings.len(), 3);
-    
+
     // Verify warning details
     assert_eq!(warnings[0].line, 2);
     assert_eq!(warnings[0].message, "List marker '-' does not match expected style '*'");
-    
+
     assert_eq!(warnings[1].line, 3);
     assert_eq!(warnings[1].message, "List marker '+' does not match expected style '*'");
-    
+
     assert_eq!(warnings[2].line, 6);
     assert_eq!(warnings[2].message, "List marker '-' does not match expected style '*'");
 }

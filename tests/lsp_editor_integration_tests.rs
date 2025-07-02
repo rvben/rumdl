@@ -373,9 +373,9 @@ fn create_large_document_with_issues() -> String {
             content.push_str(&format!("#Section {}   \n", i / 10 + 1));
         } else if i % 5 == 0 {
             // Some lines with trailing spaces
-            content.push_str(&format!("Line {} with trailing spaces   \n", i));
+            content.push_str(&format!("Line {i} with trailing spaces   \n"));
         } else {
-            content.push_str(&format!("Regular line {} content.\n", i));
+            content.push_str(&format!("Regular line {i} content.\n"));
         }
     }
 

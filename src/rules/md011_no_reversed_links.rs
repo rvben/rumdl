@@ -226,7 +226,7 @@ impl Rule for MD011NoReversedLinks {
                             let match_end_byte = match_start_byte + len;
                             match_start_byte..match_end_byte
                         },
-                        replacement: format!("[{}]({})", text, url),
+                        replacement: format!("[{text}]({url})"),
                     }),
                 });
             }
@@ -255,8 +255,8 @@ impl Rule for MD011NoReversedLinks {
 
             if !ctx.is_in_code_block_or_span(pos) {
                 let adjusted_pos = pos + offset;
-                let original_len = format!("({})[{}]", text, url).len();
-                let replacement = format!("[{}]({})", text, url);
+                let original_len = format!("({text})[{url}]").len();
+                let replacement = format!("[{text}]({url})");
                 result.replace_range(adjusted_pos..adjusted_pos + original_len, &replacement);
                 // Update offset based on the difference in lengths
                 if replacement.len() > original_len {
@@ -360,7 +360,7 @@ mod tests {
 
             // Current fix format
             let current_fix = format!("[{}]({})", &cap[2], &cap[1]);
-            println!("Current fix produces: {}", current_fix);
+            println!("Current fix produces: {current_fix}");
 
             // Test what the actual rule produces
             let rule = MD011NoReversedLinks;

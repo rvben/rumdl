@@ -796,14 +796,6 @@ mod tests {
         reset_element_cache();
         let cache = ElementCache::new(content);
 
-        println!("DEBUG: Number of list items: {}", cache.list_items.len());
-        for (i, item) in cache.list_items.iter().enumerate() {
-            println!(
-                "DEBUG: Item {}: indent_str={:?}, indentation={}, content={:?}",
-                i, item.indent_str, item.indentation, item.content
-            );
-        }
-
         assert_eq!(cache.list_items.len(), 4);
 
         // Check indentation values

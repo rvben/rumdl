@@ -62,7 +62,7 @@ mod tests {
         assert_eq!(toml_int(42), Value::Integer(42));
         assert_eq!(toml_int(0), Value::Integer(0));
         assert_eq!(toml_int(-10), Value::Integer(-10));
-        
+
         // Test with different integer types
         assert_eq!(toml_int(42u8), Value::Integer(42));
         assert_eq!(toml_int(42u16), Value::Integer(42));
@@ -77,7 +77,7 @@ mod tests {
         assert_eq!(toml_string("hello"), Value::String("hello".to_string()));
         assert_eq!(toml_string(String::from("world")), Value::String("world".to_string()));
         assert_eq!(toml_string(""), Value::String("".to_string()));
-        
+
         // Test unicode
         assert_eq!(toml_string("你好"), Value::String("你好".to_string()));
         assert_eq!(toml_string("🦀"), Value::String("🦀".to_string()));
@@ -95,7 +95,7 @@ mod tests {
         } else {
             panic!("Expected array");
         }
-        
+
         // Test with String objects
         let arr2 = toml_array(vec![String::from("alpha"), String::from("beta")]);
         if let Value::Array(values) = arr2 {
@@ -105,7 +105,7 @@ mod tests {
         } else {
             panic!("Expected array");
         }
-        
+
         // Test empty array
         let arr3 = toml_array(Vec::<String>::new());
         assert_eq!(arr3, Value::Array(vec![]));
@@ -120,11 +120,11 @@ mod tests {
             indent: toml_int(4),
             style: toml_string("consistent"),
         );
-        
+
         assert!(config.is_some());
         let (rule_name, value) = config.unwrap();
         assert_eq!(rule_name, "MD001");
-        
+
         if let Value::Table(table) = value {
             assert_eq!(table.get("enabled"), Some(&Value::Boolean(true)));
             assert_eq!(table.get("indent"), Some(&Value::Integer(4)));
@@ -138,11 +138,11 @@ mod tests {
     fn test_impl_default_config_macro_empty() {
         // Test macro with no fields
         let config = impl_default_config!("MD002");
-        
+
         assert!(config.is_some());
         let (rule_name, value) = config.unwrap();
         assert_eq!(rule_name, "MD002");
-        
+
         if let Value::Table(table) = value {
             assert!(table.is_empty());
         } else {
@@ -156,18 +156,18 @@ mod tests {
         let my_array = vec!["item1", "item2"];
         let my_bool = false;
         let my_number = 42 + 58;
-        
+
         let config = impl_default_config!(
             "MD003",
             items: toml_array(my_array),
             enabled: toml_bool(my_bool),
             count: toml_int(my_number),
         );
-        
+
         assert!(config.is_some());
         let (rule_name, value) = config.unwrap();
         assert_eq!(rule_name, "MD003");
-        
+
         if let Value::Table(table) = value {
             assert!(table.contains_key("items"));
             assert_eq!(table.get("enabled"), Some(&Value::Boolean(false)));
@@ -186,7 +186,7 @@ mod tests {
             camelCaseField: toml_string("value2"),
             UPPERCASE_FIELD: toml_string("value3"),
         );
-        
+
         let (_, value) = config.unwrap();
         if let Value::Table(table) = value {
             assert!(table.contains_key("snake_case_field"));
@@ -211,7 +211,7 @@ mod tests {
         // Test with maximum/minimum values for i32
         assert_eq!(toml_int(i32::MAX), Value::Integer(i32::MAX as i64));
         assert_eq!(toml_int(i32::MIN), Value::Integer(i32::MIN as i64));
-        
+
         // Test with special strings
         assert_eq!(toml_string("with\nnewline"), Value::String("with\nnewline".to_string()));
         assert_eq!(toml_string("with\ttab"), Value::String("with\ttab".to_string()));
