@@ -95,8 +95,8 @@ impl MD051LinkFragments {
 
         for c in text.to_lowercase().chars() {
             match c {
-                // Keep alphanumeric characters
-                'a'..='z' | '0'..='9' => {
+                // Keep alphanumeric characters and underscores
+                'a'..='z' | '0'..='9' | '_' => {
                     fragment.push(c);
                     prev_was_hyphen = false;
                 }
@@ -524,6 +524,13 @@ mod tests {
 
         // Multiple spaces
         assert_eq!(rule.heading_to_fragment_fast("Multiple   Spaces"), "multiple-spaces");
+        
+        // Test underscores - should be preserved
+        assert_eq!(rule.heading_to_fragment_fast("respect_gitignore"), "respect_gitignore");
+        assert_eq!(rule.heading_to_fragment_fast("`respect_gitignore`"), "respect_gitignore");
+        
+        // Test slash conversion
+        assert_eq!(rule.heading_to_fragment_fast("CI/CD Migration"), "ci-cd-migration");
     }
 
     #[test]

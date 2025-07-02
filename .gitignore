@@ -9,3 +9,4 @@ benchmark
 node_modules
 parity_corpus
 .cleanup_archive/
+issues/

@@ -74,7 +74,14 @@ impl Rule for MD031BlanksAroundFences {
                 if in_code_block {
                     // We're inside a code block, check if this closes it
                     if let Some(ref current_marker) = current_fence_marker {
-                        if trimmed.starts_with(current_marker) && trimmed[current_marker.len()..].trim().is_empty() {
+                        // A fence can only close a code block if:
+                        // 1. It has the same type of marker (backticks or tildes)
+                        // 2. It has at least as many markers as the opening fence
+                        // 3. It has no content after the fence marker
+                        let same_type = (current_marker.starts_with('`') && fence_marker.starts_with('`'))
+                            || (current_marker.starts_with('~') && fence_marker.starts_with('~'));
+                        
+                        if same_type && fence_marker.len() >= current_marker.len() && trimmed[fence_marker.len()..].trim().is_empty() {
                             // This closes the current code block
                             in_code_block = false;
                             current_fence_marker = None;
@@ -102,7 +109,7 @@ impl Rule for MD031BlanksAroundFences {
                                 });
                             }
                         }
-                        // else: This is content inside a code block (different fence marker), ignore
+                        // else: This is content inside a code block (shorter fence or different type), ignore
                     }
                 } else {
                     // We're outside a code block, this opens one
@@ -391,6 +398,65 @@ mod tests {
             2,
             "Expected 2 warnings for missing blank lines before and after"
         );
+    }
+
+    #[test]
+    fn test_nested_code_blocks() {
+        let rule = MD031BlanksAroundFences;
+        
+        // Test that nested code blocks are not flagged
+        let content = r#"````markdown
+```
+content
+```
+````"#;
+        let ctx = LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0, "Should not flag nested code blocks");
+        
+        // Test that fixes don't corrupt nested blocks
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Fix should not modify nested code blocks");
+    }
+    
+    #[test]
+    fn test_nested_code_blocks_complex() {
+        let rule = MD031BlanksAroundFences;
+        
+        // Test documentation example with nested code blocks
+        let content = r#"# Documentation
+
+## Examples
+
+````markdown
+```python
+def hello():
+    print("Hello, world!")
+```
+
+```javascript
+console.log("Hello, world!");
+```
+````
+
+More text here."#;
+        
+        let ctx = LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0, "Should not flag any issues in properly formatted nested code blocks");
+        
+        // Test with 5-backtick outer block
+        let content_5 = r#"`````markdown
+````python
+```bash
+echo "nested"
+```
+````
+`````"#;
+        
+        let ctx_5 = LintContext::new(content_5);
+        let warnings_5 = rule.check(&ctx_5).unwrap();
+        assert_eq!(warnings_5.len(), 0, "Should handle deeply nested code blocks");
     }
 
     #[test]
