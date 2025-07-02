@@ -24,10 +24,10 @@ uv = "latest"
 # Zig for cross-compilation (used by maturin)
 zig = "0.13"
 
-# Optional: Additional useful Rust development tools
-# Uncomment to enable
-# "cargo:cargo-edit" = "latest"     # For cargo add/rm/upgrade commands
-# "cargo:cargo-outdated" = "latest" # Check for outdated dependencies
+# Additional Rust development tools for dependency management
+"cargo:cargo-edit" = "latest"     # For cargo add/rm/upgrade commands
+"cargo:cargo-outdated" = "latest" # Check for outdated dependencies
+# Optional: Security and dependency tools
 # "cargo:cargo-audit" = "latest"    # Security audit dependencies
 # "cargo:cargo-deny" = "latest"     # Lint dependencies
 
