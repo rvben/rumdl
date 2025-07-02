@@ -45,7 +45,20 @@ impl MD036NoEmphasisAsHeading {
         Self { config }
     }
 
+    fn ends_with_punctuation(&self, text: &str) -> bool {
+        if text.is_empty() {
+            return false;
+        }
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        // Check if the last character is in the punctuation set
+        trimmed.chars().last().map_or(false, |ch| self.config.punctuation.contains(ch))
+    }
+
     fn is_entire_line_emphasized(
+        &self,
         line: &str,
         doc_structure: &DocumentStructure,
         line_num: usize,
@@ -80,34 +93,62 @@ impl MD036NoEmphasisAsHeading {
         // Check specific patterns directly without additional requirements
         // Check for *emphasis* pattern (entire line)
         if let Some(caps) = RE_ASTERISK_SINGLE.captures(line) {
-            let full_match = caps.get(0).unwrap();
-            let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
-            let end_pos = start_pos + full_match.len();
-            return Some((1, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
+            let text = caps.get(1).unwrap().as_str();
+            // Check if text ends with punctuation - if so, don't flag it
+            if !self.config.punctuation.is_empty() && self.ends_with_punctuation(text) {
+                return None;
+            }
+            let _full_match = caps.get(0).unwrap();
+            // Find position in original line by looking for the emphasis pattern
+            let pattern = format!("*{}*", text);
+            let start_pos = original_line.find(&pattern).unwrap_or(0);
+            let end_pos = start_pos + pattern.len();
+            return Some((1, text.to_string(), start_pos, end_pos));
         }
 
         // Check for _emphasis_ pattern (entire line)
         if let Some(caps) = RE_UNDERSCORE_SINGLE.captures(line) {
-            let full_match = caps.get(0).unwrap();
-            let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
-            let end_pos = start_pos + full_match.len();
-            return Some((1, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
+            let text = caps.get(1).unwrap().as_str();
+            // Check if text ends with punctuation - if so, don't flag it
+            if !self.config.punctuation.is_empty() && self.ends_with_punctuation(text) {
+                return None;
+            }
+            let _full_match = caps.get(0).unwrap();
+            // Find position in original line by looking for the emphasis pattern
+            let pattern = format!("_{}_", text);
+            let start_pos = original_line.find(&pattern).unwrap_or(0);
+            let end_pos = start_pos + pattern.len();
+            return Some((1, text.to_string(), start_pos, end_pos));
         }
 
         // Check for **strong** pattern (entire line)
         if let Some(caps) = RE_ASTERISK_DOUBLE.captures(line) {
-            let full_match = caps.get(0).unwrap();
-            let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
-            let end_pos = start_pos + full_match.len();
-            return Some((2, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
+            let text = caps.get(1).unwrap().as_str();
+            // Check if text ends with punctuation - if so, don't flag it
+            if !self.config.punctuation.is_empty() && self.ends_with_punctuation(text) {
+                return None;
+            }
+            let _full_match = caps.get(0).unwrap();
+            // Find position in original line by looking for the emphasis pattern
+            let pattern = format!("**{}**", text);
+            let start_pos = original_line.find(&pattern).unwrap_or(0);
+            let end_pos = start_pos + pattern.len();
+            return Some((2, text.to_string(), start_pos, end_pos));
         }
 
         // Check for __strong__ pattern (entire line)
         if let Some(caps) = RE_UNDERSCORE_DOUBLE.captures(line) {
-            let full_match = caps.get(0).unwrap();
-            let start_pos = original_line.find(full_match.as_str()).unwrap_or(0);
-            let end_pos = start_pos + full_match.len();
-            return Some((2, caps.get(1).unwrap().as_str().to_string(), start_pos, end_pos));
+            let text = caps.get(1).unwrap().as_str();
+            // Check if text ends with punctuation - if so, don't flag it
+            if !self.config.punctuation.is_empty() && self.ends_with_punctuation(text) {
+                return None;
+            }
+            let _full_match = caps.get(0).unwrap();
+            // Find position in original line by looking for the emphasis pattern
+            let pattern = format!("__{}__", text);
+            let start_pos = original_line.find(&pattern).unwrap_or(0);
+            let end_pos = start_pos + pattern.len();
+            return Some((2, text.to_string(), start_pos, end_pos));
         }
 
         None
@@ -201,7 +242,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                 continue;
             }
 
-            if let Some((level, text, start_pos, end_pos)) = Self::is_entire_line_emphasized(line, doc_structure, i) {
+            if let Some((level, text, start_pos, end_pos)) = self.is_entire_line_emphasized(line, doc_structure, i) {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_emphasis_range(i + 1, line, start_pos, end_pos);
 
@@ -238,7 +279,7 @@ impl Rule for MD036NoEmphasisAsHeading {
 
         for i in 0..lines.len() {
             let line = lines[i];
-            if let Some((level, text, _start_pos, _end_pos)) = Self::is_entire_line_emphasized(line, &doc_structure, i)
+            if let Some((level, text, _start_pos, _end_pos)) = self.is_entire_line_emphasized(line, &doc_structure, i)
             {
                 result.push_str(&self.get_heading_for_emphasis(level, &text));
             } else {
@@ -356,10 +397,8 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].line, 1);
-        // The punctuation should be included in the message
-        assert!(result[0].message.contains("Important Note:"));
+        // Emphasis with punctuation should NOT be flagged (matches markdownlint)
+        assert_eq!(result.len(), 0);
     }
 
     #[test]
@@ -451,7 +490,8 @@ mod tests {
     #[test]
     fn test_fix_removes_punctuation() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
-        let content = "**Important Note:**\n\nRegular text";
+        // Use emphasis without punctuation so it gets flagged
+        let content = "**Important Note**\n\nRegular text";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -463,8 +503,12 @@ mod tests {
         let rule = MD036NoEmphasisAsHeading::new("".to_string());
         let content = "**Important Note:**\n\nRegular text";
         let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // With empty punctuation config, all emphasis is flagged
+        assert_eq!(result.len(), 1);
+        
         let fixed = rule.fix(&ctx).unwrap();
-
         // With empty punctuation config, keeps the colon
         assert_eq!(fixed, "## Important Note:\n\nRegular text");
     }
