@@ -4,7 +4,8 @@ This document provides a comprehensive reference for rumdl's global configuratio
 
 ## Overview
 
-Global settings are configured in the `[global]` section of your configuration file (`.rumdl.toml` or `pyproject.toml`). These settings control file selection, rule enablement, and general linting behavior.
+Global settings are configured in the `[global]` section of your configuration file (`.rumdl.toml` or
+`pyproject.toml`). These settings control file selection, rule enablement, and general linting behavior.
 
 ## Quick Reference
 
