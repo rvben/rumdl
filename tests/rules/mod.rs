@@ -30,6 +30,7 @@ mod md032_test;
 mod md033_test;
 mod md034_test;
 mod md034_ipv6_test;
+mod md051_unicode_test;
 mod md035_test;
 mod md036_test;
 mod md037_test;
