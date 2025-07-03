@@ -304,6 +304,11 @@ impl Rule for MD013LineLength {
         RuleCategory::Whitespace
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if content is empty or all lines are shorter than the limit
+        ctx.content.is_empty() || ctx.lines.iter().all(|line| line.content.len() <= self.config.line_length)
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let default_config = MD013Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;

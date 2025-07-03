@@ -193,6 +193,11 @@ impl Rule for MD035HRStyle {
         self
     }
 
+    /// Check if this rule should be skipped
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || (!ctx.content.contains("---") && !ctx.content.contains("***") && !ctx.content.contains("___"))
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
         map.insert("style".to_string(), toml::Value::String(self.config.style.clone()));

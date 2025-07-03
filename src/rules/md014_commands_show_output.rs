@@ -276,6 +276,11 @@ impl Rule for MD014CommandsShowOutput {
         self
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if content is empty or has no code blocks
+        ctx.content.is_empty() || !ctx.content.contains("```")
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let default_config = MD014Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;

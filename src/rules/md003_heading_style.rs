@@ -215,8 +215,8 @@ impl Rule for MD003HeadingStyle {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty() || !QUICK_HEADING_CHECK.is_match(content)
+        // Skip if content is empty or has no headings
+        ctx.content.is_empty() || !ctx.lines.iter().any(|line| line.heading.is_some())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

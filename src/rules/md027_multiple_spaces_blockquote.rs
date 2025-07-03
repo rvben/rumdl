@@ -162,6 +162,11 @@ impl Rule for MD027MultipleSpacesBlockquote {
     {
         Box::new(MD027MultipleSpacesBlockquote)
     }
+
+    /// Check if this rule should be skipped
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || !ctx.content.contains('>')
+    }
 }
 
 impl MD027MultipleSpacesBlockquote {
