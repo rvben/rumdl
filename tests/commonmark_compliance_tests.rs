@@ -75,10 +75,14 @@ fn verify_commonmark_elements(content: &str, filename: &str) {
             assert!(content.contains("### Heading 3"), "Missing level 3 heading");
         }
         "headings-setext.md" => {
-            // Verify Setext headings are preserved or converted to ATX (both valid CommonMark)
+            // MD003 with default "consistent" style preserves Setext format
+            // since Setext is the first heading style encountered
             assert!(content.contains("Heading 1"), "Missing level 1 heading content");
             assert!(content.contains("Heading 2"), "Missing level 2 heading content");
-            // The format may be converted to ATX, so don't check for =======
+            // Verify Setext format is preserved - MD003 in consistent mode keeps the first style found
+            // Note: Only MD047 (newline at EOF) typically applies to this simple content
+            assert!(content.contains("========="), "Setext underline should be preserved in consistent mode");
+            assert!(content.contains("---------"), "Setext underline should be preserved in consistent mode");
         }
         "lists.md" => {
             // Verify lists are preserved
@@ -118,9 +122,11 @@ fn verify_commonmark_elements(content: &str, filename: &str) {
             assert!(content.contains("> This is a blockquote"), "Missing blockquote content");
         }
         "html.md" => {
-            // HTML may be removed by rules, so we don't assert about it
-            // Just check that the file exists and has some content
-            assert!(!content.is_empty(), "Empty content");
+            // MD033 does NOT remove HTML - it only warns about it
+            // The fix() method returns content unchanged
+            assert!(content.contains("<div>"), "HTML tags should be preserved");
+            assert!(content.contains("</div>"), "HTML closing tags should be preserved");
+            assert!(content.contains("Some text in HTML"), "HTML content should be preserved");
         }
         _ => {
             panic!("Unknown test file: {filename}");
@@ -166,7 +172,7 @@ a [link](https://example.com) and a ![image](test.png) with alt text.
    ```
 3. Ordered item 3
 
-<div>Some HTML that might be removed</div>
+<div>Some HTML content that will be preserved</div>
 
 Final paragraph with a footnote[^1] and a horizontal rule:
 
