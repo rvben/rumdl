@@ -16,10 +16,10 @@ fn test_init_command_creates_and_loads_config() {
     assert!(output.status.success(), "Init command failed");
     assert!(base_path.join(".rumdl.toml").exists(), "Config file not created");
 
-    // Create a test file with a heading level increment issue
+    // Create a test file with a heading level increment issue (jumping from level 1 to level 3)
     fs::write(
         base_path.join("test.md"),
-        "### Heading level 3\n# Heading level 1 after\n",
+        "# Heading level 1\n### Heading level 3 (skipping level 2)\n",
     )
     .unwrap();
 
@@ -34,10 +34,15 @@ fn test_init_command_creates_and_loads_config() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let combined_output = format!("{stdout}\n{stderr}");
 
-    // Verify that we've detected at least one rule violation
+    // Check for specific rules that should trigger:
+    // - MD002: First heading should be level 1 (found level 3)
+    // - MD022: Missing blank lines around headings
+    // - MD041: First line in file should be a level 1 heading
     assert!(
-        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-        "Should detect at least one rule violation"
+        combined_output.contains("MD002") || 
+        combined_output.contains("MD022") ||
+        combined_output.contains("MD041"),
+        "Should detect at least one of: MD002 (first heading h1), MD022 (blanks around headings), or MD041 (first line heading)"
     );
 }
 
@@ -111,10 +116,19 @@ ___
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{stdout}\n{stderr}");
 
-    // Simply verify that the linter detected some issues with our complex file
+    // Check for specific rules that should trigger in this complex markdown:
+    // - MD001: Heading level jump from H1 to H4 (lines 94-96)
+    // - MD013: Long line exceeding usual limits (line 88)
+    // - MD042: Empty link with no URL (line 86)
+    // - MD045: Image without alt text (line 84)
+    // - MD046: Mixed code block styles (indented code block on line 90)
     assert!(
-        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-        "Should detect at least some issues in the complex Markdown"
+        combined_output.contains("MD001") || 
+        combined_output.contains("MD013") ||
+        combined_output.contains("MD042") ||
+        combined_output.contains("MD045") ||
+        combined_output.contains("MD046"),
+        "Should detect at least one of: MD001 (heading jump), MD013 (line length), MD042 (empty link), MD045 (no alt text), or MD046 (code block style)"
     );
 
     // Run the fix operation
@@ -165,10 +179,23 @@ Multiple blank lines above this one.
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{stdout}\n{stderr}");
 
-    // Simply verify that we detected some issues
+    // Check for specific rules that should trigger:
+    // - MD003: Inconsistent heading style "## heading 2" (line 143)
+    // - MD009: Trailing whitespace on line 147
+    // - MD010: Hard tab on line 148
+    // - MD012: Multiple consecutive blank lines (lines 151-152)
+    // - MD013: Long line exceeding limit (line 149)
+    // - MD024: Duplicate "Heading 1" content (lines 139-140)
+    // - MD030: Inconsistent spaces after list markers (line 146)
     assert!(
-        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-        "Should detect some issues with the test file"
+        combined_output.contains("MD003") ||
+        combined_output.contains("MD009") ||
+        combined_output.contains("MD010") ||
+        combined_output.contains("MD012") ||
+        combined_output.contains("MD013") ||
+        combined_output.contains("MD024") ||
+        combined_output.contains("MD030"),
+        "Should detect at least one of: MD003 (heading style), MD009 (trailing spaces), MD010 (tabs), MD012 (multiple blanks), MD013 (line length), MD024 (duplicate heading), or MD030 (list marker spaces)"
     );
 }
 
@@ -207,10 +234,17 @@ Text immediately below heading (MD022)
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{stdout}\n{stderr}");
 
-    // Check if at least one rule violation was detected
+    // Check for specific rules that should trigger:
+    // - MD001: Heading level jump from H1 to H3 (lines 191-192)
+    // - MD022: Missing blank lines around headings (lines 188-189)
+    // - MD023: Indented heading (line 185)
+    // - MD036: Emphasis used as heading (lines 182-183)
     assert!(
-        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-        "Should detect at least one rule violation"
+        combined_output.contains("MD001") ||
+        combined_output.contains("MD022") ||
+        combined_output.contains("MD023") ||
+        combined_output.contains("MD036"),
+        "Should detect at least one of: MD001 (heading increment), MD022 (blanks around headings), MD023 (heading start left), or MD036 (emphasis as heading)"
     );
 
     // Test fix operation
@@ -271,10 +305,19 @@ Visit http://example.com for more information.
 
     println!("Check command output:\n{combined_output}");
 
-    // Check if at least one link-related issue was detected
+    // Check for specific link/URL rules that should trigger:
+    // - MD034: Bare URL without angle brackets (lines 246, 256)
+    // - MD039: Space inside link text (line 248)
+    // - MD042: Empty link with no URL (line 250)
+    // - MD045: Image without alt text (line 252)
+    // - MD052: Undefined reference link (line 254)
     assert!(
-        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-        "Should detect at least one link-related issue"
+        combined_output.contains("MD034") ||
+        combined_output.contains("MD039") ||
+        combined_output.contains("MD042") ||
+        combined_output.contains("MD045") ||
+        combined_output.contains("MD052"),
+        "Should detect at least one of: MD034 (bare URL), MD039 (space in links), MD042 (empty link), MD045 (no alt text), or MD052 (undefined reference)"
     );
 
     // Test fix operation
@@ -366,10 +409,19 @@ fn test_low_coverage_rules() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{stdout}\n{stderr}");
 
-    // Verify we detected some issues
+    // Check for specific rules that should trigger:
+    // - MD026: Trailing punctuation in heading (line 332)
+    // - MD028: Blank line inside blockquote (lines 337-339)
+    // - MD029: Ordered list not using incremental numbers (lines 345-347)
+    // - MD030: Extra space after list marker (line 342)
+    // - MD056: Table column count inconsistent (line 353 has extra column)
     assert!(
-        !output.status.success() || combined_output.contains("warning") || combined_output.contains("MD"),
-        "Should detect some Markdown issues"
+        combined_output.contains("MD026") ||
+        combined_output.contains("MD028") ||
+        combined_output.contains("MD029") ||
+        combined_output.contains("MD030") ||
+        combined_output.contains("MD056"),
+        "Should detect at least one of: MD026 (trailing punctuation), MD028 (blank in blockquote), MD029 (ordered list prefix), MD030 (list marker space), or MD056 (table columns)"
     );
 
     // Test fix for these rules

@@ -270,7 +270,7 @@ fn test_cli_options() {
     let temp_dir = tempdir().unwrap();
     let _config_path = create_dummy_config(&temp_dir); // Use dummy config
 
-    // Create a markdown file with some issues
+    // Create a markdown file with specific issues for MD022 (heading spacing) and MD033 (HTML)
     let markdown_path = temp_dir.path().join("format_test.md");
     let markdown_content = r#"# Test Document
 ## No blank line
@@ -293,6 +293,9 @@ fn test_cli_options() {
     // Accept exit code 0 or 1 if output is correct and only deprecation warning is in stderr
     let code = assert.get_output().status.code().unwrap_or(-1);
     assert!(code == 0 || code == 1, "Unexpected exit code: {code}");
+    // The test content triggers exactly two rules:
+    // - MD022: "## No blank line" lacks blank line above it
+    // - MD033: "<div>Some HTML</div>" contains inline HTML
     assert!(default_output.contains("MD022"));
     assert!(default_output.contains("MD033"));
     // Allow deprecation warning in stderr
@@ -300,11 +303,11 @@ fn test_cli_options() {
         assert!(stderr.contains("Deprecation warning"));
     }
 
-    // Test with disabled rules (using --no-config and disable via CLI)
+    // Test with disabled rules - only disable the rules that actually trigger
     let mut disabled_cmd = Command::cargo_bin("rumdl").unwrap();
     let disabled_assert = disabled_cmd
         .arg("--disable")
-        .arg("MD022,MD033,MD032,MD030") // Disable all rules that would trigger on this content
+        .arg("MD022,MD033") // Only disable the two rules that trigger
         .arg(&markdown_path)
         .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
@@ -317,15 +320,15 @@ fn test_cli_options() {
     );
     assert!(!disabled_output.contains("MD022"));
     assert!(!disabled_output.contains("MD033"));
-    assert!(!disabled_output.contains("MD032")); // Also check MD032 is disabled
-    // MD030 should NOT be reported for *Bad item, because it is not a valid list item per CommonMark/markdownlint
-    assert!(!disabled_output.contains("MD030"));
+    
+    // Note: MD032 (blanks around lists) doesn't trigger because the list has blank lines around it
+    // Note: MD030 (list marker space) doesn't trigger on "*Bad item" because it's not a valid list item
 
-    // Test with enabled rules (using --no-config and enable via CLI)
+    // Test enabling specific rules
     let mut enabled_cmd = Command::cargo_bin("rumdl").unwrap();
     let enabled_assert = enabled_cmd
         .arg("--enable")
-        .arg("MD030") // Only enable MD030
+        .arg("MD030") // Enable MD030 to verify it doesn't trigger on invalid list syntax
         .arg(&markdown_path)
         .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
@@ -347,4 +350,110 @@ fn test_cli_options() {
     assert!(default_output_options.contains("MD033"));
     assert!(!default_output_options.contains("MD047")); // Corrected: MD047 should NOT be reported for this file
     default_assert_options.code(1);
+}
+
+#[test]
+fn test_specific_rule_triggers() {
+    let temp_dir = tempdir().unwrap();
+    
+    // Test MD022: Headings should be surrounded by blank lines
+    let md022_path = temp_dir.path().join("md022_test.md");
+    let md022_content = r#"# First heading
+## Second heading without blank line above
+Text right after heading
+
+## Third heading
+"#;
+    fs::write(&md022_path, md022_content).unwrap();
+    
+    let mut md022_cmd = Command::cargo_bin("rumdl").unwrap();
+    let md022_assert = md022_cmd
+        .arg(&md022_path)
+        .arg("--no-config")
+        .assert();
+    let md022_output = String::from_utf8(md022_assert.get_output().stdout.clone()).unwrap();
+    assert!(md022_output.contains("MD022"), "MD022 should trigger for headings without blank lines");
+    
+    // Test MD030: Spaces after list markers
+    let md030_path = temp_dir.path().join("md030_test.md");
+    let md030_content = r#"# List spacing test
+
+*  Too many spaces
+*   Way too many spaces
+* Normal spacing
+"#;
+    fs::write(&md030_path, md030_content).unwrap();
+    
+    let mut md030_cmd = Command::cargo_bin("rumdl").unwrap();
+    let md030_assert = md030_cmd
+        .arg(&md030_path)
+        .arg("--no-config")
+        .assert();
+    let md030_output = String::from_utf8(md030_assert.get_output().stdout.clone()).unwrap();
+    assert!(md030_output.contains("MD030"), "MD030 should trigger for incorrect spacing after list markers");
+    
+    // Test MD032: Lists should be surrounded by blank lines
+    let md032_path = temp_dir.path().join("md032_test.md");
+    let md032_content = r#"# List blank lines test
+
+Some text immediately followed by list:
+* First item
+* Second item
+More text immediately after list.
+
+Another paragraph.
+1. Ordered list without blank line above
+2. Second item
+"#;
+    fs::write(&md032_path, md032_content).unwrap();
+    
+    let mut md032_cmd = Command::cargo_bin("rumdl").unwrap();
+    let md032_assert = md032_cmd
+        .arg(&md032_path)
+        .arg("--no-config")
+        .assert();
+    let md032_output = String::from_utf8(md032_assert.get_output().stdout.clone()).unwrap();
+    assert!(md032_output.contains("MD032"), "MD032 should trigger for lists without blank lines around them");
+    
+    // Test MD033: No inline HTML
+    let md033_path = temp_dir.path().join("md033_test.md");
+    let md033_content = r#"# HTML test
+
+<div>This is inline HTML</div>
+
+<span style="color: red">Styled text</span>
+
+<script>alert('JS')</script>
+"#;
+    fs::write(&md033_path, md033_content).unwrap();
+    
+    let mut md033_cmd = Command::cargo_bin("rumdl").unwrap();
+    let md033_assert = md033_cmd
+        .arg(&md033_path)
+        .arg("--no-config")
+        .assert();
+    let md033_output = String::from_utf8(md033_assert.get_output().stdout.clone()).unwrap();
+    assert!(md033_output.contains("MD033"), "MD033 should trigger for inline HTML");
+    
+    // Test that invalid list syntax doesn't trigger MD030
+    let invalid_list_path = temp_dir.path().join("invalid_list_test.md");
+    let invalid_list_content = r#"# Invalid list test
+
+*Bad item (no space after asterisk)
+* Good item
+
+This is text with *emphasis* not a list.
+"#;
+    fs::write(&invalid_list_path, invalid_list_content).unwrap();
+    
+    let mut invalid_cmd = Command::cargo_bin("rumdl").unwrap();
+    let invalid_assert = invalid_cmd
+        .arg(&invalid_list_path)
+        .arg("--no-config")
+        .arg("--enable")
+        .arg("MD030") // Only enable MD030
+        .assert();
+    let invalid_output = String::from_utf8(invalid_assert.get_output().stdout.clone()).unwrap();
+    // MD030 should NOT trigger on "*Bad item" because it's not recognized as a valid list item
+    assert!(!invalid_output.contains("MD030"), "MD030 should not trigger on invalid list syntax like '*Bad item'");
 }
