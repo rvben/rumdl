@@ -3,6 +3,16 @@
 /// See [docs/md018.md](../../docs/md018.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_single_line_range;
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    // Pattern to detect emoji hashtags like #️⃣
+    static ref EMOJI_HASHTAG_PATTERN: Regex = Regex::new(r"^#️⃣|^#⃣").unwrap();
+    
+    // Pattern to detect Unicode hashtag symbols that shouldn't be treated as headings
+    static ref UNICODE_HASHTAG_PATTERN: Regex = Regex::new(r"^#[\u{FE0F}\u{20E3}]").unwrap();
+}
 
 #[derive(Clone)]
 pub struct MD018NoMissingSpaceAtx;
@@ -27,6 +37,11 @@ impl MD018NoMissingSpaceAtx {
         if !trimmed_line.starts_with('#') {
             return None;
         }
+        
+        // Skip emoji hashtags and Unicode hashtag patterns
+        if EMOJI_HASHTAG_PATTERN.is_match(trimmed_line) || UNICODE_HASHTAG_PATTERN.is_match(trimmed_line) {
+            return None;
+        }
 
         // Count the number of hashes
         let hash_count = trimmed_line.chars().take_while(|&c| c == '#').count();
@@ -36,6 +51,13 @@ impl MD018NoMissingSpaceAtx {
 
         // Check what comes after the hashes
         let after_hashes = &trimmed_line[hash_count..];
+        
+        // Skip if what follows the hashes is an emoji modifier or variant selector
+        if after_hashes.chars().next().map_or(false, |ch| {
+            ch == '\u{FE0F}' || ch == '\u{20E3}' || ch == '\u{FE0E}' || ch == '⃣' || ch == '️'
+        }) {
+            return None;
+        }
 
         // If there's content immediately after hashes (no space), it needs fixing
         if !after_hashes.is_empty() && !after_hashes.starts_with(' ') && !after_hashes.starts_with('\t') {
@@ -55,6 +77,19 @@ impl MD018NoMissingSpaceAtx {
             // Skip if it starts with emphasis markers
             if content.starts_with('*') || content.starts_with('_') {
                 return None;
+            }
+            
+            // Skip if it looks like a hashtag (e.g., #tag, #123)
+            // But only skip if it's lowercase or a number to avoid skipping headings like #Summary
+            if hash_count == 1 && content.len() > 0 {
+                let first_char = content.chars().next();
+                if let Some(ch) = first_char {
+                    // Skip if it's a lowercase letter or number (common hashtag pattern)
+                    // Don't skip uppercase as those are likely headings
+                    if (ch.is_lowercase() || ch.is_numeric()) && !content.contains(' ') {
+                        return None;
+                    }
+                }
             }
 
             // This looks like a malformed heading that needs a space
@@ -111,6 +146,11 @@ impl Rule for MD018NoMissingSpaceAtx {
                     // Check if there's a space after the marker
                     let line = &line_info.content;
                     let trimmed = line.trim_start();
+                    
+                    // Skip emoji hashtags and Unicode hashtag patterns
+                    if EMOJI_HASHTAG_PATTERN.is_match(trimmed) || UNICODE_HASHTAG_PATTERN.is_match(trimmed) {
+                        continue;
+                    }
 
                     if trimmed.len() > heading.marker.len() {
                         let after_marker = &trimmed[heading.marker.len()..];
@@ -185,6 +225,11 @@ impl Rule for MD018NoMissingSpaceAtx {
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     let line = &line_info.content;
                     let trimmed = line.trim_start();
+                    
+                    // Skip emoji hashtags and Unicode hashtag patterns
+                    if EMOJI_HASHTAG_PATTERN.is_match(trimmed) || UNICODE_HASHTAG_PATTERN.is_match(trimmed) {
+                        continue;
+                    }
 
                     if trimmed.len() > heading.marker.len() {
                         let after_marker = &trimmed[heading.marker.len()..];
@@ -230,8 +275,8 @@ impl Rule for MD018NoMissingSpaceAtx {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty() || !content.contains('#')
+        // Skip if no lines contain hash symbols
+        !ctx.lines.iter().any(|line| line.content.contains('#'))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -31,6 +31,8 @@ pub enum HeadingStyle {
     Setext2, // Heading
     // -------
     Consistent, // For maintaining consistency with the first found header style
+    SetextWithAtx, // Setext for h1/h2, ATX for h3-h6
+    SetextWithAtxClosed, // Setext for h1/h2, ATX closed for h3-h6
 }
 
 impl fmt::Display for HeadingStyle {
@@ -41,6 +43,8 @@ impl fmt::Display for HeadingStyle {
             HeadingStyle::Setext1 => "setext1",
             HeadingStyle::Setext2 => "setext2",
             HeadingStyle::Consistent => "consistent",
+            HeadingStyle::SetextWithAtx => "setext_with_atx",
+            HeadingStyle::SetextWithAtxClosed => "setext_with_atx_closed",
         };
         write!(f, "{s}")
     }
@@ -55,6 +59,8 @@ impl FromStr for HeadingStyle {
             "setext1" | "setext" => Ok(HeadingStyle::Setext1),
             "setext2" => Ok(HeadingStyle::Setext2),
             "consistent" => Ok(HeadingStyle::Consistent),
+            "setext_with_atx" => Ok(HeadingStyle::SetextWithAtx),
+            "setext_with_atx_closed" => Ok(HeadingStyle::SetextWithAtxClosed),
             _ => Err(()),
         }
     }
@@ -267,6 +273,48 @@ impl HeadingUtils {
             HeadingStyle::Consistent => {
                 // For Consistent style, default to ATX as it's the most commonly used
                 format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
+            }
+            HeadingStyle::SetextWithAtx => {
+                if level <= 2 {
+                    // Use Setext for h1/h2
+                    let underline_char = if level == 1 { '=' } else { '-' };
+                    let visible_length = text_content.chars().count();
+                    let underline_length = visible_length.max(3);
+                    format!(
+                        "{}{}\n{}{}",
+                        indentation,
+                        text_content,
+                        indentation,
+                        underline_char.to_string().repeat(underline_length)
+                    )
+                } else {
+                    // Use ATX for h3-h6
+                    format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
+                }
+            }
+            HeadingStyle::SetextWithAtxClosed => {
+                if level <= 2 {
+                    // Use Setext for h1/h2
+                    let underline_char = if level == 1 { '=' } else { '-' };
+                    let visible_length = text_content.chars().count();
+                    let underline_length = visible_length.max(3);
+                    format!(
+                        "{}{}\n{}{}",
+                        indentation,
+                        text_content,
+                        indentation,
+                        underline_char.to_string().repeat(underline_length)
+                    )
+                } else {
+                    // Use ATX closed for h3-h6
+                    format!(
+                        "{}{} {} {}",
+                        indentation,
+                        "#".repeat(level as usize),
+                        text_content,
+                        "#".repeat(level as usize)
+                    )
+                }
             }
         }
     }

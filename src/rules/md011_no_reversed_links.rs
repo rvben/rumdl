@@ -9,8 +9,15 @@ use regex::Regex;
 lazy_static! {
     static ref REVERSED_LINK_REGEX: Regex =
         Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|(\([^)]+\))\[([^\]]+)\]").unwrap();
-    static ref REVERSED_LINK_CHECK_REGEX: Regex = Regex::new(r"\(([^)]+)\)\[([^\]]+)\]").unwrap();
+    // Pattern to match reversed links: (URL)[text]
+    // The URL pattern allows for nested parentheses using a simple approach
+    static ref REVERSED_LINK_CHECK_REGEX: Regex = Regex::new(
+        r"\(([^)]*(?:\([^)]*\)[^)]*)*)\)\[([^\]]+)\]"
+    ).unwrap();
     static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)").unwrap();
+    
+    // Pattern to detect escaped brackets and parentheses
+    static ref ESCAPED_CHARS: Regex = Regex::new(r"\\[\[\]()]").unwrap();
 
     // New patterns for detecting malformed link attempts where user intent is clear
     static ref MALFORMED_LINK_PATTERNS: Vec<(Regex, &'static str)> = vec![
@@ -33,21 +40,50 @@ lazy_static! {
 pub struct MD011NoReversedLinks;
 
 impl MD011NoReversedLinks {
+    /// Check if a character at position is escaped (preceded by odd number of backslashes)
+    fn is_escaped(content: &str, pos: usize) -> bool {
+        if pos == 0 {
+            return false;
+        }
+        
+        let mut backslash_count = 0;
+        let mut check_pos = pos - 1;
+        
+        loop {
+            if content.chars().nth(check_pos) == Some('\\') {
+                backslash_count += 1;
+                if check_pos == 0 {
+                    break;
+                }
+                check_pos -= 1;
+            } else {
+                break;
+            }
+        }
+        
+        backslash_count % 2 == 1
+    }
+
     fn find_reversed_links(content: &str) -> Vec<(usize, usize, String, String)> {
         let mut results = Vec::new();
         let mut line_start = 0;
         let mut current_line = 1;
 
         for line in content.lines() {
-            for cap in REVERSED_LINK_REGEX.captures_iter(line) {
-                if cap.get(3).is_some() {
-                    // Found reversed link syntax (URL)[text]
-                    // cap[3] contains (URL) with parentheses, cap[4] contains text
-                    let url = cap[3].trim_matches('(').trim_matches(')');
-                    let text = &cap[4];
-                    let start = line_start + cap.get(0).unwrap().start();
-                    results.push((current_line, start - line_start + 1, text.to_string(), url.to_string()));
-                }
+            // Skip processing if we can't possibly have a reversed link
+            if !line.contains('(') || !line.contains('[') || !line.contains(']') || !line.contains(')') {
+                line_start += line.len() + 1;
+                current_line += 1;
+                continue;
+            }
+
+            for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
+                // Extract URL and text
+                let url = &cap[1];
+                let text = &cap[2];
+                
+                let start = line_start + cap.get(0).unwrap().start();
+                results.push((current_line, start - line_start + 1, text.to_string(), url.to_string()));
             }
             line_start += line.len() + 1; // +1 for newline
             current_line += 1;
@@ -178,6 +214,41 @@ impl Rule for MD011NoReversedLinks {
             // Part 1: Check for existing perfectly formed reversed links
             for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
                 let match_obj = cap.get(0).unwrap();
+                let match_start = match_obj.start();
+                let match_end = match_obj.end();
+                
+                // Check if the match contains escaped brackets or parentheses
+                let match_text = match_obj.as_str();
+                
+                // Skip if the opening parenthesis is escaped
+                if match_start > 0 && Self::is_escaped(line, byte_pos + match_start) {
+                    continue;
+                }
+                
+                // Check if any brackets/parentheses within the match are escaped
+                let mut skip_match = false;
+                for esc_match in ESCAPED_CHARS.find_iter(match_text) {
+                    let esc_pos = match_start + esc_match.start();
+                    if esc_pos > 0 && line.chars().nth(esc_pos.saturating_sub(1)) == Some('\\') {
+                        skip_match = true;
+                        break;
+                    }
+                }
+                
+                if skip_match {
+                    continue;
+                }
+                
+                // Manual check for negative lookahead: skip if followed by (url)
+                // This prevents false positives like "(text)[ref](url)"
+                let remaining = &line[match_end..];
+                if remaining.trim_start().starts_with('(') {
+                    continue;
+                }
+
+                // Extract URL and text
+                let url = &cap[1];
+                let text = &cap[2];
 
                 // Calculate precise character range for the reversed syntax
                 let (start_line, start_col, end_line, end_col) =
@@ -185,7 +256,7 @@ impl Rule for MD011NoReversedLinks {
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
-                    message: format!("Reversed link syntax: use [{}]({}) instead", &cap[2], &cap[1]),
+                    message: format!("Reversed link syntax: use [{}]({}) instead", text, url),
                     line: start_line,
                     column: start_col,
                     end_line,
@@ -199,7 +270,7 @@ impl Rule for MD011NoReversedLinks {
                             let match_end_byte = match_start_byte + match_obj.len();
                             match_start_byte..match_end_byte
                         },
-                        replacement: format!("[{}]({})", &cap[2], &cap[1]),
+                        replacement: format!("[{}]({})", text, url),
                     }),
                 });
             }
@@ -482,5 +553,45 @@ But this (https://example.com)[reversed link] should be flagged."#;
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Reversed link syntax"));
         assert_eq!(result[0].line, 8); // The line with the actual reversed link
+    }
+
+    #[test]
+    fn test_negative_lookahead() {
+        let rule = MD011NoReversedLinks;
+
+        // Test that (text)[ref](url) pattern is not flagged
+        let content = "This is a reference-style link: (see here)[ref](https://example.com)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "Should not flag (text)[ref](url) pattern");
+
+        // Test that genuine reversed links are still caught
+        let content = "This is reversed: (https://example.com)[click here]";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag genuine reversed links");
+        
+        // Test with spacing before the second parentheses
+        let content = "Reference with space: (text)[ref] (url)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "Should not flag when space before (url)");
+    }
+
+    #[test]
+    fn test_escaped_characters() {
+        let rule = MD011NoReversedLinks;
+
+        // Test escaped brackets and parentheses
+        let content = r"Escaped: \(not a link\)\[also not\]";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "Should not flag escaped brackets");
+
+        // Test with URL containing parentheses
+        let content = "(https://example.com/path(with)parens)[text]";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should still flag URLs with nested parentheses");
     }
 }

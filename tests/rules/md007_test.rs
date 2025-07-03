@@ -240,7 +240,7 @@ mod comprehensive_tests {
 
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 4, "Expected 4 warnings for incorrectly nested list");
+        assert_eq!(result.len(), 3, "Expected 3 warnings for incorrectly nested list");
 
         // Check that fix works correctly
         // TODO: The fix incorrectly changes nesting level of properly indented items
@@ -248,7 +248,7 @@ mod comprehensive_tests {
         let expected = r#"* Level 1
   * Level 2 (wrong)
     * Level 3 (wrong)
-* Level 2 (correct)
+  * Level 2 (correct)
   * Level 3 (wrong)"#;
         assert_eq!(fixed, expected);
     }

@@ -24,7 +24,11 @@ lazy_static! {
 impl MD007ULIndent {
     pub fn new(indent: usize) -> Self {
         Self {
-            config: MD007Config { indent },
+            config: MD007Config {
+                indent,
+                start_indented: false,
+                start_indent: 2,
+            },
         }
     }
 
@@ -95,7 +99,17 @@ impl Rule for MD007ULIndent {
                 item.marker_type,
                 ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus
             ) {
-                let expected_indent = item.nesting_level * self.config.indent;
+                // Skip first level check if start_indented is false
+                if !self.config.start_indented && item.nesting_level == 0 {
+                    continue;
+                }
+                
+                let expected_indent = if self.config.start_indented {
+                    self.config.start_indent + (item.nesting_level * self.config.indent)
+                } else {
+                    item.nesting_level * self.config.indent
+                };
+                
                 if item.indentation != expected_indent {
                     // Generate fix for this list item
                     let fix = {
@@ -181,7 +195,17 @@ impl Rule for MD007ULIndent {
                 item.marker_type,
                 ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus
             ) {
-                let expected_indent = item.nesting_level * self.config.indent;
+                // Skip first level check if start_indented is false
+                if !self.config.start_indented && item.nesting_level == 0 {
+                    continue;
+                }
+                
+                let expected_indent = if self.config.start_indented {
+                    self.config.start_indent + (item.nesting_level * self.config.indent)
+                } else {
+                    item.nesting_level * self.config.indent
+                };
+                
                 if item.indentation != expected_indent {
                     // Generate fix for this list item
                     let fix = {
@@ -692,6 +716,55 @@ tags:
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "* Item 1 with **bold** and *italic*\n  * Item 2 with `code`\n    * Item 3 with [link](url)";
         assert_eq!(fixed, expected, "Fix should only change indentation, not content");
+    }
+
+    #[test]
+    fn test_start_indented_config() {
+        let mut config = MD007Config::default();
+        config.start_indented = true;
+        config.start_indent = 4;
+        config.indent = 2;
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // First level should be indented by start_indent (4 spaces)
+        // Level 0: 4 spaces (start_indent)
+        // Level 1: 6 spaces (start_indent + indent = 4 + 2)
+        // Level 2: 8 spaces (start_indent + 2*indent = 4 + 4)
+        let content = "    * Item 1\n      * Item 2\n        * Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Expected no warnings with start_indented config");
+
+        // Wrong first level indentation
+        let wrong_content = "  * Item 1\n    * Item 2";
+        let ctx = LintContext::new(wrong_content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].message, "Expected 4 spaces for indent depth 0, found 2");
+        assert_eq!(result[1].line, 2);
+        assert_eq!(result[1].message, "Expected 6 spaces for indent depth 1, found 4");
+
+        // Fix should correct to start_indent for first level
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "    * Item 1\n      * Item 2");
+    }
+
+    #[test]
+    fn test_start_indented_false_allows_any_first_level() {
+        let rule = MD007ULIndent::default(); // start_indented is false by default
+        
+        // When start_indented is false, first level items at any indentation are allowed
+        let content = "   * Item 1"; // First level at 3 spaces
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "First level at any indentation should be allowed when start_indented is false");
+        
+        // Multiple first level items at different indentations should all be allowed
+        let content = "* Item 1\n  * Item 2\n    * Item 3"; // All at level 0 (different indents)
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "All first-level items should be allowed at any indentation");
     }
 
     #[test]

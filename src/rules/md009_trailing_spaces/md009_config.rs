@@ -12,6 +12,10 @@ pub struct MD009Config {
     /// Strict mode - remove all trailing spaces (default: false)
     #[serde(default)]
     pub strict: bool,
+
+    /// Allow trailing spaces in empty list item lines (default: false)
+    #[serde(default)]
+    pub list_item_empty_lines: bool,
 }
 
 fn default_br_spaces() -> usize {
@@ -23,6 +27,7 @@ impl Default for MD009Config {
         Self {
             br_spaces: default_br_spaces(),
             strict: false,
+            list_item_empty_lines: false,
         }
     }
 }
