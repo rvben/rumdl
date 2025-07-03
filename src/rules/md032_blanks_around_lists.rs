@@ -512,7 +512,7 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty()
+        ctx.content.is_empty() || ctx.list_blocks.is_empty()
     }
 
     fn category(&self) -> RuleCategory {

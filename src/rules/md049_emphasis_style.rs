@@ -225,6 +225,11 @@ impl Rule for MD049EmphasisStyle {
         Ok(result)
     }
 
+    /// Check if this rule should be skipped
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || (!ctx.content.contains('*') && !ctx.content.contains('_'))
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

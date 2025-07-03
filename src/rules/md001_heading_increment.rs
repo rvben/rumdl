@@ -105,7 +105,7 @@ impl Rule for MD001HeadingIncrement {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: format!("Expected heading level {}", prev_level + 1),
+                        message: format!("Expected heading level {}, but found heading level {}", prev_level + 1, level),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: line_index.line_content_range(line_num + 1),
@@ -175,8 +175,8 @@ impl Rule for MD001HeadingIncrement {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty()
+        // Skip if content is empty or has no headings
+        ctx.content.is_empty() || !ctx.lines.iter().any(|line| line.heading.is_some())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

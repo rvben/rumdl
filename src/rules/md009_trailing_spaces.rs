@@ -246,6 +246,11 @@ impl Rule for MD009TrailingSpaces {
         self
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if content is empty or has no spaces at all
+        ctx.content.is_empty() || !ctx.content.contains(' ')
+    }
+
     fn category(&self) -> RuleCategory {
         RuleCategory::Whitespace
     }

@@ -153,11 +153,10 @@ impl MD005ListIndent {
                 let expected_indent = Self::get_expected_indent(level);
                 if indent != expected_indent {
                     let inconsistent_message = format!(
-                        "List item indentation is {} {}, expected {} for level {}",
-                        indent,
-                        if indent == 1 { "space" } else { "spaces" },
+                        "Expected indentation of {} {}, found {}",
                         expected_indent,
-                        level
+                        if expected_indent == 1 { "space" } else { "spaces" },
+                        indent
                     );
 
                     let line = &line_info.content;
@@ -206,7 +205,10 @@ impl MD005ListIndent {
                 if let Some(reference_indent) = level_indents.get(&key) {
                     if indent != *reference_indent {
                         let inconsistent_message = format!(
-                            "List item indentation is inconsistent with other items at the same level (found: {indent}, expected: {reference_indent})"
+                            "Expected indentation of {} {}, found {}",
+                            reference_indent,
+                            if *reference_indent == 1 { "space" } else { "spaces" },
+                            indent
                         );
 
                         // Only add if we don't already have a warning for this line
@@ -325,11 +327,8 @@ impl Rule for MD005ListIndent {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty()
-            || (!ctx.content.contains('*')
-                && !ctx.content.contains('-')
-                && !ctx.content.contains('+')
-                && !ctx.content.contains(|c: char| c.is_ascii_digit()))
+        // Skip if content is empty or has no list items
+        ctx.content.is_empty() || !ctx.lines.iter().any(|line| line.list_item.is_some())
     }
 
     /// Optimized check using document structure
@@ -776,7 +775,7 @@ Even more text";
         // Both the single space and two space items get warnings
         // because they establish inconsistent indentation at the same level
         assert_eq!(result.len(), 2);
-        assert!(result.iter().any(|w| w.line == 2 && w.message.contains("1 space")));
+        assert!(result.iter().any(|w| w.line == 2 && w.message.contains("found 1")));
     }
 
     #[test]
@@ -790,7 +789,7 @@ Even more text";
         let result = rule.check(&ctx).unwrap();
         // Both items get warnings due to inconsistent indentation
         assert_eq!(result.len(), 2);
-        assert!(result.iter().any(|w| w.line == 2 && w.message.contains("3 spaces")));
+        assert!(result.iter().any(|w| w.line == 2 && w.message.contains("found 3")));
     }
 
     #[test]

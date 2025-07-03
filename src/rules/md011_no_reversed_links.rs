@@ -185,7 +185,7 @@ impl Rule for MD011NoReversedLinks {
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
-                    message: "Reversed link syntax".to_string(),
+                    message: format!("Reversed link syntax: use [{}]({}) instead", &cap[2], &cap[1]),
                     line: start_line,
                     column: start_col,
                     end_line,
@@ -272,6 +272,11 @@ impl Rule for MD011NoReversedLinks {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if content is empty or doesn't have the necessary characters for links
+        ctx.content.is_empty() || !ctx.content.contains('(') || !ctx.content.contains('[')
     }
 
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>

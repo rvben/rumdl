@@ -133,7 +133,7 @@ impl Rule for MD007ULIndent {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message: format!(
-                            "Incorrect indentation: expected {} spaces for nesting level {}, found {}",
+                            "Expected {} spaces for indent depth {}, found {}",
                             expected_indent, item.nesting_level, item.indentation
                         ),
                         line: item.line_number,
@@ -219,7 +219,7 @@ impl Rule for MD007ULIndent {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message: format!(
-                            "Incorrect indentation: expected {} spaces for nesting level {}, found {}",
+                            "Expected {} spaces for indent depth {}, found {}",
                             expected_indent, item.nesting_level, item.indentation
                         ),
                         line: item.line_number,
@@ -269,8 +269,10 @@ impl Rule for MD007ULIndent {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty()
-            || (!ctx.content.contains('*') && !ctx.content.contains('-') && !ctx.content.contains('+'))
+        // Skip if content is empty or has no unordered list items
+        ctx.content.is_empty() || !ctx.lines.iter().any(|line| {
+            line.list_item.as_ref().map_or(false, |item| !item.is_ordered)
+        })
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
