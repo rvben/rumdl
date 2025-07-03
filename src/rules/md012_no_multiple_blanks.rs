@@ -1,4 +1,5 @@
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use std::collections::HashSet;
 use toml;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
@@ -10,8 +11,6 @@ use md012_config::MD012Config;
 /// Rule MD012: No multiple consecutive blank lines
 ///
 /// See [docs/md012.md](../../docs/md012.md) for full documentation, configuration, and examples.
-#[cfg(test)]
-type LineRegions = Vec<(usize, usize)>;
 
 #[derive(Debug, Clone, Default)]
 pub struct MD012NoMultipleBlanks {
@@ -29,113 +28,6 @@ impl MD012NoMultipleBlanks {
         Self { config }
     }
 
-    #[cfg(test)]
-    pub fn debug_regions(lines: &[&str]) -> (LineRegions, LineRegions) {
-        let code_regions = Self::compute_code_block_regions(lines);
-        let front_matter_regions = Self::compute_front_matter_regions(lines);
-        println!("Lines:");
-        for (i, line) in lines.iter().enumerate() {
-            println!("  {i}: {line:?}");
-        }
-        println!("Code block regions: {code_regions:?}");
-        println!("Front matter regions: {front_matter_regions:?}");
-        (code_regions, front_matter_regions)
-    }
-
-    /// Pre-compute code block regions for efficient lookup
-    fn compute_code_block_regions(lines: &[&str]) -> Vec<(usize, usize)> {
-        let mut regions = Vec::new();
-        let mut in_code_block = false;
-        let mut start_line = 0;
-
-        for (i, line) in lines.iter().enumerate() {
-            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
-                if in_code_block {
-                    // End of code block
-                    regions.push((start_line, i));
-                    in_code_block = false;
-                } else {
-                    // Start of code block
-                    start_line = i;
-                    in_code_block = true;
-                }
-            }
-        }
-
-        // Handle unclosed code block
-        if in_code_block {
-            regions.push((start_line, lines.len() - 1));
-        }
-
-        // Second pass: detect indented code blocks (4+ spaces)
-        let mut in_indented_block = false;
-        let mut indented_start = 0;
-
-        for (i, line) in lines.iter().enumerate() {
-            // Skip lines that are already in fenced code blocks
-            if Self::is_in_regions(i, &regions) {
-                continue;
-            }
-
-            let is_indented_code = line.len() >= 4 && line.starts_with("    ") && !line.trim().is_empty();
-            let is_blank = line.trim().is_empty();
-
-            if is_indented_code {
-                if !in_indented_block {
-                    // Start of indented code block
-                    indented_start = i;
-                    in_indented_block = true;
-                }
-            } else if !is_blank {
-                // Non-blank, non-indented line ends the indented code block
-                if in_indented_block {
-                    regions.push((indented_start, i - 1));
-                    in_indented_block = false;
-                }
-            }
-            // Blank lines don't end indented code blocks, they're part of them
-        }
-
-        // Handle indented code block at end of file
-        if in_indented_block {
-            regions.push((indented_start, lines.len() - 1));
-        }
-
-        // Sort regions by start position
-        regions.sort_by(|a, b| a.0.cmp(&b.0));
-
-        regions
-    }
-
-    /// Pre-compute front matter regions for efficient lookup
-    fn compute_front_matter_regions(lines: &[&str]) -> Vec<(usize, usize)> {
-        let mut regions = Vec::new();
-        let mut in_front_matter = false;
-        let mut start_line = 0;
-
-        for (i, line) in lines.iter().enumerate() {
-            if line.trim() == "---" {
-                if in_front_matter {
-                    // End of front matter
-                    regions.push((start_line, i));
-                    in_front_matter = false;
-                } else if i == 0 {
-                    // Start of front matter (only at beginning of file)
-                    start_line = i;
-                    in_front_matter = true;
-                }
-            }
-        }
-
-        regions
-    }
-
-    /// Check if a line is in any of the given regions
-    fn is_in_regions(line_num: usize, regions: &[(usize, usize)]) -> bool {
-        regions
-            .iter()
-            .any(|(start, end)| line_num >= *start && line_num <= *end)
-    }
 }
 
 impl Rule for MD012NoMultipleBlanks {
@@ -173,24 +65,59 @@ impl Rule for MD012NoMultipleBlanks {
         let _line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
-
-        // Pre-compute regions once for efficiency
-        let code_block_regions = Self::compute_code_block_regions(&lines);
-        let front_matter_regions = Self::compute_front_matter_regions(&lines);
-
+        
+        // Single-pass algorithm with immediate counter reset
         let mut blank_count = 0;
         let mut blank_start = 0;
+        let mut in_code_block = false;
+        let mut in_front_matter = false;
+        let mut code_fence_marker = "";
+        
+        // Use HashSet for O(1) lookups of lines that need to be checked
+        let mut lines_to_check: HashSet<usize> = HashSet::new();
 
         for (line_num, &line) in lines.iter().enumerate() {
-            // Skip code blocks and front matter
-            if Self::is_in_regions(line_num, &code_block_regions)
-                || Self::is_in_regions(line_num, &front_matter_regions)
-            {
-                // Reset blank line counting when entering a code block or front matter
-                // to prevent counting blank lines across block boundaries
-                if blank_count > 0 {
-                    blank_count = 0;
+            let trimmed = line.trim_start();
+            
+            // Check for front matter boundaries (only at start of file)
+            if trimmed == "---" {
+                if line_num == 0 {
+                    in_front_matter = true;
+                } else if in_front_matter {
+                    in_front_matter = false;
                 }
+                // Reset blank count when entering/exiting front matter
+                blank_count = 0;
+                continue;
+            }
+            
+            // Check for code block boundaries
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                if !in_code_block {
+                    // Entering code block
+                    in_code_block = true;
+                    code_fence_marker = if trimmed.starts_with("```") { "```" } else { "~~~" };
+                } else if trimmed.starts_with(code_fence_marker) {
+                    // Exiting code block
+                    in_code_block = false;
+                    code_fence_marker = "";
+                }
+                // Reset blank count immediately when entering code block
+                blank_count = 0;
+                continue;
+            }
+            
+            // Skip lines in code blocks or front matter
+            if in_code_block || in_front_matter {
+                // Reset counter to prevent counting across boundaries
+                blank_count = 0;
+                continue;
+            }
+            
+            // Check for indented code blocks (4+ spaces)
+            let is_indented_code = line.len() >= 4 && line.starts_with("    ") && !line.trim().is_empty();
+            if is_indented_code {
+                blank_count = 0;
                 continue;
             }
 
@@ -199,9 +126,13 @@ impl Rule for MD012NoMultipleBlanks {
                     blank_start = line_num;
                 }
                 blank_count += 1;
+                // Store line numbers that exceed the limit
+                if blank_count > self.config.maximum {
+                    lines_to_check.insert(line_num);
+                }
             } else {
                 if blank_count > self.config.maximum {
-                    // Generate warnings for each excess blank line to match markdownlint behavior
+                    // Generate warnings for each excess blank line
                     let location = if blank_start == 0 {
                         "at start of file"
                     } else {
@@ -210,39 +141,43 @@ impl Rule for MD012NoMultipleBlanks {
 
                     // Report warnings starting from the (maximum+1)th blank line
                     for i in self.config.maximum..blank_count {
-                        let excess_line = blank_start + i + 1; // +1 for 1-indexed lines
-                        let excess_line_content = lines.get(blank_start + i).unwrap_or(&"");
+                        let excess_line_num = blank_start + i;
+                        if lines_to_check.contains(&excess_line_num) {
+                            let excess_line = excess_line_num + 1; // +1 for 1-indexed lines
+                            let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
 
-                        // Calculate precise character range for the entire blank line
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_line_range(excess_line, excess_line_content);
+                            // Calculate precise character range for the entire blank line
+                            let (start_line, start_col, end_line, end_col) =
+                                calculate_line_range(excess_line, excess_line_content);
 
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            severity: Severity::Warning,
-                            message: format!(
-                                "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
-                                location, self.config.maximum, blank_count
-                            ),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            fix: Some(Fix {
-                                range: {
-                                    // Remove entire line including newline
-                                    let line_start = _line_index.get_line_start_byte(excess_line).unwrap_or(0);
-                                    let line_end = _line_index
-                                        .get_line_start_byte(excess_line + 1)
-                                        .unwrap_or(line_start + 1);
-                                    line_start..line_end
-                                },
-                                replacement: String::new(), // Remove the excess line
-                            }),
-                        });
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                severity: Severity::Warning,
+                                message: format!(
+                                    "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                                    location, self.config.maximum, blank_count
+                                ),
+                                line: start_line,
+                                column: start_col,
+                                end_line,
+                                end_column: end_col,
+                                fix: Some(Fix {
+                                    range: {
+                                        // Remove entire line including newline
+                                        let line_start = _line_index.get_line_start_byte(excess_line).unwrap_or(0);
+                                        let line_end = _line_index
+                                            .get_line_start_byte(excess_line + 1)
+                                            .unwrap_or(line_start + 1);
+                                        line_start..line_end
+                                    },
+                                    replacement: String::new(), // Remove the excess line
+                                }),
+                            });
+                        }
                     }
                 }
                 blank_count = 0;
+                lines_to_check.clear();
             }
         }
 
@@ -250,35 +185,38 @@ impl Rule for MD012NoMultipleBlanks {
         if blank_count > self.config.maximum {
             let location = "at end of file";
             for i in self.config.maximum..blank_count {
-                let excess_line = blank_start + i + 1;
-                let excess_line_content = lines.get(blank_start + i).unwrap_or(&"");
+                let excess_line_num = blank_start + i;
+                if lines_to_check.contains(&excess_line_num) {
+                    let excess_line = excess_line_num + 1;
+                    let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
 
-                // Calculate precise character range for the entire blank line
-                let (start_line, start_col, end_line, end_col) = calculate_line_range(excess_line, excess_line_content);
+                    // Calculate precise character range for the entire blank line
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(excess_line, excess_line_content);
 
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    severity: Severity::Warning,
-                    message: format!(
-                        "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
-                        location, self.config.maximum, blank_count
-                    ),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    fix: Some(Fix {
-                        range: {
-                            // Remove entire line including newline
-                            let line_start = _line_index.get_line_start_byte(excess_line).unwrap_or(0);
-                            let line_end = _line_index
-                                .get_line_start_byte(excess_line + 1)
-                                .unwrap_or(line_start + 1);
-                            line_start..line_end
-                        },
-                        replacement: String::new(),
-                    }),
-                });
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        severity: Severity::Warning,
+                        message: format!(
+                            "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                            location, self.config.maximum, blank_count
+                        ),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        fix: Some(Fix {
+                            range: {
+                                // Remove entire line including newline
+                                let line_start = _line_index.get_line_start_byte(excess_line).unwrap_or(0);
+                                let line_end = _line_index
+                                    .get_line_start_byte(excess_line + 1)
+                                    .unwrap_or(line_start + 1);
+                                line_start..line_end
+                            },
+                            replacement: String::new(),
+                        }),
+                    });
+                }
             }
         }
 
@@ -557,29 +495,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn test_compute_code_block_regions() {
-        let lines = vec!["text", "```", "code", "", "", "```", "text"];
-        let regions = MD012NoMultipleBlanks::compute_code_block_regions(&lines);
-        assert_eq!(regions, vec![(1, 5)]);
-    }
-
-    #[test]
-    fn test_compute_front_matter_regions() {
-        let lines = vec!["---", "title: Test", "", "---", "content"];
-        let regions = MD012NoMultipleBlanks::compute_front_matter_regions(&lines);
-        assert_eq!(regions, vec![(0, 3)]);
-    }
-
-    #[test]
-    fn test_is_in_regions() {
-        let regions = vec![(2, 5), (10, 15)];
-        assert!(!MD012NoMultipleBlanks::is_in_regions(1, &regions));
-        assert!(MD012NoMultipleBlanks::is_in_regions(3, &regions));
-        assert!(MD012NoMultipleBlanks::is_in_regions(5, &regions));
-        assert!(!MD012NoMultipleBlanks::is_in_regions(7, &regions));
-        assert!(MD012NoMultipleBlanks::is_in_regions(12, &regions));
-    }
 
     #[test]
     fn test_unclosed_code_block() {

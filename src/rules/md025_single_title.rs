@@ -378,8 +378,10 @@ impl Rule for MD025SingleTitle {
                             let replacement = if heading.text.is_empty() {
                                 // For empty headings, manually construct the replacement
                                 match style {
-                                    crate::rules::heading_utils::HeadingStyle::Atx => "#".repeat(self.config.level + 1),
-                                    crate::rules::heading_utils::HeadingStyle::AtxClosed => {
+                                    crate::rules::heading_utils::HeadingStyle::Atx
+                                    | crate::rules::heading_utils::HeadingStyle::SetextWithAtx => "#".repeat(self.config.level + 1),
+                                    crate::rules::heading_utils::HeadingStyle::AtxClosed
+                                    | crate::rules::heading_utils::HeadingStyle::SetextWithAtxClosed => {
                                         format!(
                                             "{} {}",
                                             "#".repeat(self.config.level + 1),

@@ -24,6 +24,18 @@ pub struct MD013Config {
     /// Strict mode - disables exceptions for URLs, etc. (default: false)
     #[serde(default)]
     pub strict: bool,
+
+    /// Maximum line length for headings (default: None, uses line_length)
+    #[serde(default)]
+    pub heading_line_length: Option<usize>,
+
+    /// Maximum line length for code blocks (default: None, uses line_length)
+    #[serde(default)]
+    pub code_block_line_length: Option<usize>,
+
+    /// Stern mode - stricter checking without exceptions (default: false)
+    #[serde(default)]
+    pub stern: bool,
 }
 
 fn default_line_length() -> usize {
@@ -50,6 +62,9 @@ impl Default for MD013Config {
             tables: default_tables(),
             headings: default_headings(),
             strict: false,
+            heading_line_length: None,
+            code_block_line_length: None,
+            stern: false,
         }
     }
 }

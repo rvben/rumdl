@@ -21,7 +21,7 @@ pub struct MD009TrailingSpaces {
 impl MD009TrailingSpaces {
     pub fn new(br_spaces: usize, strict: bool) -> Self {
         Self {
-            config: MD009Config { br_spaces, strict },
+            config: MD009Config { br_spaces, strict, list_item_empty_lines: false },
         }
     }
 
@@ -44,6 +44,27 @@ impl MD009TrailingSpaces {
             }
         }
         count
+    }
+
+    fn is_empty_list_item_line(line: &str, prev_line: Option<&str>) -> bool {
+        // A line is an empty list item line if:
+        // 1. It's blank or only contains spaces
+        // 2. The previous line is a list item
+        if !line.trim().is_empty() {
+            return false;
+        }
+
+        if let Some(prev) = prev_line {
+            // Check for unordered list markers (*, -, +) with proper formatting
+            lazy_static! {
+                static ref LIST_MARKER_REGEX: Regex = Regex::new(r"^(\s*)[-*+]\s+").unwrap();
+                static ref ORDERED_LIST_REGEX: Regex = Regex::new(r"^(\s*)\d+[.)]\s+").unwrap();
+            }
+            
+            LIST_MARKER_REGEX.is_match(prev) || ORDERED_LIST_REGEX.is_match(prev)
+        } else {
+            false
+        }
     }
 }
 
@@ -75,6 +96,12 @@ impl Rule for MD009TrailingSpaces {
             // Handle empty lines
             if line.trim().is_empty() {
                 if trailing_spaces > 0 {
+                    // Check if this is an empty list item line and config allows it
+                    let prev_line = if line_num > 0 { Some(lines[line_num - 1]) } else { None };
+                    if self.config.list_item_empty_lines && Self::is_empty_list_item_line(line, prev_line) {
+                        continue;
+                    }
+
                     // Calculate precise character range for all trailing spaces on empty line
                     let (start_line, start_col, end_line, end_col) = calculate_trailing_range(line_num + 1, line, 0);
 
@@ -200,6 +227,13 @@ impl Rule for MD009TrailingSpaces {
 
             // Handle empty lines - fast regex replacement
             if trimmed.is_empty() {
+                // Check if this is an empty list item line and config allows it
+                let prev_line = if i > 0 { Some(lines[i - 1]) } else { None };
+                if self.config.list_item_empty_lines && Self::is_empty_list_item_line(line, prev_line) {
+                    result.push_str(line);
+                } else {
+                    // Remove all trailing spaces
+                }
                 result.push('\n');
                 continue;
             }
@@ -498,6 +532,47 @@ Code block
         // In strict mode, should remove all spaces
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Line");
+    }
+
+    #[test]
+    fn test_list_item_empty_lines() {
+        // Create rule with list_item_empty_lines enabled
+        let mut config = MD009Config::default();
+        config.list_item_empty_lines = true;
+        let rule = MD009TrailingSpaces::from_config_struct(config);
+
+        // Test unordered list with empty line
+        let content = "- First item\n  \n- Second item";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should not flag the empty line with spaces after list item
+        assert!(result.is_empty());
+
+        // Test ordered list with empty line
+        let content = "1. First item\n  \n2. Second item";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+
+        // Test that non-list empty lines are still flagged
+        let content = "Normal paragraph\n  \nAnother paragraph";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
+    }
+
+    #[test]
+    fn test_list_item_empty_lines_disabled() {
+        // Default config has list_item_empty_lines disabled
+        let rule = MD009TrailingSpaces::default();
+
+        let content = "- First item\n  \n- Second item";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should flag the empty line with spaces
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
     }
 
     #[test]

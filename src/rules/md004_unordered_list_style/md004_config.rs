@@ -24,6 +24,7 @@ impl Serialize for MD004Config {
             UnorderedListStyle::Dash => "dash",
             UnorderedListStyle::Plus => "plus",
             UnorderedListStyle::Consistent => "consistent",
+            UnorderedListStyle::Sublist => "sublist",
         };
         state.serialize_field("style", style_str)?;
         state.end()
@@ -49,6 +50,7 @@ impl<'de> Deserialize<'de> for MD004Config {
             "dash" => UnorderedListStyle::Dash,
             "plus" => UnorderedListStyle::Plus,
             "consistent" => UnorderedListStyle::Consistent,
+            "sublist" => UnorderedListStyle::Sublist,
             _ => UnorderedListStyle::Consistent,
         };
 

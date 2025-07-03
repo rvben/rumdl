@@ -12,6 +12,10 @@ pub struct MD010Config {
     /// Check code blocks (default: true)
     #[serde(default = "default_code_blocks")]
     pub code_blocks: bool,
+
+    /// List of code languages to ignore (e.g., ["makefile", "make", "Makefile"])
+    #[serde(default)]
+    pub ignore_code_languages: Vec<String>,
 }
 
 fn default_spaces_per_tab() -> usize {
@@ -27,6 +31,7 @@ impl Default for MD010Config {
         Self {
             spaces_per_tab: default_spaces_per_tab(),
             code_blocks: default_code_blocks(),
+            ignore_code_languages: Vec::new(),
         }
     }
 }

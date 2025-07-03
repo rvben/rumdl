@@ -9,7 +9,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
 
-mod md013_config;
+pub mod md013_config;
 use md013_config::MD013Config;
 
 lazy_static! {
@@ -48,6 +48,9 @@ impl MD013LineLength {
                 tables,
                 headings,
                 strict,
+                heading_line_length: None,
+                code_block_line_length: None,
+                stern: false,
             },
         }
     }
@@ -81,7 +84,7 @@ impl MD013LineLength {
         current_line: usize,
         structure: &DocumentStructure,
     ) -> bool {
-        if self.config.strict {
+        if self.config.strict || self.config.stern {
             return false;
         }
 
@@ -184,22 +187,31 @@ impl Rule for MD013LineLength {
 
             // Calculate effective length excluding unbreakable URLs
             let effective_length = self.calculate_effective_length(line);
+            
+            // Determine the appropriate line length limit based on line type
+            let line_limit = if heading_lines_set.contains(&line_number) {
+                self.config.heading_line_length.unwrap_or(self.config.line_length)
+            } else if structure.is_in_code_block(line_number) {
+                self.config.code_block_line_length.unwrap_or(self.config.line_length)
+            } else {
+                self.config.line_length
+            };
 
             // Skip short lines immediately
-            if effective_length <= self.config.line_length {
+            if effective_length <= line_limit {
                 continue;
             }
 
             // Skip various block types efficiently
-            if !self.config.strict {
+            if !self.config.strict && !self.config.stern {
                 // Skip setext heading underlines
                 if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
                     continue;
                 }
 
                 // Skip block elements according to config flags (optimized checks)
-                if (self.config.headings && heading_lines_set.contains(&line_number))
-                    || (!self.config.code_blocks && structure.is_in_code_block(line_number))
+                if (self.config.headings && heading_lines_set.contains(&line_number) && self.config.heading_line_length.is_none())
+                    || (!self.config.code_blocks && structure.is_in_code_block(line_number) && self.config.code_block_line_length.is_none())
                     || (self.config.tables && table_lines_set.contains(&line_number))
                     || structure.is_in_blockquote(line_number)
                     || structure.is_in_html_block(line_number)
@@ -211,13 +223,21 @@ impl Rule for MD013LineLength {
                 if self.should_ignore_line(line, &lines, line_num, structure) {
                     continue;
                 }
+            } else if self.config.stern {
+                // In stern mode, only skip if explicitly configured
+                if (self.config.headings && heading_lines_set.contains(&line_number) && self.config.heading_line_length.is_none())
+                    || (!self.config.code_blocks && structure.is_in_code_block(line_number) && self.config.code_block_line_length.is_none())
+                    || (self.config.tables && table_lines_set.contains(&line_number))
+                {
+                    continue;
+                }
             }
 
             // Generate simplified fix (avoid expensive sentence splitting for now)
             let fix = if !self.should_skip_line_for_fix(line, line_num, structure) {
                 // First try trimming trailing whitespace
                 let trimmed = line.trim_end();
-                if trimmed.len() <= self.config.line_length && trimmed != *line {
+                if trimmed.len() <= line_limit && trimmed != *line {
                     let line_start = line_index.line_col_to_byte_range(line_number, 1).start;
                     let line_end = if line_number < lines.len() {
                         line_index.line_col_to_byte_range(line_number + 1, 1).start - 1
@@ -238,18 +258,18 @@ impl Rule for MD013LineLength {
             let message = if let Some(ref _fix_obj) = fix {
                 format!(
                     "Line length {} exceeds {} characters (can trim whitespace)",
-                    effective_length, self.config.line_length
+                    effective_length, line_limit
                 )
             } else {
                 format!(
                     "Line length {} exceeds {} characters",
-                    effective_length, self.config.line_length
+                    effective_length, line_limit
                 )
             };
 
             // Calculate precise character range for the excess portion
             let (start_line, start_col, end_line, end_col) =
-                calculate_excess_range(line_number, line, self.config.line_length);
+                calculate_excess_range(line_number, line, line_limit);
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
@@ -374,8 +394,8 @@ impl MD013LineLength {
 
     /// Calculate effective line length excluding unbreakable URLs
     fn calculate_effective_length(&self, line: &str) -> usize {
-        if self.config.strict {
-            // In strict mode, count everything
+        if self.config.strict || self.config.stern {
+            // In strict or stern mode, count everything
             return line.chars().count();
         }
 

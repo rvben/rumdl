@@ -454,6 +454,120 @@ fn test_fix_empty_lines_with_spaces() {
 }
 
 #[test]
+fn test_heading_line_length_config() {
+    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    
+    // Create a config with different limits for headings
+    let config = MD013Config {
+        line_length: 50,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        heading_line_length: Some(100), // Allow longer headings
+        code_block_line_length: None,
+        stern: false,
+    };
+    
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = "# This is a very long heading that exceeds 50 characters but is under 100 characters\nThis regular line is too long and exceeds the 50 character limit significantly";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // Only the regular line should be flagged, not the heading
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 2);
+}
+
+#[test]
+fn test_code_block_line_length_config() {
+    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    
+    // Create a config with different limits for code blocks
+    let config = MD013Config {
+        line_length: 50,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        heading_line_length: None,
+        code_block_line_length: Some(120), // Allow longer lines in code blocks
+        stern: false,
+    };
+    
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = "```\nThis is a very long line in a code block that exceeds 50 but is under 120 characters so it should be OK\n```\nThis regular line is too long and exceeds the 50 character limit";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // Only the regular line should be flagged, not the code block line
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 4);
+}
+
+#[test]
+fn test_stern_mode() {
+    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    
+    // Create a config with stern mode enabled
+    let config = MD013Config {
+        line_length: 50,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        heading_line_length: None,
+        code_block_line_length: None,
+        stern: true, // Stern mode: stricter checking
+    };
+    
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = "https://example.com/this/is/a/very/long/url/that/exceeds/the/limit\n![This is a very long image reference that exceeds limit][ref]\nThis regular line is too long and exceeds the limit";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // In stern mode, URLs and image refs should still be flagged
+    assert_eq!(result.len(), 3);
+}
+
+#[test]
+fn test_combined_heading_and_code_block_limits() {
+    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    
+    let config = MD013Config {
+        line_length: 40,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        heading_line_length: Some(80),
+        code_block_line_length: Some(100),
+        stern: false,
+    };
+    
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = r#"# This heading is under 80 chars so it should be fine even over 40
+
+Regular text that exceeds the 40 character limit
+
+```
+This code block line is under 100 characters so it should be fine even though it's way over 40
+```
+
+## Another heading that's under 80 characters but over 40
+
+More regular text exceeding 40 characters"#;
+    
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // Should flag the two regular text lines only
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].line, 3);
+    assert_eq!(result[1].line, 11);
+}
+
+#[test]
 fn test_fix_code_blocks_not_modified() {
     let rule = MD013LineLength::new(41, true, true, true, false);
     let content = "```\nThis is a long line in code     \n```\nThis normal line is too long with spaces    ";

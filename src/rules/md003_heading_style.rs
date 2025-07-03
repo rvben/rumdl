@@ -108,21 +108,44 @@ impl Rule for MD003HeadingStyle {
                 };
 
                 // Determine expected style based on level and target
-                let expected_style = if level > 2
-                    && (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2)
-                {
-                    // Setext only supports levels 1-2, so levels 3+ must be ATX
-                    HeadingStyle::Atx
-                } else if (target_style == HeadingStyle::Setext1 || target_style == HeadingStyle::Setext2) && level <= 2
-                {
-                    // For Setext target, use appropriate style based on level
-                    if level == 1 {
-                        HeadingStyle::Setext1
-                    } else {
-                        HeadingStyle::Setext2
+                let expected_style = match target_style {
+                    HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
+                        if level > 2 {
+                            // Setext only supports levels 1-2, so levels 3+ must be ATX
+                            HeadingStyle::Atx
+                        } else if level == 1 {
+                            HeadingStyle::Setext1
+                        } else {
+                            HeadingStyle::Setext2
+                        }
                     }
-                } else {
-                    target_style
+                    HeadingStyle::SetextWithAtx => {
+                        if level <= 2 {
+                            // Use Setext for h1/h2
+                            if level == 1 {
+                                HeadingStyle::Setext1
+                            } else {
+                                HeadingStyle::Setext2
+                            }
+                        } else {
+                            // Use ATX for h3-h6
+                            HeadingStyle::Atx
+                        }
+                    }
+                    HeadingStyle::SetextWithAtxClosed => {
+                        if level <= 2 {
+                            // Use Setext for h1/h2
+                            if level == 1 {
+                                HeadingStyle::Setext1
+                            } else {
+                                HeadingStyle::Setext2
+                            }
+                        } else {
+                            // Use ATX closed for h3-h6
+                            HeadingStyle::AtxClosed
+                        }
+                    }
+                    _ => target_style
                 };
 
                 if current_style != expected_style {
@@ -164,6 +187,8 @@ impl Rule for MD003HeadingStyle {
                                 HeadingStyle::Setext1 => "Heading\n=======",
                                 HeadingStyle::Setext2 => "Heading\n-------",
                                 HeadingStyle::Consistent => "consistent with the first heading",
+                                HeadingStyle::SetextWithAtx => "setext_with_atx style",
+                                HeadingStyle::SetextWithAtxClosed => "setext_with_atx_closed style",
                             },
                             match current_style {
                                 HeadingStyle::Atx => "# Heading",
@@ -171,6 +196,8 @@ impl Rule for MD003HeadingStyle {
                                 HeadingStyle::Setext1 => "Heading (underlined with =)",
                                 HeadingStyle::Setext2 => "Heading (underlined with -)",
                                 HeadingStyle::Consistent => "consistent style",
+                                HeadingStyle::SetextWithAtx => "setext_with_atx style",
+                                HeadingStyle::SetextWithAtxClosed => "setext_with_atx_closed style",
                             }
                         ),
                         severity: Severity::Warning,
@@ -333,5 +360,37 @@ mod tests {
             result.is_empty(),
             "No warnings expected for setext style with ATX for level 3, found: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_setext_with_atx_style() {
+        let rule = MD003HeadingStyle::new(HeadingStyle::SetextWithAtx);
+        // Setext for h1/h2, ATX for h3-h6
+        let content = "Heading 1\n=========\n\nHeading 2\n---------\n\n### Heading 3\n\n#### Heading 4";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "SesetxtWithAtx style should accept setext for h1/h2 and ATX for h3+");
+
+        // Test incorrect usage - ATX for h1/h2
+        let content_wrong = "# Heading 1\n## Heading 2\n### Heading 3";
+        let ctx_wrong = LintContext::new(content_wrong);
+        let result_wrong = rule.check(&ctx_wrong).unwrap();
+        assert_eq!(result_wrong.len(), 2, "Should flag ATX headings for h1/h2 with setext_with_atx style");
+    }
+
+    #[test]
+    fn test_setext_with_atx_closed_style() {
+        let rule = MD003HeadingStyle::new(HeadingStyle::SetextWithAtxClosed);
+        // Setext for h1/h2, ATX closed for h3-h6
+        let content = "Heading 1\n=========\n\nHeading 2\n---------\n\n### Heading 3 ###\n\n#### Heading 4 ####";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "SetextWithAtxClosed style should accept setext for h1/h2 and ATX closed for h3+");
+
+        // Test incorrect usage - regular ATX for h3+
+        let content_wrong = "Heading 1\n=========\n\n### Heading 3\n\n#### Heading 4";
+        let ctx_wrong = LintContext::new(content_wrong);
+        let result_wrong = rule.check(&ctx_wrong).unwrap();
+        assert_eq!(result_wrong.len(), 2, "Should flag non-closed ATX headings for h3+ with setext_with_atx_closed style");
     }
 }

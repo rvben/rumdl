@@ -62,6 +62,7 @@ pub enum UnorderedListStyle {
     Plus,       // "+"
     Dash,       // "-"
     Consistent, // Use the first marker in a file consistently
+    Sublist,    // Each nesting level uses a different marker (*, +, -, cycling)
 }
 
 impl Default for UnorderedListStyle {
@@ -165,6 +166,36 @@ impl Rule for MD004UnorderedListStyle {
                                     first_marker = Some(marker);
                                 }
                             }
+                            UnorderedListStyle::Sublist => {
+                                // Calculate expected marker based on indentation level
+                                // Each 2 spaces of indentation represents a nesting level
+                                let nesting_level = list_item.marker_column / 2;
+                                let expected_marker = match nesting_level % 3 {
+                                    0 => '*',
+                                    1 => '+',
+                                    2 => '-',
+                                    _ => unreachable!(),
+                                };
+                                if marker != expected_marker {
+                                    let (line, col) = ctx.offset_to_line_col(offset);
+                                    warnings.push(LintWarning {
+                                        line,
+                                        column: col,
+                                        end_line: line,
+                                        end_column: col + 1,
+                                        message: format!(
+                                            "List marker '{}' does not match expected style '{}' for nesting level {}",
+                                            marker, expected_marker, nesting_level
+                                        ),
+                                        severity: Severity::Warning,
+                                        rule_name: Some(self.name()),
+                                        fix: Some(Fix {
+                                            range: offset..offset + 1,
+                                            replacement: expected_marker.to_string(),
+                                        }),
+                                    });
+                                }
+                            }
                             _ => {
                                 // Handle specific style requirements (asterisk, dash, plus)
                                 let target_marker = match self.config.style {
@@ -239,6 +270,17 @@ impl Rule for MD004UnorderedListStyle {
                                     marker
                                 }
                             }
+                            UnorderedListStyle::Sublist => {
+                                // Calculate expected marker based on indentation level
+                                // Each 2 spaces of indentation represents a nesting level
+                                let nesting_level = list_item.marker_column / 2;
+                                match nesting_level % 3 {
+                                    0 => '*',
+                                    1 => '+',
+                                    2 => '-',
+                                    _ => unreachable!(),
+                                }
+                            }
                             UnorderedListStyle::Asterisk => '*',
                             UnorderedListStyle::Dash => '-',
                             UnorderedListStyle::Plus => '+',
@@ -290,6 +332,7 @@ impl Rule for MD004UnorderedListStyle {
                 UnorderedListStyle::Dash => "dash".to_string(),
                 UnorderedListStyle::Plus => "plus".to_string(),
                 UnorderedListStyle::Consistent => "consistent".to_string(),
+                UnorderedListStyle::Sublist => "sublist".to_string(),
             }),
         );
         Some((self.name().to_string(), toml::Value::Table(map)))
@@ -305,6 +348,7 @@ impl Rule for MD004UnorderedListStyle {
             "asterisk" => UnorderedListStyle::Asterisk,
             "dash" => UnorderedListStyle::Dash,
             "plus" => UnorderedListStyle::Plus,
+            "sublist" => UnorderedListStyle::Sublist,
             _ => UnorderedListStyle::Consistent,
         };
         Box::new(MD004UnorderedListStyle::new(style))
@@ -596,6 +640,38 @@ mod tests {
         } else {
             panic!("Expected table");
         }
+    }
+
+    #[test]
+    fn test_sublist_style() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Sublist);
+        // Level 0 should use *, level 1 should use +, level 2 should use -
+        let content = "* Item 1\n  + Item 2\n    - Item 3\n      * Item 4\n  + Item 5";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Sublist style should accept cycling markers");
+    }
+
+    #[test]
+    fn test_sublist_style_incorrect() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Sublist);
+        // Wrong markers for each level
+        let content = "- Item 1\n  * Item 2\n    + Item 3";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].message, "List marker '-' does not match expected style '*' for nesting level 0");
+        assert_eq!(result[1].message, "List marker '*' does not match expected style '+' for nesting level 1");
+        assert_eq!(result[2].message, "List marker '+' does not match expected style '-' for nesting level 2");
+    }
+
+    #[test]
+    fn test_fix_sublist_style() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Sublist);
+        let content = "- Item 1\n  - Item 2\n    - Item 3\n      - Item 4";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "* Item 1\n  + Item 2\n    - Item 3\n      * Item 4");
     }
 
     #[test]

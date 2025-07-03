@@ -71,15 +71,16 @@ impl Rule for MD001HeadingIncrement {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
-        let mut prev_level = 0;
+        let mut prev_level: Option<usize> = None;
 
         // Process headings using cached heading information
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
-                let level = heading.level;
+                let level = heading.level as usize;
 
                 // Check if this heading level is more than one level deeper than the previous
-                if prev_level > 0 && level > prev_level + 1 {
+                if let Some(prev) = prev_level {
+                    if level > prev + 1 {
                     let indentation = line_info.indent;
                     let heading_text = &heading.text;
 
@@ -90,8 +91,8 @@ impl Rule for MD001HeadingIncrement {
                         crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
                     };
 
-                    // Create a fix with the correct heading level
-                    let fixed_level = prev_level + 1;
+                        // Create a fix with the correct heading level
+                        let fixed_level = prev + 1;
                     let replacement = HeadingUtils::convert_heading_style(heading_text, fixed_level as u32, style);
 
                     // Calculate precise range: highlight the entire heading
@@ -105,16 +106,17 @@ impl Rule for MD001HeadingIncrement {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: format!("Expected heading level {}, but found heading level {}", prev_level + 1, level),
+                            message: format!("Expected heading level {}, but found heading level {}", prev + 1, level),
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: line_index.line_content_range(line_num + 1),
                             replacement: format!("{}{}", " ".repeat(indentation), replacement),
                         }),
                     });
+                    }
                 }
 
-                prev_level = level;
+                prev_level = Some(level);
             }
         }
 
@@ -123,16 +125,18 @@ impl Rule for MD001HeadingIncrement {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let mut fixed_lines = Vec::new();
-        let mut prev_level = 0;
+        let mut prev_level: Option<usize> = None;
 
         for line_info in ctx.lines.iter() {
             if let Some(heading) = &line_info.heading {
-                let level = heading.level;
+                let level = heading.level as usize;
                 let mut fixed_level = level;
 
                 // Check if this heading needs fixing
-                if prev_level > 0 && level > prev_level + 1 {
-                    fixed_level = prev_level + 1;
+                if let Some(prev) = prev_level {
+                    if level > prev + 1 {
+                        fixed_level = prev + 1;
+                    }
                 }
 
                 // Map heading style - when fixing, we may need to change Setext style based on level
@@ -157,7 +161,7 @@ impl Rule for MD001HeadingIncrement {
                 let replacement = HeadingUtils::convert_heading_style(&heading.text, fixed_level as u32, style);
                 fixed_lines.push(format!("{}{}", " ".repeat(line_info.indent), replacement));
 
-                prev_level = fixed_level;
+                prev_level = Some(fixed_level);
             } else {
                 fixed_lines.push(line_info.content.clone());
             }

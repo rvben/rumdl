@@ -2,6 +2,14 @@ use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
+use fancy_regex::Regex as FancyRegex;
+use regex::Regex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    /// Pattern for HTML heading tags
+    static ref HTML_HEADING_PATTERN: FancyRegex = FancyRegex::new(r"^\s*<h([1-6])(?:\s[^>]*)?>.*</h\1>\s*$").unwrap();
+}
 
 /// Rule MD041: First line in file should be a top-level heading
 ///
@@ -11,6 +19,7 @@ use crate::rules::front_matter_utils::FrontMatterUtils;
 pub struct MD041FirstLineHeading {
     pub level: usize,
     pub front_matter_title: bool,
+    pub front_matter_title_pattern: Option<Regex>,
 }
 
 impl Default for MD041FirstLineHeading {
@@ -18,6 +27,7 @@ impl Default for MD041FirstLineHeading {
         Self {
             level: 1,
             front_matter_title: true,
+            front_matter_title_pattern: None,
         }
     }
 }
@@ -27,6 +37,25 @@ impl MD041FirstLineHeading {
         Self {
             level,
             front_matter_title,
+            front_matter_title_pattern: None,
+        }
+    }
+    
+    pub fn with_pattern(level: usize, front_matter_title: bool, pattern: Option<String>) -> Self {
+        let front_matter_title_pattern = pattern.and_then(|p| {
+            match Regex::new(&p) {
+                Ok(regex) => Some(regex),
+                Err(e) => {
+                    log::warn!("Invalid front_matter_title_pattern regex: {}", e);
+                    None
+                }
+            }
+        });
+        
+        Self {
+            level,
+            front_matter_title,
+            front_matter_title_pattern,
         }
     }
 
@@ -35,7 +64,46 @@ impl MD041FirstLineHeading {
             return false;
         }
 
+        // If we have a custom pattern, use it to search front matter content
+        if let Some(ref pattern) = self.front_matter_title_pattern {
+            let front_matter_lines = FrontMatterUtils::extract_front_matter(content);
+            for line in front_matter_lines {
+                if pattern.is_match(line) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        // Default behavior: check for "title:" field
         FrontMatterUtils::has_front_matter_field(content, "title:")
+    }
+    
+    /// Check if a line is a non-content token that should be skipped
+    fn is_non_content_line(line: &str) -> bool {
+        let trimmed = line.trim();
+        
+        // Skip reference definitions
+        if trimmed.starts_with('[') && trimmed.contains("]: ") {
+            return true;
+        }
+        
+        // Skip abbreviation definitions
+        if trimmed.starts_with('*') && trimmed.contains("]: ") {
+            return true;
+        }
+        
+        false
+    }
+    
+    /// Check if a line is an HTML heading
+    fn is_html_heading(line: &str, level: usize) -> bool {
+        if let Ok(Some(captures)) = HTML_HEADING_PATTERN.captures(line.trim()) {
+            if let Some(h_level) = captures.get(1) {
+                return h_level.as_str().parse::<usize>().unwrap_or(0) == level;
+            }
+        }
+        false
     }
 }
 
@@ -74,7 +142,8 @@ impl Rule for MD041FirstLineHeading {
         }
 
         for (line_num, line_info) in ctx.lines.iter().enumerate().skip(skip_lines) {
-            if !line_info.content.trim().is_empty() {
+            let line_content = line_info.content.trim();
+            if !line_content.is_empty() && !Self::is_non_content_line(&line_info.content) {
                 first_content_line_num = Some(line_num);
                 break;
             }
@@ -92,7 +161,8 @@ impl Rule for MD041FirstLineHeading {
         let is_correct_heading = if let Some(heading) = &first_line_info.heading {
             heading.level as usize == self.level
         } else {
-            false
+            // Check for HTML heading
+            Self::is_html_heading(&first_line_info.content, self.level)
         };
 
         if !is_correct_heading {
@@ -144,7 +214,8 @@ impl Rule for MD041FirstLineHeading {
         }
 
         for (line_num, line_info) in fixed_ctx.lines.iter().enumerate().skip(skip_lines) {
-            if !line_info.content.trim().is_empty() {
+            let line_content = line_info.content.trim();
+            if !line_content.is_empty() && !Self::is_non_content_line(&line_info.content) {
                 first_content_line_num = Some(line_num);
                 break;
             }
@@ -180,6 +251,9 @@ impl Rule for MD041FirstLineHeading {
                     // No fix needed, return original
                     return Ok(content.to_string());
                 }
+            } else if Self::is_html_heading(&first_line_info.content, self.level) {
+                // HTML heading with correct level, no fix needed
+                return Ok(content.to_string());
             } else {
                 // First line is not a heading, add a new title before it
                 for (i, line) in lines.iter().enumerate() {
@@ -216,9 +290,23 @@ impl Rule for MD041FirstLineHeading {
         let level = crate::config::get_rule_config_value::<u32>(config, "MD041", "level").unwrap_or(1);
         let front_matter_title = crate::config::get_rule_config_value::<String>(config, "MD041", "front_matter_title")
             .unwrap_or_else(|| "title".to_string());
+        let front_matter_title_pattern = crate::config::get_rule_config_value::<String>(config, "MD041", "front_matter_title_pattern");
+        
         let level_usize = level as usize;
         let use_front_matter = !front_matter_title.is_empty();
-        Box::new(MD041FirstLineHeading::new(level_usize, use_front_matter))
+        
+        Box::new(MD041FirstLineHeading::with_pattern(level_usize, use_front_matter, front_matter_title_pattern))
+    }
+    
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        Some((
+            "MD041".to_string(),
+            toml::toml! {
+                level = 1
+                // Pattern for matching title in front matter (regex)
+                // front_matter_title_pattern = "^(title|header):"
+            }.into(),
+        ))
     }
 }
 

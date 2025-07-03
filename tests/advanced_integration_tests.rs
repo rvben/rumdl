@@ -62,8 +62,9 @@ This is a line that would normally exceed the default line length limit, but we'
     // Note: rumdl returns exit code 1 when it finds issues, which is expected
     assert.code(1);
 
-    // Should have MD007 violations (incorrect list indentation)
-    assert!(output.contains("MD007"));
+    // Should have list indentation violations (MD005 - list starts with 3 spaces instead of 0)
+    assert!(output.contains("MD005"), 
+            "Expected MD005 in output: {}", output);
 
     // Should have MD023 violations (indented heading)
     assert!(output.contains("MD023"));

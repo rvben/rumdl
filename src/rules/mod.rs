@@ -18,7 +18,7 @@ mod md007_ul_indent;
 mod md009_trailing_spaces;
 mod md010_no_hard_tabs;
 mod md011_no_reversed_links;
-mod md013_line_length;
+pub mod md013_line_length;
 mod md014_commands_show_output;
 mod md024_no_duplicate_heading;
 mod md025_single_title;
