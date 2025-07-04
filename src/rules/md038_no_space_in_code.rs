@@ -134,11 +134,12 @@ impl MD038NoSpaceInCode {
     fn is_likely_nested_backticks(&self, ctx: &crate::lint_context::LintContext, span_index: usize) -> bool {
         // If there are multiple code spans on the same line, and there's text
         // between them that contains "code" or other indicators, it's likely nested
-        let current_span = &ctx.code_spans[span_index];
+        let code_spans = ctx.code_spans();
+        let current_span = &code_spans[span_index];
         let current_line = current_span.line;
         
         // Look for other code spans on the same line
-        let same_line_spans: Vec<_> = ctx.code_spans.iter()
+        let same_line_spans: Vec<_> = code_spans.iter()
             .enumerate()
             .filter(|(i, s)| s.line == current_line && *i != span_index)
             .collect();
@@ -196,7 +197,8 @@ impl Rule for MD038NoSpaceInCode {
         let mut warnings = Vec::new();
 
         // Use centralized code spans from LintContext
-        for (i, code_span) in ctx.code_spans.iter().enumerate() {
+        let code_spans = ctx.code_spans();
+        for (i, code_span) in code_spans.iter().enumerate() {
             let code_content = &code_span.content;
 
             // Skip empty code spans
@@ -348,7 +350,8 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD038NoSp
         _doc_structure: &crate::utils::document_structure::DocumentStructure,
     ) -> bool {
         // We now use centralized code spans from LintContext
-        !ctx.code_spans.is_empty()
+        // Quick check without parsing
+        ctx.content.contains('`')
     }
 }
 
@@ -463,13 +466,14 @@ mod tests {
         
         println!("Content: {}", content);
         println!("Code spans found:");
-        for (i, span) in ctx.code_spans.iter().enumerate() {
+        let code_spans = ctx.code_spans();
+        for (i, span) in code_spans.iter().enumerate() {
             println!("  Span {}: line={}, col={}-{}, backticks={}, content='{}'", 
                      i, span.line, span.start_col, span.end_col, span.backtick_count, span.content);
         }
         
         // This test reveals the issue - we're getting multiple separate code spans instead of one
-        assert_eq!(ctx.code_spans.len(), 2, "Should parse as 2 code spans");
+        assert_eq!(code_spans.len(), 2, "Should parse as 2 code spans");
     }
     
     #[test]

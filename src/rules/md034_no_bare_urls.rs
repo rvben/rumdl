@@ -74,9 +74,7 @@ impl MD034NoBareUrls {
     #[inline]
     pub fn should_skip(&self, content: &str) -> bool {
         // Skip if content has no URLs and no email addresses
-        let has_urls = early_returns::has_urls(content);
-        let has_emails = content.contains('@');
-        !has_urls && !has_emails
+        !early_returns::has_urls(content) && !content.contains('@')
     }
 
     /// Remove trailing punctuation that is likely sentence punctuation, not part of the URL
@@ -160,94 +158,135 @@ impl MD034NoBareUrls {
             merged.push((start, end));
         }
 
-        // Now find all URLs in the content and check if they're excluded
-        // First find IPv6 URLs (they need special handling due to square brackets)
-        let mut all_url_matches = Vec::new();
+        // Now find all URLs and emails in the content and check if they're excluded
+        // We'll combine URL and email detection for efficiency
+        let mut all_matches: Vec<(usize, usize, bool)> = Vec::new(); // (start, end, is_email)
         
-        // Collect IPv6 URLs
-        for url_match in IPV6_URL_REGEX.find_iter(content) {
-            all_url_matches.push((url_match.start(), url_match.end()));
+        // Early exit if no potential URLs/emails based on quick check
+        if !content.contains("://") && !content.contains('@') {
+            return Ok(warnings);
         }
-        
-        // Collect regular URLs (but skip if they overlap with IPv6 URLs)
-        for url_match in SIMPLE_URL_REGEX.find_iter(content) {
-            let start = url_match.start();
-            let end = url_match.end();
-            let matched_str = &content[start..end];
+
+        // Use line-based processing for better cache locality
+        for (_line_idx, line_info) in ctx.lines.iter().enumerate() {
+            let line_content = &line_info.content;
             
-            // Skip invalid IPv6 patterns (e.g., "https://::1]" without opening bracket)
-            if matched_str.contains("::") && !matched_str.contains('[') && matched_str.contains(']') {
+            // Skip lines in code blocks
+            if line_info.in_code_block {
                 continue;
             }
             
-            // Check if this overlaps with any IPv6 URL we already found
-            let overlaps = all_url_matches.iter().any(|(ipv6_start, ipv6_end)| {
-                start < *ipv6_end && end > *ipv6_start
-            });
+            // Quick check if line might contain URLs or emails
+            if !line_content.contains("://") && !line_content.contains('@') {
+                continue;
+            }
             
-            if !overlaps {
-                all_url_matches.push((start, end));
+            // Check for URLs in this line
+            for url_match in SIMPLE_URL_REGEX.find_iter(line_content) {
+                let start_in_line = url_match.start();
+                let end_in_line = url_match.end();
+                let matched_str = &line_content[start_in_line..end_in_line];
+                
+                // Skip invalid IPv6 patterns
+                if matched_str.contains("::") && !matched_str.contains('[') && matched_str.contains(']') {
+                    continue;
+                }
+                
+                let global_start = line_info.byte_offset + start_in_line;
+                let global_end = line_info.byte_offset + end_in_line;
+                all_matches.push((global_start, global_end, false));
+            }
+            
+            // Check for IPv6 URLs
+            for url_match in IPV6_URL_REGEX.find_iter(line_content) {
+                let global_start = line_info.byte_offset + url_match.start();
+                let global_end = line_info.byte_offset + url_match.end();
+                
+                // Remove any overlapping regular URL matches
+                all_matches.retain(|(start, end, _)| {
+                    !(*start < global_end && *end > global_start)
+                });
+                
+                all_matches.push((global_start, global_end, false));
+            }
+            
+            // Check for emails in this line
+            for email_match in EMAIL_REGEX.find_iter(line_content) {
+                let global_start = line_info.byte_offset + email_match.start();
+                let global_end = line_info.byte_offset + email_match.end();
+                all_matches.push((global_start, global_end, true));
             }
         }
         
-        // Sort by start position
-        all_url_matches.sort_by_key(|&(start, _)| start);
-        
-        // Process all URL matches
-        for (url_start, url_end_orig) in all_url_matches {
-            let mut url_end = url_end_orig;
+        // Process all matches
+        for (match_start, match_end_orig, is_email) in all_matches {
+            let mut match_end = match_end_orig;
 
-            // Trim trailing punctuation that's likely sentence punctuation
-            let raw_url = &content[url_start..url_end];
-            let trimmed_url = self.trim_trailing_punctuation(raw_url);
-            url_end = url_start + trimmed_url.len();
+            // For URLs, trim trailing punctuation
+            if !is_email {
+                let raw_url = &content[match_start..match_end];
+                let trimmed_url = self.trim_trailing_punctuation(raw_url);
+                match_end = match_start + trimmed_url.len();
+            }
 
-            // Skip if URL became empty after trimming
-            if url_end <= url_start {
+            // Skip if became empty after trimming
+            if match_end <= match_start {
                 continue;
             }
 
             // Manual boundary check: not part of a larger word
-            let before = if url_start == 0 {
+            let before = if match_start == 0 {
                 None
             } else {
-                content.get(url_start - 1..url_start)
+                content.get(match_start - 1..match_start)
             };
-            let after = content.get(url_end..url_end + 1);
-            let is_valid_boundary = before.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
-                && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_");
+            let after = content.get(match_end..match_end + 1);
+            
+            let is_valid_boundary = if is_email {
+                before.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".")
+                    && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".")
+            } else {
+                before.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
+                    && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
+            };
+            
             if !is_valid_boundary {
                 continue;
             }
 
-            // Skip if this URL is within a code block or code span
-            if ctx.is_in_code_block_or_span(url_start) {
+            // Skip if this is within a code span (code blocks already checked)
+            if ctx.is_in_code_block_or_span(match_start) {
                 continue;
             }
 
-            // Convert byte offset to line/column for warning
-            let (line_num, col_num) = ctx.offset_to_line_col(url_start);
-
-            // Skip if URL is within any excluded range (link/image dest)
-            let in_any_range = merged.iter().any(|(start, end)| url_start >= *start && url_end <= *end);
+            // Skip if within any excluded range (link/image dest)
+            let in_any_range = merged.iter().any(|(start, end)| match_start >= *start && match_end <= *end);
             if in_any_range {
                 continue;
             }
 
-            // Skip reference definitions
-            let line_start = content[..url_start].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            let line_end = content[url_start..]
-                .find('\n')
-                .map(|i| url_start + i)
-                .unwrap_or(content.len());
-            let line = &content[line_start..line_end];
-            if REFERENCE_DEF_RE.is_match(line) {
-                continue;
+            // Get line information efficiently
+            let (line_num, col_num) = ctx.offset_to_line_col(match_start);
+            
+            // Skip reference definitions for URLs
+            if !is_email {
+                if let Some(line_info) = ctx.line_info(line_num) {
+                    if REFERENCE_DEF_RE.is_match(&line_info.content) {
+                        continue;
+                    }
+                }
             }
 
-            let url_text = &content[url_start..url_end];
+            let matched_text = &content[match_start..match_end];
+            let line_info = ctx.line_info(line_num).unwrap();
             let (start_line, start_col, end_line, end_col) =
-                calculate_url_range(line_num, line, col_num - 1, url_text.len());
+                calculate_url_range(line_num, &line_info.content, col_num - 1, matched_text.len());
+
+            let message = if is_email {
+                "Email address without angle brackets or link formatting".to_string()
+            } else {
+                "URL without angle brackets or link formatting".to_string()
+            };
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
@@ -255,71 +294,11 @@ impl MD034NoBareUrls {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: "URL without angle brackets or link formatting".to_string(),
+                message,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: url_start..url_end,
-                    replacement: format!("<{url_text}>"),
-                }),
-            });
-        }
-
-        // Check for email addresses - similar logic to URLs
-        for email_match in EMAIL_REGEX.find_iter(content) {
-            let email_start = email_match.start();
-            let email_end = email_match.end();
-
-            // Manual boundary check: not part of a larger word
-            let before = if email_start == 0 {
-                None
-            } else {
-                content.get(email_start - 1..email_start)
-            };
-            let after = content.get(email_end..email_end + 1);
-            let is_valid_boundary = before
-                .is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".")
-                && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".");
-            if !is_valid_boundary {
-                continue;
-            }
-
-            // Skip if this email is within a code block or code span
-            if ctx.is_in_code_block_or_span(email_start) {
-                continue;
-            }
-
-            // Convert byte offset to line/column for warning
-            let (line_num, col_num) = ctx.offset_to_line_col(email_start);
-
-            // Skip if email is within any excluded range (link/image dest)
-            let in_any_range = merged
-                .iter()
-                .any(|(start, end)| email_start >= *start && email_end <= *end);
-            if in_any_range {
-                continue;
-            }
-
-            let email_text = &content[email_start..email_end];
-            let line_start = content[..email_start].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            let line_end = content[email_start..]
-                .find('\n')
-                .map(|i| email_start + i)
-                .unwrap_or(content.len());
-            let line = &content[line_start..line_end];
-            let (start_line, start_col, end_line, end_col) =
-                calculate_url_range(line_num, line, col_num - 1, email_text.len());
-
-            warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                message: "Email address without angle brackets or link formatting".to_string(),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: email_start..email_end,
-                    replacement: format!("<{email_text}>"),
+                    range: match_start..match_end,
+                    replacement: format!("<{matched_text}>"),
                 }),
             });
         }

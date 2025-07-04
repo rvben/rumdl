@@ -243,6 +243,8 @@ pub struct ListBlock {
     pub nesting_level: usize,
 }
 
+use std::sync::{Arc, Mutex};
+
 pub struct LintContext<'a> {
     pub content: &'a str,
     pub line_offsets: Vec<usize>,
@@ -251,7 +253,7 @@ pub struct LintContext<'a> {
     pub links: Vec<ParsedLink>,           // Pre-parsed links
     pub images: Vec<ParsedImage>,         // Pre-parsed images
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
-    pub code_spans: Vec<CodeSpan>,        // Pre-parsed inline code spans
+    code_spans_cache: Mutex<Option<Arc<Vec<CodeSpan>>>>, // Lazy-loaded inline code spans
     pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
 }
 
@@ -270,11 +272,11 @@ impl<'a> LintContext<'a> {
         // Pre-compute line information
         let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
 
-        // Parse links, images, references, code spans, and list blocks
+        // Parse links, images, references, and list blocks
+        // Skip code spans - they'll be computed lazily
         let links = Self::parse_links(content, &lines, &code_blocks);
         let images = Self::parse_images(content, &lines, &code_blocks);
         let reference_defs = Self::parse_reference_defs(content, &lines);
-        let code_spans = Self::parse_code_spans(content, &lines);
         let list_blocks = Self::parse_list_blocks(&lines);
 
         Self {
@@ -285,9 +287,23 @@ impl<'a> LintContext<'a> {
             links,
             images,
             reference_defs,
-            code_spans,
+            code_spans_cache: Mutex::new(None),
             list_blocks,
         }
+    }
+
+    /// Get code spans - computed lazily on first access
+    pub fn code_spans(&self) -> Arc<Vec<CodeSpan>> {
+        let mut cache = self.code_spans_cache.lock().unwrap();
+        
+        // Check if we need to compute code spans
+        if cache.is_none() {
+            let code_spans = Self::parse_code_spans(self.content, &self.lines);
+            *cache = Some(Arc::new(code_spans));
+        }
+        
+        // Return a reference to the cached code spans
+        cache.as_ref().unwrap().clone()
     }
 
     /// Map a byte offset to (line, column)
@@ -308,8 +324,8 @@ impl<'a> LintContext<'a> {
             return true;
         }
 
-        // Check inline code spans
-        self.code_spans
+        // Check inline code spans (lazy load if needed)
+        self.code_spans()
             .iter()
             .any(|span| pos >= span.byte_offset && pos < span.byte_end)
     }

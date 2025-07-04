@@ -28,7 +28,7 @@ fn main() {
             times.push(elapsed.as_micros());
 
             if times.len() == 1 {
-                println!("  Code spans detected: {}", ctx.code_spans.len());
+                println!("  Code spans detected: {}", ctx.code_spans().len());
             }
         }
 
