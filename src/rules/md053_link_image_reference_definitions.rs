@@ -1,6 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -110,39 +110,55 @@ impl MD053LinkImageReferenceDefinitions {
     /// This method returns a HashMap where the key is the normalized reference ID and the value is a vector of (start_line, end_line) tuples.
     fn find_definitions(
         &self,
-        content: &str,
+        ctx: &crate::lint_context::LintContext,
         doc_structure: &DocumentStructure,
     ) -> HashMap<String, Vec<(usize, usize)>> {
         let mut definitions: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
-        let lines: Vec<&str> = content.lines().collect();
+        
+        // First, add all reference definitions from context
+        for ref_def in &ctx.reference_defs {
+            // Apply unescape to handle escaped characters in definitions
+            let normalized_id = Self::unescape_reference(&ref_def.id); // Already lowercase from context
+            definitions
+                .entry(normalized_id)
+                .or_default()
+                .push((ref_def.line - 1, ref_def.line - 1)); // Convert to 0-indexed
+        }
+        
+        // Handle multi-line definitions that might not be fully captured by ctx.reference_defs
+        let lines = &ctx.lines;
         let mut i = 0;
         while i < lines.len() {
-            let line = lines[i];
+            let line_info = &lines[i];
+            let line = &line_info.content;
 
-            // Skip code blocks and front matter using DocumentStructure
-            if doc_structure.is_in_code_block(i + 1) || doc_structure.is_in_front_matter(i + 1) {
+            // Skip code blocks and front matter using line info
+            if line_info.in_code_block || doc_structure.is_in_front_matter(i + 1) {
                 i += 1;
                 continue;
             }
 
-            // Reference definition
-            if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line) {
-                let ref_id = caps.get(1).unwrap().as_str().trim();
-                let start_line = i;
-                let mut end_line = i;
-                // Multi-line continuation
-                i += 1;
-                while i < lines.len() && CONTINUATION_REGEX.is_match(lines[i]) {
-                    end_line = i;
-                    i += 1;
+            // Check for multi-line continuation of existing definitions
+            if i > 0 && CONTINUATION_REGEX.is_match(line) {
+                // Find the reference definition this continues
+                let mut def_start = i - 1;
+                while def_start > 0 && !REFERENCE_DEFINITION_REGEX.is_match(&lines[def_start].content) {
+                    def_start -= 1;
                 }
-                // Normalize reference id: trim, unescape, and lowercase
-                let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
-                definitions
-                    .entry(normalized_id)
-                    .or_default()
-                    .push((start_line, end_line));
-                continue;
+                
+                if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(&lines[def_start].content) {
+                    let ref_id = caps.get(1).unwrap().as_str().trim();
+                    let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
+                    
+                    // Update the end line for this definition
+                    if let Some(ranges) = definitions.get_mut(&normalized_id) {
+                        if let Some(last_range) = ranges.last_mut() {
+                            if last_range.0 == def_start {
+                                last_range.1 = i;
+                            }
+                        }
+                    }
+                }
             }
             i += 1;
         }
@@ -155,11 +171,9 @@ impl MD053LinkImageReferenceDefinitions {
     /// It leverages cached data from LintContext for efficiency.
     fn find_usages(
         &self,
-        content: &str,
         doc_structure: &DocumentStructure,
         ctx: &crate::lint_context::LintContext,
     ) -> HashSet<String> {
-        let lines: Vec<&str> = content.lines().collect();
         let mut usages: HashSet<String> = HashSet::new();
 
         // 1. Add usages from cached reference links in LintContext
@@ -188,23 +202,24 @@ impl MD053LinkImageReferenceDefinitions {
 
         // 3. Find shortcut references [ref] not already handled by DocumentStructure.links
         //    and ensure they are not within code spans or code blocks.
-        for (i, line) in lines.iter().enumerate() {
+        // Cache code spans once before the loop
+        let code_spans = ctx.code_spans();
+        
+        for (i, line_info) in ctx.lines.iter().enumerate() {
             let line_num = i + 1; // 1-indexed
 
             // Skip lines in code blocks or front matter
-            if doc_structure.is_in_code_block(line_num) || doc_structure.is_in_front_matter(line_num) {
+            if line_info.in_code_block || doc_structure.is_in_front_matter(line_num) {
                 continue;
             }
 
             // Find potential shortcut references
-            for caps in SHORTCUT_REFERENCE_REGEX.captures_iter(line).flatten() {
+            for caps in SHORTCUT_REFERENCE_REGEX.captures_iter(&line_info.content).flatten() {
                 if let Some(full_match) = caps.get(0) {
                     if let Some(ref_id_match) = caps.get(1) {
                         // Check if the match is within a code span
-                        let line_start_byte = ctx.line_to_byte_offset(line_num).unwrap_or(0);
-                        let match_byte_offset = line_start_byte + full_match.start();
-                        let in_code_span = ctx
-                            .code_spans
+                        let match_byte_offset = line_info.byte_offset + full_match.start();
+                        let in_code_span = code_spans
                             .iter()
                             .any(|span| match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end);
 
@@ -299,22 +314,18 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         let doc_structure = DocumentStructure::new(content);
 
         // Find definitions and usages using DocumentStructure
-        let definitions = self.find_definitions(content, &doc_structure);
-        let usages = self.find_usages(content, &doc_structure, ctx);
+        let definitions = self.find_definitions(ctx, &doc_structure);
+        let usages = self.find_usages(&doc_structure, ctx);
 
         // Get unused references by comparing definitions and usages
         let unused_refs = self.get_unused_references(&definitions, &usages);
 
         let mut warnings = Vec::new();
 
-        // Create LineIndex for proper range calculations
-        let line_index = LineIndex::new(content.to_string());
-
         // Create warnings for unused references
         for (definition, start, _end) in unused_refs {
             let line_num = start + 1; // 1-indexed line numbers
-            let lines: Vec<&str> = content.lines().collect();
-            let line_content = lines.get(start).unwrap_or(&"");
+            let line_content = ctx.lines.get(start).map(|l| l.content.as_str()).unwrap_or("");
 
             // Calculate precise character range for the entire reference definition line
             let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line_content);
@@ -330,10 +341,12 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                 fix: Some(Fix {
                     // Remove the entire line including the newline
                     range: {
-                        let line_start = line_index.get_line_start_byte(line_num).unwrap_or(0);
-                        let line_end = line_index
-                            .get_line_start_byte(line_num + 1)
-                            .unwrap_or(line_start + line_content.len());
+                        let line_start = ctx.line_to_byte_offset(line_num).unwrap_or(0);
+                        let line_end = if line_num < ctx.lines.len() {
+                            ctx.line_to_byte_offset(line_num + 1).unwrap_or(content.len())
+                        } else {
+                            content.len()
+                        };
                         line_start..line_end
                     },
                     replacement: String::new(), // Remove the line
@@ -356,8 +369,8 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         let doc_structure = DocumentStructure::new(content);
 
         // Find definitions and usages using DocumentStructure
-        let definitions = self.find_definitions(content, &doc_structure);
-        let usages = self.find_usages(content, &doc_structure, ctx);
+        let definitions = self.find_definitions(ctx, &doc_structure);
+        let usages = self.find_usages(&doc_structure, ctx);
 
         // Get unused references by comparing definitions and usages
         let unused_refs = self.get_unused_references(&definitions, &usages);
@@ -373,7 +386,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         lines_to_remove.sort_by(|a, b| b.0.cmp(&a.0)); // Sort descending by start line
 
         // Remove lines from end to beginning to preserve line numbers
-        let lines: Vec<&str> = content.lines().collect();
+        let lines: Vec<&str> = ctx.lines.iter().map(|l| l.content.as_str()).collect();
         let mut result_lines: Vec<&str> = lines.clone();
 
         for (start_line, end_line) in lines_to_remove {
@@ -602,8 +615,9 @@ mod tests {
     fn test_find_definitions() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[ref1]: url1\n[ref2]: url2\nSome text\n[ref3]: url3";
+        let ctx = LintContext::new(content);
         let doc = DocumentStructure::new(content);
-        let defs = rule.find_definitions(content, &doc);
+        let defs = rule.find_definitions(&ctx, &doc);
 
         assert_eq!(defs.len(), 3);
         assert!(defs.contains_key("ref1"));
@@ -617,7 +631,7 @@ mod tests {
         let content = "[text][ref1] and [ref2] and ![img][ref3]";
         let ctx = LintContext::new(content);
         let doc = DocumentStructure::new(content);
-        let usages = rule.find_usages(content, &doc, &ctx);
+        let usages = rule.find_usages(&doc, &ctx);
 
         assert!(usages.contains("ref1"));
         assert!(usages.contains("ref2"));

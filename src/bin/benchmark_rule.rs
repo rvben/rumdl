@@ -74,6 +74,37 @@ fn generate_test_content(rule_name: &str) -> Vec<(&'static str, String)> {
             ("Mixed case", "JavaScript is good, but javascript is bad\n".repeat(100)),
             ("Many names", "JavaScript Python TypeScript Ruby Go Rust Java\n".repeat(100)),
         ],
+        "MD034" => vec![
+            ("No URLs", "Simple text without any URLs or links\n".repeat(100)),
+            ("Markdown links", "[link](http://example.com) and [another](https://test.com)\n".repeat(100)),
+            ("Bare URLs", "Check out http://example.com and https://test.com for more\n".repeat(100)),
+            ("Mixed URLs", "Visit [site](http://a.com) or just go to http://b.com directly\n".repeat(100)),
+            ("Complex URLs", "IPv6: http://[2001:db8::1]/path and port: http://example.com:8080/path?query=1\n".repeat(50)),
+            ("Many URLs", {
+                let mut content = String::new();
+                for i in 0..200 {
+                    content.push_str(&format!("URL {}: http://example{}.com/path/{}/file?id={}\n", i, i, i, i));
+                }
+                content
+            }),
+        ],
+        "MD053" => vec![
+            ("No references", "Simple text without any links or references\n".repeat(100)),
+            ("Used references", "[link1][ref1] and [link2][ref2]\n\n[ref1]: http://example1.com\n[ref2]: http://example2.com\n".repeat(50)),
+            ("Unused references", "Some text here\n\n[unused1]: http://unused1.com\n[unused2]: http://unused2.com\n".repeat(50)),
+            ("Mixed references", "[used][ref1]\n\n[ref1]: http://used.com\n[unused]: http://unused.com\n".repeat(100)),
+            ("Many references", {
+                let mut content = String::new();
+                for i in 0..100 {
+                    content.push_str(&format!("[link{}][ref{}]\n", i, i));
+                }
+                content.push_str("\n");
+                for i in 0..200 {
+                    content.push_str(&format!("[ref{}]: http://example{}.com\n", i, i));
+                }
+                content
+            }),
+        ],
         _ => vec![
             ("Default test", "Default test content\n".repeat(100)),
         ],

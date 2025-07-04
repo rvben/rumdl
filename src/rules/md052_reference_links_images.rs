@@ -106,6 +106,9 @@ impl MD052ReferenceLinkImages {
         let mut code_fence_marker = String::new();
         let mut in_example_section = false;
 
+        // Get code spans once for the entire function
+        let code_spans = ctx.code_spans();
+        
         // Use cached data for reference links and images
         for link in &ctx.links {
             if !link.is_reference {
@@ -113,7 +116,7 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip links inside code spans
-            if Self::is_in_code_span(link.line, link.start_col, &ctx.code_spans) {
+            if Self::is_in_code_span(link.line, link.start_col, &*code_spans) {
                 continue;
             }
 
@@ -153,7 +156,7 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip images inside code spans
-            if Self::is_in_code_span(image.line, image.start_col, &ctx.code_spans) {
+            if Self::is_in_code_span(image.line, image.start_col, &*code_spans) {
                 continue;
             }
 
@@ -243,7 +246,8 @@ impl MD052ReferenceLinkImages {
                             let col = full_match.start();
 
                             // Skip if inside code span
-                            if Self::is_in_code_span(line_num + 1, col, &ctx.code_spans) {
+                            let code_spans = ctx.code_spans();
+                            if Self::is_in_code_span(line_num + 1, col, &*code_spans) {
                                 continue;
                             }
 
