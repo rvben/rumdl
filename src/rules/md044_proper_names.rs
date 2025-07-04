@@ -1,5 +1,6 @@
 use crate::utils::fast_hash;
 use crate::utils::range_utils::LineIndex;
+use crate::utils::regex_cache::{get_cached_fancy_regex, escape_regex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex;
@@ -73,8 +74,8 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 #[derive(Clone)]
 pub struct MD044ProperNames {
     config: MD044Config,
-    // Cache the combined regex pattern
-    combined_regex: Arc<Mutex<Option<Regex>>>,
+    // Cache the combined regex pattern string
+    combined_pattern: Option<String>,
     // Cache for name violations by content hash
     content_cache: Arc<Mutex<HashMap<u64, Vec<WarningPosition>>>>,
 }
@@ -86,62 +87,43 @@ impl MD044ProperNames {
             code_blocks,
             html_comments: true, // Default to checking HTML comments
         };
-        let mut instance = Self {
+        let combined_pattern = Self::create_combined_pattern(&config);
+        Self {
             config,
-            combined_regex: Arc::new(Mutex::new(None)),
+            combined_pattern,
             content_cache: Arc::new(Mutex::new(HashMap::new())),
-        };
-
-        // Pre-compile the combined regex
-        instance.compile_combined_regex();
-        instance
+        }
     }
 
     pub fn from_config_struct(config: MD044Config) -> Self {
-        let mut instance = Self {
+        let combined_pattern = Self::create_combined_pattern(&config);
+        Self {
             config,
-            combined_regex: Arc::new(Mutex::new(None)),
+            combined_pattern,
             content_cache: Arc::new(Mutex::new(HashMap::new())),
-        };
-        instance.compile_combined_regex();
-        instance
-    }
-
-    // Compile and cache the combined regex pattern
-    fn compile_combined_regex(&mut self) {
-        if let Some(pattern) = self.create_combined_pattern() {
-            match Regex::new(&pattern) {
-                Ok(regex) => {
-                    *self.combined_regex.lock().unwrap() = Some(regex);
-                }
-                Err(e) => {
-                    eprintln!("Failed to compile combined regex pattern: {e}");
-                }
-            }
         }
     }
 
     // Create a combined regex pattern for all proper names
-    fn create_combined_pattern(&self) -> Option<String> {
-        if self.config.names.is_empty() {
+    fn create_combined_pattern(config: &MD044Config) -> Option<String> {
+        if config.names.is_empty() {
             return None;
         }
 
         // Create patterns for all names and their variations
-        let patterns: Vec<String> = self
-            .config
+        let patterns: Vec<String> = config
             .names
             .iter()
             .map(|name| {
                 let lower_name = name.to_lowercase();
                 let lower_name_no_dots = lower_name.replace('.', "");
                 if lower_name == lower_name_no_dots {
-                    fancy_regex::escape(&lower_name).to_string()
+                    escape_regex(&lower_name)
                 } else {
                     format!(
                         "(?:{}|{})",
-                        fancy_regex::escape(&lower_name),
-                        fancy_regex::escape(&lower_name_no_dots)
+                        escape_regex(&lower_name),
+                        escape_regex(&lower_name_no_dots)
                     )
                 }
             })
@@ -154,7 +136,7 @@ impl MD044ProperNames {
     // Find all name violations in the content and return positions
     fn find_name_violations(&self, content: &str, ctx: &crate::lint_context::LintContext) -> Vec<WarningPosition> {
         // Early return: if no names configured or content is empty
-        if self.config.names.is_empty() || content.is_empty() {
+        if self.config.names.is_empty() || content.is_empty() || self.combined_pattern.is_none() {
             return Vec::new();
         }
 
@@ -181,41 +163,40 @@ impl MD044ProperNames {
 
         let mut violations = Vec::new();
 
-        // Get the cached combined regex
-        let combined_regex = {
-            let regex_lock = self.combined_regex.lock().unwrap();
-            match &*regex_lock {
-                Some(regex) => regex.clone(),
-                None => return Vec::new(),
-            }
+        // Get the regex from global cache
+        let combined_regex = match &self.combined_pattern {
+            Some(pattern) => match get_cached_fancy_regex(pattern) {
+                Ok(regex) => regex,
+                Err(_) => return Vec::new(),
+            },
+            None => return Vec::new(),
         };
 
-        let mut byte_pos = 0;
-
-        for (line_num, line) in content.lines().enumerate() {
+        // Use ctx.lines for better performance
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+            let line = &line_info.content;
+            
             // Skip code fence lines (```language or ~~~language)
             let trimmed = line.trim_start();
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                byte_pos += line.len() + 1;
                 continue;
             }
 
             // Skip if in code block
-            if self.config.code_blocks && ctx.is_in_code_block_or_span(byte_pos) {
-                byte_pos += line.len() + 1;
+            if self.config.code_blocks && line_info.in_code_block {
                 continue;
             }
 
             // Check if we should skip HTML comments
             let in_html_comment = if !self.config.html_comments {
                 // Check if this position is within an HTML comment
-                self.is_in_html_comment(content, byte_pos)
+                self.is_in_html_comment(content, line_info.byte_offset)
             } else {
                 false
             };
 
             if in_html_comment {
-                byte_pos += line.len() + 1;
                 continue;
             }
 
@@ -227,7 +208,6 @@ impl MD044ProperNames {
             });
 
             if !has_line_matches {
-                byte_pos += line.len() + 1;
                 continue;
             }
 
@@ -240,17 +220,15 @@ impl MD044ProperNames {
                         if let Some(proper_name) = self.get_proper_name_for(found_name) {
                             // Only flag if it's not already correct
                             if found_name != proper_name {
-                                violations.push((line_num + 1, cap.start() + 1, found_name.to_string()));
+                                violations.push((line_num, cap.start() + 1, found_name.to_string()));
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("Regex execution error on line {}: {}", line_num + 1, e);
+                        eprintln!("Regex execution error on line {}: {}", line_num, e);
                     }
                 }
             }
-
-            byte_pos += line.len() + 1;
         }
 
         // Store in cache
@@ -301,7 +279,18 @@ impl Rule for MD044ProperNames {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        if content.is_empty() || self.config.names.is_empty() {
+        if content.is_empty() || self.config.names.is_empty() || self.combined_pattern.is_none() {
+            return Ok(Vec::new());
+        }
+
+        // Early return: quick check if any of the configured names might be in content
+        let content_lower = content.to_lowercase();
+        let has_potential_matches = self.config.names.iter().any(|name| {
+            let name_lower = name.to_lowercase();
+            content_lower.contains(&name_lower) || content_lower.contains(&name_lower.replace('.', ""))
+        });
+
+        if !has_potential_matches {
             return Ok(Vec::new());
         }
 
@@ -338,48 +327,63 @@ impl Rule for MD044ProperNames {
             return Ok(content.to_string());
         }
 
-        let mut violations = self.find_name_violations(content, ctx);
+        let violations = self.find_name_violations(content, ctx);
         if violations.is_empty() {
             return Ok(content.to_string());
         }
 
-        // Sort violations in reverse order (by line, then by column) to apply fixes
-        // from end to beginning, avoiding range invalidation.
-        violations.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
-
-        let mut fixed_content = content.to_string();
-        let line_index = LineIndex::new(content.to_string()); // Recreate for accurate byte ranges
-
+        // Process lines and build the fixed content
+        let mut fixed_lines = Vec::new();
+        
+        // Group violations by line
+        let mut violations_by_line: HashMap<usize, Vec<(usize, String)>> = HashMap::new();
         for (line_num, col_num, found_name) in violations {
-            if let Some(proper_name) = self.get_proper_name_for(&found_name) {
-                // Calculate the byte range for the violation
-                let range = line_index.line_col_to_byte_range(line_num, col_num);
-                let start_byte = range.start;
-                let end_byte = start_byte + found_name.len();
+            violations_by_line
+                .entry(line_num)
+                .or_insert_with(Vec::new)
+                .push((col_num, found_name));
+        }
+        
+        // Sort violations within each line in reverse order
+        for violations in violations_by_line.values_mut() {
+            violations.sort_by(|a, b| b.0.cmp(&a.0));
+        }
 
-                // Ensure the calculated range is valid within the current fixed_content
-                if end_byte <= fixed_content.len()
-                    && fixed_content.is_char_boundary(start_byte)
-                    && fixed_content.is_char_boundary(end_byte)
-                {
-                    // Perform the replacement directly on the string using byte offsets
-                    fixed_content.replace_range(start_byte..end_byte, &proper_name);
-                } else {
-                    // Log error or handle invalid range - potentially due to overlapping fixes or calculation errors
-                    eprintln!(
-                        "Warning: Skipping fix for '{}' at {}:{} due to invalid byte range [{}..{}], content length {}.",
-                        found_name,
-                        line_num,
-                        col_num,
-                        start_byte,
-                        end_byte,
-                        fixed_content.len()
-                    );
+        // Process each line
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+            
+            if let Some(line_violations) = violations_by_line.get(&line_num) {
+                // This line has violations, fix them
+                let mut fixed_line = line_info.content.clone();
+                
+                for (col_num, found_name) in line_violations {
+                    if let Some(proper_name) = self.get_proper_name_for(found_name) {
+                        let start_col = col_num - 1; // Convert to 0-based
+                        let end_col = start_col + found_name.len();
+                        
+                        if end_col <= fixed_line.len()
+                            && fixed_line.is_char_boundary(start_col)
+                            && fixed_line.is_char_boundary(end_col)
+                        {
+                            fixed_line.replace_range(start_col..end_col, &proper_name);
+                        }
+                    }
                 }
+                
+                fixed_lines.push(fixed_line);
+            } else {
+                // No violations on this line, keep it as is
+                fixed_lines.push(line_info.content.clone());
             }
         }
 
-        Ok(fixed_content)
+        // Join lines with newlines, preserving the original ending
+        let mut result = fixed_lines.join("\n");
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
+        }
+        Ok(result)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

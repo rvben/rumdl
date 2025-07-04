@@ -35,15 +35,7 @@ impl MD009TrailingSpaces {
     }
 
     fn count_trailing_spaces(line: &str) -> usize {
-        let mut count = 0;
-        for c in line.chars().rev() {
-            if c == ' ' {
-                count += 1;
-            } else {
-                break;
-            }
-        }
-        count
+        line.chars().rev().take_while(|&c| c == ' ').count()
     }
 
     fn is_empty_list_item_line(line: &str, prev_line: Option<&str>) -> bool {
@@ -224,6 +216,7 @@ impl Rule for MD009TrailingSpaces {
             }
 
             let trimmed = line.trim_end();
+            let trailing_spaces = Self::count_trailing_spaces(line);
 
             // Handle empty lines - fast regex replacement
             if trimmed.is_empty() {
@@ -256,20 +249,25 @@ impl Rule for MD009TrailingSpaces {
             }
 
             // Handle lines with trailing spaces
-            let trailing_spaces = Self::count_trailing_spaces(line);
             let is_truly_last_line = i == lines.len() - 1 && !content.ends_with('\n');
 
             result.push_str(trimmed);
 
             // In non-strict mode, preserve line breaks by normalizing to br_spaces
             if !self.config.strict && !is_truly_last_line && trailing_spaces > 0 {
-                result.push_str(&" ".repeat(self.config.br_spaces));
+                // Optimize for common case of 2 spaces
+                match self.config.br_spaces {
+                    0 => {},
+                    1 => result.push(' '),
+                    2 => result.push_str("  "),
+                    n => result.push_str(&" ".repeat(n)),
+                }
             }
             result.push('\n');
         }
 
         // Preserve original ending (with or without final newline)
-        if !content.ends_with('\n') {
+        if !content.ends_with('\n') && result.ends_with('\n') {
             result.pop();
         }
 

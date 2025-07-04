@@ -20,7 +20,6 @@ impl Rule for MD047SingleTrailingNewline {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
         // Empty content is fine
@@ -36,21 +35,20 @@ impl Rule for MD047SingleTrailingNewline {
 
         // Only issue warning if there's no newline or more than one
         if !has_trailing_newline || has_multiple_newlines {
-            let lines: Vec<&str> = content.lines().collect();
+            let lines = &ctx.lines;
             let last_line_num = lines.len();
-            let last_line_content = lines.last().unwrap_or(&"");
+            let last_line_content = lines.last().map(|s| s.content.as_str()).unwrap_or("");
 
             // Calculate precise character range for the end of file
             let (start_line, start_col, end_line, end_col) = if has_multiple_newlines {
                 // For multiple newlines, highlight from the end of the last content line to the end
                 let last_content_line = content.trim_end_matches('\n');
-                let last_content_lines: Vec<&str> = last_content_line.lines().collect();
-                if last_content_lines.is_empty() {
+                let last_content_line_count = last_content_line.lines().count();
+                if last_content_line_count == 0 {
                     (1, 1, 1, 2)
                 } else {
-                    let line_num = last_content_lines.len();
-                    let line_content = last_content_lines.last().unwrap_or(&"");
-                    (line_num, line_content.len() + 1, line_num, line_content.len() + 2)
+                    let line_content = last_content_line.lines().last().unwrap_or("");
+                    (last_content_line_count, line_content.len() + 1, last_content_line_count, line_content.len() + 2)
                 }
             } else {
                 // For missing newline, highlight the end of the last line
@@ -61,6 +59,9 @@ impl Rule for MD047SingleTrailingNewline {
                     last_line_content.len() + 1,
                 )
             };
+
+            // Only create LineIndex when we actually need it for the fix
+            let line_index = LineIndex::new(content.to_string());
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
@@ -102,27 +103,41 @@ impl Rule for MD047SingleTrailingNewline {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
+        
         // Empty content remains empty
         if content.is_empty() {
+            return Ok(String::new());
+        }
+
+        // Check current state
+        let has_trailing_newline = content.ends_with('\n');
+        let has_multiple_newlines = content.ends_with("\n\n");
+
+        // Early return if content is already correct
+        if has_trailing_newline && !has_multiple_newlines {
             return Ok(content.to_string());
         }
 
-        // If the content doesn't end with a newline, add one
-        if !content.ends_with('\n') {
-            return Ok(content.to_string() + "\n");
-        }
-
-        // Handle multiple trailing newlines
-        let mut result = content.to_string();
-
-        // If there are multiple newlines, trim them down to just one
-        if content.ends_with("\n\n") {
-            // Preserve any whitespace at the end but only have one newline
+        // Only allocate when we need to make changes
+        if !has_trailing_newline {
+            // Content doesn't end with newline, add one
+            let mut result = String::with_capacity(content.len() + 1);
+            result.push_str(content);
+            result.push('\n');
+            Ok(result)
+        } else {
+            // Has multiple newlines, trim them down to just one
             let content_without_trailing_newlines = content.trim_end_matches('\n');
-            result = content_without_trailing_newlines.to_string() + "\n";
+            if content_without_trailing_newlines.is_empty() {
+                // Handle the case where content is just newlines
+                Ok("\n".to_string())
+            } else {
+                let mut result = String::with_capacity(content_without_trailing_newlines.len() + 1);
+                result.push_str(content_without_trailing_newlines);
+                result.push('\n');
+                Ok(result)
+            }
         }
-
-        Ok(result)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

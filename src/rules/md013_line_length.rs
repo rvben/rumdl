@@ -135,8 +135,36 @@ impl Rule for MD013LineLength {
         if content.is_empty() {
             return Ok(Vec::new());
         }
+        
+        // Quick check: if total content is shorter than line limit, definitely no violations
+        if content.len() <= self.config.line_length {
+            return Ok(Vec::new());
+        }
+        
+        // More aggressive early return - check if any line could possibly be long
+        let has_long_lines = if !ctx.lines.is_empty() {
+            ctx.lines.iter().any(|line| line.content.len() > self.config.line_length)
+        } else {
+            // Fallback: do a quick scan for newlines to estimate max line length
+            let mut max_line_len = 0;
+            let mut current_line_len = 0;
+            for ch in content.chars() {
+                if ch == '\n' {
+                    max_line_len = max_line_len.max(current_line_len);
+                    current_line_len = 0;
+                } else {
+                    current_line_len += 1;
+                }
+            }
+            max_line_len = max_line_len.max(current_line_len);
+            max_line_len > self.config.line_length
+        };
+        
+        if !has_long_lines {
+            return Ok(Vec::new());
+        }
 
-        // Fallback path: create structure manually (should rarely be used)
+        // Create structure manually 
         let structure = DocumentStructure::new(content);
         self.check_with_structure(ctx, &structure)
     }
@@ -149,12 +177,15 @@ impl Rule for MD013LineLength {
     ) -> LintResult {
         let content = ctx.content;
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Early return if no lines could possibly exceed the limit
-        if lines.iter().all(|line| line.len() <= self.config.line_length) {
-            return Ok(Vec::new());
-        }
+        
+        // Early return was already done in check(), so we know there are long lines
+        
+        // Use ctx.lines if available for better performance
+        let lines: Vec<&str> = if !ctx.lines.is_empty() {
+            ctx.lines.iter().map(|l| l.content.as_str()).collect()
+        } else {
+            content.lines().collect()
+        };
 
         // Pre-compute LineIndex for efficient byte range calculations
         let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
@@ -166,9 +197,18 @@ impl Rule for MD013LineLength {
         let table_lines_set: std::collections::HashSet<usize> = if self.config.tables {
             let mut table_lines = std::collections::HashSet::new();
             let mut in_table = false;
+            
             for (i, line) in lines.iter().enumerate() {
                 let line_number = i + 1;
-                if line.contains('|') && !structure.is_in_code_block(line_number) {
+                
+                // Quick check if in code block using pre-computed blocks from context or structure
+                let in_code = if !ctx.code_blocks.is_empty() {
+                    ctx.code_blocks.iter().any(|(start, end)| *start <= line_number && line_number <= *end)
+                } else {
+                    structure.is_in_code_block(line_number)
+                };
+                
+                if !in_code && line.contains('|') {
                     in_table = true;
                     table_lines.insert(line_number);
                 } else if in_table && line.trim().is_empty() {
@@ -236,18 +276,25 @@ impl Rule for MD013LineLength {
             // Generate simplified fix (avoid expensive sentence splitting for now)
             let fix = if !self.should_skip_line_for_fix(line, line_num, structure) {
                 // First try trimming trailing whitespace
-                let trimmed = line.trim_end();
-                if trimmed.len() <= line_limit && trimmed != *line {
-                    let line_start = line_index.line_col_to_byte_range(line_number, 1).start;
-                    let line_end = if line_number < lines.len() {
-                        line_index.line_col_to_byte_range(line_number + 1, 1).start - 1
+                let last_char = line.chars().last();
+                if last_char == Some(' ') || last_char == Some('\t') {
+                    let trimmed = line.trim_end();
+                    // Calculate trimmed length to avoid re-scanning
+                    let trimmed_len = self.calculate_effective_length(trimmed);
+                    if trimmed_len <= line_limit {
+                        let line_start = line_index.line_col_to_byte_range(line_number, 1).start;
+                        let line_end = if line_number < lines.len() {
+                            line_index.line_col_to_byte_range(line_number + 1, 1).start - 1
+                        } else {
+                            content.len()
+                        };
+                        Some(crate::rule::Fix {
+                            range: line_start..line_end,
+                            replacement: trimmed.to_string(),
+                        })
                     } else {
-                        content.len()
-                    };
-                    Some(crate::rule::Fix {
-                        range: line_start..line_end,
-                        replacement: trimmed.to_string(),
-                    })
+                        None
+                    }
                 } else {
                     None // Skip expensive sentence splitting for performance
                 }
@@ -289,16 +336,35 @@ impl Rule for MD013LineLength {
         // Get all warnings with their fixes
         let warnings = self.check(ctx)?;
 
-        // If no warnings, return original content
+        // If no warnings, return original content without allocation
         if warnings.is_empty() {
             return Ok(ctx.content.to_string());
         }
 
-        // Collect all fixes and sort by range start (descending) to apply from end to beginning
+        // Collect all fixes - check if any exist before allocating
+        let mut has_any_fix = false;
+        for w in &warnings {
+            if w.fix.is_some() {
+                has_any_fix = true;
+                break;
+            }
+        }
+        
+        if !has_any_fix {
+            return Ok(ctx.content.to_string());
+        }
+
+        // Now collect fixes since we know there's at least one
         let mut fixes: Vec<_> = warnings
             .iter()
             .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
             .collect();
+        
+        // This should not happen given our check above, but just in case
+        if fixes.is_empty() {
+            return Ok(ctx.content.to_string());
+        }
+        
         fixes.sort_by(|a, b| b.0.cmp(&a.0));
 
         // Apply fixes from end to beginning to preserve byte offsets
@@ -325,8 +391,18 @@ impl Rule for MD013LineLength {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty or all lines are shorter than the limit
-        ctx.content.is_empty() || ctx.lines.iter().all(|line| line.content.len() <= self.config.line_length)
+        // Skip if content is empty
+        if ctx.content.is_empty() {
+            return true;
+        }
+        
+        // Quick check: if total content is shorter than line limit, definitely skip
+        if ctx.content.len() <= self.config.line_length {
+            return true;
+        }
+        
+        // Use more efficient check - any() with early termination instead of all()
+        !ctx.lines.iter().any(|line| line.content.len() > self.config.line_length)
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -399,29 +475,38 @@ impl MD013LineLength {
             return line.chars().count();
         }
 
+        // Quick check: if line doesn't contain "http" or "[", it can't have URLs or markdown links
+        if !line.contains("http") && !line.contains('[') {
+            return line.chars().count();
+        }
+
         let mut effective_line = line.to_string();
 
         // First handle markdown links to avoid double-counting URLs
         // Pattern: [text](very-long-url) -> [text](url)
-        for cap in MARKDOWN_LINK_PATTERN.captures_iter(&effective_line.clone()) {
-            if let (Some(full_match), Some(text), Some(url)) = (cap.get(0), cap.get(1), cap.get(2)) {
-                if url.as_str().len() > 15 {
-                    let replacement = format!("[{}](url)", text.as_str());
-                    effective_line = effective_line.replacen(full_match.as_str(), &replacement, 1);
+        if line.contains('[') && line.contains("](") {
+            for cap in MARKDOWN_LINK_PATTERN.captures_iter(&effective_line.clone()) {
+                if let (Some(full_match), Some(text), Some(url)) = (cap.get(0), cap.get(1), cap.get(2)) {
+                    if url.as_str().len() > 15 {
+                        let replacement = format!("[{}](url)", text.as_str());
+                        effective_line = effective_line.replacen(full_match.as_str(), &replacement, 1);
+                    }
                 }
             }
         }
 
         // Then replace bare URLs with a placeholder of reasonable length
         // This allows lines with long URLs to pass if the rest of the content is reasonable
-        for url_match in URL_IN_TEXT.find_iter(&effective_line.clone()) {
-            let url = url_match.as_str();
-            // Skip if this URL is already part of a markdown link we handled
-            if !effective_line.contains(&format!("({url})")) {
-                // Replace URL with placeholder that represents a "reasonable" URL length
-                // Using 15 chars as a reasonable URL placeholder (e.g., "https://ex.com")
-                let placeholder = "x".repeat(15.min(url.len()));
-                effective_line = effective_line.replacen(url, &placeholder, 1);
+        if effective_line.contains("http") {
+            for url_match in URL_IN_TEXT.find_iter(&effective_line.clone()) {
+                let url = url_match.as_str();
+                // Skip if this URL is already part of a markdown link we handled
+                if !effective_line.contains(&format!("({url})")) {
+                    // Replace URL with placeholder that represents a "reasonable" URL length
+                    // Using 15 chars as a reasonable URL placeholder (e.g., "https://ex.com")
+                    let placeholder = "x".repeat(15.min(url.len()));
+                    effective_line = effective_line.replacen(url, &placeholder, 1);
+                }
             }
         }
 
