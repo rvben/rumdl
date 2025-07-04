@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.94] - 2025-07-04
 
+### Performance Improvements
+- Implemented lazy code span loading - 3.8x speedup for 94% of rules that don't use code spans
+- MD013: 34.5% faster check operations through aggressive early returns
+- MD038: 14% faster by leveraging lazy code span loading  
+- MD044: 93.5% faster with global regex caching
+- MD047: 8.3% faster using pre-computed line data
+- MD053: 39.7% faster by leveraging pre-parsed reference definitions
+- Overall LintContext creation improved by 11.7%
+
+### Fixed
+- MD053: Fixed escaped character handling in reference definitions
+
 ## [0.0.93] - 2025-07-03
 
 ## [0.0.92] - 2025-07-02
