@@ -90,14 +90,20 @@ impl MD038NoSpaceInCode {
 
     /// Check if content looks like a shell command that benefits from spaces
     fn looks_like_command(&self, content: &str) -> bool {
-        // Common command patterns
-        let command_indicators = [
+        // Common command patterns - check case-insensitive prefixes
+        const COMMAND_PREFIXES: &[&str] = &[
             "git ", "npm ", "cargo ", "docker ", "kubectl ", "pip ", "yarn ", "sudo ", "chmod ", "chown ", "ls ",
             "cd ", "mkdir ", "rm ", "cp ", "mv ", "cat ", "grep ", "find ", "awk ", "sed ",
         ];
 
-        let lower_content = content.to_lowercase();
-        command_indicators.iter().any(|&indicator| lower_content.starts_with(indicator))
+        // Check if content starts with any command (case-insensitive)
+        // Use iterator with early return to avoid allocating lowercase string unless needed
+        let needs_lowercase_check = COMMAND_PREFIXES.iter().any(|&cmd| {
+            content.len() >= cmd.len() && 
+            content.as_bytes()[..cmd.len()].eq_ignore_ascii_case(cmd.as_bytes())
+        });
+
+        needs_lowercase_check
             || content.contains(" -") // Commands with flags
             || content.contains(" --") // Commands with long flags
     }
@@ -198,6 +204,12 @@ impl Rule for MD038NoSpaceInCode {
                 continue;
             }
 
+            // Early check: if no leading/trailing whitespace, skip trimming
+            if !code_content.chars().next().map_or(false, |c| c.is_whitespace()) &&
+               !code_content.chars().last().map_or(false, |c| c.is_whitespace()) {
+                continue;
+            }
+
             let trimmed = code_content.trim();
 
             // Check if there are leading or trailing spaces
@@ -249,6 +261,11 @@ impl Rule for MD038NoSpaceInCode {
             return Ok(content.to_string());
         }
 
+        // Early return if no backticks in content
+        if !content.contains('`') {
+            return Ok(content.to_string());
+        }
+
         // Get warnings to identify what needs to be fixed
         let warnings = self.check(ctx)?;
         if warnings.is_empty() {
@@ -263,7 +280,7 @@ impl Rule for MD038NoSpaceInCode {
 
         fixes.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
 
-        // Apply fixes
+        // Apply fixes - only allocate string when we have fixes to apply
         let mut result = content.to_string();
         for (range, replacement) in fixes {
             result.replace_range(range, &replacement);
