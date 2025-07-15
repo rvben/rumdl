@@ -14,6 +14,7 @@ pub mod range_utils;
 pub mod regex_cache;
 pub mod string_interner;
 pub mod table_utils;
+pub mod text_reflow;
 
 pub use ast_utils::AstCache;
 pub use code_block_utils::CodeBlockUtils;

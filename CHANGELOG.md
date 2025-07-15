@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- MD013: Text reflow/wrapping functionality for automatic line breaking
+  - New `enable_reflow` configuration option
+  - Intelligently wraps long lines while preserving Markdown formatting
+  - Preserves bold, italic, links, code spans, and other Markdown elements
+  - Proper indentation for wrapped list items
+- Added `pulldown-cmark` dependency for improved Markdown parsing
+
+### Changed
+- MD013: Enhanced fix functionality with optional text reflow (disabled by default)
+
 ## [0.0.95] - 2025-07-15
 
 ### Added

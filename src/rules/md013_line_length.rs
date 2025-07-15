@@ -51,6 +51,7 @@ impl MD013LineLength {
                 heading_line_length: None,
                 code_block_line_length: None,
                 stern: false,
+                enable_reflow: false,
             },
         }
     }
@@ -333,6 +334,18 @@ impl Rule for MD013LineLength {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        // If reflow is enabled, use the new text reflow functionality
+        if self.config.enable_reflow {
+            let reflow_options = crate::utils::text_reflow::ReflowOptions {
+                line_length: self.config.line_length,
+                break_on_sentences: true,
+                preserve_breaks: false,
+            };
+            
+            return Ok(crate::utils::text_reflow::reflow_markdown(ctx.content, &reflow_options));
+        }
+        
+        // Otherwise, use the existing fix logic (trimming whitespace)
         // Get all warnings with their fixes
         let warnings = self.check(ctx)?;
 
@@ -906,5 +919,133 @@ Another long line that should trigger a warning."#;
 
         // Should not flag because the URL is in a markdown link
         assert_eq!(result.len(), 0);
+    }
+    
+    #[test]
+    fn test_text_reflow_simple() {
+        let mut config = MD013Config::default();
+        config.line_length = 30;
+        config.enable_reflow = true;
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = "This is a very long line that definitely exceeds thirty characters and needs to be wrapped.";
+        let ctx = LintContext::new(content);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Verify all lines are under 30 chars
+        for line in fixed.lines() {
+            assert!(line.chars().count() <= 30, "Line too long: {} (len={})", line, line.chars().count());
+        }
+        
+        // Verify content is preserved
+        let fixed_words: Vec<&str> = fixed.split_whitespace().collect();
+        let original_words: Vec<&str> = content.split_whitespace().collect();
+        assert_eq!(fixed_words, original_words);
+    }
+    
+    #[test]
+    fn test_text_reflow_preserves_markdown_elements() {
+        let mut config = MD013Config::default();
+        config.line_length = 40;
+        config.enable_reflow = true;
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = "This paragraph has **bold text** and *italic text* and [a link](https://example.com) that should be preserved.";
+        let ctx = LintContext::new(content);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Verify markdown elements are preserved
+        assert!(fixed.contains("**bold text**"), "Bold text not preserved in: {}", fixed);
+        assert!(fixed.contains("*italic text*"), "Italic text not preserved in: {}", fixed);
+        assert!(fixed.contains("[a link](https://example.com)"), "Link not preserved in: {}", fixed);
+        
+        // Verify all lines are under 40 chars
+        for line in fixed.lines() {
+            assert!(line.len() <= 40, "Line too long: {}", line);
+        }
+    }
+    
+    #[test]
+    fn test_text_reflow_preserves_code_blocks() {
+        let mut config = MD013Config::default();
+        config.line_length = 30;
+        config.enable_reflow = true;
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = r#"Here is some text.
+
+```python
+def very_long_function_name_that_exceeds_limit():
+    return "This should not be wrapped"
+```
+
+More text after code block."#;
+        let ctx = LintContext::new(content);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Verify code block is preserved
+        assert!(fixed.contains("def very_long_function_name_that_exceeds_limit():"));
+        assert!(fixed.contains("```python"));
+        assert!(fixed.contains("```"));
+    }
+    
+    #[test]
+    fn test_text_reflow_preserves_lists() {
+        let mut config = MD013Config::default();
+        config.line_length = 30;
+        config.enable_reflow = true;
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = r#"Here is a list:
+
+1. First item with a very long line that needs wrapping
+2. Second item is short
+3. Third item also has a long line that exceeds the limit
+
+And a bullet list:
+
+- Bullet item with very long content that needs wrapping
+- Short bullet"#;
+        let ctx = LintContext::new(content);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Verify list structure is preserved
+        assert!(fixed.contains("1. "));
+        assert!(fixed.contains("2. "));
+        assert!(fixed.contains("3. "));
+        assert!(fixed.contains("- "));
+        
+        // Verify proper indentation for wrapped lines
+        let lines: Vec<&str> = fixed.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if line.trim().starts_with("1.") || line.trim().starts_with("2.") || 
+               line.trim().starts_with("3.") || line.trim().starts_with("-") {
+                // Check if next line is a continuation (should be indented)
+                if i + 1 < lines.len() && !lines[i + 1].trim().is_empty() &&
+                   !lines[i + 1].trim().starts_with(char::is_numeric) &&
+                   !lines[i + 1].trim().starts_with("-") {
+                    // Continuation lines should have proper indentation
+                    assert!(lines[i + 1].starts_with("   ") || lines[i + 1].trim().is_empty());
+                }
+            }
+        }
+    }
+    
+    #[test]
+    fn test_text_reflow_disabled_by_default() {
+        let rule = MD013LineLength::new(30, false, false, false, false);
+        
+        let content = "This is a very long line that definitely exceeds thirty characters.";
+        let ctx = LintContext::new(content);
+        
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Without reflow enabled, it should only trim whitespace (if any)
+        // Since there's no trailing whitespace, content should be unchanged
+        assert_eq!(fixed, content);
     }
 }

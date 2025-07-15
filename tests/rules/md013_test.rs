@@ -467,6 +467,7 @@ fn test_heading_line_length_config() {
         heading_line_length: Some(100), // Allow longer headings
         code_block_line_length: None,
         stern: false,
+        enable_reflow: false,
     };
     
     let rule = MD013LineLength::from_config_struct(config);
@@ -493,6 +494,7 @@ fn test_code_block_line_length_config() {
         heading_line_length: None,
         code_block_line_length: Some(120), // Allow longer lines in code blocks
         stern: false,
+        enable_reflow: false,
     };
     
     let rule = MD013LineLength::from_config_struct(config);
@@ -519,6 +521,7 @@ fn test_stern_mode() {
         heading_line_length: None,
         code_block_line_length: None,
         stern: true, // Stern mode: stricter checking
+        enable_reflow: false,
     };
     
     let rule = MD013LineLength::from_config_struct(config);
@@ -543,6 +546,7 @@ fn test_combined_heading_and_code_block_limits() {
         heading_line_length: Some(80),
         code_block_line_length: Some(100),
         stern: false,
+        enable_reflow: false,
     };
     
     let rule = MD013LineLength::from_config_struct(config);
