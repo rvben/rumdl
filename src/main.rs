@@ -9,12 +9,12 @@ use std::error::Error;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
-use std::process;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use rumdl::config as rumdl_config;
+use rumdl::exit_codes::exit;
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::code_block_utils::CodeBlockStyle;
@@ -84,7 +84,7 @@ fn load_config_with_cli_error_handling_with_dir(
         Ok(config) => config,
         Err(e) => {
             eprintln!("{}: {}", "Config error".red().bold(), e);
-            std::process::exit(1);
+            exit::tool_error();
         }
     }
 }
@@ -990,13 +990,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                                                 "Error".red().bold(),
                                                 e
                                             );
-                                            std::process::exit(1);
+                                            exit::tool_error();
                                         }
                                     }
                                 }
                                 Err(e) => {
                                     eprintln!("{}: Failed to read pyproject.toml: {}", "Error".red().bold(), e);
-                                    std::process::exit(1);
+                                    exit::tool_error();
                                 }
                             }
                         } else {
@@ -1017,7 +1017,7 @@ build-backend = \"setuptools.build_meta\"
                             }
                             Err(e) => {
                                 eprintln!("{}: Failed to create pyproject.toml: {}", "Error".red().bold(), e);
-                                std::process::exit(1);
+                                exit::tool_error();
                             }
                         }
                     }
@@ -1033,7 +1033,7 @@ build-backend = \"setuptools.build_meta\"
                     }
                     Err(e) => {
                         eprintln!("{}: Failed to create config file: {}", "Error".red().bold(), e);
-                        std::process::exit(1);
+                        exit::tool_error();
                     }
                 }
             }
@@ -1116,7 +1116,7 @@ build-backend = \"setuptools.build_meta\"
                         );
                     } else {
                         eprintln!("Rule '{rule_query}' not found.");
-                        std::process::exit(1);
+                        exit::tool_error();
                     }
                 } else {
                     println!("Available rules:");
@@ -1145,7 +1145,7 @@ build-backend = \"setuptools.build_meta\"
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("{}: {}", "Config error".red().bold(), e);
-                                std::process::exit(1);
+                                exit::tool_error();
                             }
                         };
                         // 2. Convert to final Config once
@@ -1233,7 +1233,7 @@ build-backend = \"setuptools.build_meta\"
                                 // Successfully handled 'get', exit the command processing
                             } else {
                                 eprintln!("Unknown global key: {field_part}");
-                                std::process::exit(1);
+                                exit::tool_error();
                             }
                         }
                         // Handle RULE keys (MDxxx.field)
@@ -1276,12 +1276,12 @@ build-backend = \"setuptools.build_meta\"
                                     }
                                 }
                                 eprintln!("Unknown config key: {normalized_rule_name}.{normalized_field}");
-                                std::process::exit(1);
+                                exit::tool_error();
                             }
                         }
                     } else {
                         eprintln!("Key must be in the form global.key or MDxxx.key");
-                        std::process::exit(1);
+                        exit::tool_error();
                     }
                 }
                 // Handle 'config file' subcommand for showing config file path
@@ -1374,7 +1374,7 @@ build-backend = \"setuptools.build_meta\"
                                 Ok(s) => println!("{s}"),
                                 Err(e) => {
                                     eprintln!("Failed to serialize config to TOML: {e}");
-                                    std::process::exit(1);
+                                    exit::tool_error();
                                 }
                             }
                         } else {
@@ -1383,7 +1383,7 @@ build-backend = \"setuptools.build_meta\"
                                 Ok(s) => println!("{s}"),
                                 Err(e) => {
                                     eprintln!("Failed to serialize config to TOML: {e}");
-                                    std::process::exit(1);
+                                    exit::tool_error();
                                 }
                             }
                         }
@@ -1413,7 +1413,7 @@ build-backend = \"setuptools.build_meta\"
                         // TCP mode for debugging
                         if let Err(e) = rumdl::lsp::start_tcp_server(*port).await {
                             eprintln!("Failed to start LSP server on port {port}: {e}");
-                            std::process::exit(1);
+                            exit::tool_error();
                         }
                     } else {
                         // Standard LSP mode over stdio (default behavior)
@@ -1421,7 +1421,7 @@ build-backend = \"setuptools.build_meta\"
                         let _ = stdio; // Suppress unused variable warning
                         if let Err(e) = rumdl::lsp::start_server().await {
                             eprintln!("Failed to start LSP server: {e}");
-                            std::process::exit(1);
+                            exit::tool_error();
                         }
                     }
                 });
@@ -1439,7 +1439,7 @@ build-backend = \"setuptools.build_meta\"
                     Ok(config) => config,
                     Err(e) => {
                         eprintln!("{}: {}", "Import error".red().bold(), e);
-                        std::process::exit(1);
+                        exit::tool_error();
                     }
                 };
 
@@ -1620,7 +1620,7 @@ build-backend = \"setuptools.build_meta\"
 
                         serde_json::to_string_pretty(&json_config).unwrap_or_else(|e| {
                             eprintln!("{}: Failed to serialize to JSON: {}", "Error".red().bold(), e);
-                            std::process::exit(1);
+                            exit::tool_error();
                         })
                     }
                     _ => {
@@ -1629,7 +1629,7 @@ build-backend = \"setuptools.build_meta\"
                             "Error".red().bold(),
                             format
                         );
-                        std::process::exit(1);
+                        exit::tool_error();
                     }
                 };
 
@@ -1646,7 +1646,7 @@ build-backend = \"setuptools.build_meta\"
 
                     if Path::new(output_path).exists() {
                         eprintln!("{}: Output file '{}' already exists", "Error".red().bold(), output_path);
-                        std::process::exit(1);
+                        exit::tool_error();
                     }
 
                     match fs::write(output_path, output_content) {
@@ -1656,7 +1656,7 @@ build-backend = \"setuptools.build_meta\"
                         }
                         Err(e) => {
                             eprintln!("{}: Failed to write to '{}': {}", "Error".red().bold(), output_path, e);
-                            std::process::exit(1);
+                            exit::tool_error();
                         }
                     }
                 }
@@ -1667,7 +1667,7 @@ build-backend = \"setuptools.build_meta\"
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("{}: {}", "Error".red().bold(), e);
-                        std::process::exit(1);
+                        exit::tool_error();
                     }
                 }
             }
@@ -1707,14 +1707,14 @@ build-backend = \"setuptools.build_meta\"
                         "{}: No files or directories specified. Please provide at least one path to lint.",
                         "Error".red().bold()
                     );
-                    std::process::exit(1);
+                    exit::tool_error();
                 }
             }
         }
     });
     if let Err(e) = result {
         eprintln!("[rumdl panic handler] Uncaught panic: {e:?}");
-        std::process::exit(1);
+        exit::tool_error();
     } else {
         Ok(())
     }
@@ -1745,7 +1745,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
         Ok(fmt) => fmt,
         Err(e) => {
             eprintln!("{}: {}", "Error".red().bold(), e);
-            process::exit(1);
+            exit::tool_error();
         }
     };
 
@@ -1755,7 +1755,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
         if !args.silent {
             eprintln!("Error reading from stdin: {e}");
         }
-        process::exit(1);
+        exit::violations_found();
     }
 
     // Create a lint context for the stdin content
@@ -1828,7 +1828,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
 
     // Exit with error code if issues found
     if has_issues {
-        process::exit(1);
+        exit::violations_found();
     }
 }
 
@@ -1888,7 +1888,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
         Ok(fmt) => fmt,
         Err(e) => {
             eprintln!("{}: {}", "Error".red().bold(), e);
-            process::exit(1);
+            exit::tool_error();
         }
     };
 
@@ -1908,7 +1908,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
             if !args.silent {
                 eprintln!("{}: Failed to find markdown files: {}", "Error".red().bold(), e);
             }
-            process::exit(1);
+            exit::tool_error();
         }
     };
     if file_paths.is_empty() {
@@ -1967,7 +1967,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
 
         // Exit with appropriate code
         if has_issues {
-            process::exit(1);
+            exit::violations_found();
         }
         return;
     }
@@ -2124,7 +2124,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
 
     // Exit with non-zero status if issues were found
     if has_issues {
-        std::process::exit(1);
+        exit::violations_found();
     }
 }
 
@@ -2267,7 +2267,7 @@ fn handle_explain_command(rule_query: &str) {
     } else {
         eprintln!("{}: Rule '{}' not found.", "Error".red().bold(), rule_query);
         eprintln!("\nUse 'rumdl rule' to see all available rules.");
-        std::process::exit(1);
+        exit::tool_error();
     }
 }
 
