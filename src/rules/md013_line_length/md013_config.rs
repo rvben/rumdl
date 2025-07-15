@@ -36,6 +36,10 @@ pub struct MD013Config {
     /// Stern mode - stricter checking without exceptions (default: false)
     #[serde(default)]
     pub stern: bool,
+
+    /// Enable text reflow to wrap long lines (default: false)
+    #[serde(default)]
+    pub enable_reflow: bool,
 }
 
 fn default_line_length() -> usize {
@@ -65,6 +69,7 @@ impl Default for MD013Config {
             heading_line_length: None,
             code_block_line_length: None,
             stern: false,
+            enable_reflow: false,
         }
     }
 }
