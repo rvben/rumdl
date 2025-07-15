@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.95] - 2025-07-15
 
+### Added
+- Implemented 3-tier exit code system following Ruff's convention:
+  - Exit code 0: Success (no issues found)
+  - Exit code 1: Linting violations found
+  - Exit code 2: Tool error (config error, file access error, etc.)
+- Added exit_codes module for cleaner exit code management
+
+### Changed
+- Updated all error handlers to use appropriate exit codes
+- CI/CD systems can now distinguish between markdown issues (exit 1) and tool failures (exit 2)
+
+### Documentation
+- Updated README with exit code documentation
+- Added exit codes section to CLI reference
+
 ## [0.0.94] - 2025-07-04
 
 ### Performance Improvements
