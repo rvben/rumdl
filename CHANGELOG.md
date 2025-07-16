@@ -7,16 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.96] - 2025-07-16
+
+## [0.0.96] - 2025-07-16
+
 ### Added
-- MD013: Text reflow/wrapping functionality for automatic line breaking
-  - New `enable_reflow` configuration option
+- MD013: Text reflow/wrapping functionality for automatic line breaking (fixes #13)
+  - New `enable_reflow` configuration option (disabled by default)
   - Intelligently wraps long lines while preserving Markdown formatting
   - Preserves bold, italic, links, code spans, and other Markdown elements
-  - Proper indentation for wrapped list items
-- Added `pulldown-cmark` dependency for improved Markdown parsing
+  - Proper list continuation indentation that aligns with the text after markers
+  - Preserves hard line breaks (two trailing spaces)
+  - Does not wrap code blocks, tables, headings, or reference definitions
+- Added `pulldown-cmark` dependency (v0.12.2) for improved Markdown parsing
+- Comprehensive test coverage for text reflow functionality
 
 ### Changed
-- MD013: Enhanced fix functionality with optional text reflow (disabled by default)
+- MD013: Enhanced fix functionality with optional text reflow (opt-in feature)
+
+### Fixed
+- MD013: Fixed list indentation to properly align continuation lines with the text content
 
 ## [0.0.95] - 2025-07-15
 
@@ -175,7 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.95...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.96...HEAD
+[0.0.96]: https://github.com/rvben/rumdl/compare/v0.0.95...v0.0.96
 [0.0.95]: https://github.com/rvben/rumdl/compare/v0.0.94...v0.0.95
 [0.0.94]: https://github.com/rvben/rumdl/compare/v0.0.93...v0.0.94
 [0.0.93]: https://github.com/rvben/rumdl/compare/v0.0.92...v0.0.93
