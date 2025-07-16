@@ -324,13 +324,18 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             let marker = &line[indent..content_start];
             let content = &line[content_start..].trim_start();
             
+            // Calculate the proper indentation for continuation lines
+            // We need to align with the text after the marker
+            let trimmed_marker = marker.trim_end();
+            let continuation_spaces = indent + trimmed_marker.len() + 1; // +1 for the space after marker
+            
             let reflowed = reflow_line(content, options);
             for (j, reflowed_line) in reflowed.iter().enumerate() {
                 if j == 0 {
-                    result.push(format!("{}{} {}", indent_str, marker.trim_end(), reflowed_line));
+                    result.push(format!("{}{} {}", indent_str, trimmed_marker, reflowed_line));
                 } else {
-                    // Continuation lines get extra indentation
-                    let continuation_indent = " ".repeat(indent + marker.len() + 1);
+                    // Continuation lines aligned with text after marker
+                    let continuation_indent = " ".repeat(continuation_spaces);
                     result.push(format!("{}{}", continuation_indent, reflowed_line));
                 }
             }

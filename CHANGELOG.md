@@ -9,8 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.96] - 2025-07-16
 
-## [0.0.96] - 2025-07-16
-
 ### Added
 - MD013: Text reflow/wrapping functionality for automatic line breaking (fixes #13)
   - New `enable_reflow` configuration option (disabled by default)

@@ -1023,13 +1023,21 @@ And a bullet list:
         let lines: Vec<&str> = fixed.lines().collect();
         for (i, line) in lines.iter().enumerate() {
             if line.trim().starts_with("1.") || line.trim().starts_with("2.") || 
-               line.trim().starts_with("3.") || line.trim().starts_with("-") {
-                // Check if next line is a continuation (should be indented)
+               line.trim().starts_with("3.") {
+                // Check if next line is a continuation (should be indented with 3 spaces for numbered lists)
                 if i + 1 < lines.len() && !lines[i + 1].trim().is_empty() &&
                    !lines[i + 1].trim().starts_with(char::is_numeric) &&
                    !lines[i + 1].trim().starts_with("-") {
-                    // Continuation lines should have proper indentation
+                    // Numbered list continuation lines should have 3 spaces
                     assert!(lines[i + 1].starts_with("   ") || lines[i + 1].trim().is_empty());
+                }
+            } else if line.trim().starts_with("-") {
+                // Check if next line is a continuation (should be indented with 2 spaces for dash lists)
+                if i + 1 < lines.len() && !lines[i + 1].trim().is_empty() &&
+                   !lines[i + 1].trim().starts_with(char::is_numeric) &&
+                   !lines[i + 1].trim().starts_with("-") {
+                    // Dash list continuation lines should have 2 spaces
+                    assert!(lines[i + 1].starts_with("  ") || lines[i + 1].trim().is_empty());
                 }
             }
         }
