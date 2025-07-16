@@ -246,7 +246,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
     
     // Don't forget the last line
     if !current_line.is_empty() {
-        lines.push(current_line.trim().to_string());
+        lines.push(current_line.trim_end().to_string());
     }
     
     lines
@@ -352,11 +352,45 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             continue;
         }
         
+        // Check if this is a single line that doesn't need processing
+        let mut is_single_line_paragraph = true;
+        if i + 1 < lines.len() {
+            let next_line = lines[i + 1];
+            let next_trimmed = next_line.trim();
+            // Check if next line starts a new block
+            if !next_trimmed.is_empty() 
+                && !next_trimmed.starts_with('#')
+                && !next_trimmed.starts_with("```") 
+                && !next_trimmed.starts_with("~~~")
+                && !next_trimmed.starts_with('>')
+                && !next_trimmed.starts_with('|')
+                && !(next_trimmed.starts_with('[') && next_line.contains("]:"))
+                && !next_trimmed.starts_with('-') 
+                && !next_trimmed.starts_with('*') 
+                && !next_trimmed.starts_with('+')
+                && !next_trimmed.chars().next().map_or(false, |c| c.is_numeric()) {
+                is_single_line_paragraph = false;
+            }
+        }
+        
+        // If it's a single line that fits, just add it as-is
+        if is_single_line_paragraph && line.chars().count() <= options.line_length {
+            result.push(line.to_string());
+            i += 1;
+            continue;
+        }
+        
         // For regular paragraphs, collect consecutive lines
-        let mut paragraph = vec![line];
+        let mut paragraph_parts = Vec::new();
+        let mut current_part = vec![line];
         i += 1;
         
         while i < lines.len() {
+            let prev_line = if !current_part.is_empty() {
+                current_part.last().unwrap()
+            } else {
+                ""
+            };
             let next_line = lines[i];
             let next_trimmed = next_line.trim();
             
@@ -375,14 +409,40 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 break;
             }
             
-            paragraph.push(next_line);
+            // Check if previous line ends with hard break (two spaces)
+            if prev_line.ends_with("  ") {
+                // Start a new part after hard break
+                paragraph_parts.push(current_part.join(" "));
+                current_part = vec![next_line];
+            } else {
+                current_part.push(next_line);
+            }
             i += 1;
         }
         
-        // Join paragraph lines and reflow
-        let paragraph_text = paragraph.join(" ");
-        let reflowed = reflow_line(&paragraph_text, options);
-        result.extend(reflowed);
+        // Add the last part
+        if !current_part.is_empty() {
+            if current_part.len() == 1 {
+                // Single line, don't add trailing space
+                paragraph_parts.push(current_part[0].to_string());
+            } else {
+                paragraph_parts.push(current_part.join(" "));
+            }
+        }
+        
+        // Reflow each part separately, preserving hard breaks
+        for (j, part) in paragraph_parts.iter().enumerate() {
+            let reflowed = reflow_line(part, options);
+            result.extend(reflowed);
+            
+            // Preserve hard break by ensuring last line of part ends with two spaces
+            if j < paragraph_parts.len() - 1 && !result.is_empty() {
+                let last_idx = result.len() - 1;
+                if !result[last_idx].ends_with("  ") {
+                    result[last_idx].push_str("  ");
+                }
+            }
+        }
     }
     
     result.join("\n")
