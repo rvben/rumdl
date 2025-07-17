@@ -215,7 +215,7 @@ fn test_invalid_output_format() {
         .arg(&test_file);
 
     cmd.assert()
-        .failure()
+        .code(2)  // Should exit with code 2 for invalid command argument
         .stderr(predicate::str::contains("invalid value 'invalid_format'"));
 }
 
