@@ -56,7 +56,8 @@ fn test_config_file_command_with_nonexistent_config() {
         .output()
         .expect("Failed to execute command");
 
-    assert!(!output.status.success());
+    // Should exit with code 2 for file not found (tool error)
+    assert_eq!(output.status.code(), Some(2), "Expected exit code 2 for file not found");
 
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("Config error"));

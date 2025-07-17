@@ -721,7 +721,8 @@ line-length:
             .output()
             .expect("Failed to execute command");
 
-        assert!(!output.status.success(), "Command should fail with invalid config");
+        // Should exit with code 2 for configuration error
+        assert_eq!(output.status.code(), Some(2), "Expected exit code 2 for invalid JSON config");
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let combined_output = format!("{stderr}{stdout}");
@@ -739,7 +740,8 @@ line-length:
             .output()
             .expect("Failed to execute command");
 
-        assert!(!output.status.success(), "Command should fail with invalid YAML config");
+        // Should exit with code 2 for configuration error
+        assert_eq!(output.status.code(), Some(2), "Expected exit code 2 for invalid YAML config");
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let combined_output = format!("{stderr}{stdout}");
@@ -754,7 +756,8 @@ line-length:
             .output()
             .expect("Failed to execute command");
 
-        assert!(!output.status.success(), "Command should fail with nonexistent config");
+        // Should exit with code 2 for file not found
+        assert_eq!(output.status.code(), Some(2), "Expected exit code 2 for nonexistent config file");
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let combined_output = format!("{stderr}{stdout}");
