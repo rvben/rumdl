@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.97] - 2025-07-17
+
+### Changed
+- Updated exit code handling for consistency:
+  - Configuration errors now return exit code 2 (was 1)
+  - File not found errors now return exit code 2 (was 1)
+  - Invalid command arguments now return exit code 2 (was 1)
+- Standardized exit codes across all error conditions:
+  - Exit code 1: Reserved for linting issues found
+  - Exit code 2: Tool errors (config parse errors, file not found, invalid arguments)
+
+### Fixed
+- Improved consistency in exit code handling across the entire codebase
+- Updated all tests to expect correct exit codes for different error scenarios
+
 ## [0.0.96] - 2025-07-16
 
 ### Added
@@ -183,7 +198,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.96...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.97...HEAD
+[0.0.97]: https://github.com/rvben/rumdl/compare/v0.0.96...v0.0.97
 [0.0.96]: https://github.com/rvben/rumdl/compare/v0.0.95...v0.0.96
 [0.0.95]: https://github.com/rvben/rumdl/compare/v0.0.94...v0.0.95
 [0.0.94]: https://github.com/rvben/rumdl/compare/v0.0.93...v0.0.94
