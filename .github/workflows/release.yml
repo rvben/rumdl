@@ -203,16 +203,18 @@ jobs:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: |
-          uv tool run twine upload artifacts/**/*.whl artifacts/**/*.tar.gz
+          # Upload only Python packages (wheels and sdist), not Homebrew archives
+          uv tool run twine upload artifacts/wheel-*/*.whl artifacts/sdist/*.tar.gz
 
       - name: Test PyPI upload (dry run)
         if: ${{ inputs.dry_run == true && inputs.skip_pypi != true }}
         run: |
           echo "DRY RUN: Would upload to PyPI:"
-          find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" \) | sort
+          find artifacts/wheel-* -name "*.whl" -type f | sort
+          find artifacts/sdist -name "*.tar.gz" -type f | sort
           echo ""
           echo "Checking packages:"
-          uv tool run twine check artifacts/**/*.whl artifacts/**/*.tar.gz
+          uv tool run twine check artifacts/wheel-*/*.whl artifacts/sdist/*.tar.gz
 
       - name: Skip PyPI publishing
         if: ${{ inputs.skip_pypi == true }}
