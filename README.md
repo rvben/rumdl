@@ -56,6 +56,7 @@ It offers:
 - [Quick Start](#quick-start)
 - [Overview](#overview)
 - [Installation](#installation)
+  - [Using Homebrew (macOS/Linux)](#using-homebrew-macoslinux)
   - [Using Cargo (Rust)](#using-cargo-rust)
   - [Using pip (Python)](#using-pip-python)
   - [Using uv](#using-uv)
@@ -86,6 +87,13 @@ It offers:
 ## Installation
 
 Choose the installation method that works best for you:
+
+### Using Homebrew (macOS/Linux)
+
+```bash
+brew tap rvben/rumdl
+brew install rumdl
+```
 
 ### Using Cargo (Rust)
 
