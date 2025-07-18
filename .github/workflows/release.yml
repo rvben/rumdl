@@ -30,8 +30,36 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      # Toolchain setup
+      - uses: jdx/mise-action@v2
+        with:
+          experimental: true
+          install: true
+      
+      - name: Install mise tools
+        run: mise install --yes
+      
+      - name: Run linting
+        run: make lint
+      
+      - name: Run tests
+        run: |
+          # Use fast CI-optimized tests
+          if command -v cargo-nextest >/dev/null 2>&1; then
+            make test-ci
+          else
+            make test
+          fi
+
   build:
     name: Build ${{ matrix.target }}
+    needs: test
     strategy:
       matrix:
         include:
@@ -152,6 +180,7 @@ jobs:
 
   sdist:
     runs-on: ubuntu-latest
+    needs: test
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
