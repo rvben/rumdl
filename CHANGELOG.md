@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.98] - 2025-07-18
+
+### Added
+- Homebrew tap support for easy installation on macOS and Linux
+  - Created `homebrew-rumdl` tap repository
+  - Added automatic archive creation for macOS builds in release workflow
+  - Included SHA256 checksum generation for each platform
+  - Set up automated formula updates on new releases
+- Homebrew installation instructions in README
+
+### Changed
+- Enhanced release workflow to create platform-specific tar.gz archives
+- Added repository dispatch to notify homebrew-rumdl on new releases
+
 ## [0.0.97] - 2025-07-17
 
 ### Changed
@@ -198,7 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.97...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.98...HEAD
+[0.0.98]: https://github.com/rvben/rumdl/compare/v0.0.97...v0.0.98
 [0.0.97]: https://github.com/rvben/rumdl/compare/v0.0.96...v0.0.97
 [0.0.96]: https://github.com/rvben/rumdl/compare/v0.0.95...v0.0.96
 [0.0.95]: https://github.com/rvben/rumdl/compare/v0.0.94...v0.0.95
