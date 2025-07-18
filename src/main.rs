@@ -261,6 +261,14 @@ struct CheckArgs {
     #[arg(short, long)]
     enable: Option<String>,
 
+    /// Extend the list of enabled rules (additive with config)
+    #[arg(long)]
+    extend_enable: Option<String>,
+
+    /// Extend the list of disabled rules (additive with config)
+    #[arg(long)]
+    extend_disable: Option<String>,
+
     /// Exclude specific files or directories (comma-separated glob patterns)
     #[arg(long)]
     exclude: Option<String>,
@@ -332,6 +340,14 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Con
         .disable
         .as_deref()
         .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
+    let cli_extend_enable_set: Option<HashSet<&str>> = args
+        .extend_enable
+        .as_deref()
+        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
+    let cli_extend_disable_set: Option<HashSet<&str>> = args
+        .extend_disable
+        .as_deref()
+        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
 
     // Rule names provided via config file
     let config_enable_set: HashSet<&str> = config.global.enable.iter().map(|s| s.as_str()).collect();
@@ -339,14 +355,84 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Con
     let config_disable_set: HashSet<&str> = config.global.disable.iter().map(|s| s.as_str()).collect();
 
     if let Some(enabled_cli) = &cli_enable_set {
-        // Normalize CLI enable values
+        // CLI --enable completely overrides config (ruff --select behavior)
         let enabled_cli_normalized: HashSet<String> = enabled_cli.iter().map(|s| normalize_key(s)).collect();
         let _all_rule_names: Vec<String> = all_rules.iter().map(|r| normalize_key(r.name())).collect();
-        final_rules = all_rules
+        let mut filtered_rules = all_rules
             .into_iter()
             .filter(|rule| enabled_cli_normalized.contains(&normalize_key(rule.name())))
-            .collect();
-        // Note: CLI --disable is IGNORED if CLI --enable is present.
+            .collect::<Vec<_>>();
+        
+        // Apply CLI --disable to remove rules from the enabled set (ruff-like behavior)
+        if let Some(disabled_cli) = &cli_disable_set {
+            filtered_rules.retain(|rule| {
+                let rule_name_upper = rule.name();
+                let rule_name_lower = normalize_key(rule_name_upper);
+                !disabled_cli.contains(rule_name_upper) && !disabled_cli.contains(rule_name_lower.as_str())
+            });
+        }
+        
+        final_rules = filtered_rules;
+    } else if cli_extend_enable_set.is_some() || cli_extend_disable_set.is_some() {
+        // Handle extend flags (additive with config)
+        let mut current_rules = all_rules;
+        
+        // Start with config enable if present
+        if !config_enable_set.is_empty() {
+            current_rules.retain(|rule| {
+                let normalized_rule_name = normalize_key(rule.name());
+                config_enable_set.contains(normalized_rule_name.as_str())
+            });
+        }
+        
+        // Add CLI extend-enable rules
+        if let Some(extend_enabled_cli) = &cli_extend_enable_set {
+            // If we started with all rules (no config enable), keep all rules
+            // If we started with config enable, we need to re-filter with extended set
+            if !config_enable_set.is_empty() {
+                let mut extended_enable_set = config_enable_set.clone();
+                for rule in extend_enabled_cli {
+                    extended_enable_set.insert(rule);
+                }
+                
+                // Re-filter with extended set
+                current_rules = rumdl::rules::all_rules(config)
+                    .into_iter()
+                    .filter(|rule| {
+                        let normalized_rule_name = normalize_key(rule.name());
+                        extended_enable_set.contains(normalized_rule_name.as_str())
+                    })
+                    .collect();
+            }
+        }
+        
+        // Apply config disable
+        if !config_disable_set.is_empty() {
+            current_rules.retain(|rule| {
+                let normalized_rule_name = normalize_key(rule.name());
+                !config_disable_set.contains(normalized_rule_name.as_str())
+            });
+        }
+        
+        // Apply CLI extend-disable
+        if let Some(extend_disabled_cli) = &cli_extend_disable_set {
+            current_rules.retain(|rule| {
+                let rule_name_upper = rule.name();
+                let rule_name_lower = normalize_key(rule_name_upper);
+                !extend_disabled_cli.contains(rule_name_upper) && !extend_disabled_cli.contains(rule_name_lower.as_str())
+            });
+        }
+        
+        // Apply CLI disable
+        if let Some(disabled_cli) = &cli_disable_set {
+            current_rules.retain(|rule| {
+                let rule_name_upper = rule.name();
+                let rule_name_lower = normalize_key(rule_name_upper);
+                !disabled_cli.contains(rule_name_upper) && !disabled_cli.contains(rule_name_lower.as_str())
+            });
+        }
+        
+        final_rules = current_rules;
     } else {
         // --- Case 2: No CLI --enable ---
         // Start with the configured rules.
@@ -1684,6 +1770,8 @@ build-backend = \"setuptools.build_meta\"
                         list_rules: cli.list_rules,
                         disable: cli.disable.clone(),
                         enable: cli.enable.clone(),
+                        extend_enable: None,
+                        extend_disable: None,
                         exclude: cli.exclude.clone(),
                         include: cli.include.clone(),
                         respect_gitignore: cli.respect_gitignore,
