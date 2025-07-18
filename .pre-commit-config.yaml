@@ -1,0 +1,59 @@
+# Pre-commit hooks for rumdl
+# Install with: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Rust formatting and linting
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all --
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: make lint
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-test-quick
+        name: cargo test (quick)
+        entry: make test-quick
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: cargo-check
+        name: cargo check
+        entry: cargo check --all-targets --all-features
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+  # General file quality checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+        exclude: \.md$
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # Markdown linting using rumdl itself
+  - repo: https://github.com/rvben/rumdl-pre-commit
+    rev: v0.0.45
+    hooks:
+      - id: rumdl
+        exclude: ^(test_tmp|benchmark/test-data|docs/temp|CHANGELOG\.md)
