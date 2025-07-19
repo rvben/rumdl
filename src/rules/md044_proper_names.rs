@@ -1,6 +1,6 @@
 use crate::utils::fast_hash;
 use crate::utils::range_utils::LineIndex;
-use crate::utils::regex_cache::{get_cached_fancy_regex, escape_regex};
+use crate::utils::regex_cache::{escape_regex, get_cached_fancy_regex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex;
@@ -82,8 +82,8 @@ pub struct MD044ProperNames {
 
 impl MD044ProperNames {
     pub fn new(names: Vec<String>, code_blocks: bool) -> Self {
-        let config = MD044Config { 
-            names, 
+        let config = MD044Config {
+            names,
             code_blocks,
             html_comments: true, // Default to checking HTML comments
         };
@@ -176,7 +176,7 @@ impl MD044ProperNames {
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
             let line = &line_info.content;
-            
+
             // Skip code fence lines (```language or ~~~language)
             let trimmed = line.trim_start();
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
@@ -225,7 +225,7 @@ impl MD044ProperNames {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Regex execution error on line {}: {}", line_num, e);
+                        eprintln!("Regex execution error on line {line_num}: {e}");
                     }
                 }
             }
@@ -238,11 +238,9 @@ impl MD044ProperNames {
 
     // Check if a byte position is within an HTML comment
     fn is_in_html_comment(&self, content: &str, byte_pos: usize) -> bool {
-        for comment_match in HTML_COMMENT_REGEX.find_iter(content) {
-            if let Ok(m) = comment_match {
-                if m.start() <= byte_pos && byte_pos < m.end() {
-                    return true;
-                }
+        for m in HTML_COMMENT_REGEX.find_iter(content).flatten() {
+            if m.start() <= byte_pos && byte_pos < m.end() {
+                return true;
             }
         }
         false
@@ -306,9 +304,7 @@ impl Rule for MD044ProperNames {
                     column,
                     end_line: line,
                     end_column: column + found_name.len(),
-                    message: format!(
-                        "Proper name '{found_name}' should be '{proper_name}'"
-                    ),
+                    message: format!("Proper name '{found_name}' should be '{proper_name}'"),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(line, column),
@@ -334,16 +330,16 @@ impl Rule for MD044ProperNames {
 
         // Process lines and build the fixed content
         let mut fixed_lines = Vec::new();
-        
+
         // Group violations by line
         let mut violations_by_line: HashMap<usize, Vec<(usize, String)>> = HashMap::new();
         for (line_num, col_num, found_name) in violations {
             violations_by_line
                 .entry(line_num)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((col_num, found_name));
         }
-        
+
         // Sort violations within each line in reverse order
         for violations in violations_by_line.values_mut() {
             violations.sort_by(|a, b| b.0.cmp(&a.0));
@@ -352,16 +348,16 @@ impl Rule for MD044ProperNames {
         // Process each line
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
-            
+
             if let Some(line_violations) = violations_by_line.get(&line_num) {
                 // This line has violations, fix them
                 let mut fixed_line = line_info.content.clone();
-                
+
                 for (col_num, found_name) in line_violations {
                     if let Some(proper_name) = self.get_proper_name_for(found_name) {
                         let start_col = col_num - 1; // Convert to 0-based
                         let end_col = start_col + found_name.len();
-                        
+
                         if end_col <= fixed_line.len()
                             && fixed_line.is_char_boundary(start_col)
                             && fixed_line.is_char_boundary(end_col)
@@ -370,7 +366,7 @@ impl Rule for MD044ProperNames {
                         }
                     }
                 }
-                
+
                 fixed_lines.push(fixed_line);
             } else {
                 // No violations on this line, keep it as is
@@ -776,7 +772,11 @@ More javascript outside."#;
         let ctx = create_context(content);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 3, "Should flag all javascript occurrences including in HTML comments");
+        assert_eq!(
+            result.len(),
+            3,
+            "Should flag all javascript occurrences including in HTML comments"
+        );
     }
 
     #[test]
@@ -824,6 +824,9 @@ More javascript."#;
 <!-- javascript in comment -->
 More JavaScript."#;
 
-        assert_eq!(fixed, expected, "Should not fix names inside HTML comments when disabled");
+        assert_eq!(
+            fixed, expected,
+            "Should not fix names inside HTML comments when disabled"
+        );
     }
 }

@@ -144,9 +144,7 @@ impl Rule for MD050StrongStyle {
                         fix: Some(Fix {
                             range: _line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
                             replacement: match target_style {
-                                StrongStyle::Asterisk => format!(
-                                    "**{text}**"
-                                ),
+                                StrongStyle::Asterisk => format!("**{text}**"),
                                 StrongStyle::Underscore => format!("__{text}__"),
                                 StrongStyle::Consistent => unreachable!(),
                             },

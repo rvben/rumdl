@@ -54,7 +54,10 @@ impl MD036NoEmphasisAsHeading {
             return false;
         }
         // Check if the last character is in the punctuation set
-        trimmed.chars().last().map_or(false, |ch| self.config.punctuation.contains(ch))
+        trimmed
+            .chars()
+            .last()
+            .is_some_and(|ch| self.config.punctuation.contains(ch))
     }
 
     fn is_entire_line_emphasized(
@@ -100,7 +103,7 @@ impl MD036NoEmphasisAsHeading {
             }
             let _full_match = caps.get(0).unwrap();
             // Find position in original line by looking for the emphasis pattern
-            let pattern = format!("*{}*", text);
+            let pattern = format!("*{text}*");
             let start_pos = original_line.find(&pattern).unwrap_or(0);
             let end_pos = start_pos + pattern.len();
             return Some((1, text.to_string(), start_pos, end_pos));
@@ -115,7 +118,7 @@ impl MD036NoEmphasisAsHeading {
             }
             let _full_match = caps.get(0).unwrap();
             // Find position in original line by looking for the emphasis pattern
-            let pattern = format!("_{}_", text);
+            let pattern = format!("_{text}_");
             let start_pos = original_line.find(&pattern).unwrap_or(0);
             let end_pos = start_pos + pattern.len();
             return Some((1, text.to_string(), start_pos, end_pos));
@@ -130,7 +133,7 @@ impl MD036NoEmphasisAsHeading {
             }
             let _full_match = caps.get(0).unwrap();
             // Find position in original line by looking for the emphasis pattern
-            let pattern = format!("**{}**", text);
+            let pattern = format!("**{text}**");
             let start_pos = original_line.find(&pattern).unwrap_or(0);
             let end_pos = start_pos + pattern.len();
             return Some((2, text.to_string(), start_pos, end_pos));
@@ -145,7 +148,7 @@ impl MD036NoEmphasisAsHeading {
             }
             let _full_match = caps.get(0).unwrap();
             // Find position in original line by looking for the emphasis pattern
-            let pattern = format!("__{}__", text);
+            let pattern = format!("__{text}__");
             let start_pos = original_line.find(&pattern).unwrap_or(0);
             let end_pos = start_pos + pattern.len();
             return Some((2, text.to_string(), start_pos, end_pos));
@@ -279,8 +282,7 @@ impl Rule for MD036NoEmphasisAsHeading {
 
         for i in 0..lines.len() {
             let line = lines[i];
-            if let Some((level, text, _start_pos, _end_pos)) = self.is_entire_line_emphasized(line, &doc_structure, i)
-            {
+            if let Some((level, text, _start_pos, _end_pos)) = self.is_entire_line_emphasized(line, &doc_structure, i) {
                 result.push_str(&self.get_heading_for_emphasis(level, &text));
             } else {
                 result.push_str(line);
@@ -504,10 +506,10 @@ mod tests {
         let content = "**Important Note:**\n\nRegular text";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // With empty punctuation config, all emphasis is flagged
         assert_eq!(result.len(), 1);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
         // With empty punctuation config, keeps the colon
         assert_eq!(fixed, "## Important Note:\n\nRegular text");

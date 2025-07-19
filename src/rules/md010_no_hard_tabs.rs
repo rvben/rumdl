@@ -73,12 +73,12 @@ impl MD010NoHardTabs {
         let lines: Vec<&str> = ctx.content.lines().collect();
         let mut in_code_block = false;
         let mut current_language = None;
-        
+
         for (i, line) in lines.iter().enumerate() {
             if i >= line_num - 1 {
                 break;
             }
-            
+
             let trimmed = line.trim();
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 if in_code_block {
@@ -94,15 +94,11 @@ impl MD010NoHardTabs {
                 }
             }
         }
-        
+
         // Check if we're currently in a code block
-        if in_code_block {
-            current_language
-        } else {
-            None
-        }
+        if in_code_block { current_language } else { None }
     }
-    
+
     fn count_leading_tabs(line: &str) -> usize {
         let mut count = 0;
         for c in line.chars() {
@@ -184,16 +180,19 @@ impl Rule for MD010NoHardTabs {
                     }
                 }
             }
-            
+
             // Skip if in a code block with an ignored language
             if !self.config.ignore_code_languages.is_empty() {
                 if let Some(line_info) = ctx.line_info(line_num + 1) {
                     if line_info.in_code_block {
                         // Check if this code block has an ignored language
                         if let Some(lang) = self.get_code_block_language(ctx, line_num + 1) {
-                            if self.config.ignore_code_languages.iter().any(|ignored| {
-                                ignored.eq_ignore_ascii_case(&lang)
-                            }) {
+                            if self
+                                .config
+                                .ignore_code_languages
+                                .iter()
+                                .any(|ignored| ignored.eq_ignore_ascii_case(&lang))
+                            {
                                 continue;
                             }
                         }
@@ -289,9 +288,12 @@ impl Rule for MD010NoHardTabs {
                 if let Some(line_info) = ctx.line_info(i + 1) {
                     if line_info.in_code_block {
                         if let Some(lang) = self.get_code_block_language(ctx, i + 1) {
-                            if self.config.ignore_code_languages.iter().any(|ignored| {
-                                ignored.eq_ignore_ascii_case(&lang)
-                            }) {
+                            if self
+                                .config
+                                .ignore_code_languages
+                                .iter()
+                                .any(|ignored| ignored.eq_ignore_ascii_case(&lang))
+                            {
                                 // Preserve tabs in ignored language code blocks
                                 result.push_str(line);
                                 if i < lines.len() - 1 || content.ends_with('\n') {
@@ -595,10 +597,12 @@ mod tests {
 
     #[test]
     fn test_ignore_code_languages() {
-        let mut config = MD010Config::default();
-        config.ignore_code_languages = vec!["makefile".to_string(), "Makefile".to_string(), "make".to_string()];
+        let config = MD010Config {
+            ignore_code_languages: vec!["makefile".to_string(), "Makefile".to_string(), "make".to_string()],
+            ..Default::default()
+        };
         let rule = MD010NoHardTabs::from_config_struct(config);
-        
+
         // Test Makefile code block with tabs
         let content = "Normal\ttext\n```makefile\ntarget:\n\tcommand\n```\nMore\ttext";
         let ctx = LintContext::new(content);
@@ -607,30 +611,35 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 6);
-        
+
         // Test case insensitive matching
         let content_case = "```Makefile\n\ttabs here\n```";
         let ctx = LintContext::new(content_case);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Should ignore Makefile code blocks (case insensitive)");
-        
+        assert!(
+            result.is_empty(),
+            "Should ignore Makefile code blocks (case insensitive)"
+        );
+
         // Test non-ignored language
         let content_python = "```python\n\ttabs here\n```";
         let ctx = LintContext::new(content_python);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should flag tabs in non-ignored languages");
     }
-    
+
     #[test]
     fn test_ignore_code_languages_fix() {
-        let mut config = MD010Config::default();
-        config.ignore_code_languages = vec!["makefile".to_string()];
+        let config = MD010Config {
+            ignore_code_languages: vec!["makefile".to_string()],
+            ..Default::default()
+        };
         let rule = MD010NoHardTabs::from_config_struct(config);
-        
+
         let content = "Text\twith\ttab\n```makefile\ntarget:\n\tcommand\n\tanother\n```\nMore\ttabs";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Should preserve tabs in makefile block but fix others
         let expected = "Text    with    tab\n```makefile\ntarget:\n\tcommand\n\tanother\n```\nMore    tabs";
         assert_eq!(fixed, expected);

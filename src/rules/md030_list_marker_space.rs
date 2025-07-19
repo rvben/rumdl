@@ -130,9 +130,8 @@ impl Rule for MD030ListMarkerSpace {
                         });
 
                         // Generate appropriate message
-                        let message = format!(
-                            "Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})"
-                        );
+                        let message =
+                            format!("Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})");
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),

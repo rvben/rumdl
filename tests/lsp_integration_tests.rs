@@ -129,9 +129,7 @@ async fn test_performance_with_large_document() {
     large_content.push_str("# Large Document\n\n");
 
     for i in 1..=100 {
-        large_content.push_str(&format!(
-            "## Section {i}\n\nThis is paragraph {i} with some content. "
-        ));
+        large_content.push_str(&format!("## Section {i}\n\nThis is paragraph {i} with some content. "));
         large_content.push_str("Here's some more text to make it substantial. ");
         large_content.push_str("And even more content to test performance.\n\n");
 
@@ -229,9 +227,7 @@ async fn test_workspace_scenarios() {
         println!("File {} processed with {} warnings", filepath, warnings.len());
     }
 
-    println!(
-        "Workspace total: {total_warnings} warnings across {file_count} files"
-    );
+    println!("Workspace total: {total_warnings} warnings across {file_count} files");
 }
 
 /// Test that diagnostic conversion preserves all necessary information

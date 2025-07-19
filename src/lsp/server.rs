@@ -94,7 +94,7 @@ impl RumdlLanguageServer {
         // Apply fixes sequentially for each rule
         let mut fixed_text = text.to_string();
         let mut any_changes = false;
-        
+
         for rule in &all_rules {
             let ctx = crate::lint_context::LintContext::new(&fixed_text);
             match rule.fix(&ctx) {
@@ -109,12 +109,8 @@ impl RumdlLanguageServer {
                 }
             }
         }
-        
-        if any_changes {
-            Ok(Some(fixed_text))
-        } else {
-            Ok(None)
-        }
+
+        if any_changes { Ok(Some(fixed_text)) } else { Ok(None) }
     }
 
     /// Get the end position of a document
@@ -295,33 +291,36 @@ impl LanguageServer for RumdlLanguageServer {
         // Auto-fix on save if enabled
         if enable_auto_fix {
             if let Some(text) = self.documents.read().await.get(&params.text_document.uri) {
-                match self.apply_all_fixes(&params.text_document.uri, &text).await {
+                match self.apply_all_fixes(&params.text_document.uri, text).await {
                     Ok(Some(fixed_text)) => {
                         // Create a workspace edit to apply the fixes
                         let edit = TextEdit {
                             range: Range {
                                 start: Position { line: 0, character: 0 },
-                                end: self.get_end_position(&text),
+                                end: self.get_end_position(text),
                             },
                             new_text: fixed_text.clone(),
                         };
-                        
+
                         let mut changes = std::collections::HashMap::new();
                         changes.insert(params.text_document.uri.clone(), vec![edit]);
-                        
+
                         let workspace_edit = WorkspaceEdit {
                             changes: Some(changes),
                             document_changes: None,
                             change_annotations: None,
                         };
-                        
+
                         // Apply the edit
                         match self.client.apply_edit(workspace_edit).await {
                             Ok(response) => {
                                 if response.applied {
                                     log::info!("Auto-fix applied successfully");
                                     // Update our stored version
-                                    self.documents.write().await.insert(params.text_document.uri.clone(), fixed_text);
+                                    self.documents
+                                        .write()
+                                        .await
+                                        .insert(params.text_document.uri.clone(), fixed_text);
                                 } else {
                                     log::warn!("Auto-fix was not applied: {:?}", response.failure_reason);
                                 }
@@ -608,19 +607,19 @@ mod tests {
     #[tokio::test]
     async fn test_auto_fix_on_save() {
         let server = create_test_server();
-        
+
         // Enable auto-fix
         {
             let mut config = server.config.write().await;
             config.enable_auto_fix = true;
         }
-        
+
         let uri = Url::parse("file:///test.md").unwrap();
-        let text = "#Heading without space";  // MD018 violation
-        
+        let text = "#Heading without space"; // MD018 violation
+
         // Store document
         server.documents.write().await.insert(uri.clone(), text.to_string());
-        
+
         // Test apply_all_fixes
         let fixed = server.apply_all_fixes(&uri, text).await.unwrap();
         assert!(fixed.is_some());
@@ -630,22 +629,22 @@ mod tests {
     #[tokio::test]
     async fn test_get_end_position() {
         let server = create_test_server();
-        
+
         // Single line
         let pos = server.get_end_position("Hello");
         assert_eq!(pos.line, 0);
         assert_eq!(pos.character, 5);
-        
+
         // Multiple lines
         let pos = server.get_end_position("Hello\nWorld\nTest");
         assert_eq!(pos.line, 2);
         assert_eq!(pos.character, 4);
-        
+
         // Empty string
         let pos = server.get_end_position("");
         assert_eq!(pos.line, 0);
         assert_eq!(pos.character, 0);
-        
+
         // Ends with newline - lines() doesn't include the empty line after \n
         let pos = server.get_end_position("Hello\n");
         assert_eq!(pos.line, 0);

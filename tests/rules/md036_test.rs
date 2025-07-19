@@ -203,7 +203,7 @@ fn test_table_of_contents_with_other_emphasis() {
 fn test_markdownlint_parity_comprehensive() {
     // Comprehensive test to ensure full parity with markdownlint behavior
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?。，；：！？".to_string());
-    
+
     // Test various punctuation types that should NOT be flagged
     let not_flagged_cases = vec![
         // ASCII punctuation
@@ -213,22 +213,19 @@ fn test_markdownlint_parity_comprehensive() {
         "_Question?_",
         "**Important;**",
         "*Items,*",
-        
         // Full-width Asian punctuation
         "**注意：**",
         "**重要。**",
         "**什么？**",
         "**警告！**",
-        
         // Mixed punctuation
         "**Really?!**",
         "**Note:!**",
-        
         // With whitespace
         "  **Arguments:**  ",
         "\t*Options:*\t",
     ];
-    
+
     for content in not_flagged_cases {
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
@@ -253,7 +250,7 @@ fn test_custom_punctuation_config() {
     let ctx = LintContext::new(content);
     let rule = MD036NoEmphasisAsHeading::new("!@#".to_string());
     let warnings = rule.check(&ctx).unwrap();
-    
+
     // Should only flag "Default:" since : is not in punctuation list
     assert_eq!(warnings.len(), 1, "Should flag only one item");
     assert!(warnings[0].message.contains("Default:"));
@@ -269,9 +266,13 @@ fn test_empty_punctuation_config() {
     let ctx = LintContext::new(content);
     let rule = MD036NoEmphasisAsHeading::new("".to_string());
     let warnings = rule.check(&ctx).unwrap();
-    
+
     // Should flag all three
-    assert_eq!(warnings.len(), 3, "Should flag all emphasis with empty punctuation config");
+    assert_eq!(
+        warnings.len(),
+        3,
+        "Should flag all emphasis with empty punctuation config"
+    );
 }
 
 #[test]
@@ -306,10 +307,10 @@ const result = myFunction("test", 42);
     let ctx = LintContext::new(content);
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?。，；：！？".to_string());
     let warnings = rule.check(&ctx).unwrap();
-    
+
     // Should only flag "Example Usage" and "TODO"
     assert_eq!(warnings.len(), 2, "Should flag exactly 2 items");
-    
+
     let messages: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
     assert!(messages.iter().any(|m| m.contains("Example Usage")));
     assert!(messages.iter().any(|m| m.contains("TODO")));
@@ -331,15 +332,15 @@ fn test_fix_without_punctuation() {
     for (content, expected_fix) in test_cases {
         let ctx = LintContext::new(content);
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
-        
+
         // Should be flagged
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(
-            warnings.len(), 1,
-            "Emphasis without punctuation '{}' should be flagged",
-            content
+            warnings.len(),
+            1,
+            "Emphasis without punctuation '{content}' should be flagged"
         );
-        
+
         // Fix should convert to heading
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(

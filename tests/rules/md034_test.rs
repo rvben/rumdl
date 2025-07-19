@@ -233,11 +233,7 @@ fn test_md034_edge_cases() {
             // The fixed version should have no warnings
             let ctx_fixed = LintContext::new(&fixed);
             let result_fixed = rule.check(&ctx_fixed).unwrap();
-            assert_eq!(
-                result_fixed.len(),
-                0,
-                "Fixed content should have no warnings: {fixed}"
-            );
+            assert_eq!(result_fixed.len(), 0, "Fixed content should have no warnings: {fixed}");
         } else {
             assert_eq!(
                 fixed, *content,

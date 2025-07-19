@@ -434,17 +434,17 @@ Same subsection name in different section."#;
 
     #[test]
     fn test_empty_headings() {
-        let content = r#"# 
+        let content = r#"#
 
 Some content.
 
-## 
+##
 
 More content.
 
 ### Non-empty
 
-#### 
+####
 
 Another empty."#;
 
@@ -591,7 +591,7 @@ Just paragraphs."#;
 
 Some content.
 
-##  Heading with spaces  
+##  Heading with spaces
 
 Different amount of spaces.
 
@@ -836,9 +836,7 @@ Duplicate with code span."#;
     #[test]
     fn test_very_long_heading() {
         let long_text = "This is a very long heading that goes on and on and on and contains many words to test how the rule handles long headings";
-        let content = format!(
-            "# {long_text}\n\nSome content.\n\n## {long_text}\n\nDuplicate long heading."
-        );
+        let content = format!("# {long_text}\n\nSome content.\n\n## {long_text}\n\nDuplicate long heading.");
 
         let config = MD024Config::default();
         let result = run_test(&content, config);

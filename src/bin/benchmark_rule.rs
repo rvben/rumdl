@@ -7,7 +7,7 @@ use std::time::Instant;
 
 fn benchmark_rule(rule: &dyn Rule, test_cases: &[(&str, &str)], iterations: u32) -> Vec<(String, u64, u64)> {
     let mut results = Vec::new();
-    
+
     for (name, content) in test_cases {
         // Warm up
         for _ in 0..10 {
@@ -15,7 +15,7 @@ fn benchmark_rule(rule: &dyn Rule, test_cases: &[(&str, &str)], iterations: u32)
             let _ = rule.check(&ctx);
             let _ = rule.fix(&ctx);
         }
-        
+
         // Benchmark check
         let start = Instant::now();
         for _ in 0..iterations {
@@ -23,7 +23,7 @@ fn benchmark_rule(rule: &dyn Rule, test_cases: &[(&str, &str)], iterations: u32)
             let _ = rule.check(&ctx);
         }
         let check_time = start.elapsed().as_micros() as u64 / iterations as u64;
-        
+
         // Benchmark fix
         let start = Instant::now();
         for _ in 0..iterations {
@@ -31,10 +31,10 @@ fn benchmark_rule(rule: &dyn Rule, test_cases: &[(&str, &str)], iterations: u32)
             let _ = rule.fix(&ctx);
         }
         let fix_time = start.elapsed().as_micros() as u64 / iterations as u64;
-        
+
         results.push((name.to_string(), check_time, fix_time));
     }
-    
+
     results
 }
 
@@ -83,7 +83,7 @@ fn generate_test_content(rule_name: &str) -> Vec<(&'static str, String)> {
             ("Many URLs", {
                 let mut content = String::new();
                 for i in 0..200 {
-                    content.push_str(&format!("URL {}: http://example{}.com/path/{}/file?id={}\n", i, i, i, i));
+                    content.push_str(&format!("URL {i}: http://example{i}.com/path/{i}/file?id={i}\n"));
                 }
                 content
             }),
@@ -96,11 +96,11 @@ fn generate_test_content(rule_name: &str) -> Vec<(&'static str, String)> {
             ("Many references", {
                 let mut content = String::new();
                 for i in 0..100 {
-                    content.push_str(&format!("[link{}][ref{}]\n", i, i));
+                    content.push_str(&format!("[link{i}][ref{i}]\n"));
                 }
-                content.push_str("\n");
+                content.push('\n');
                 for i in 0..200 {
-                    content.push_str(&format!("[ref{}]: http://example{}.com\n", i, i));
+                    content.push_str(&format!("[ref{i}]: http://example{i}.com\n"));
                 }
                 content
             }),
@@ -117,38 +117,37 @@ fn main() {
         eprintln!("Usage: {} <rule_name>", args[0]);
         std::process::exit(1);
     }
-    
+
     let rule_name = &args[1];
     let config = Config::default();
     let rules = all_rules(&config);
-    
-    let rule = rules.into_iter()
-        .find(|r| r.name() == rule_name)
-        .unwrap_or_else(|| {
-            eprintln!("Rule {} not found", rule_name);
-            std::process::exit(1);
-        });
-    
+
+    let rule = rules.into_iter().find(|r| r.name() == rule_name).unwrap_or_else(|| {
+        eprintln!("Rule {rule_name} not found");
+        std::process::exit(1);
+    });
+
     let test_cases_vec = generate_test_content(rule_name);
-    let test_cases: Vec<(&str, &str)> = test_cases_vec.iter()
+    let test_cases: Vec<(&str, &str)> = test_cases_vec
+        .iter()
         .map(|(name, content)| (*name, content.as_str()))
         .collect();
-    
-    println!("Benchmarking {} Rule", rule_name);
+
+    println!("Benchmarking {rule_name} Rule");
     println!("{}", "=".repeat(50));
     println!();
-    
+
     let results = benchmark_rule(rule.as_ref(), &test_cases, 100);
-    
+
     let mut total_check = 0u64;
     let mut total_fix = 0u64;
-    
+
     for (test_name, check_time, fix_time) in &results {
-        println!("{:<30} Check: {:>6} μs  Fix: {:>6} μs", test_name, check_time, fix_time);
+        println!("{test_name:<30} Check: {check_time:>6} μs  Fix: {fix_time:>6} μs");
         total_check += check_time;
         total_fix += fix_time;
     }
-    
+
     println!();
     println!("Average times:");
     println!("  Check: {} μs", total_check / results.len() as u64);

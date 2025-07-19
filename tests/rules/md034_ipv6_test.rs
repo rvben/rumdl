@@ -10,7 +10,7 @@ fn test_ipv6_url_basic() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "IPv6 URL should be flagged as bare URL");
     assert_eq!(result[0].line, 1);
-    
+
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Visit <https://[::1]:8080> for local testing");
 }
@@ -22,7 +22,7 @@ fn test_ipv6_url_full_address() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Full IPv6 URL should be flagged");
-    
+
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Server at <http://[2001:db8::8a2e:370:7334]/path>");
 }
@@ -37,14 +37,14 @@ fn test_ipv6_localhost_variations() {
         ("https://[::1]:8080/api", "<https://[::1]:8080/api>"),
         ("http://[::ffff:127.0.0.1]", "<http://[::ffff:127.0.0.1]>"),
     ];
-    
+
     for (input, expected) in test_cases {
         let ctx = LintContext::new(input);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "IPv6 URL '{}' should be flagged", input);
-        
+        assert_eq!(result.len(), 1, "IPv6 URL '{input}' should be flagged");
+
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, expected, "IPv6 URL '{}' should be wrapped correctly", input);
+        assert_eq!(fixed, expected, "IPv6 URL '{input}' should be wrapped correctly");
     }
 }
 
@@ -55,7 +55,7 @@ fn test_ipv6_with_zone_id() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "IPv6 with zone ID should be flagged");
-    
+
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Connect to <https://[fe80::1%eth0]:8080>");
 }
@@ -67,9 +67,12 @@ fn test_ipv6_mixed_with_ipv4() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "All three URLs should be flagged");
-    
+
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Try <http://127.0.0.1> or <https://[::1]:8080> or <http://localhost>");
+    assert_eq!(
+        fixed,
+        "Try <http://127.0.0.1> or <https://[::1]:8080> or <http://localhost>"
+    );
 }
 
 #[test]
@@ -87,19 +90,22 @@ fn test_ipv6_in_angle_brackets() {
     let content = "Already wrapped: <https://[::1]:8080>";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "IPv6 URL already in angle brackets should not be flagged");
+    assert!(
+        result.is_empty(),
+        "IPv6 URL already in angle brackets should not be flagged"
+    );
 }
 
 #[test]
 fn test_ipv6_edge_cases() {
     let rule = MD034NoBareUrls;
-    
+
     // Test compressed zeros
     let content = "Visit http://[2001:db8:0:0:0:0:0:1] or http://[2001:db8::1]";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Both IPv6 formats should be flagged");
-    
+
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Visit <http://[2001:db8:0:0:0:0:0:1]> or <http://[2001:db8::1]>");
 }
@@ -111,7 +117,7 @@ fn test_ipv6_with_path_query_fragment() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "IPv6 URL with full path should be flagged");
-    
+
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "API at <https://[2001:db8::1]:8080/api/v1?param=value#section>");
 }
@@ -123,7 +129,7 @@ fn test_ipv6_trailing_punctuation() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "IPv6 URL with trailing period should be flagged");
-    
+
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Visit <https://[::1]:8080>.");
 }
@@ -135,7 +141,7 @@ fn test_ipv6_ftp_protocol() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "FTP IPv6 URL should be flagged");
-    
+
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "FTP server at <ftp://[2001:db8::ftp]:21>");
 }
@@ -147,9 +153,12 @@ fn test_ipv6_multiple_on_line() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Both IPv6 URLs should be flagged");
-    
+
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Primary: <https://[2001:db8::1]> Secondary: <https://[2001:db8::2]>");
+    assert_eq!(
+        fixed,
+        "Primary: <https://[2001:db8::1]> Secondary: <https://[2001:db8::2]>"
+    );
 }
 
 #[test]
@@ -158,7 +167,10 @@ fn test_ipv6_in_reference_definition() {
     let content = "[ref]: https://[::1]:8080";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "IPv6 URL in reference definition should not be flagged");
+    assert!(
+        result.is_empty(),
+        "IPv6 URL in reference definition should not be flagged"
+    );
 }
 
 #[test]
@@ -171,10 +183,10 @@ fn test_ipv6_invalid_formats_not_flagged() {
         "Missing opening bracket https://::1]:8080",
         "Empty brackets https://[]:8080",
     ];
-    
+
     for content in test_cases {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Invalid format '{}' should not be flagged", content);
+        assert!(result.is_empty(), "Invalid format '{content}' should not be flagged");
     }
 }

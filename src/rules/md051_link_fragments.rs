@@ -529,11 +529,14 @@ mod tests {
 
         // Multiple spaces
         assert_eq!(rule.heading_to_fragment_fast("Multiple   Spaces"), "multiple-spaces");
-        
+
         // Test underscores - should be preserved
         assert_eq!(rule.heading_to_fragment_fast("respect_gitignore"), "respect_gitignore");
-        assert_eq!(rule.heading_to_fragment_fast("`respect_gitignore`"), "respect_gitignore");
-        
+        assert_eq!(
+            rule.heading_to_fragment_fast("`respect_gitignore`"),
+            "respect_gitignore"
+        );
+
         // Test slash conversion
         assert_eq!(rule.heading_to_fragment_fast("CI/CD Migration"), "ci-cd-migration");
     }

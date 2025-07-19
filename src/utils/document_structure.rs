@@ -1467,10 +1467,7 @@ mod tests {
 
         // Lines 2-8 should be inside the code block
         for line in 2..=8 {
-            assert!(
-                structure.is_in_code_block(line),
-                "Line {line} should be in code block"
-            );
+            assert!(structure.is_in_code_block(line), "Line {line} should be in code block");
         }
     }
 

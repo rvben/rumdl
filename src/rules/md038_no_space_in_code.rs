@@ -99,8 +99,7 @@ impl MD038NoSpaceInCode {
         // Check if content starts with any command (case-insensitive)
         // Use iterator with early return to avoid allocating lowercase string unless needed
         let needs_lowercase_check = COMMAND_PREFIXES.iter().any(|&cmd| {
-            content.len() >= cmd.len() && 
-            content.as_bytes()[..cmd.len()].eq_ignore_ascii_case(cmd.as_bytes())
+            content.len() >= cmd.len() && content.as_bytes()[..cmd.len()].eq_ignore_ascii_case(cmd.as_bytes())
         });
 
         needs_lowercase_check
@@ -129,7 +128,7 @@ impl MD038NoSpaceInCode {
             || (trimmed.chars().filter(|c| c.is_ascii_punctuation()).count() as f64 / trimmed.len() as f64) > 0.4
         // Higher punctuation density threshold
     }
-    
+
     /// Check if a code span is likely part of a nested backtick structure
     fn is_likely_nested_backticks(&self, ctx: &crate::lint_context::LintContext, span_index: usize) -> bool {
         // If there are multiple code spans on the same line, and there's text
@@ -137,31 +136,32 @@ impl MD038NoSpaceInCode {
         let code_spans = ctx.code_spans();
         let current_span = &code_spans[span_index];
         let current_line = current_span.line;
-        
+
         // Look for other code spans on the same line
-        let same_line_spans: Vec<_> = code_spans.iter()
+        let same_line_spans: Vec<_> = code_spans
+            .iter()
             .enumerate()
             .filter(|(i, s)| s.line == current_line && *i != span_index)
             .collect();
-            
+
         if same_line_spans.is_empty() {
             return false;
         }
-        
+
         // Check if there's content between spans that might indicate nesting
         // Get the line content
         let line_idx = current_line - 1; // Convert to 0-based
         if line_idx >= ctx.lines.len() {
             return false;
         }
-        
+
         let line_content = &ctx.lines[line_idx].content;
-        
+
         // For each pair of adjacent code spans, check what's between them
         for (_, other_span) in &same_line_spans {
             let start = current_span.end_col.min(other_span.end_col);
             let end = current_span.start_col.max(other_span.start_col);
-            
+
             if start < end && end <= line_content.len() {
                 let between = &line_content[start..end];
                 // If there's text containing "code" or similar patterns between spans,
@@ -171,7 +171,7 @@ impl MD038NoSpaceInCode {
                 }
             }
         }
-        
+
         false
     }
 }
@@ -207,8 +207,9 @@ impl Rule for MD038NoSpaceInCode {
             }
 
             // Early check: if no leading/trailing whitespace, skip trimming
-            if !code_content.chars().next().map_or(false, |c| c.is_whitespace()) &&
-               !code_content.chars().last().map_or(false, |c| c.is_whitespace()) {
+            if !code_content.chars().next().is_some_and(|c| c.is_whitespace())
+                && !code_content.chars().last().is_some_and(|c| c.is_whitespace())
+            {
                 continue;
             }
 
@@ -221,13 +222,13 @@ impl Rule for MD038NoSpaceInCode {
                 if trimmed.contains('`') {
                     continue;
                 }
-                
+
                 // Check if this might be part of a nested backtick structure
                 // by looking for other code spans nearby that might indicate nesting
                 if self.is_likely_nested_backticks(ctx, i) {
                     continue;
                 }
-                
+
                 // Check if spaces are allowed in this context
                 if self.should_allow_spaces(code_content, trimmed) {
                     continue;
@@ -463,27 +464,29 @@ mod tests {
     fn test_code_span_parsing_nested_backticks() {
         let content = "Code with ` nested `code` example ` should preserve backticks";
         let ctx = crate::lint_context::LintContext::new(content);
-        
-        println!("Content: {}", content);
+
+        println!("Content: {content}");
         println!("Code spans found:");
         let code_spans = ctx.code_spans();
         for (i, span) in code_spans.iter().enumerate() {
-            println!("  Span {}: line={}, col={}-{}, backticks={}, content='{}'", 
-                     i, span.line, span.start_col, span.end_col, span.backtick_count, span.content);
+            println!(
+                "  Span {}: line={}, col={}-{}, backticks={}, content='{}'",
+                i, span.line, span.start_col, span.end_col, span.backtick_count, span.content
+            );
         }
-        
+
         // This test reveals the issue - we're getting multiple separate code spans instead of one
         assert_eq!(code_spans.len(), 2, "Should parse as 2 code spans");
     }
-    
+
     #[test]
     fn test_nested_backtick_detection() {
         let rule = MD038NoSpaceInCode::strict();
-        
+
         // In strict mode, should_allow_spaces returns false, but the check method
         // will skip code spans with backticks anyway
         assert!(!rule.should_allow_spaces(" plain text ", "plain text"));
-        
+
         // Test with lenient mode
         let lenient_rule = MD038NoSpaceInCode::new();
         assert!(lenient_rule.should_allow_spaces(" y ", "y")); // Single char

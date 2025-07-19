@@ -1035,12 +1035,7 @@ impl SourcedConfig {
                 .overrides
                 .first()
                 .and_then(|o| o.file.clone()),
-            fragment
-                .global
-                .respect_gitignore
-                .overrides
-                .first()
-                .and_then(|o| o.line),
+            fragment.global.respect_gitignore.overrides.first().and_then(|o| o.line),
         );
 
         // Merge output_format if present
@@ -1441,8 +1436,8 @@ fn toml_value_type_matches(expected: &toml::Value, actual: &toml::Value) -> bool
 
 /// Parses pyproject.toml content and extracts the [tool.rumdl] section if present.
 fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfigFragment>, ConfigError> {
-    let doc: toml::Value = toml::from_str(content)
-        .map_err(|e| ConfigError::ParseError(format!("{path}: Failed to parse TOML: {e}")))?;
+    let doc: toml::Value =
+        toml::from_str(content).map_err(|e| ConfigError::ParseError(format!("{path}: Failed to parse TOML: {e}")))?;
     let mut fragment = SourcedConfigFragment::default();
     let source = ConfigSource::PyprojectToml;
     let file = Some(path.to_string());
@@ -1867,9 +1862,7 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                 }
             }
         } else if item.is_value() {
-            log::warn!(
-                "[WARN] Ignoring top-level value key in {path}: '{key}'. Expected a table like [{key}]."
-            );
+            log::warn!("[WARN] Ignoring top-level value key in {path}: '{key}'. Expected a table like [{key}].");
         }
     }
 

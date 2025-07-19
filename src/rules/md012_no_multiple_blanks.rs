@@ -27,7 +27,6 @@ impl MD012NoMultipleBlanks {
     pub fn from_config_struct(config: MD012Config) -> Self {
         Self { config }
     }
-
 }
 
 impl Rule for MD012NoMultipleBlanks {
@@ -65,20 +64,20 @@ impl Rule for MD012NoMultipleBlanks {
         let _line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
-        
+
         // Single-pass algorithm with immediate counter reset
         let mut blank_count = 0;
         let mut blank_start = 0;
         let mut in_code_block = false;
         let mut in_front_matter = false;
         let mut code_fence_marker = "";
-        
+
         // Use HashSet for O(1) lookups of lines that need to be checked
         let mut lines_to_check: HashSet<usize> = HashSet::new();
 
         for (line_num, &line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
-            
+
             // Check for front matter boundaries (only at start of file)
             if trimmed == "---" {
                 if line_num == 0 {
@@ -90,7 +89,7 @@ impl Rule for MD012NoMultipleBlanks {
                 blank_count = 0;
                 continue;
             }
-            
+
             // Check for code block boundaries
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 if !in_code_block {
@@ -106,14 +105,14 @@ impl Rule for MD012NoMultipleBlanks {
                 blank_count = 0;
                 continue;
             }
-            
+
             // Skip lines in code blocks or front matter
             if in_code_block || in_front_matter {
                 // Reset counter to prevent counting across boundaries
                 blank_count = 0;
                 continue;
             }
-            
+
             // Check for indented code blocks (4+ spaces)
             let is_indented_code = line.len() >= 4 && line.starts_with("    ") && !line.trim().is_empty();
             if is_indented_code {
@@ -191,7 +190,8 @@ impl Rule for MD012NoMultipleBlanks {
                     let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
 
                     // Calculate precise character range for the entire blank line
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(excess_line, excess_line_content);
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_line_range(excess_line, excess_line_content);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
@@ -494,7 +494,6 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
-
 
     #[test]
     fn test_unclosed_code_block() {

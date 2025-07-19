@@ -23,7 +23,7 @@ fn check_file(file_path: &str) -> PyResult<i32> {
     let status = std::process::Command::new("rumdl")
         .arg(file_path)
         .status()
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Failed to execute rumdl: {}", e)))?;
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Failed to execute rumdl: {e}")))?;
 
     Ok(status.code().unwrap_or(1))
 }
@@ -208,8 +208,7 @@ mod tests {
                     let num_part = part.split('-').next().unwrap();
                     assert!(
                         num_part.parse::<u32>().is_ok(),
-                        "Version part '{}' is not a valid number",
-                        num_part
+                        "Version part '{num_part}' is not a valid number"
                     );
                 }
             });

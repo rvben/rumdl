@@ -53,6 +53,18 @@ enum Element {
     Italic(String),
 }
 
+impl std::fmt::Display for Element {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Element::Text(s) => write!(f, "{s}"),
+            Element::Link { text, url } => write!(f, "[{text}]({url})"),
+            Element::Code(s) => write!(f, "`{s}`"),
+            Element::Bold(s) => write!(f, "**{s}**"),
+            Element::Italic(s) => write!(f, "*{s}*"),
+        }
+    }
+}
+
 impl Element {
     fn len(&self) -> usize {
         match self {
@@ -61,16 +73,6 @@ impl Element {
             Element::Code(s) => s.chars().count() + 2,                                     // `code`
             Element::Bold(s) => s.chars().count() + 4,                                     // **text**
             Element::Italic(s) => s.chars().count() + 2,                                   // *text*
-        }
-    }
-
-    fn to_string(&self) -> String {
-        match self {
-            Element::Text(s) => s.clone(),
-            Element::Link { text, url } => format!("[{text}]({url})"),
-            Element::Code(s) => format!("`{s}`"),
-            Element::Bold(s) => format!("**{s}**"),
-            Element::Italic(s) => format!("*{s}*"),
         }
     }
 }
@@ -198,7 +200,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
     let mut current_length = 0;
 
     for element in elements {
-        let element_str = element.to_string();
+        let element_str = format!("{element}");
         let element_len = element.len();
 
         // For text elements that might need breaking
@@ -296,12 +298,8 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             let quote_content = &line[quote_prefix.len()..].trim_start();
 
             let reflowed = reflow_line(quote_content, options);
-            for (j, reflowed_line) in reflowed.iter().enumerate() {
-                if j == 0 {
-                    result.push(format!("{quote_prefix} {reflowed_line}"));
-                } else {
-                    result.push(format!("{quote_prefix} {reflowed_line}"));
-                }
+            for reflowed_line in reflowed.iter() {
+                result.push(format!("{quote_prefix} {reflowed_line}"));
             }
             i += 1;
             continue;

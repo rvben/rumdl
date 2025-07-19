@@ -136,15 +136,17 @@ impl Rule for MD013LineLength {
         if content.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         // Quick check: if total content is shorter than line limit, definitely no violations
         if content.len() <= self.config.line_length {
             return Ok(Vec::new());
         }
-        
+
         // More aggressive early return - check if any line could possibly be long
         let has_long_lines = if !ctx.lines.is_empty() {
-            ctx.lines.iter().any(|line| line.content.len() > self.config.line_length)
+            ctx.lines
+                .iter()
+                .any(|line| line.content.len() > self.config.line_length)
         } else {
             // Fallback: do a quick scan for newlines to estimate max line length
             let mut max_line_len = 0;
@@ -160,12 +162,12 @@ impl Rule for MD013LineLength {
             max_line_len = max_line_len.max(current_line_len);
             max_line_len > self.config.line_length
         };
-        
+
         if !has_long_lines {
             return Ok(Vec::new());
         }
 
-        // Create structure manually 
+        // Create structure manually
         let structure = DocumentStructure::new(content);
         self.check_with_structure(ctx, &structure)
     }
@@ -178,9 +180,9 @@ impl Rule for MD013LineLength {
     ) -> LintResult {
         let content = ctx.content;
         let mut warnings = Vec::new();
-        
+
         // Early return was already done in check(), so we know there are long lines
-        
+
         // Use ctx.lines if available for better performance
         let lines: Vec<&str> = if !ctx.lines.is_empty() {
             ctx.lines.iter().map(|l| l.content.as_str()).collect()
@@ -198,17 +200,19 @@ impl Rule for MD013LineLength {
         let table_lines_set: std::collections::HashSet<usize> = if self.config.tables {
             let mut table_lines = std::collections::HashSet::new();
             let mut in_table = false;
-            
+
             for (i, line) in lines.iter().enumerate() {
                 let line_number = i + 1;
-                
+
                 // Quick check if in code block using pre-computed blocks from context or structure
                 let in_code = if !ctx.code_blocks.is_empty() {
-                    ctx.code_blocks.iter().any(|(start, end)| *start <= line_number && line_number <= *end)
+                    ctx.code_blocks
+                        .iter()
+                        .any(|(start, end)| *start <= line_number && line_number <= *end)
                 } else {
                     structure.is_in_code_block(line_number)
                 };
-                
+
                 if !in_code && line.contains('|') {
                     in_table = true;
                     table_lines.insert(line_number);
@@ -228,7 +232,7 @@ impl Rule for MD013LineLength {
 
             // Calculate effective length excluding unbreakable URLs
             let effective_length = self.calculate_effective_length(line);
-            
+
             // Determine the appropriate line length limit based on line type
             let line_limit = if heading_lines_set.contains(&line_number) {
                 self.config.heading_line_length.unwrap_or(self.config.line_length)
@@ -251,8 +255,12 @@ impl Rule for MD013LineLength {
                 }
 
                 // Skip block elements according to config flags (optimized checks)
-                if (self.config.headings && heading_lines_set.contains(&line_number) && self.config.heading_line_length.is_none())
-                    || (!self.config.code_blocks && structure.is_in_code_block(line_number) && self.config.code_block_line_length.is_none())
+                if (self.config.headings
+                    && heading_lines_set.contains(&line_number)
+                    && self.config.heading_line_length.is_none())
+                    || (!self.config.code_blocks
+                        && structure.is_in_code_block(line_number)
+                        && self.config.code_block_line_length.is_none())
                     || (self.config.tables && table_lines_set.contains(&line_number))
                     || structure.is_in_blockquote(line_number)
                     || structure.is_in_html_block(line_number)
@@ -266,8 +274,12 @@ impl Rule for MD013LineLength {
                 }
             } else if self.config.stern {
                 // In stern mode, only skip if explicitly configured
-                if (self.config.headings && heading_lines_set.contains(&line_number) && self.config.heading_line_length.is_none())
-                    || (!self.config.code_blocks && structure.is_in_code_block(line_number) && self.config.code_block_line_length.is_none())
+                if (self.config.headings
+                    && heading_lines_set.contains(&line_number)
+                    && self.config.heading_line_length.is_none())
+                    || (!self.config.code_blocks
+                        && structure.is_in_code_block(line_number)
+                        && self.config.code_block_line_length.is_none())
                     || (self.config.tables && table_lines_set.contains(&line_number))
                 {
                     continue;
@@ -304,20 +316,13 @@ impl Rule for MD013LineLength {
             };
 
             let message = if let Some(ref _fix_obj) = fix {
-                format!(
-                    "Line length {} exceeds {} characters (can trim whitespace)",
-                    effective_length, line_limit
-                )
+                format!("Line length {effective_length} exceeds {line_limit} characters (can trim whitespace)")
             } else {
-                format!(
-                    "Line length {} exceeds {} characters",
-                    effective_length, line_limit
-                )
+                format!("Line length {effective_length} exceeds {line_limit} characters")
             };
 
             // Calculate precise character range for the excess portion
-            let (start_line, start_col, end_line, end_col) =
-                calculate_excess_range(line_number, line, line_limit);
+            let (start_line, start_col, end_line, end_col) = calculate_excess_range(line_number, line, line_limit);
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
@@ -341,10 +346,10 @@ impl Rule for MD013LineLength {
                 break_on_sentences: true,
                 preserve_breaks: false,
             };
-            
+
             return Ok(crate::utils::text_reflow::reflow_markdown(ctx.content, &reflow_options));
         }
-        
+
         // Otherwise, use the existing fix logic (trimming whitespace)
         // Get all warnings with their fixes
         let warnings = self.check(ctx)?;
@@ -362,7 +367,7 @@ impl Rule for MD013LineLength {
                 break;
             }
         }
-        
+
         if !has_any_fix {
             return Ok(ctx.content.to_string());
         }
@@ -372,12 +377,12 @@ impl Rule for MD013LineLength {
             .iter()
             .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
             .collect();
-        
+
         // This should not happen given our check above, but just in case
         if fixes.is_empty() {
             return Ok(ctx.content.to_string());
         }
-        
+
         fixes.sort_by(|a, b| b.0.cmp(&a.0));
 
         // Apply fixes from end to beginning to preserve byte offsets
@@ -408,14 +413,16 @@ impl Rule for MD013LineLength {
         if ctx.content.is_empty() {
             return true;
         }
-        
+
         // Quick check: if total content is shorter than line limit, definitely skip
         if ctx.content.len() <= self.config.line_length {
             return true;
         }
-        
+
         // Use more efficient check - any() with early termination instead of all()
-        !ctx.lines.iter().any(|line| line.content.len() > self.config.line_length)
+        !ctx.lines
+            .iter()
+            .any(|line| line.content.len() > self.config.line_length)
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -920,60 +927,74 @@ Another long line that should trigger a warning."#;
         // Should not flag because the URL is in a markdown link
         assert_eq!(result.len(), 0);
     }
-    
+
     #[test]
     fn test_text_reflow_simple() {
-        let mut config = MD013Config::default();
-        config.line_length = 30;
-        config.enable_reflow = true;
+        let config = MD013Config {
+            line_length: 30,
+            enable_reflow: true,
+            ..Default::default()
+        };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = "This is a very long line that definitely exceeds thirty characters and needs to be wrapped.";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Verify all lines are under 30 chars
         for line in fixed.lines() {
-            assert!(line.chars().count() <= 30, "Line too long: {} (len={})", line, line.chars().count());
+            assert!(
+                line.chars().count() <= 30,
+                "Line too long: {} (len={})",
+                line,
+                line.chars().count()
+            );
         }
-        
+
         // Verify content is preserved
         let fixed_words: Vec<&str> = fixed.split_whitespace().collect();
         let original_words: Vec<&str> = content.split_whitespace().collect();
         assert_eq!(fixed_words, original_words);
     }
-    
+
     #[test]
     fn test_text_reflow_preserves_markdown_elements() {
-        let mut config = MD013Config::default();
-        config.line_length = 40;
-        config.enable_reflow = true;
+        let config = MD013Config {
+            line_length: 40,
+            enable_reflow: true,
+            ..Default::default()
+        };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = "This paragraph has **bold text** and *italic text* and [a link](https://example.com) that should be preserved.";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Verify markdown elements are preserved
-        assert!(fixed.contains("**bold text**"), "Bold text not preserved in: {}", fixed);
-        assert!(fixed.contains("*italic text*"), "Italic text not preserved in: {}", fixed);
-        assert!(fixed.contains("[a link](https://example.com)"), "Link not preserved in: {}", fixed);
-        
+        assert!(fixed.contains("**bold text**"), "Bold text not preserved in: {fixed}");
+        assert!(fixed.contains("*italic text*"), "Italic text not preserved in: {fixed}");
+        assert!(
+            fixed.contains("[a link](https://example.com)"),
+            "Link not preserved in: {fixed}"
+        );
+
         // Verify all lines are under 40 chars
         for line in fixed.lines() {
-            assert!(line.len() <= 40, "Line too long: {}", line);
+            assert!(line.len() <= 40, "Line too long: {line}");
         }
     }
-    
+
     #[test]
     fn test_text_reflow_preserves_code_blocks() {
-        let mut config = MD013Config::default();
-        config.line_length = 30;
-        config.enable_reflow = true;
+        let config = MD013Config {
+            line_length: 30,
+            enable_reflow: true,
+            ..Default::default()
+        };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = r#"Here is some text.
 
 ```python
@@ -983,22 +1004,24 @@ def very_long_function_name_that_exceeds_limit():
 
 More text after code block."#;
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Verify code block is preserved
         assert!(fixed.contains("def very_long_function_name_that_exceeds_limit():"));
         assert!(fixed.contains("```python"));
         assert!(fixed.contains("```"));
     }
-    
+
     #[test]
     fn test_text_reflow_preserves_lists() {
-        let mut config = MD013Config::default();
-        config.line_length = 30;
-        config.enable_reflow = true;
+        let config = MD013Config {
+            line_length: 30,
+            enable_reflow: true,
+            ..Default::default()
+        };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = r#"Here is a list:
 
 1. First item with a very long line that needs wrapping
@@ -1010,48 +1033,51 @@ And a bullet list:
 - Bullet item with very long content that needs wrapping
 - Short bullet"#;
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Verify list structure is preserved
         assert!(fixed.contains("1. "));
         assert!(fixed.contains("2. "));
         assert!(fixed.contains("3. "));
         assert!(fixed.contains("- "));
-        
+
         // Verify proper indentation for wrapped lines
         let lines: Vec<&str> = fixed.lines().collect();
         for (i, line) in lines.iter().enumerate() {
-            if line.trim().starts_with("1.") || line.trim().starts_with("2.") || 
-               line.trim().starts_with("3.") {
+            if line.trim().starts_with("1.") || line.trim().starts_with("2.") || line.trim().starts_with("3.") {
                 // Check if next line is a continuation (should be indented with 3 spaces for numbered lists)
-                if i + 1 < lines.len() && !lines[i + 1].trim().is_empty() &&
-                   !lines[i + 1].trim().starts_with(char::is_numeric) &&
-                   !lines[i + 1].trim().starts_with("-") {
+                if i + 1 < lines.len()
+                    && !lines[i + 1].trim().is_empty()
+                    && !lines[i + 1].trim().starts_with(char::is_numeric)
+                    && !lines[i + 1].trim().starts_with("-")
+                {
                     // Numbered list continuation lines should have 3 spaces
                     assert!(lines[i + 1].starts_with("   ") || lines[i + 1].trim().is_empty());
                 }
             } else if line.trim().starts_with("-") {
                 // Check if next line is a continuation (should be indented with 2 spaces for dash lists)
-                if i + 1 < lines.len() && !lines[i + 1].trim().is_empty() &&
-                   !lines[i + 1].trim().starts_with(char::is_numeric) &&
-                   !lines[i + 1].trim().starts_with("-") {
+                if i + 1 < lines.len()
+                    && !lines[i + 1].trim().is_empty()
+                    && !lines[i + 1].trim().starts_with(char::is_numeric)
+                    && !lines[i + 1].trim().starts_with("-")
+                {
                     // Dash list continuation lines should have 2 spaces
                     assert!(lines[i + 1].starts_with("  ") || lines[i + 1].trim().is_empty());
                 }
             }
         }
     }
-    
+
     #[test]
     fn test_text_reflow_disabled_by_default() {
         let rule = MD013LineLength::new(30, false, false, false, false);
-        
+
         let content = "This is a very long line that definitely exceeds thirty characters.";
         let ctx = LintContext::new(content);
-        
+
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Without reflow enabled, it should only trim whitespace (if any)
         // Since there's no trailing whitespace, content should be unchanged
         assert_eq!(fixed, content);

@@ -103,13 +103,13 @@ impl Rule for MD007ULIndent {
                 if !self.config.start_indented && item.nesting_level == 0 {
                     continue;
                 }
-                
+
                 let expected_indent = if self.config.start_indented {
                     self.config.start_indent + (item.nesting_level * self.config.indent)
                 } else {
                     item.nesting_level * self.config.indent
                 };
-                
+
                 if item.indentation != expected_indent {
                     // Generate fix for this list item
                     let fix = {
@@ -199,13 +199,13 @@ impl Rule for MD007ULIndent {
                 if !self.config.start_indented && item.nesting_level == 0 {
                     continue;
                 }
-                
+
                 let expected_indent = if self.config.start_indented {
                     self.config.start_indent + (item.nesting_level * self.config.indent)
                 } else {
                     item.nesting_level * self.config.indent
                 };
-                
+
                 if item.indentation != expected_indent {
                     // Generate fix for this list item
                     let fix = {
@@ -294,9 +294,11 @@ impl Rule for MD007ULIndent {
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or has no unordered list items
-        ctx.content.is_empty() || !ctx.lines.iter().any(|line| {
-            line.list_item.as_ref().map_or(false, |item| !item.is_ordered)
-        })
+        ctx.content.is_empty()
+            || !ctx
+                .lines
+                .iter()
+                .any(|line| line.list_item.as_ref().is_some_and(|item| !item.is_ordered))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -720,10 +722,11 @@ tags:
 
     #[test]
     fn test_start_indented_config() {
-        let mut config = MD007Config::default();
-        config.start_indented = true;
-        config.start_indent = 4;
-        config.indent = 2;
+        let config = MD007Config {
+            start_indented: true,
+            start_indent: 4,
+            indent: 2,
+        };
         let rule = MD007ULIndent::from_config_struct(config);
 
         // First level should be indented by start_indent (4 spaces)
@@ -753,18 +756,24 @@ tags:
     #[test]
     fn test_start_indented_false_allows_any_first_level() {
         let rule = MD007ULIndent::default(); // start_indented is false by default
-        
+
         // When start_indented is false, first level items at any indentation are allowed
         let content = "   * Item 1"; // First level at 3 spaces
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "First level at any indentation should be allowed when start_indented is false");
-        
+        assert!(
+            result.is_empty(),
+            "First level at any indentation should be allowed when start_indented is false"
+        );
+
         // Multiple first level items at different indentations should all be allowed
         let content = "* Item 1\n  * Item 2\n    * Item 3"; // All at level 0 (different indents)
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "All first-level items should be allowed at any indentation");
+        assert!(
+            result.is_empty(),
+            "All first-level items should be allowed at any indentation"
+        );
     }
 
     #[test]

@@ -149,7 +149,7 @@ fn test_has_trailing_spaces() {
     assert!(!("".has_trailing_spaces()));
     assert!(!("Hello\t".has_trailing_spaces())); // Tab is not a space
     assert!(!("Hello world".has_trailing_spaces()));
-    
+
     // Test cases with trailing spaces
     assert!("Hello ".has_trailing_spaces());
     assert!("Hello  ".has_trailing_spaces());
@@ -159,7 +159,7 @@ fn test_has_trailing_spaces() {
     assert!("Hello world ".has_trailing_spaces());
     assert!("Hello\t ".has_trailing_spaces()); // Space after tab
     assert!("Hello  \n".has_trailing_spaces()); // Spaces before newline
-    
+
     // Edge cases
     assert!(!("\n".has_trailing_spaces())); // Just newline
     assert!(!("\t".has_trailing_spaces())); // Just tab
@@ -174,15 +174,15 @@ fn test_has_trailing_spaces_with_mixed_whitespace() {
     assert!("Hello \t ".has_trailing_spaces()); // Space, tab, space
     assert!(!("Hello \t".has_trailing_spaces())); // Space then tab (tab breaks trailing spaces)
     assert!("Hello\t  ".has_trailing_spaces()); // Tab then spaces
-    
+
     // Multiple lines
     let multiline = "Line 1  \nLine 2\nLine 3 ";
     // Note: has_trailing_spaces works on the whole string, not individual lines
     assert!(multiline.has_trailing_spaces()); // Last line has trailing space
-    
+
     let multiline_no_trailing = "Line 1  \nLine 2\nLine 3";
     assert!(!multiline_no_trailing.has_trailing_spaces());
-    
+
     let multiline_with_newline = "Line 1  \nLine 2\nLine 3 \n";
     assert!(multiline_with_newline.has_trailing_spaces()); // Space before final newline
 }

@@ -295,13 +295,13 @@ impl<'a> LintContext<'a> {
     /// Get code spans - computed lazily on first access
     pub fn code_spans(&self) -> Arc<Vec<CodeSpan>> {
         let mut cache = self.code_spans_cache.lock().unwrap();
-        
+
         // Check if we need to compute code spans
         if cache.is_none() {
             let code_spans = Self::parse_code_spans(self.content, &self.lines);
             *cache = Some(Arc::new(code_spans));
         }
-        
+
         // Return a reference to the cached code spans
         cache.as_ref().unwrap().clone()
     }

@@ -217,9 +217,7 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
     if _verbose {
         let skipped_rules = _total_rules - _applicable_count;
         if skipped_rules > 0 {
-            log::debug!(
-                "Skipped {skipped_rules} of {_total_rules} rules based on content analysis"
-            );
+            log::debug!("Skipped {skipped_rules} of {_total_rules} rules based on content analysis");
         }
         if ast.is_some() {
             log::debug!("Used shared AST for {ast_rules_count} rules");

@@ -30,8 +30,8 @@ pub enum HeadingStyle {
     // =======
     Setext2, // Heading
     // -------
-    Consistent, // For maintaining consistency with the first found header style
-    SetextWithAtx, // Setext for h1/h2, ATX for h3-h6
+    Consistent,          // For maintaining consistency with the first found header style
+    SetextWithAtx,       // Setext for h1/h2, ATX for h3-h6
     SetextWithAtxClosed, // Setext for h1/h2, ATX closed for h3-h6
 }
 

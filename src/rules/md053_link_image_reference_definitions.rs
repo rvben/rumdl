@@ -114,7 +114,7 @@ impl MD053LinkImageReferenceDefinitions {
         doc_structure: &DocumentStructure,
     ) -> HashMap<String, Vec<(usize, usize)>> {
         let mut definitions: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
-        
+
         // First, add all reference definitions from context
         for ref_def in &ctx.reference_defs {
             // Apply unescape to handle escaped characters in definitions
@@ -124,7 +124,7 @@ impl MD053LinkImageReferenceDefinitions {
                 .or_default()
                 .push((ref_def.line - 1, ref_def.line - 1)); // Convert to 0-indexed
         }
-        
+
         // Handle multi-line definitions that might not be fully captured by ctx.reference_defs
         let lines = &ctx.lines;
         let mut i = 0;
@@ -145,11 +145,11 @@ impl MD053LinkImageReferenceDefinitions {
                 while def_start > 0 && !REFERENCE_DEFINITION_REGEX.is_match(&lines[def_start].content) {
                     def_start -= 1;
                 }
-                
+
                 if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(&lines[def_start].content) {
                     let ref_id = caps.get(1).unwrap().as_str().trim();
                     let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
-                    
+
                     // Update the end line for this definition
                     if let Some(ranges) = definitions.get_mut(&normalized_id) {
                         if let Some(last_range) = ranges.last_mut() {
@@ -204,7 +204,7 @@ impl MD053LinkImageReferenceDefinitions {
         //    and ensure they are not within code spans or code blocks.
         // Cache code spans once before the loop
         let code_spans = ctx.code_spans();
-        
+
         for (i, line_info) in ctx.lines.iter().enumerate() {
             let line_num = i + 1; // 1-indexed
 
