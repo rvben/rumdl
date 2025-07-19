@@ -60,8 +60,13 @@ mod md058_test;
 
 // Unicode-specific test modules
 mod md001_unicode_test;
+mod md005_unicode_test;
 mod md006_unicode_test;
+mod md029_unicode_test;
 mod md054_unicode_test;
+
+// Cross-rule integration test modules
+mod list_rules_integration_test;
 
 // Test cases for MD003 - Heading Style
 #[test]

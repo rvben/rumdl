@@ -49,6 +49,17 @@ impl MD029OrderedListPrefix {
     }
 
     #[inline]
+    fn parse_marker_number(marker: &str) -> Option<usize> {
+        // Handle marker format like "1." or "1"
+        let num_part = if let Some(stripped) = marker.strip_suffix('.') {
+            stripped
+        } else {
+            marker
+        };
+        num_part.parse::<usize>().ok()
+    }
+
+    #[inline]
     fn get_expected_number(&self, index: usize) -> usize {
         match self.style {
             ListStyle::One => 1,
@@ -75,23 +86,56 @@ impl Rule for MD029OrderedListPrefix {
         "Ordered list marker value"
     }
 
-    // TODO: Consider using centralized list blocks with improved handling for code block separations
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-
-        // Early return: if no content or no ordered lists
-        if content.is_empty() || !content.contains('.') {
+        // Early returns for performance
+        if ctx.content.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Early return: quick check for ordered list patterns
-        if !ORDERED_LIST_ITEM_REGEX.is_match(content) {
+        // Quick check for any ordered list markers before processing
+        if !ctx.content.contains('.') || !ORDERED_LIST_ITEM_REGEX.is_match(ctx.content) {
             return Ok(Vec::new());
         }
 
-        // Fallback path: create structure manually (should rarely be used)
-        let structure = crate::utils::document_structure::DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
+        let mut warnings = Vec::new();
+
+        // Group ordered list blocks that are only separated by code blocks
+        // This handles cases where the centralized system splits lists that should be continuous
+        let ordered_blocks: Vec<_> = ctx.list_blocks.iter().filter(|block| block.is_ordered).collect();
+
+        if ordered_blocks.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Group consecutive list blocks that should be treated as continuous
+        let mut block_groups = Vec::new();
+        let mut current_group = vec![ordered_blocks[0]];
+
+        for i in 1..ordered_blocks.len() {
+            let prev_block = ordered_blocks[i - 1];
+            let current_block = ordered_blocks[i];
+
+            // Check if there are only code blocks/fences between these list blocks
+            let between_content_is_code_only =
+                self.is_only_code_between_blocks(ctx, prev_block.end_line, current_block.start_line);
+
+            if between_content_is_code_only {
+                // Treat as continuation of the same logical list
+                current_group.push(current_block);
+            } else {
+                // Start a new list group
+                block_groups.push(current_group);
+                current_group = vec![current_block];
+            }
+        }
+        block_groups.push(current_group);
+
+        // Process each group of blocks as a continuous list
+        for group in block_groups {
+            self.check_ordered_list_group(ctx, &group, &mut warnings);
+        }
+
+        Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -302,6 +346,134 @@ impl DocumentStructureExtensions for MD029OrderedListPrefix {
 }
 
 impl MD029OrderedListPrefix {
+    /// Check if there's only code blocks/fences between two list blocks
+    fn is_only_code_between_blocks(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        end_line: usize,
+        start_line: usize,
+    ) -> bool {
+        if end_line >= start_line {
+            return false;
+        }
+
+        for line_num in (end_line + 1)..start_line {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                // Get line content by extracting from the full content
+                let line_start = line_info.byte_offset;
+                let line_end = if line_num < ctx.lines.len() {
+                    ctx.lines[line_num].byte_offset
+                } else {
+                    ctx.content.len()
+                };
+                let line_content = &ctx.content[line_start..line_end.min(ctx.content.len())];
+                let trimmed = line_content.trim();
+
+                // Skip empty lines
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                // If in code block, it's fine
+                if line_info.in_code_block {
+                    continue;
+                }
+
+                // If this is a code fence line, it's fine
+                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                    continue;
+                }
+
+                // Any other non-empty content means lists are truly separated
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check a group of ordered list blocks that should be treated as continuous
+    fn check_ordered_list_group(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        group: &[&crate::lint_context::ListBlock],
+        warnings: &mut Vec<LintWarning>,
+    ) {
+        // Collect all items from all blocks in the group
+        let mut all_items = Vec::new();
+
+        for list_block in group {
+            for &item_line in &list_block.item_lines {
+                if let Some(line_info) = ctx.line_info(item_line) {
+                    if let Some(list_item) = &line_info.list_item {
+                        // Skip unordered lists (safety check)
+                        if !list_item.is_ordered {
+                            continue;
+                        }
+                        all_items.push((item_line, line_info, list_item));
+                    }
+                }
+            }
+        }
+
+        // Sort by line number to ensure correct order
+        all_items.sort_by_key(|(line_num, _, _)| *line_num);
+
+        // Group items by indentation level and process each level independently
+        let mut level_groups: std::collections::HashMap<
+            usize,
+            Vec<(
+                usize,
+                &crate::lint_context::LineInfo,
+                &crate::lint_context::ListItemInfo,
+            )>,
+        > = std::collections::HashMap::new();
+
+        for (line_num, line_info, list_item) in all_items {
+            // Group by marker column (indentation level)
+            level_groups
+                .entry(list_item.marker_column)
+                .or_default()
+                .push((line_num, line_info, list_item));
+        }
+
+        // Process each indentation level separately
+        for (_indent, mut group) in level_groups {
+            // Sort by line number to ensure correct order
+            group.sort_by_key(|(line_num, _, _)| *line_num);
+
+            // Check each item in the group for correct sequence
+            for (idx, (line_num, line_info, list_item)) in group.iter().enumerate() {
+                // Parse the actual number from the marker (e.g., "1." -> 1)
+                if let Some(actual_num) = Self::parse_marker_number(&list_item.marker) {
+                    let expected_num = self.get_expected_number(idx);
+
+                    if actual_num != expected_num {
+                        // Calculate byte position for the fix
+                        let marker_start = line_info.byte_offset + list_item.marker_column;
+                        let number_len = actual_num.to_string().len();
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message: format!(
+                                "Ordered list item number {actual_num} does not match style (expected {expected_num})"
+                            ),
+                            line: *line_num,
+                            column: list_item.marker_column + 1,
+                            end_line: *line_num,
+                            end_column: list_item.marker_column + number_len + 1,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: marker_start..marker_start + number_len,
+                                replacement: expected_num.to_string(),
+                            }),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     fn check_list_section(&self, items: &[(usize, String)], warnings: &mut Vec<LintWarning>, content: &str) {
         // Group items by indentation level and process each level independently
         let mut level_groups: std::collections::HashMap<usize, Vec<(usize, String)>> = std::collections::HashMap::new();

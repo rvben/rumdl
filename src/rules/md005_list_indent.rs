@@ -32,126 +32,126 @@ impl MD005ListIndent {
         }
     }
 
-    // Determine if a line is a continuation of a list item
-    #[inline]
-    fn is_list_continuation(prev_list_indent: usize, current_line: &str, current_is_list: bool) -> bool {
-        // Early return for empty lines
-        if current_line.trim().is_empty() {
-            return false;
+    /// Group related list blocks that should be treated as one logical list structure
+    fn group_related_list_blocks<'a>(
+        &self,
+        list_blocks: &'a [crate::lint_context::ListBlock],
+    ) -> Vec<Vec<&'a crate::lint_context::ListBlock>> {
+        if list_blocks.is_empty() {
+            return Vec::new();
         }
 
-        // If the previous line is a list item and the current line has more indentation
-        // but is not a list item itself, it's a continuation
-        let current_indent = current_line.len() - current_line.trim_start().len();
-        current_indent > prev_list_indent && !current_is_list
+        let mut groups = Vec::new();
+        let mut current_group = vec![&list_blocks[0]];
+
+        for i in 1..list_blocks.len() {
+            let prev_block = &list_blocks[i - 1];
+            let current_block = &list_blocks[i];
+
+            // Check if blocks are consecutive (no significant gap between them)
+            let line_gap = current_block.start_line.saturating_sub(prev_block.end_line);
+
+            // Group blocks if they are close together (within 2 lines)
+            // This handles cases where mixed list types are split but should be treated together
+            if line_gap <= 2 {
+                current_group.push(current_block);
+            } else {
+                // Start a new group
+                groups.push(current_group);
+                current_group = vec![current_block];
+            }
+        }
+        groups.push(current_group);
+
+        groups
     }
 
-    /// Optimized check that combines all passes into one
-    /// TODO: Consider migrating to centralized list blocks after improving mixed list type handling
-    fn check_optimized(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
+    /// Check a group of related list blocks as one logical list structure
+    fn check_list_block_group(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        group: &[&crate::lint_context::ListBlock],
+        warnings: &mut Vec<LintWarning>,
+    ) -> Result<(), LintError> {
+        let line_index = LineIndex::new(ctx.content.to_string());
 
-        // Early returns for common cases
-        if content.is_empty() || ctx.lines.is_empty() {
-            return Ok(Vec::new());
-        }
+        // Collect all list items from all blocks in the group
+        let mut all_list_items = Vec::new();
 
-        // Quick check to avoid processing files without lists
-        let has_lists = ctx.lines.iter().any(|line| line.list_item.is_some());
-        if !has_lists {
-            return Ok(Vec::new());
-        }
+        for list_block in group {
+            for &item_line in &list_block.item_lines {
+                if let Some(line_info) = ctx.line_info(item_line) {
+                    if let Some(list_item) = &line_info.list_item {
+                        // Calculate the effective indentation (considering blockquotes)
+                        let effective_indent = if let Some(blockquote) = &line_info.blockquote {
+                            // For blockquoted lists, use relative indentation within the blockquote
+                            list_item.marker_column.saturating_sub(blockquote.nesting_level * 2)
+                        } else {
+                            // For normal lists, use the marker column directly
+                            list_item.marker_column
+                        };
 
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
-
-        // Single pass processing with efficient data structures
-        let mut list_items: Vec<(usize, usize, usize)> = Vec::new(); // (line_num, indent, list_id)
-        let mut current_list_id = 0;
-        let mut in_list = false;
-        let mut list_level_maps: HashMap<usize, HashMap<usize, usize>> = HashMap::new(); // list_id -> { indent -> level }
-        let mut level_indents: HashMap<(usize, usize), usize> = HashMap::new(); // (list_id, level) -> expected_indent
-
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            // Skip blank lines and code blocks
-            if line_info.is_blank || line_info.in_code_block {
-                continue;
-            }
-
-            // Check if this is a list item using cached info
-            if let Some(list_item) = &line_info.list_item {
-                // For MD005, we need the indentation within the list context
-                let line = &line_info.content;
-
-                // Check if this line is in a blockquote
-                let indent = if let Some(caps) = BLOCKQUOTE_PREFIX.captures(line) {
-                    // Get the content after all blockquote markers
-                    let prefix_len = caps.get(0).unwrap().len();
-                    let content_after_prefix = &line[prefix_len..];
-                    // Count leading spaces in the content (within blockquote context)
-                    content_after_prefix.len() - content_after_prefix.trim_start().len()
-                } else {
-                    // Not in a blockquote, use the marker column directly
-                    list_item.marker_column
-                };
-
-                // Determine if this starts a new list
-                let is_new_list = !in_list
-                    || (list_items.last().is_some_and(|(_, prev_indent, _)| {
-                        // A significant dedent (less than half of previous) starts a new list
-                        prev_indent > &0 && indent == 0
-                    }));
-
-                if is_new_list {
-                    current_list_id += 1;
-                    in_list = true;
+                        all_list_items.push((item_line, effective_indent, line_info, list_item));
+                    }
                 }
+            }
+        }
 
-                // Determine level for this item
-                let level_map = list_level_maps.entry(current_list_id).or_default();
-                let level = if level_map.is_empty() {
-                    // First item in list - if indented, it's wrong
-                    if indent > 0 {
-                        // This is a top-level item that should not be indented
-                        level_map.insert(indent, 1);
-                        1
-                    } else {
-                        level_map.insert(0, 1);
-                        level_indents.insert((current_list_id, 1), 0);
-                        1
+        if all_list_items.is_empty() {
+            return Ok(());
+        }
+
+        // Sort by line number to process in order
+        all_list_items.sort_by_key(|(line_num, _, _, _)| *line_num);
+
+        // Determine levels based on indentation progression (like the original algorithm)
+        let mut indent_to_level: HashMap<usize, usize> = HashMap::new();
+
+        // Process items to establish level mapping based on nesting structure
+        for (_line_num, indent, _line_info, _list_item) in &all_list_items {
+            let _level = if indent_to_level.is_empty() {
+                // First item establishes level 1
+                indent_to_level.insert(*indent, 1);
+                1
+            } else if let Some(&existing_level) = indent_to_level.get(indent) {
+                // This indentation already has a level
+                existing_level
+            } else {
+                // Determine level based on relative indentation and parent-child relationships
+                let mut level = 1;
+                for (&existing_indent, &existing_level) in &indent_to_level {
+                    if existing_indent < *indent {
+                        level = level.max(existing_level + 1);
                     }
-                } else {
-                    // Find appropriate level based on indentation
-                    if let Some(&existing_level) = level_map.get(&indent) {
-                        existing_level
-                    } else {
-                        // Determine level based on parent indentation
-                        let mut level = 1;
-                        let mut parent_indent = 0;
+                }
+                indent_to_level.insert(*indent, level);
+                level
+            };
+        }
 
-                        for (&prev_indent, &prev_level) in level_map.iter() {
-                            if prev_indent < indent && (prev_level >= level || prev_indent > parent_indent) {
-                                level = prev_level + 1;
-                                parent_indent = prev_indent;
-                            }
-                        }
+        // Group items by level and check for consistency within each level
+        let mut level_groups: HashMap<usize, Vec<(usize, usize, &crate::lint_context::LineInfo)>> = HashMap::new();
+        for (line_num, indent, line_info, _list_item) in &all_list_items {
+            let level = indent_to_level[indent];
+            level_groups
+                .entry(level)
+                .or_default()
+                .push((*line_num, *indent, *line_info));
+        }
 
-                        // If we have no parent (indent > 0 but no smaller indent found), it's level 1
-                        if level == 1 && indent > 0 && !level_map.contains_key(&0) {
-                            // This is a top level item that's incorrectly indented
-                            level = 1;
-                        }
+        // Process each level group
+        for (level, mut group) in level_groups {
+            // Sort by line number to process in order
+            group.sort_by_key(|(line_num, _, _)| *line_num);
 
-                        level_map.insert(indent, level);
-                        level
-                    }
-                };
+            let expected_indent = Self::get_expected_indent(level);
 
-                list_items.push((line_num, indent, current_list_id));
+            // Check if items in this level have consistent indentation
+            let indents: std::collections::HashSet<usize> = group.iter().map(|(_, indent, _)| *indent).collect();
 
-                // Check indentation immediately
-                let expected_indent = Self::get_expected_indent(level);
-                if indent != expected_indent {
+            if indents.len() > 1 {
+                // Multiple different indentations at the same level - flag all as inconsistent
+                for (line_num, indent, line_info) in &group {
                     let inconsistent_message = format!(
                         "Expected indentation of {} {}, found {}",
                         expected_indent,
@@ -159,26 +159,21 @@ impl MD005ListIndent {
                         indent
                     );
 
-                    let line = &line_info.content;
-                    let (start_line, start_col, end_line, end_col) = if indent > 0 {
-                        calculate_match_range(line_num + 1, line, 0, indent)
+                    let (start_line, start_col, end_line, end_col) = if *indent > 0 {
+                        calculate_match_range(*line_num, &line_info.content, 0, *indent)
                     } else {
-                        calculate_match_range(line_num + 1, line, 0, 1)
+                        calculate_match_range(*line_num, &line_info.content, 0, 1)
                     };
 
-                    // Fix range should span from start of line to end of indentation
-                    let fix_range = if indent > 0 {
-                        // Replace the current indentation with expected indentation
-                        let start_byte = line_index.line_col_to_byte_range(line_num + 1, 1).start;
-                        let end_byte = line_index.line_col_to_byte_range(line_num + 1, indent + 1).start;
+                    let fix_range = if *indent > 0 {
+                        let start_byte = line_index.line_col_to_byte_range(*line_num, 1).start;
+                        let end_byte = line_index.line_col_to_byte_range(*line_num, *indent + 1).start;
                         start_byte..end_byte
                     } else {
-                        // For no indentation, insert at start of line
-                        let byte_pos = line_index.line_col_to_byte_range(line_num + 1, 1).start;
+                        let byte_pos = line_index.line_col_to_byte_range(*line_num, 1).start;
                         byte_pos..byte_pos
                     };
 
-                    // Replacement should be just the corrected indentation
                     let replacement = if expected_indent > 0 {
                         " ".repeat(expected_indent)
                     } else {
@@ -199,78 +194,82 @@ impl MD005ListIndent {
                         }),
                     });
                 }
-
-                // Track level consistency
-                let key = (current_list_id, level);
-                if let Some(reference_indent) = level_indents.get(&key) {
-                    if indent != *reference_indent {
+            } else {
+                // Single indentation at this level - check if it matches expected
+                let actual_indent = indents.iter().next().unwrap();
+                if *actual_indent != expected_indent {
+                    for (line_num, indent, line_info) in &group {
                         let inconsistent_message = format!(
                             "Expected indentation of {} {}, found {}",
-                            reference_indent,
-                            if *reference_indent == 1 { "space" } else { "spaces" },
+                            expected_indent,
+                            if expected_indent == 1 { "space" } else { "spaces" },
                             indent
                         );
 
-                        // Only add if we don't already have a warning for this line
-                        if !warnings.iter().any(|w| w.line == line_num + 1) {
-                            let line = &line_info.content;
-                            let (start_line, start_col, end_line, end_col) = if indent > 0 {
-                                calculate_match_range(line_num + 1, line, 0, indent)
-                            } else {
-                                calculate_match_range(line_num + 1, line, 0, 1)
-                            };
+                        let (start_line, start_col, end_line, end_col) = if *indent > 0 {
+                            calculate_match_range(*line_num, &line_info.content, 0, *indent)
+                        } else {
+                            calculate_match_range(*line_num, &line_info.content, 0, 1)
+                        };
 
-                            // Fix range should span from start of line to end of indentation
-                            let fix_range = if indent > 0 {
-                                // Replace the current indentation with expected indentation
-                                let start_byte = line_index.line_col_to_byte_range(line_num + 1, 1).start;
-                                let end_byte = line_index.line_col_to_byte_range(line_num + 1, indent + 1).start;
-                                start_byte..end_byte
-                            } else {
-                                // For no indentation, insert at start of line
-                                let byte_pos = line_index.line_col_to_byte_range(line_num + 1, 1).start;
-                                byte_pos..byte_pos
-                            };
+                        let fix_range = if *indent > 0 {
+                            let start_byte = line_index.line_col_to_byte_range(*line_num, 1).start;
+                            let end_byte = line_index.line_col_to_byte_range(*line_num, *indent + 1).start;
+                            start_byte..end_byte
+                        } else {
+                            let byte_pos = line_index.line_col_to_byte_range(*line_num, 1).start;
+                            byte_pos..byte_pos
+                        };
 
-                            // Replacement should be just the corrected indentation
-                            let replacement = if *reference_indent > 0 {
-                                " ".repeat(*reference_indent)
-                            } else {
-                                String::new()
-                            };
+                        let replacement = if expected_indent > 0 {
+                            " ".repeat(expected_indent)
+                        } else {
+                            String::new()
+                        };
 
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
-                                line: start_line,
-                                column: start_col,
-                                end_line,
-                                end_column: end_col,
-                                message: inconsistent_message,
-                                severity: Severity::Warning,
-                                fix: Some(Fix {
-                                    range: fix_range,
-                                    replacement,
-                                }),
-                            });
-                        }
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: inconsistent_message,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: fix_range,
+                                replacement,
+                            }),
+                        });
                     }
-                } else {
-                    level_indents.insert(key, indent);
-                }
-            } else {
-                // Check if it's a list continuation
-                if list_items.is_empty() || !in_list {
-                    continue;
-                }
-
-                let (prev_line_num, prev_indent, _) = list_items.last().unwrap();
-                let prev_line_info = &ctx.lines[*prev_line_num];
-                if prev_line_info.list_item.is_some()
-                    && !Self::is_list_continuation(*prev_indent, &line_info.content, false)
-                {
-                    in_list = false;
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    /// Migrated to use centralized list blocks for better performance and accuracy
+    fn check_optimized(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let content = ctx.content;
+
+        // Early returns for common cases
+        if content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Quick check for any list blocks before processing
+        if ctx.list_blocks.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut warnings = Vec::new();
+
+        // Group consecutive list blocks that should be treated as one logical structure
+        // This is needed because mixed list types (ordered/unordered) get split into separate blocks
+        let block_groups = self.group_related_list_blocks(&ctx.list_blocks);
+
+        for group in block_groups {
+            self.check_list_block_group(ctx, &group, &mut warnings)?;
         }
 
         Ok(warnings)

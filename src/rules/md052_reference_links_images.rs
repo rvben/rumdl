@@ -429,15 +429,54 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Shortcut reference detection doesn't check inline code spans"]
     fn test_references_in_inline_code_ignored() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "`[undefined]`";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
-        // TODO: Shortcut reference detection should check inline code spans
+        // References inside inline code spans should be ignored
         assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_comprehensive_inline_code_detection() {
+        let rule = MD052ReferenceLinkImages::new();
+        let content = r#"# Test
+
+This `[inside]` should be ignored.
+This [outside] should be flagged.
+Reference links `[text][ref]` in code are ignored.
+Regular reference [text][missing] should be flagged.
+Images `![alt][img]` in code are ignored.
+Regular image ![alt][badimg] should be flagged.
+
+Multiple `[one]` and `[two]` in code ignored, but [three] is not.
+
+```
+[code block content] should be ignored
+```
+
+`Multiple [refs] in [same] code span` ignored."#;
+
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag: outside, missing, badimg, three (4 total)
+        assert_eq!(result.len(), 4);
+
+        let messages: Vec<&str> = result.iter().map(|w| &*w.message).collect();
+        assert!(messages.iter().any(|m| m.contains("outside")));
+        assert!(messages.iter().any(|m| m.contains("missing")));
+        assert!(messages.iter().any(|m| m.contains("badimg")));
+        assert!(messages.iter().any(|m| m.contains("three")));
+
+        // Should NOT flag any references inside code spans
+        assert!(!messages.iter().any(|m| m.contains("inside")));
+        assert!(!messages.iter().any(|m| m.contains("one")));
+        assert!(!messages.iter().any(|m| m.contains("two")));
+        assert!(!messages.iter().any(|m| m.contains("refs")));
+        assert!(!messages.iter().any(|m| m.contains("same")));
     }
 
     #[test]
