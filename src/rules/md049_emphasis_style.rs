@@ -161,7 +161,11 @@ impl Rule for MD049EmphasisStyle {
                 let (wrong_marker, correct_marker) = match self.config.style {
                     EmphasisStyle::Asterisk => ('_', '*'),
                     EmphasisStyle::Underscore => ('*', '_'),
-                    EmphasisStyle::Consistent => unreachable!(),
+                    EmphasisStyle::Consistent => {
+                        // This case is handled separately above
+                        // but fallback to asterisk style for safety
+                        ('_', '*')
+                    }
                 };
 
                 for (line_num, abs_col, marker, content) in &emphasis_info {

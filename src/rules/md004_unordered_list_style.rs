@@ -174,7 +174,11 @@ impl Rule for MD004UnorderedListStyle {
                                     0 => '*',
                                     1 => '+',
                                     2 => '-',
-                                    _ => unreachable!(),
+                                    _ => {
+                                        // This should never happen as % 3 only returns 0, 1, or 2
+                                        // but fallback to asterisk for safety
+                                        '*'
+                                    }
                                 };
                                 if marker != expected_marker {
                                     let (line, col) = ctx.offset_to_line_col(offset);
@@ -201,7 +205,11 @@ impl Rule for MD004UnorderedListStyle {
                                     UnorderedListStyle::Asterisk => '*',
                                     UnorderedListStyle::Dash => '-',
                                     UnorderedListStyle::Plus => '+',
-                                    _ => unreachable!(),
+                                    UnorderedListStyle::Consistent | UnorderedListStyle::Sublist => {
+                                        // These cases are handled separately above
+                                        // but fallback to asterisk for safety
+                                        '*'
+                                    }
                                 };
                                 if marker != target_marker {
                                     let (line, col) = ctx.offset_to_line_col(offset);
@@ -277,7 +285,11 @@ impl Rule for MD004UnorderedListStyle {
                                     0 => '*',
                                     1 => '+',
                                     2 => '-',
-                                    _ => unreachable!(),
+                                    _ => {
+                                        // This should never happen as % 3 only returns 0, 1, or 2
+                                        // but fallback to asterisk for safety
+                                        '*'
+                                    }
                                 }
                             }
                             UnorderedListStyle::Asterisk => '*',

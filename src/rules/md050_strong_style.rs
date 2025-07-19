@@ -105,7 +105,11 @@ impl Rule for MD050StrongStyle {
         let strong_regex = match target_style {
             StrongStyle::Asterisk => &*BOLD_UNDERSCORE_REGEX,
             StrongStyle::Underscore => &*BOLD_ASTERISK_REGEX,
-            StrongStyle::Consistent => unreachable!(),
+            StrongStyle::Consistent => {
+                // This case is handled separately in the calling code
+                // but fallback to asterisk style for safety
+                &*BOLD_UNDERSCORE_REGEX
+            }
         };
 
         // Track byte position for each line
@@ -126,7 +130,11 @@ impl Rule for MD050StrongStyle {
                     let message = match target_style {
                         StrongStyle::Asterisk => "Strong emphasis should use ** instead of __",
                         StrongStyle::Underscore => "Strong emphasis should use __ instead of **",
-                        StrongStyle::Consistent => unreachable!(),
+                        StrongStyle::Consistent => {
+                            // This case is handled separately in the calling code
+                            // but fallback to asterisk style for safety
+                            "Strong emphasis should use ** instead of __"
+                        }
                     };
 
                     // Calculate precise character range for the entire strong emphasis
@@ -146,7 +154,11 @@ impl Rule for MD050StrongStyle {
                             replacement: match target_style {
                                 StrongStyle::Asterisk => format!("**{text}**"),
                                 StrongStyle::Underscore => format!("__{text}__"),
-                                StrongStyle::Consistent => unreachable!(),
+                                StrongStyle::Consistent => {
+                                    // This case is handled separately in the calling code
+                                    // but fallback to asterisk style for safety
+                                    format!("**{text}**")
+                                }
                             },
                         }),
                     });
@@ -171,7 +183,11 @@ impl Rule for MD050StrongStyle {
         let strong_regex = match target_style {
             StrongStyle::Asterisk => &*BOLD_UNDERSCORE_REGEX,
             StrongStyle::Underscore => &*BOLD_ASTERISK_REGEX,
-            StrongStyle::Consistent => unreachable!(),
+            StrongStyle::Consistent => {
+                // This case is handled separately in the calling code
+                // but fallback to asterisk style for safety
+                &*BOLD_UNDERSCORE_REGEX
+            }
         };
 
         // Store matches with their positions
@@ -191,7 +207,11 @@ impl Rule for MD050StrongStyle {
             let replacement = match target_style {
                 StrongStyle::Asterisk => format!("**{text}**"),
                 StrongStyle::Underscore => format!("__{text}__"),
-                StrongStyle::Consistent => unreachable!(),
+                StrongStyle::Consistent => {
+                    // This case is handled separately in the calling code
+                    // but fallback to asterisk style for safety
+                    format!("**{text}**")
+                }
             };
             result.replace_range(start..end, &replacement);
         }
