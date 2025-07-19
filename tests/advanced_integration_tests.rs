@@ -63,8 +63,7 @@ This is a line that would normally exceed the default line length limit, but we'
     assert.code(1);
 
     // Should have list indentation violations (MD005 - list starts with 3 spaces instead of 0)
-    assert!(output.contains("MD005"), 
-            "Expected MD005 in output: {}", output);
+    assert!(output.contains("MD005"), "Expected MD005 in output: {output}");
 
     // Should have MD023 violations (indented heading)
     assert!(output.contains("MD023"));
@@ -320,7 +319,7 @@ fn test_cli_options() {
     );
     assert!(!disabled_output.contains("MD022"));
     assert!(!disabled_output.contains("MD033"));
-    
+
     // Note: MD032 (blanks around lists) doesn't trigger because the list has blank lines around it
     // Note: MD030 (list marker space) doesn't trigger on "*Bad item" because it's not a valid list item
 
@@ -355,7 +354,7 @@ fn test_cli_options() {
 #[test]
 fn test_specific_rule_triggers() {
     let temp_dir = tempdir().unwrap();
-    
+
     // Test MD022: Headings should be surrounded by blank lines
     let md022_path = temp_dir.path().join("md022_test.md");
     let md022_content = r#"# First heading
@@ -365,15 +364,15 @@ Text right after heading
 ## Third heading
 "#;
     fs::write(&md022_path, md022_content).unwrap();
-    
+
     let mut md022_cmd = Command::cargo_bin("rumdl").unwrap();
-    let md022_assert = md022_cmd
-        .arg(&md022_path)
-        .arg("--no-config")
-        .assert();
+    let md022_assert = md022_cmd.arg(&md022_path).arg("--no-config").assert();
     let md022_output = String::from_utf8(md022_assert.get_output().stdout.clone()).unwrap();
-    assert!(md022_output.contains("MD022"), "MD022 should trigger for headings without blank lines");
-    
+    assert!(
+        md022_output.contains("MD022"),
+        "MD022 should trigger for headings without blank lines"
+    );
+
     // Test MD030: Spaces after list markers
     let md030_path = temp_dir.path().join("md030_test.md");
     let md030_content = r#"# List spacing test
@@ -383,15 +382,15 @@ Text right after heading
 * Normal spacing
 "#;
     fs::write(&md030_path, md030_content).unwrap();
-    
+
     let mut md030_cmd = Command::cargo_bin("rumdl").unwrap();
-    let md030_assert = md030_cmd
-        .arg(&md030_path)
-        .arg("--no-config")
-        .assert();
+    let md030_assert = md030_cmd.arg(&md030_path).arg("--no-config").assert();
     let md030_output = String::from_utf8(md030_assert.get_output().stdout.clone()).unwrap();
-    assert!(md030_output.contains("MD030"), "MD030 should trigger for incorrect spacing after list markers");
-    
+    assert!(
+        md030_output.contains("MD030"),
+        "MD030 should trigger for incorrect spacing after list markers"
+    );
+
     // Test MD032: Lists should be surrounded by blank lines
     let md032_path = temp_dir.path().join("md032_test.md");
     let md032_content = r#"# List blank lines test
@@ -406,15 +405,15 @@ Another paragraph.
 2. Second item
 "#;
     fs::write(&md032_path, md032_content).unwrap();
-    
+
     let mut md032_cmd = Command::cargo_bin("rumdl").unwrap();
-    let md032_assert = md032_cmd
-        .arg(&md032_path)
-        .arg("--no-config")
-        .assert();
+    let md032_assert = md032_cmd.arg(&md032_path).arg("--no-config").assert();
     let md032_output = String::from_utf8(md032_assert.get_output().stdout.clone()).unwrap();
-    assert!(md032_output.contains("MD032"), "MD032 should trigger for lists without blank lines around them");
-    
+    assert!(
+        md032_output.contains("MD032"),
+        "MD032 should trigger for lists without blank lines around them"
+    );
+
     // Test MD033: No inline HTML
     let md033_path = temp_dir.path().join("md033_test.md");
     let md033_content = r#"# HTML test
@@ -426,15 +425,12 @@ Another paragraph.
 <script>alert('JS')</script>
 "#;
     fs::write(&md033_path, md033_content).unwrap();
-    
+
     let mut md033_cmd = Command::cargo_bin("rumdl").unwrap();
-    let md033_assert = md033_cmd
-        .arg(&md033_path)
-        .arg("--no-config")
-        .assert();
+    let md033_assert = md033_cmd.arg(&md033_path).arg("--no-config").assert();
     let md033_output = String::from_utf8(md033_assert.get_output().stdout.clone()).unwrap();
     assert!(md033_output.contains("MD033"), "MD033 should trigger for inline HTML");
-    
+
     // Test that invalid list syntax doesn't trigger MD030
     let invalid_list_path = temp_dir.path().join("invalid_list_test.md");
     let invalid_list_content = r#"# Invalid list test
@@ -445,7 +441,7 @@ Another paragraph.
 This is text with *emphasis* not a list.
 "#;
     fs::write(&invalid_list_path, invalid_list_content).unwrap();
-    
+
     let mut invalid_cmd = Command::cargo_bin("rumdl").unwrap();
     let invalid_assert = invalid_cmd
         .arg(&invalid_list_path)
@@ -455,5 +451,8 @@ This is text with *emphasis* not a list.
         .assert();
     let invalid_output = String::from_utf8(invalid_assert.get_output().stdout.clone()).unwrap();
     // MD030 should NOT trigger on "*Bad item" because it's not recognized as a valid list item
-    assert!(!invalid_output.contains("MD030"), "MD030 should not trigger on invalid list syntax like '*Bad item'");
+    assert!(
+        !invalid_output.contains("MD030"),
+        "MD030 should not trigger on invalid list syntax like '*Bad item'"
+    );
 }

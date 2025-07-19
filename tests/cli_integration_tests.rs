@@ -974,10 +974,7 @@ line_length = 123
 
     // Test MD013.line_length
     let (success, stdout, stderr) = run_cmd(&["config", "get", "MD013.line_length"]);
-    assert!(
-        success,
-        "config get MD013.line_length should succeed, stderr: {stderr}"
-    );
+    assert!(success, "config get MD013.line_length should succeed, stderr: {stderr}");
     assert!(
         stdout.contains("MD013.line-length = 123 [from .rumdl.toml]"),
         "Unexpected output: {stdout}. Stderr: {stderr}"

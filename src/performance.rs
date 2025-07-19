@@ -131,9 +131,7 @@ impl ContentGenerator {
             // Add subsections
             for j in 1..=3 {
                 content.push_str(&format!("### Subsection {i}.{j}\n\n"));
-                content.push_str(&format!(
-                    "Content for subsection {i}.{j} with multiple paragraphs.\n\n"
-                ));
+                content.push_str(&format!("Content for subsection {i}.{j} with multiple paragraphs.\n\n"));
                 content.push_str("Lorem ipsum dolor sit amet, consectetur adipiscing elit. ");
                 content.push_str("Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\n");
 
@@ -190,9 +188,7 @@ impl ContentGenerator {
                 content.push_str(&format!(
                     "- [Official docs](https://docs.example.com/section{i}/subsection{j})\n"
                 ));
-                content.push_str(&format!(
-                    "- [API reference](https://api.example.com/v{j}/section{i})\n"
-                ));
+                content.push_str(&format!("- [API reference](https://api.example.com/v{j}/section{i})\n"));
                 content.push_str(&format!("- Bare URL: https://example{i}.com/path/{j}\n"));
                 content.push_str(&format!("- Contact: section{i}@example{j}.com\n"));
                 content.push('\n');
@@ -257,7 +253,7 @@ impl PerformanceBenchmark {
                 }
             }
         }
-        
+
         // For other platforms, return None for now
         // This can be enhanced with platform-specific implementations in the future
         #[cfg(not(target_os = "linux"))]
@@ -265,7 +261,7 @@ impl PerformanceBenchmark {
             // Memory measurement not implemented for this platform yet
             // Could add support for macOS (using libc), Windows (using winapi), etc.
         }
-        
+
         None
     }
 
@@ -280,7 +276,7 @@ impl PerformanceBenchmark {
 
         // Collect memory samples
         let mut memory_samples = Vec::new();
-        
+
         // Take initial memory reading
         if let Some(initial_mem) = Self::get_memory_usage_mb() {
             memory_samples.push(initial_mem);
@@ -290,12 +286,12 @@ impl PerformanceBenchmark {
         let start = Instant::now();
         let warnings = rule.check(&ctx).unwrap_or_else(|_| vec![]);
         let execution_time = start.elapsed();
-        
+
         // Take final memory reading
         if let Some(final_mem) = Self::get_memory_usage_mb() {
             memory_samples.push(final_mem);
         }
-        
+
         // Calculate memory stats if we have samples
         let memory_stats = if !memory_samples.is_empty() {
             let peak = memory_samples.iter().cloned().fold(f64::MIN, f64::max);
@@ -486,7 +482,7 @@ mod tests {
     fn test_memory_measurement() {
         // Test that memory measurement doesn't panic
         let memory = PerformanceBenchmark::get_memory_usage_mb();
-        
+
         #[cfg(target_os = "linux")]
         {
             // On Linux, we should get a value if /proc/self/status exists
@@ -497,7 +493,7 @@ mod tests {
                 }
             }
         }
-        
+
         #[cfg(not(target_os = "linux"))]
         {
             // On other platforms, we currently return None
@@ -508,7 +504,7 @@ mod tests {
     #[test]
     fn test_benchmark_rule_with_memory() {
         use crate::rules;
-        
+
         // Create a simple test rule
         let config = crate::config::Config::default();
         let rules = rules::all_rules(&config);
@@ -516,13 +512,13 @@ mod tests {
         if let Some(rule) = rules.first() {
             let content = "# Test\n\nSome content";
             let result = monitor.benchmark_rule(rule.as_ref(), content);
-            
+
             // Check basic properties
             assert!(!result.rule_name.is_empty());
             assert!(result.execution_time.as_nanos() > 0);
             assert_eq!(result.content_size_bytes, content.len());
             assert_eq!(result.lines_processed, 3);
-            
+
             // Memory stats might be None on unsupported platforms
             #[cfg(target_os = "linux")]
             {

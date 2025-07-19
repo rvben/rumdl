@@ -47,9 +47,7 @@ fn test_cli_lsp_consistency(rule: &dyn Rule, content: &str, test_name: &str) {
             }
         }
         (Ok(_), Err(warnings_error)) => {
-            panic!(
-                "{test_name}: CLI fix succeeded but check failed: {warnings_error:?}"
-            );
+            panic!("{test_name}: CLI fix succeeded but check failed: {warnings_error:?}");
         }
         (Err(cli_error), Ok(_)) => {
             println!("○ {test_name}: CLI fix not implemented: {cli_error:?}");
@@ -481,15 +479,11 @@ fn test_all_53_rules_systematic_coverage() {
         0.0
     };
 
-    println!(
-        "📈 Test coverage: {coverage_tested}/{total_tested} rules ({coverage_percentage:.1}%)"
-    );
+    println!("📈 Test coverage: {coverage_tested}/{total_tested} rules ({coverage_percentage:.1}%)");
 
     if consistent_fixes > 0 {
         let consistency_rate = (consistent_fixes as f64 / coverage_tested as f64) * 100.0;
-        println!(
-            "🎯 Fix consistency rate: {consistent_fixes}/{coverage_tested} ({consistency_rate:.1}%)"
-        );
+        println!("🎯 Fix consistency rate: {consistent_fixes}/{coverage_tested} ({consistency_rate:.1}%)");
     }
 
     // Quality assertions

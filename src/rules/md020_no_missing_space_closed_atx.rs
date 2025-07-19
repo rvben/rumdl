@@ -46,9 +46,7 @@ impl MD020NoMissingSpaceClosedAtx {
             let content = &captures[3];
             let last_char = &captures[4];
             let closing_hashes = &captures[5];
-            format!(
-                "{indentation}{opening_hashes} {content}{last_char} {closing_hashes}"
-            )
+            format!("{indentation}{opening_hashes} {content}{last_char} {closing_hashes}")
         } else if let Some(captures) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
@@ -61,9 +59,7 @@ impl MD020NoMissingSpaceClosedAtx {
             let content = &captures[3];
             let last_char = &captures[4];
             let closing_hashes = &captures[5];
-            format!(
-                "{indentation}{opening_hashes} {content}{last_char} {closing_hashes}"
-            )
+            format!("{indentation}{opening_hashes} {content}{last_char} {closing_hashes}")
         } else {
             line.to_string()
         }

@@ -39,9 +39,7 @@ fn test_init_command_creates_and_loads_config() {
     // - MD022: Missing blank lines around headings
     // - MD041: First line in file should be a level 1 heading
     assert!(
-        combined_output.contains("MD002") || 
-        combined_output.contains("MD022") ||
-        combined_output.contains("MD041"),
+        combined_output.contains("MD002") || combined_output.contains("MD022") || combined_output.contains("MD041"),
         "Should detect at least one of: MD002 (first heading h1), MD022 (blanks around headings), or MD041 (first line heading)"
     );
 }
@@ -123,11 +121,11 @@ ___
     // - MD045: Image without alt text (line 84)
     // - MD046: Mixed code block styles (indented code block on line 90)
     assert!(
-        combined_output.contains("MD001") || 
-        combined_output.contains("MD013") ||
-        combined_output.contains("MD042") ||
-        combined_output.contains("MD045") ||
-        combined_output.contains("MD046"),
+        combined_output.contains("MD001")
+            || combined_output.contains("MD013")
+            || combined_output.contains("MD042")
+            || combined_output.contains("MD045")
+            || combined_output.contains("MD046"),
         "Should detect at least one of: MD001 (heading jump), MD013 (line length), MD042 (empty link), MD045 (no alt text), or MD046 (code block style)"
     );
 
@@ -157,7 +155,7 @@ fn test_multiple_rule_groups() {
 
 - First list item
 -   Second item with extra spaces
-- Third list item with trailing whitespace  
+- Third list item with trailing whitespace
 - Fourth item with	hard tab
 
 Unnecessarily long line that exceeds the default line length limit and should trigger a warning if enabled.
@@ -188,13 +186,13 @@ Multiple blank lines above this one.
     // - MD024: Duplicate "Heading 1" content (lines 139-140)
     // - MD030: Inconsistent spaces after list markers (line 146)
     assert!(
-        combined_output.contains("MD003") ||
-        combined_output.contains("MD009") ||
-        combined_output.contains("MD010") ||
-        combined_output.contains("MD012") ||
-        combined_output.contains("MD013") ||
-        combined_output.contains("MD024") ||
-        combined_output.contains("MD030"),
+        combined_output.contains("MD003")
+            || combined_output.contains("MD009")
+            || combined_output.contains("MD010")
+            || combined_output.contains("MD012")
+            || combined_output.contains("MD013")
+            || combined_output.contains("MD024")
+            || combined_output.contains("MD030"),
         "Should detect at least one of: MD003 (heading style), MD009 (trailing spaces), MD010 (tabs), MD012 (multiple blanks), MD013 (line length), MD024 (duplicate heading), or MD030 (list marker spaces)"
     );
 }
@@ -211,7 +209,7 @@ fn test_emphasis_and_heading_rules() {
 **Another emphasized line that should be detected**
 
    # Indented heading (MD023)
-   
+
 ## Missing blank line above (MD022)
 Text immediately below heading (MD022)
 
@@ -240,10 +238,10 @@ Text immediately below heading (MD022)
     // - MD023: Indented heading (line 185)
     // - MD036: Emphasis used as heading (lines 182-183)
     assert!(
-        combined_output.contains("MD001") ||
-        combined_output.contains("MD022") ||
-        combined_output.contains("MD023") ||
-        combined_output.contains("MD036"),
+        combined_output.contains("MD001")
+            || combined_output.contains("MD022")
+            || combined_output.contains("MD023")
+            || combined_output.contains("MD036"),
         "Should detect at least one of: MD001 (heading increment), MD022 (blanks around headings), MD023 (heading start left), or MD036 (emphasis as heading)"
     );
 
@@ -312,11 +310,11 @@ Visit http://example.com for more information.
     // - MD045: Image without alt text (line 252)
     // - MD052: Undefined reference link (line 254)
     assert!(
-        combined_output.contains("MD034") ||
-        combined_output.contains("MD039") ||
-        combined_output.contains("MD042") ||
-        combined_output.contains("MD045") ||
-        combined_output.contains("MD052"),
+        combined_output.contains("MD034")
+            || combined_output.contains("MD039")
+            || combined_output.contains("MD042")
+            || combined_output.contains("MD045")
+            || combined_output.contains("MD052"),
         "Should detect at least one of: MD034 (bare URL), MD039 (space in links), MD042 (empty link), MD045 (no alt text), or MD052 (undefined reference)"
     );
 
@@ -378,7 +376,7 @@ fn test_low_coverage_rules() {
 > with multiple lines.
 
 > This is another blockquote
-> 
+>
 > with a blank line.
 
 - List item 1
@@ -416,11 +414,11 @@ fn test_low_coverage_rules() {
     // - MD030: Extra space after list marker (line 342)
     // - MD056: Table column count inconsistent (line 353 has extra column)
     assert!(
-        combined_output.contains("MD026") ||
-        combined_output.contains("MD028") ||
-        combined_output.contains("MD029") ||
-        combined_output.contains("MD030") ||
-        combined_output.contains("MD056"),
+        combined_output.contains("MD026")
+            || combined_output.contains("MD028")
+            || combined_output.contains("MD029")
+            || combined_output.contains("MD030")
+            || combined_output.contains("MD056"),
         "Should detect at least one of: MD026 (trailing punctuation), MD028 (blank in blockquote), MD029 (ordered list prefix), MD030 (list marker space), or MD056 (table columns)"
     );
 

@@ -447,12 +447,7 @@ mod tests {
         let processor = FileParallelProcessor::with_default_config();
 
         let test_files: Vec<(String, String)> = (0..10)
-            .map(|i| {
-                (
-                    format!("test{i}.md"),
-                    format!("# Heading {i}\n\nTrailing spaces   \n"),
-                )
-            })
+            .map(|i| (format!("test{i}.md"), format!("# Heading {i}\n\nTrailing spaces   \n")))
             .collect();
 
         // Run multiple times

@@ -5,7 +5,7 @@ use tempfile::tempdir;
 fn test_md013_reflow_via_cli() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
-    
+
     // Create test file with long lines
     let content = "This is a very long line that definitely exceeds the default eighty character limit and needs to be wrapped properly by the reflow algorithm.
 
@@ -15,9 +15,9 @@ fn test_md013_reflow_via_cli() {
 - Another long list item that should also be wrapped with the proper continuation indentation
 
 Regular paragraph with **bold text** and *italic text* and `inline code` that needs wrapping.";
-    
+
     fs::write(&file_path, content).unwrap();
-    
+
     // Create config file enabling reflow
     let config_path = dir.path().join(".rumdl.toml");
     let config_content = r#"
@@ -26,7 +26,7 @@ line-length = 40
 enable-reflow = true
 "#;
     fs::write(&config_path, config_content).unwrap();
-    
+
     // First check what violations exist (for debugging if needed)
     let _check_output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .arg("check")
@@ -35,7 +35,7 @@ enable-reflow = true
         .arg(&config_path)
         .output()
         .expect("Failed to execute rumdl check");
-    
+
     // Run rumdl with fix
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .arg("check")
@@ -45,7 +45,7 @@ enable-reflow = true
         .arg(&config_path)
         .output()
         .expect("Failed to execute rumdl");
-    
+
     // With --fix, rumdl returns exit code 1 if violations were found (even if fixed)
     // Exit code 2 indicates an actual error
     let exit_code = output.status.code().unwrap_or(-1);
@@ -54,15 +54,17 @@ enable-reflow = true
         eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
         panic!("rumdl failed with error exit code 2");
     }
-    
+
     // Verify fixes were applied
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Fixed:") || stdout.contains("fixed"), 
-            "Expected fixes to be applied, but got: {}", stdout);
-    
+    assert!(
+        stdout.contains("Fixed:") || stdout.contains("fixed"),
+        "Expected fixes to be applied, but got: {stdout}"
+    );
+
     // Read the fixed content
     let fixed_content = fs::read_to_string(&file_path).unwrap();
-    
+
     // Verify reflow worked (lines should be reasonably short)
     for line in fixed_content.lines() {
         if !line.starts_with('#') && !line.trim().is_empty() && !line.contains('`') {
@@ -72,18 +74,21 @@ enable-reflow = true
             // - Words can't be broken
             let is_indented = line.starts_with(' ');
             let reasonable_limit = if is_indented { 50 } else { 45 };
-            
-            assert!(line.chars().count() <= reasonable_limit, 
-                    "Line seems too long after reflow: {} ({} chars)", 
-                    line, line.chars().count());
+
+            assert!(
+                line.chars().count() <= reasonable_limit,
+                "Line seems too long after reflow: {} ({} chars)",
+                line,
+                line.chars().count()
+            );
         }
     }
-    
+
     // Verify markdown elements are preserved
     assert!(fixed_content.contains("**bold text**"));
     assert!(fixed_content.contains("*italic text*"));
     assert!(fixed_content.contains("`inline code`"));
-    
+
     // Verify list structure is preserved
     assert!(fixed_content.contains("- This"));
     assert!(fixed_content.contains("- Another"));
@@ -93,11 +98,11 @@ enable-reflow = true
 fn test_md013_reflow_disabled_by_default() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
-    
+
     // Create test file with long line that has no trailing whitespace
     let content = "This is a very long line that definitely exceeds the default eighty character limit but has no trailing whitespace";
     fs::write(&file_path, content).unwrap();
-    
+
     // Run rumdl with fix (no config, so reflow should be disabled)
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .arg("check")
@@ -105,24 +110,26 @@ fn test_md013_reflow_disabled_by_default() {
         .arg(&file_path)
         .output()
         .expect("Failed to execute rumdl");
-    
+
     // Should complete without error (exit code 0 or 1, not 2)
     let exit_code = output.status.code().unwrap_or(-1);
-    assert!(exit_code == 0 || exit_code == 1, "Unexpected exit code: {}", exit_code);
-    
+    assert!(exit_code == 0 || exit_code == 1, "Unexpected exit code: {exit_code}");
+
     // The long line should not be wrapped (reflow disabled by default)
     let fixed_content = fs::read_to_string(&file_path).unwrap();
-    
+
     // Check that the long line is still present (not reflowed)
-    assert!(fixed_content.contains(content), 
-            "Expected the long line to remain unchanged, but it was modified");
+    assert!(
+        fixed_content.contains(content),
+        "Expected the long line to remain unchanged, but it was modified"
+    );
 }
 
 #[test]
 fn test_md013_reflow_complex_document() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("complex.md");
-    
+
     let content = r#"# Complex Document Test
 
 This is a very long introduction paragraph that contains multiple sentences and definitely exceeds the line length limit. It should be wrapped properly while preserving all the markdown formatting.
@@ -155,9 +162,9 @@ For more information, see [our documentation](https://example.com/very/long/url/
 
 [ref]: https://example.com/another/very/long/url/for/reference
 "#;
-    
+
     fs::write(&file_path, content).unwrap();
-    
+
     // Create config with specific settings
     let config_path = dir.path().join(".rumdl.toml");
     let config_content = r#"
@@ -168,7 +175,7 @@ code-blocks = true
 tables = true
 "#;
     fs::write(&config_path, config_content).unwrap();
-    
+
     // Run rumdl with fix
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .arg("check")
@@ -178,19 +185,19 @@ tables = true
         .arg(&config_path)
         .output()
         .expect("Failed to execute rumdl");
-    
+
     let exit_code = output.status.code().unwrap_or(-1);
-    assert!(exit_code == 0 || exit_code == 1, "Unexpected exit code: {}", exit_code);
-    
+    assert!(exit_code == 0 || exit_code == 1, "Unexpected exit code: {exit_code}");
+
     let fixed_content = fs::read_to_string(&file_path).unwrap();
-    
+
     // Verify structure is preserved
     assert!(fixed_content.contains("# Complex Document Test"));
     assert!(fixed_content.contains("```python"));
     assert!(fixed_content.contains("def very_long_function_name_with_many_parameters"));
     assert!(fixed_content.contains("|----------|"));
     assert!(fixed_content.contains("[ref]: https://example.com/another/very/long/url/for/reference"));
-    
+
     // Verify proper wrapping of regular content
     let lines: Vec<&str> = fixed_content.lines().collect();
     let mut in_code = false;
@@ -199,19 +206,29 @@ tables = true
             in_code = !in_code;
             continue;
         }
-        
+
         // Skip special lines
-        if !in_code && !line.starts_with('#') && !line.starts_with('|') && 
-           !line.starts_with('[') && !line.trim().is_empty() && !line.starts_with('>') {
+        if !in_code
+            && !line.starts_with('#')
+            && !line.starts_with('|')
+            && !line.starts_with('[')
+            && !line.trim().is_empty()
+            && !line.starts_with('>')
+        {
             // Allow slightly more for list items and lines with URLs
-            let is_list_item = line.trim_start().starts_with("- ") || 
-                               line.trim_start().starts_with("* ") ||
-                               line.trim_start().chars().next().map_or(false, |c| c.is_numeric());
+            let is_list_item = line.trim_start().starts_with("- ")
+                || line.trim_start().starts_with("* ")
+                || line.trim_start().chars().next().is_some_and(|c| c.is_numeric());
             let contains_url = line.contains("http://") || line.contains("https://");
             let limit = if is_list_item || contains_url { 80 } else { 50 };
-            
-            assert!(line.chars().count() <= limit, 
-                    "Line exceeds limit: {} ({} > {})", line, line.chars().count(), limit);
+
+            assert!(
+                line.chars().count() <= limit,
+                "Line exceeds limit: {} ({} > {})",
+                line,
+                line.chars().count(),
+                limit
+            );
         }
     }
 }
@@ -220,12 +237,12 @@ tables = true
 fn test_md013_reflow_preserves_exact_content() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("preserve.md");
-    
+
     // Content with various markdown elements
     let content = "This paragraph has **bold text** and *italic text* and [a link](https://example.com) and `inline code` that should all be preserved exactly during the reflow process.";
-    
+
     fs::write(&file_path, content).unwrap();
-    
+
     let config_path = dir.path().join(".rumdl.toml");
     let config_content = r#"
 [MD013]
@@ -233,7 +250,7 @@ line-length = 30
 enable-reflow = true
 "#;
     fs::write(&config_path, config_content).unwrap();
-    
+
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .arg("check")
         .arg("--fix")
@@ -242,29 +259,30 @@ enable-reflow = true
         .arg(&config_path)
         .output()
         .expect("Failed to execute rumdl");
-    
+
     let exit_code = output.status.code().unwrap_or(-1);
-    assert!(exit_code == 0 || exit_code == 1, "Unexpected exit code: {}", exit_code);
-    
+    assert!(exit_code == 0 || exit_code == 1, "Unexpected exit code: {exit_code}");
+
     let fixed_content = fs::read_to_string(&file_path).unwrap();
-    
+
     // Extract all words and markdown elements to verify nothing was lost
     let original_elements = vec![
         "**bold text**",
         "*italic text*",
         "[a link](https://example.com)",
-        "`inline code`"
+        "`inline code`",
     ];
-    
+
     for element in &original_elements {
-        assert!(fixed_content.contains(element), 
-                "Missing element: {} in:\n{}", element, fixed_content);
+        assert!(
+            fixed_content.contains(element),
+            "Missing element: {element} in:\n{fixed_content}"
+        );
     }
-    
+
     // Verify all original words are preserved
     let original_words: Vec<&str> = content.split_whitespace().collect();
     for word in &original_words {
-        assert!(fixed_content.contains(word), 
-                "Missing word '{}' in fixed content", word);
+        assert!(fixed_content.contains(word), "Missing word '{word}' in fixed content");
     }
 }

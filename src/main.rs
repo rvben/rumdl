@@ -362,7 +362,7 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Con
             .into_iter()
             .filter(|rule| enabled_cli_normalized.contains(&normalize_key(rule.name())))
             .collect::<Vec<_>>();
-        
+
         // Apply CLI --disable to remove rules from the enabled set (ruff-like behavior)
         if let Some(disabled_cli) = &cli_disable_set {
             filtered_rules.retain(|rule| {
@@ -371,12 +371,12 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Con
                 !disabled_cli.contains(rule_name_upper) && !disabled_cli.contains(rule_name_lower.as_str())
             });
         }
-        
+
         final_rules = filtered_rules;
     } else if cli_extend_enable_set.is_some() || cli_extend_disable_set.is_some() {
         // Handle extend flags (additive with config)
         let mut current_rules = all_rules;
-        
+
         // Start with config enable if present
         if !config_enable_set.is_empty() {
             current_rules.retain(|rule| {
@@ -384,7 +384,7 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Con
                 config_enable_set.contains(normalized_rule_name.as_str())
             });
         }
-        
+
         // Add CLI extend-enable rules
         if let Some(extend_enabled_cli) = &cli_extend_enable_set {
             // If we started with all rules (no config enable), keep all rules
@@ -394,7 +394,7 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Con
                 for rule in extend_enabled_cli {
                     extended_enable_set.insert(rule);
                 }
-                
+
                 // Re-filter with extended set
                 current_rules = rumdl::rules::all_rules(config)
                     .into_iter()
@@ -405,7 +405,7 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Con
                     .collect();
             }
         }
-        
+
         // Apply config disable
         if !config_disable_set.is_empty() {
             current_rules.retain(|rule| {
@@ -413,16 +413,17 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Con
                 !config_disable_set.contains(normalized_rule_name.as_str())
             });
         }
-        
+
         // Apply CLI extend-disable
         if let Some(extend_disabled_cli) = &cli_extend_disable_set {
             current_rules.retain(|rule| {
                 let rule_name_upper = rule.name();
                 let rule_name_lower = normalize_key(rule_name_upper);
-                !extend_disabled_cli.contains(rule_name_upper) && !extend_disabled_cli.contains(rule_name_lower.as_str())
+                !extend_disabled_cli.contains(rule_name_upper)
+                    && !extend_disabled_cli.contains(rule_name_lower.as_str())
             });
         }
-        
+
         // Apply CLI disable
         if let Some(disabled_cli) = &cli_disable_set {
             current_rules.retain(|rule| {
@@ -431,7 +432,7 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Con
                 !disabled_cli.contains(rule_name_upper) && !disabled_cli.contains(rule_name_lower.as_str())
             });
         }
-        
+
         final_rules = current_rules;
     } else {
         // --- Case 2: No CLI --enable ---
@@ -708,9 +709,7 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
 
             if !args._fix && total_fixable_issues > 0 {
                 // Display the exact count of fixable issues
-                println!(
-                    "Run with `--fix` to automatically fix {total_fixable_issues} of the {total_issues} issues"
-                );
+                println!("Run with `--fix` to automatically fix {total_fixable_issues} of the {total_issues} issues");
             }
         }
     } else {
@@ -2219,7 +2218,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
 // Handle explain command
 fn handle_explain_command(rule_query: &str) {
     use rumdl::rules::*;
-    
+
     // Get all rules
     let all_rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD001HeadingIncrement),
@@ -2275,70 +2274,62 @@ fn handle_explain_command(rule_query: &str) {
         Box::new(MD056TableColumnCount),
         Box::new(MD058BlanksAroundTables),
     ];
-    
+
     // Find the rule
     let rule_query_upper = rule_query.to_ascii_uppercase();
     let found = all_rules.iter().find(|r| {
         r.name().eq_ignore_ascii_case(&rule_query_upper)
             || r.name().replace("MD", "") == rule_query_upper.replace("MD", "")
     });
-    
+
     if let Some(rule) = found {
         let rule_name = rule.name();
         let rule_id = rule_name.to_lowercase();
-        
+
         // Print basic info
         println!("{}", format!("{} - {}", rule_name, rule.description()).bold());
         println!();
-        
+
         // Try to load detailed documentation from docs/
-        let doc_path = format!("docs/{}.md", rule_id);
+        let doc_path = format!("docs/{rule_id}.md");
         match fs::read_to_string(&doc_path) {
             Ok(doc_content) => {
                 // Parse and display the documentation
                 let lines: Vec<&str> = doc_content.lines().collect();
                 let mut in_example = false;
-                let mut in_config = false;
-                
-                for line in lines.iter().skip(1) { // Skip the title line
+
+                for line in lines.iter().skip(1) {
+                    // Skip the title line
                     if line.starts_with("## ") {
                         println!("\n{}", line.trim_start_matches("## ").bold().underline());
                     } else if line.starts_with("### ") {
                         println!("\n{}", line.trim_start_matches("### ").bold());
                     } else if line.starts_with("```") {
-                        if in_example || in_config {
-                            println!("{}", line.dimmed());
-                        } else {
-                            println!("{}", line.dimmed());
-                        }
+                        println!("{}", line.dimmed());
                         in_example = !in_example;
-                        in_config = line.contains("toml");
                     } else if in_example {
                         if line.contains("<!-- Good -->") {
                             println!("{}", "✓ Good:".green());
                         } else if line.contains("<!-- Bad -->") {
                             println!("{}", "✗ Bad:".red());
                         } else {
-                            println!("  {}", line);
+                            println!("  {line}");
                         }
                     } else if !line.trim().is_empty() {
-                        println!("{}", line);
+                        println!("{line}");
                     } else {
                         println!();
                     }
                 }
-                
+
                 // Add a note about configuration
                 if let Some((_, config_section)) = rule.default_config_section() {
                     println!("\n{}", "Default Configuration:".bold());
-                    println!("{}", format!("[{}]", rule_name).dimmed());
-                    match toml::to_string_pretty(&config_section) {
-                        Ok(config_str) => {
-                            for line in config_str.lines() {
-                                println!("{}", line.dimmed());
-                            }
+                    println!("{}", format!("[{rule_name}]").dimmed());
+                    if let Ok(config_str) = toml::to_string_pretty(&config_section) {
+                        for line in config_str.lines() {
+                            println!("{}", line.dimmed());
                         }
-                        Err(_) => {}
                     }
                 }
             }
@@ -2349,7 +2340,7 @@ fn handle_explain_command(rule_query: &str) {
                 println!("This rule helps maintain consistent Markdown formatting.");
                 println!();
                 println!("For more information, see the documentation at:");
-                println!("  https://github.com/rvben/rumdl/blob/main/docs/{}.md", rule_id);
+                println!("  https://github.com/rvben/rumdl/blob/main/docs/{rule_id}.md");
             }
         }
     } else {

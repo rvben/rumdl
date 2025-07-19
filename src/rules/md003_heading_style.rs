@@ -145,7 +145,7 @@ impl Rule for MD003HeadingStyle {
                             HeadingStyle::AtxClosed
                         }
                     }
-                    _ => target_style
+                    _ => target_style,
                 };
 
                 if current_style != expected_style {
@@ -369,13 +369,20 @@ mod tests {
         let content = "Heading 1\n=========\n\nHeading 2\n---------\n\n### Heading 3\n\n#### Heading 4";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "SesetxtWithAtx style should accept setext for h1/h2 and ATX for h3+");
+        assert!(
+            result.is_empty(),
+            "SesetxtWithAtx style should accept setext for h1/h2 and ATX for h3+"
+        );
 
         // Test incorrect usage - ATX for h1/h2
         let content_wrong = "# Heading 1\n## Heading 2\n### Heading 3";
         let ctx_wrong = LintContext::new(content_wrong);
         let result_wrong = rule.check(&ctx_wrong).unwrap();
-        assert_eq!(result_wrong.len(), 2, "Should flag ATX headings for h1/h2 with setext_with_atx style");
+        assert_eq!(
+            result_wrong.len(),
+            2,
+            "Should flag ATX headings for h1/h2 with setext_with_atx style"
+        );
     }
 
     #[test]
@@ -385,12 +392,19 @@ mod tests {
         let content = "Heading 1\n=========\n\nHeading 2\n---------\n\n### Heading 3 ###\n\n#### Heading 4 ####";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "SetextWithAtxClosed style should accept setext for h1/h2 and ATX closed for h3+");
+        assert!(
+            result.is_empty(),
+            "SetextWithAtxClosed style should accept setext for h1/h2 and ATX closed for h3+"
+        );
 
         // Test incorrect usage - regular ATX for h3+
         let content_wrong = "Heading 1\n=========\n\n### Heading 3\n\n#### Heading 4";
         let ctx_wrong = LintContext::new(content_wrong);
         let result_wrong = rule.check(&ctx_wrong).unwrap();
-        assert_eq!(result_wrong.len(), 2, "Should flag non-closed ATX headings for h3+ with setext_with_atx_closed style");
+        assert_eq!(
+            result_wrong.len(),
+            2,
+            "Should flag non-closed ATX headings for h3+ with setext_with_atx_closed style"
+        );
     }
 }

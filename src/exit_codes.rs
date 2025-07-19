@@ -2,7 +2,6 @@
 ///
 /// These exit codes allow users and CI/CD systems to distinguish between
 /// different types of failures.
-
 /// Success - No issues found or all issues were fixed
 pub const SUCCESS: i32 = 0;
 
@@ -14,7 +13,7 @@ pub const TOOL_ERROR: i32 = 2;
 
 /// Helper functions for consistent exit behavior
 pub mod exit {
-    use super::{SUCCESS, VIOLATIONS_FOUND, TOOL_ERROR};
+    use super::{SUCCESS, TOOL_ERROR, VIOLATIONS_FOUND};
 
     /// Exit with success code (0)
     pub fn success() -> ! {

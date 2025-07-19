@@ -81,8 +81,14 @@ fn verify_commonmark_elements(content: &str, filename: &str) {
             assert!(content.contains("Heading 2"), "Missing level 2 heading content");
             // Verify Setext format is preserved - MD003 in consistent mode keeps the first style found
             // Note: Only MD047 (newline at EOF) typically applies to this simple content
-            assert!(content.contains("========="), "Setext underline should be preserved in consistent mode");
-            assert!(content.contains("---------"), "Setext underline should be preserved in consistent mode");
+            assert!(
+                content.contains("========="),
+                "Setext underline should be preserved in consistent mode"
+            );
+            assert!(
+                content.contains("---------"),
+                "Setext underline should be preserved in consistent mode"
+            );
         }
         "lists.md" => {
             // Verify lists are preserved
@@ -126,7 +132,10 @@ fn verify_commonmark_elements(content: &str, filename: &str) {
             // The fix() method returns content unchanged
             assert!(content.contains("<div>"), "HTML tags should be preserved");
             assert!(content.contains("</div>"), "HTML closing tags should be preserved");
-            assert!(content.contains("Some text in HTML"), "HTML content should be preserved");
+            assert!(
+                content.contains("Some text in HTML"),
+                "HTML content should be preserved"
+            );
         }
         _ => {
             panic!("Unknown test file: {filename}");
@@ -147,7 +156,7 @@ author: Test Author
 
 # Main Heading
 
-This paragraph has *emphasized* text and **strong** text. It also has 
+This paragraph has *emphasized* text and **strong** text. It also has
 a [link](https://example.com) and a ![image](test.png) with alt text.
 
 ## Secondary Heading

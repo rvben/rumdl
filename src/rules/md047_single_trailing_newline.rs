@@ -48,7 +48,12 @@ impl Rule for MD047SingleTrailingNewline {
                     (1, 1, 1, 2)
                 } else {
                     let line_content = last_content_line.lines().last().unwrap_or("");
-                    (last_content_line_count, line_content.len() + 1, last_content_line_count, line_content.len() + 2)
+                    (
+                        last_content_line_count,
+                        line_content.len() + 1,
+                        last_content_line_count,
+                        line_content.len() + 2,
+                    )
                 }
             } else {
                 // For missing newline, highlight the end of the last line
@@ -103,7 +108,7 @@ impl Rule for MD047SingleTrailingNewline {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        
+
         // Empty content remains empty
         if content.is_empty() {
             return Ok(String::new());

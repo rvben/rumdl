@@ -50,7 +50,7 @@ lazy_static! {
     // Note: We need two separate patterns - one for IPv6 and one for regular URLs
     // Updated to avoid matching partial IPv6 patterns (e.g., "https://::1]" without opening bracket)
     static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`:\]]+(?::\d+)?)(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
-    
+
     // Special pattern just for IPv6 URLs to handle them separately
     // Note: This is permissive to match markdownlint behavior, allowing technically invalid IPv6 for examples
     static ref IPV6_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
@@ -161,55 +161,53 @@ impl MD034NoBareUrls {
         // Now find all URLs and emails in the content and check if they're excluded
         // We'll combine URL and email detection for efficiency
         let mut all_matches: Vec<(usize, usize, bool)> = Vec::new(); // (start, end, is_email)
-        
+
         // Early exit if no potential URLs/emails based on quick check
         if !content.contains("://") && !content.contains('@') {
             return Ok(warnings);
         }
 
         // Use line-based processing for better cache locality
-        for (_line_idx, line_info) in ctx.lines.iter().enumerate() {
+        for line_info in ctx.lines.iter() {
             let line_content = &line_info.content;
-            
+
             // Skip lines in code blocks
             if line_info.in_code_block {
                 continue;
             }
-            
+
             // Quick check if line might contain URLs or emails
             if !line_content.contains("://") && !line_content.contains('@') {
                 continue;
             }
-            
+
             // Check for URLs in this line
             for url_match in SIMPLE_URL_REGEX.find_iter(line_content) {
                 let start_in_line = url_match.start();
                 let end_in_line = url_match.end();
                 let matched_str = &line_content[start_in_line..end_in_line];
-                
+
                 // Skip invalid IPv6 patterns
                 if matched_str.contains("::") && !matched_str.contains('[') && matched_str.contains(']') {
                     continue;
                 }
-                
+
                 let global_start = line_info.byte_offset + start_in_line;
                 let global_end = line_info.byte_offset + end_in_line;
                 all_matches.push((global_start, global_end, false));
             }
-            
+
             // Check for IPv6 URLs
             for url_match in IPV6_URL_REGEX.find_iter(line_content) {
                 let global_start = line_info.byte_offset + url_match.start();
                 let global_end = line_info.byte_offset + url_match.end();
-                
+
                 // Remove any overlapping regular URL matches
-                all_matches.retain(|(start, end, _)| {
-                    !(*start < global_end && *end > global_start)
-                });
-                
+                all_matches.retain(|(start, end, _)| !(*start < global_end && *end > global_start));
+
                 all_matches.push((global_start, global_end, false));
             }
-            
+
             // Check for emails in this line
             for email_match in EMAIL_REGEX.find_iter(line_content) {
                 let global_start = line_info.byte_offset + email_match.start();
@@ -217,7 +215,7 @@ impl MD034NoBareUrls {
                 all_matches.push((global_start, global_end, true));
             }
         }
-        
+
         // Process all matches
         for (match_start, match_end_orig, is_email) in all_matches {
             let mut match_end = match_end_orig;
@@ -241,7 +239,7 @@ impl MD034NoBareUrls {
                 content.get(match_start - 1..match_start)
             };
             let after = content.get(match_end..match_end + 1);
-            
+
             let is_valid_boundary = if is_email {
                 before.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".")
                     && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".")
@@ -249,7 +247,7 @@ impl MD034NoBareUrls {
                 before.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
                     && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
             };
-            
+
             if !is_valid_boundary {
                 continue;
             }
@@ -260,14 +258,16 @@ impl MD034NoBareUrls {
             }
 
             // Skip if within any excluded range (link/image dest)
-            let in_any_range = merged.iter().any(|(start, end)| match_start >= *start && match_end <= *end);
+            let in_any_range = merged
+                .iter()
+                .any(|(start, end)| match_start >= *start && match_end <= *end);
             if in_any_range {
                 continue;
             }
 
             // Get line information efficiently
             let (line_num, col_num) = ctx.offset_to_line_col(match_start);
-            
+
             // Skip reference definitions for URLs
             if !is_email {
                 if let Some(line_info) = ctx.line_info(line_num) {
@@ -637,7 +637,6 @@ mod tests {
         assert!(URL_QUICK_CHECK.is_match("This is a URL: https://example.com"));
         assert!(!URL_QUICK_CHECK.is_match("This has no URL"));
     }
-
 
     #[test]
     fn test_multiple_badges_and_links_on_one_line() {

@@ -80,8 +80,11 @@ impl Rule for MD031BlanksAroundFences {
                         // 3. It has no content after the fence marker
                         let same_type = (current_marker.starts_with('`') && fence_marker.starts_with('`'))
                             || (current_marker.starts_with('~') && fence_marker.starts_with('~'));
-                        
-                        if same_type && fence_marker.len() >= current_marker.len() && trimmed[fence_marker.len()..].trim().is_empty() {
+
+                        if same_type
+                            && fence_marker.len() >= current_marker.len()
+                            && trimmed[fence_marker.len()..].trim().is_empty()
+                        {
                             // This closes the current code block
                             in_code_block = false;
                             current_fence_marker = None;
@@ -403,7 +406,7 @@ mod tests {
     #[test]
     fn test_nested_code_blocks() {
         let rule = MD031BlanksAroundFences;
-        
+
         // Test that nested code blocks are not flagged
         let content = r#"````markdown
 ```
@@ -413,16 +416,16 @@ content
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 0, "Should not flag nested code blocks");
-        
+
         // Test that fixes don't corrupt nested blocks
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content, "Fix should not modify nested code blocks");
     }
-    
+
     #[test]
     fn test_nested_code_blocks_complex() {
         let rule = MD031BlanksAroundFences;
-        
+
         // Test documentation example with nested code blocks
         let content = r#"# Documentation
 
@@ -440,11 +443,15 @@ console.log("Hello, world!");
 ````
 
 More text here."#;
-        
+
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
-        assert_eq!(warnings.len(), 0, "Should not flag any issues in properly formatted nested code blocks");
-        
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not flag any issues in properly formatted nested code blocks"
+        );
+
         // Test with 5-backtick outer block
         let content_5 = r#"`````markdown
 ````python
@@ -453,7 +460,7 @@ echo "nested"
 ```
 ````
 `````"#;
-        
+
         let ctx_5 = LintContext::new(content_5);
         let warnings_5 = rule.check(&ctx_5).unwrap();
         assert_eq!(warnings_5.len(), 0, "Should handle deeply nested code blocks");

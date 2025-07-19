@@ -198,9 +198,7 @@ fn test_list_with_content() {
             current_block_start_debug = None;
         }
     }
-    println!(
-        "DEBUG MD032 - test_list_with_content - calculated_blocks: {calculated_blocks:?}"
-    );
+    println!("DEBUG MD032 - test_list_with_content - calculated_blocks: {calculated_blocks:?}");
     // --- End Temporary Debugging ---
 
     let result = rule.check(&ctx).unwrap();

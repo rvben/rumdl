@@ -9,7 +9,7 @@ use regex::Regex;
 lazy_static! {
     // Pattern to detect emoji hashtags like #️⃣
     static ref EMOJI_HASHTAG_PATTERN: Regex = Regex::new(r"^#️⃣|^#⃣").unwrap();
-    
+
     // Pattern to detect Unicode hashtag symbols that shouldn't be treated as headings
     static ref UNICODE_HASHTAG_PATTERN: Regex = Regex::new(r"^#[\u{FE0F}\u{20E3}]").unwrap();
 }
@@ -37,7 +37,7 @@ impl MD018NoMissingSpaceAtx {
         if !trimmed_line.starts_with('#') {
             return None;
         }
-        
+
         // Skip emoji hashtags and Unicode hashtag patterns
         if EMOJI_HASHTAG_PATTERN.is_match(trimmed_line) || UNICODE_HASHTAG_PATTERN.is_match(trimmed_line) {
             return None;
@@ -51,11 +51,13 @@ impl MD018NoMissingSpaceAtx {
 
         // Check what comes after the hashes
         let after_hashes = &trimmed_line[hash_count..];
-        
+
         // Skip if what follows the hashes is an emoji modifier or variant selector
-        if after_hashes.chars().next().map_or(false, |ch| {
-            ch == '\u{FE0F}' || ch == '\u{20E3}' || ch == '\u{FE0E}' || ch == '⃣' || ch == '️'
-        }) {
+        if after_hashes
+            .chars()
+            .next()
+            .is_some_and(|ch| matches!(ch, '\u{FE0F}' | '\u{20E3}' | '\u{FE0E}'))
+        {
             return None;
         }
 
@@ -78,10 +80,10 @@ impl MD018NoMissingSpaceAtx {
             if content.starts_with('*') || content.starts_with('_') {
                 return None;
             }
-            
+
             // Skip if it looks like a hashtag (e.g., #tag, #123)
             // But only skip if it's lowercase or a number to avoid skipping headings like #Summary
-            if hash_count == 1 && content.len() > 0 {
+            if hash_count == 1 && !content.is_empty() {
                 let first_char = content.chars().next();
                 if let Some(ch) = first_char {
                     // Skip if it's a lowercase letter or number (common hashtag pattern)
@@ -146,7 +148,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                     // Check if there's a space after the marker
                     let line = &line_info.content;
                     let trimmed = line.trim_start();
-                    
+
                     // Skip emoji hashtags and Unicode hashtag patterns
                     if EMOJI_HASHTAG_PATTERN.is_match(trimmed) || UNICODE_HASHTAG_PATTERN.is_match(trimmed) {
                         continue;
@@ -225,7 +227,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     let line = &line_info.content;
                     let trimmed = line.trim_start();
-                    
+
                     // Skip emoji hashtags and Unicode hashtag patterns
                     if EMOJI_HASHTAG_PATTERN.is_match(trimmed) || UNICODE_HASHTAG_PATTERN.is_match(trimmed) {
                         continue;

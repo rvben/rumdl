@@ -184,8 +184,7 @@ impl Rule for MD004UnorderedListStyle {
                                         end_line: line,
                                         end_column: col + 1,
                                         message: format!(
-                                            "List marker '{}' does not match expected style '{}' for nesting level {}",
-                                            marker, expected_marker, nesting_level
+                                            "List marker '{marker}' does not match expected style '{expected_marker}' for nesting level {nesting_level}"
                                         ),
                                         severity: Severity::Warning,
                                         rule_name: Some(self.name()),
@@ -660,9 +659,18 @@ mod tests {
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0].message, "List marker '-' does not match expected style '*' for nesting level 0");
-        assert_eq!(result[1].message, "List marker '*' does not match expected style '+' for nesting level 1");
-        assert_eq!(result[2].message, "List marker '+' does not match expected style '-' for nesting level 2");
+        assert_eq!(
+            result[0].message,
+            "List marker '-' does not match expected style '*' for nesting level 0"
+        );
+        assert_eq!(
+            result[1].message,
+            "List marker '*' does not match expected style '+' for nesting level 1"
+        );
+        assert_eq!(
+            result[2].message,
+            "List marker '+' does not match expected style '-' for nesting level 2"
+        );
     }
 
     #[test]

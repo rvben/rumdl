@@ -3,8 +3,8 @@ use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use fancy_regex::Regex as FancyRegex;
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 lazy_static! {
     /// Pattern for HTML heading tags
@@ -40,18 +40,16 @@ impl MD041FirstLineHeading {
             front_matter_title_pattern: None,
         }
     }
-    
+
     pub fn with_pattern(level: usize, front_matter_title: bool, pattern: Option<String>) -> Self {
-        let front_matter_title_pattern = pattern.and_then(|p| {
-            match Regex::new(&p) {
-                Ok(regex) => Some(regex),
-                Err(e) => {
-                    log::warn!("Invalid front_matter_title_pattern regex: {}", e);
-                    None
-                }
+        let front_matter_title_pattern = pattern.and_then(|p| match Regex::new(&p) {
+            Ok(regex) => Some(regex),
+            Err(e) => {
+                log::warn!("Invalid front_matter_title_pattern regex: {e}");
+                None
             }
         });
-        
+
         Self {
             level,
             front_matter_title,
@@ -74,28 +72,28 @@ impl MD041FirstLineHeading {
             }
             return false;
         }
-        
+
         // Default behavior: check for "title:" field
         FrontMatterUtils::has_front_matter_field(content, "title:")
     }
-    
+
     /// Check if a line is a non-content token that should be skipped
     fn is_non_content_line(line: &str) -> bool {
         let trimmed = line.trim();
-        
+
         // Skip reference definitions
         if trimmed.starts_with('[') && trimmed.contains("]: ") {
             return true;
         }
-        
+
         // Skip abbreviation definitions
         if trimmed.starts_with('*') && trimmed.contains("]: ") {
             return true;
         }
-        
+
         false
     }
-    
+
     /// Check if a line is an HTML heading
     fn is_html_heading(line: &str, level: usize) -> bool {
         if let Ok(Some(captures)) = HTML_HEADING_PATTERN.captures(line.trim()) {
@@ -290,14 +288,19 @@ impl Rule for MD041FirstLineHeading {
         let level = crate::config::get_rule_config_value::<u32>(config, "MD041", "level").unwrap_or(1);
         let front_matter_title = crate::config::get_rule_config_value::<String>(config, "MD041", "front_matter_title")
             .unwrap_or_else(|| "title".to_string());
-        let front_matter_title_pattern = crate::config::get_rule_config_value::<String>(config, "MD041", "front_matter_title_pattern");
-        
+        let front_matter_title_pattern =
+            crate::config::get_rule_config_value::<String>(config, "MD041", "front_matter_title_pattern");
+
         let level_usize = level as usize;
         let use_front_matter = !front_matter_title.is_empty();
-        
-        Box::new(MD041FirstLineHeading::with_pattern(level_usize, use_front_matter, front_matter_title_pattern))
+
+        Box::new(MD041FirstLineHeading::with_pattern(
+            level_usize,
+            use_front_matter,
+            front_matter_title_pattern,
+        ))
     }
-    
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         Some((
             "MD041".to_string(),
@@ -305,7 +308,8 @@ impl Rule for MD041FirstLineHeading {
                 level = 1
                 // Pattern for matching title in front matter (regex)
                 // front_matter_title_pattern = "^(title|header):"
-            }.into(),
+            }
+            .into(),
         ))
     }
 }

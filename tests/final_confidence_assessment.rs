@@ -32,20 +32,11 @@ fn test_comprehensive_release_validation() {
 fn validate_core_functionality() {
     println!("📋 Validating Core Functionality...");
 
-    let test_content = r#"# Test Document
-This is a test paragraph with trailing spaces   
-
-### Skipping Level 2 (MD001 issue)
-
-##Missing Space Heading
-- List item 1
-- List item 2
-
-```
-code without language
-```
-Another paragraph.
-"#;
+    // Programmatically construct test content with trailing spaces to avoid linter issues
+    let mut test_content = String::new();
+    test_content.push_str("# Test Document\nThis is a test paragraph with trailing spaces");
+    test_content.push_str("   "); // Explicitly add 3 trailing spaces
+    test_content.push_str("\n\n### Skipping Level 2 (MD001 issue)\n\n##Missing Space Heading\n- List item 1\n- List item 2\n\n```\ncode without language\n```\nAnother paragraph.\n");
 
     let critical_rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD001HeadingIncrement),
@@ -56,7 +47,7 @@ Another paragraph.
         Box::new(MD040FencedCodeLanguage),
     ];
 
-    let ctx = LintContext::new(test_content);
+    let ctx = LintContext::new(&test_content);
     let mut total_warnings = 0;
 
     for rule in &critical_rules {
@@ -81,9 +72,7 @@ Another paragraph.
         "Should find multiple issues in test content, found {total_warnings}"
     );
 
-    println!(
-        "   ✓ Core rules functioning correctly ({total_warnings} warnings found)"
-    );
+    println!("   ✓ Core rules functioning correctly ({total_warnings} warnings found)");
 }
 
 fn validate_cli_lsp_consistency() {
@@ -131,9 +120,7 @@ fn validate_cli_lsp_consistency() {
     }
 
     assert!(consistency_checks > 0, "Should have performed consistency checks");
-    println!(
-        "   ✓ CLI/LSP consistency validated ({consistency_checks} checks passed)"
-    );
+    println!("   ✓ CLI/LSP consistency validated ({consistency_checks} checks passed)");
 }
 
 fn validate_performance_characteristics() {
@@ -537,7 +524,7 @@ You can also use ***bold italic*** for emphasis.
 ## Blockquotes
 
 > This is a blockquote with some important information.
-> 
+>
 > It can span multiple lines and contain other elements.
 
 ## Horizontal Rules

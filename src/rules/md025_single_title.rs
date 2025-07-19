@@ -110,8 +110,8 @@ impl MD025SingleTitle {
             lower_text.contains(&format!(" {indicator}")) ||
             // Handle appendix numbering like "Appendix A", "Appendix 1"
             (indicator == "appendix" && (
-                lower_text.matches("appendix").count() == 1 && 
-                (lower_text.contains(" a") || lower_text.contains(" b") || 
+                lower_text.matches("appendix").count() == 1 &&
+                (lower_text.contains(" a") || lower_text.contains(" b") ||
                  lower_text.contains(" 1") || lower_text.contains(" 2") ||
                  lower_text.contains(" i") || lower_text.contains(" ii"))
             ))
@@ -379,7 +379,9 @@ impl Rule for MD025SingleTitle {
                                 // For empty headings, manually construct the replacement
                                 match style {
                                     crate::rules::heading_utils::HeadingStyle::Atx
-                                    | crate::rules::heading_utils::HeadingStyle::SetextWithAtx => "#".repeat(self.config.level + 1),
+                                    | crate::rules::heading_utils::HeadingStyle::SetextWithAtx => {
+                                        "#".repeat(self.config.level + 1)
+                                    }
                                     crate::rules::heading_utils::HeadingStyle::AtxClosed
                                     | crate::rules::heading_utils::HeadingStyle::SetextWithAtxClosed => {
                                         format!(
