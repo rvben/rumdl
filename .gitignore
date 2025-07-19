@@ -10,6 +10,7 @@ node_modules
 parity_corpus
 .cleanup_archive/
 issues/
-
-# Claude Code instructions (personal, not for repo)
+.DS_Store
+.archive
+.cursorrules
 CLAUDE.md
