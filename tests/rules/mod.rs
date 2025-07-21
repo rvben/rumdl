@@ -67,6 +67,7 @@ mod md054_unicode_test;
 
 // Cross-rule integration test modules
 mod heading_edge_cases_test;
+mod link_edge_cases_test;
 mod list_rules_integration_test;
 
 // Test cases for MD003 - Heading Style
