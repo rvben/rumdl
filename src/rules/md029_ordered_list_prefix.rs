@@ -93,7 +93,7 @@ impl Rule for MD029OrderedListPrefix {
         }
 
         // Quick check for any ordered list markers before processing
-        if !ctx.content.contains('.') || !ORDERED_LIST_ITEM_REGEX.is_match(ctx.content) {
+        if !ctx.content.contains('.') || !ctx.content.lines().any(|line| ORDERED_LIST_ITEM_REGEX.is_match(line)) {
             return Ok(Vec::new());
         }
 
@@ -359,15 +359,7 @@ impl MD029OrderedListPrefix {
 
         for line_num in (end_line + 1)..start_line {
             if let Some(line_info) = ctx.line_info(line_num) {
-                // Get line content by extracting from the full content
-                let line_start = line_info.byte_offset;
-                let line_end = if line_num < ctx.lines.len() {
-                    ctx.lines[line_num].byte_offset
-                } else {
-                    ctx.content.len()
-                };
-                let line_content = &ctx.content[line_start..line_end.min(ctx.content.len())];
-                let trimmed = line_content.trim();
+                let trimmed = line_info.content.trim();
 
                 // Skip empty lines
                 if trimmed.is_empty() {

@@ -1155,7 +1155,33 @@ impl<'a> LintContext<'a> {
                                     && item.is_ordered == block.is_ordered
                                     && block.blockquote_prefix.trim() == next_blockquote_prefix.trim()
                                 {
-                                    found_continuation = true;
+                                    // Check if there was meaningful content between the list items
+                                    let has_meaningful_content = (line_idx + 1..check_idx).any(|idx| {
+                                        if let Some(between_line) = lines.get(idx) {
+                                            let trimmed = between_line.content.trim();
+                                            // Skip empty lines
+                                            if trimmed.is_empty() {
+                                                return false;
+                                            }
+                                            // Check for meaningful content
+                                            let line_indent =
+                                                between_line.content.len() - between_line.content.trim_start().len();
+                                            // Code fences or properly indented content
+                                            trimmed.starts_with("```")
+                                                || trimmed.starts_with("~~~")
+                                                || line_indent >= current_indent_level + 2
+                                        } else {
+                                            false
+                                        }
+                                    });
+
+                                    if block.is_ordered {
+                                        // For ordered lists: only continue if there's meaningful content
+                                        found_continuation = has_meaningful_content;
+                                    } else {
+                                        // For unordered lists: continue regardless
+                                        found_continuation = true;
+                                    }
                                 }
                             }
                         }
@@ -1215,14 +1241,14 @@ impl<'a> LintContext<'a> {
         }
 
         // Merge adjacent blocks that should be one
-        merge_adjacent_list_blocks(&mut list_blocks);
+        merge_adjacent_list_blocks(&mut list_blocks, lines);
 
         list_blocks
     }
 }
 
 /// Merge adjacent list blocks that should be treated as one
-fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
+fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>, lines: &[LineInfo]) {
     if list_blocks.len() < 2 {
         return;
     }
@@ -1237,10 +1263,20 @@ fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
         let consecutive = next.start_line == current.end_line + 1;
         let only_blank_between = next.start_line == current.end_line + 2;
 
+        // For ordered lists, we need to be more careful about merging
+        let should_merge_condition = if current.is_ordered && next.is_ordered {
+            // Only merge ordered lists if there's meaningful content between them
+            // (like code blocks, continuation paragraphs) not just blank lines
+            consecutive || has_meaningful_content_between(&current, next, lines)
+        } else {
+            // For unordered lists, use original logic
+            consecutive || (only_blank_between && current.marker == next.marker)
+        };
+
         let should_merge = next.is_ordered == current.is_ordered
             && next.blockquote_prefix == current.blockquote_prefix
             && next.nesting_level == current.nesting_level
-            && (consecutive || (only_blank_between && current.marker == next.marker));
+            && should_merge_condition;
 
         if should_merge {
             // Merge blocks
@@ -1263,6 +1299,42 @@ fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>) {
     merged.push(current);
 
     *list_blocks = merged;
+}
+
+/// Check if there's meaningful content (not just blank lines) between two list blocks
+fn has_meaningful_content_between(current: &ListBlock, next: &ListBlock, lines: &[LineInfo]) -> bool {
+    // Check lines between current.end_line and next.start_line
+    for line_num in (current.end_line + 1)..next.start_line {
+        if let Some(line_info) = lines.get(line_num - 1) {
+            // Convert to 0-indexed
+            let trimmed = line_info.content.trim();
+
+            // Skip empty lines
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            // Check if this line has proper indentation for list continuation
+            let line_indent = line_info.content.len() - line_info.content.trim_start().len();
+
+            // If the line is indented enough to be list continuation content, it's meaningful
+            // List content should be indented at least 2 spaces beyond the marker
+            if line_indent >= current.nesting_level + 2 {
+                return true;
+            }
+
+            // Code fences are meaningful content
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                return true;
+            }
+
+            // Any other non-blank content at this level breaks the sequence
+            return false;
+        }
+    }
+
+    // Only blank lines between blocks - should not merge
+    false
 }
 
 /// Check if content contains patterns that cause the markdown crate to panic
