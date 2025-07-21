@@ -26,7 +26,7 @@ fn test_unicode_list_items_invalid() {
 * Item with Unicode café
  * Item with emoji 🔥 (wrong indent)
    * Nested item with 汉字 (wrong indent)
-  * Correct nested with こんにちは
+  * Another nested with こんにちは (wrong indent)
 * Item with Arabic مرحبا";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
@@ -35,9 +35,9 @@ fn test_unicode_list_items_invalid() {
         3,
         "Unicode list items with incorrect indentation should trigger warnings"
     );
-    assert_eq!(result[0].line, 2);
-    assert_eq!(result[1].line, 3);
-    assert_eq!(result[2].line, 4);
+    assert_eq!(result[0].line, 2); // 1 space instead of 2
+    assert_eq!(result[1].line, 3); // 3 spaces instead of 4
+    assert_eq!(result[2].line, 4); // 2 spaces instead of 4 (should match line 3's level)
 }
 
 #[test]

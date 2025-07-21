@@ -163,7 +163,7 @@ fn test_deep_nesting_with_multiple_list_types() {
   * Second level unordered
     1. Third level ordered
       * Fourth level unordered
-        2. Fifth level ordered (continues from third level)
+        1. Fifth level ordered (independent numbering)
   * Back to second level
 2. Second top level";
 
@@ -176,7 +176,14 @@ fn test_deep_nesting_with_multiple_list_types() {
 
     assert!(md005_result.is_empty(), "MD005 should pass with proper indentation");
     assert!(md007_result.is_empty(), "MD007 should pass with proper nesting");
-    assert!(md029_result.is_empty(), "MD029 should pass with proper numbering");
+    // MD029 should detect that "2. Second top level" starts a new list after nested content
+    assert_eq!(md029_result.len(), 1, "MD029 should detect numbering issue");
+    assert_eq!(md029_result[0].line, 7, "Should detect issue on line 7");
+    assert!(md029_result[0].message.contains("2"), "Should mention actual number 2");
+    assert!(
+        md029_result[0].message.contains("1"),
+        "Should mention expected number 1"
+    );
 }
 
 #[test]
@@ -308,9 +315,9 @@ fn test_empty_lines_between_list_items() {
 
 3. Third item
 
-   * Nested unordered with empty line above
+  * Nested unordered with empty line above
 
-   * Another nested item
+  * Another nested item
 
 4. Fourth item";
 
@@ -323,7 +330,14 @@ fn test_empty_lines_between_list_items() {
 
     assert!(md004_result.is_empty(), "MD004 should handle empty lines correctly");
     assert!(md005_result.is_empty(), "MD005 should handle empty lines correctly");
-    assert!(md029_result.is_empty(), "MD029 should handle empty lines correctly");
+    // MD029 should detect that item 4 starts a new list after the unordered list section
+    assert_eq!(md029_result.len(), 1, "MD029 should detect numbering issue");
+    assert_eq!(md029_result[0].line, 11, "Should detect issue on line 11");
+    assert!(md029_result[0].message.contains("4"), "Should mention actual number 4");
+    assert!(
+        md029_result[0].message.contains("1"),
+        "Should mention expected number 1"
+    );
 }
 
 #[test]
