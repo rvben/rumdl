@@ -1,17 +1,12 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::{LineIndex, calculate_trailing_range};
-use crate::utils::regex_cache::get_cached_regex;
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::{ORDERED_LIST_MARKER_REGEX, UNORDERED_LIST_MARKER_REGEX, get_cached_regex};
 
 mod md009_config;
 use md009_config::MD009Config;
 
-lazy_static! {
-    // Optimized regex patterns for fix operations
-    static ref TRAILING_SPACES_REGEX: std::sync::Arc<Regex> = get_cached_regex(r"(?m) +$").unwrap();
-}
+// No need for lazy_static, we'll use get_cached_regex directly
 
 #[derive(Debug, Clone, Default)]
 pub struct MD009TrailingSpaces {
@@ -52,12 +47,7 @@ impl MD009TrailingSpaces {
 
         if let Some(prev) = prev_line {
             // Check for unordered list markers (*, -, +) with proper formatting
-            lazy_static! {
-                static ref LIST_MARKER_REGEX: Regex = Regex::new(r"^(\s*)[-*+]\s+").unwrap();
-                static ref ORDERED_LIST_REGEX: Regex = Regex::new(r"^(\s*)\d+[.)]\s+").unwrap();
-            }
-
-            LIST_MARKER_REGEX.is_match(prev) || ORDERED_LIST_REGEX.is_match(prev)
+            UNORDERED_LIST_MARKER_REGEX.is_match(prev) || ORDERED_LIST_MARKER_REGEX.is_match(prev)
         } else {
             false
         }
@@ -204,7 +194,10 @@ impl Rule for MD009TrailingSpaces {
         // For simple cases (strict mode), use fast regex approach
         if self.config.strict {
             // In strict mode, remove ALL trailing spaces everywhere
-            return Ok(TRAILING_SPACES_REGEX.replace_all(content, "").to_string());
+            return Ok(get_cached_regex(r"(?m) +$")
+                .unwrap()
+                .replace_all(content, "")
+                .to_string());
         }
 
         // For complex cases, we need line-by-line processing but with optimizations

@@ -232,6 +232,41 @@ lazy_static! {
 
     // Blockquote patterns
     pub static ref BLOCKQUOTE_PREFIX_RE: Regex = Regex::new(r"^(\s*>+\s*)").unwrap();
+
+    // MD013 specific patterns
+    pub static ref IMAGE_REF_PATTERN: Regex = Regex::new(r"^!\[.*?\]\[.*?\]$").unwrap();
+    pub static ref LINK_REF_PATTERN: Regex = Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap();
+    pub static ref URL_IN_TEXT: Regex = Regex::new(r"https?://\S+").unwrap();
+    pub static ref SENTENCE_END: Regex = Regex::new(r"[.!?]\s+[A-Z]").unwrap();
+    pub static ref ABBREVIATION: Regex = Regex::new(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|i\.e|e\.g|Inc|Corp|Ltd|Co|St|Ave|Blvd|Rd|Ph\.D|M\.D|B\.A|M\.A|Ph\.D|U\.S|U\.K|U\.N|N\.Y|L\.A|D\.C)\.\s+[A-Z]").unwrap();
+    pub static ref DECIMAL_NUMBER: Regex = Regex::new(r"\d+\.\s*\d+").unwrap();
+    pub static ref LIST_ITEM: Regex = Regex::new(r"^\s*\d+\.\s+").unwrap();
+    pub static ref REFERENCE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\[([^\]]*)\]").unwrap();
+
+    // Email pattern
+    pub static ref EMAIL_PATTERN: Regex = Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap();
+}
+
+// Second lazy_static block for additional patterns
+lazy_static! {
+    // HTML comment patterns
+    pub static ref HTML_COMMENT_START: Regex = Regex::new(r"<!--").unwrap();
+    pub static ref HTML_COMMENT_END: Regex = Regex::new(r"-->").unwrap();
+    pub static ref HTML_COMMENT_PATTERN: Regex = Regex::new(r"<!--[\s\S]*?-->").unwrap();
+
+    // HTML heading pattern (matches <h1> through <h6> tags)
+    pub static ref HTML_HEADING_PATTERN: FancyRegex = FancyRegex::new(r"^\s*<h([1-6])(?:\s[^>]*)?>.*</h\1>\s*$").unwrap();
+
+    // Heading quick check pattern
+    pub static ref HEADING_CHECK: Regex = Regex::new(r"(?m)^(?:\s*)#").unwrap();
+
+    // Horizontal rule patterns
+    pub static ref HR_DASH: Regex = Regex::new(r"^\-{3,}\s*$").unwrap();
+    pub static ref HR_ASTERISK: Regex = Regex::new(r"^\*{3,}\s*$").unwrap();
+    pub static ref HR_UNDERSCORE: Regex = Regex::new(r"^_{3,}\s*$").unwrap();
+    pub static ref HR_SPACED_DASH: Regex = Regex::new(r"^(\-\s+){2,}\-\s*$").unwrap();
+    pub static ref HR_SPACED_ASTERISK: Regex = Regex::new(r"^(\*\s+){2,}\*\s*$").unwrap();
+    pub static ref HR_SPACED_UNDERSCORE: Regex = Regex::new(r"^(_\s+){2,}_\s*$").unwrap();
 }
 
 /// Utility functions for quick content checks

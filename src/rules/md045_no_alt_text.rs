@@ -1,13 +1,8 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::IMAGE_REGEX;
 
 pub mod md045_config;
 use md045_config::MD045Config;
-
-lazy_static! {
-    static ref IMAGE_REGEX: Regex = Regex::new(r"!\[([^\]]*)\](\([^)]+\))").unwrap();
-}
 
 /// Rule MD045: Images should have alt text
 ///
@@ -140,7 +135,7 @@ impl Rule for MD045NoAltText {
         for caps in IMAGE_REGEX.captures_iter(content) {
             let full_match = caps.get(0).unwrap();
             let alt_text = caps.get(1).map_or("", |m| m.as_str());
-            let url_part = caps.get(2).map_or("", |m| m.as_str());
+            let url = caps.get(2).map_or("", |m| m.as_str());
 
             // Add text before this match
             result.push_str(&content[last_end..full_match.start()]);
@@ -151,8 +146,10 @@ impl Rule for MD045NoAltText {
                 result.push_str(&caps[0]);
             } else if alt_text.trim().is_empty() {
                 // Generate a more helpful placeholder based on the image URL
-                let placeholder = self.generate_placeholder_text(url_part);
-                result.push_str(&format!("![{placeholder}]{url_part}"));
+                // The centralized regex captures just the URL, so we need to add parentheses
+                let url_part = format!("({url})");
+                let placeholder = self.generate_placeholder_text(&url_part);
+                result.push_str(&format!("![{placeholder}]({url})"));
             } else {
                 // Keep the original if alt text is not empty
                 result.push_str(&caps[0]);

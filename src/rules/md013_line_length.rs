@@ -5,34 +5,13 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severi
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::calculate_excess_range;
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::{
+    IMAGE_REF_PATTERN, INLINE_LINK_REGEX as MARKDOWN_LINK_PATTERN, LINK_REF_PATTERN, URL_IN_TEXT, URL_PATTERN,
+};
 use toml;
 
 pub mod md013_config;
 use md013_config::MD013Config;
-
-lazy_static! {
-    static ref URL_PATTERN: Regex = Regex::new(r"^https?://\S+$").unwrap();
-    static ref IMAGE_REF_PATTERN: Regex = Regex::new(r"^!\[.*?\]\[.*?\]$" ).unwrap();
-    static ref LINK_REF_PATTERN: Regex = Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap();
-
-    // Pattern to find URLs anywhere in text
-    static ref URL_IN_TEXT: Regex = Regex::new(r"https?://\S+").unwrap();
-
-    // Pattern to find markdown links [text](url) for URL exclusion
-    static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").unwrap();
-
-    // Sentence splitting patterns
-    static ref SENTENCE_END: Regex = Regex::new(r"[.!?]\s+[A-Z]").unwrap();
-    static ref ABBREVIATION: Regex = Regex::new(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|i\.e|e\.g|Inc|Corp|Ltd|Co|St|Ave|Blvd|Rd|Ph\.D|M\.D|B\.A|M\.A|Ph\.D|U\.S|U\.K|U\.N|N\.Y|L\.A|D\.C)\.\s+[A-Z]").unwrap();
-    static ref DECIMAL_NUMBER: Regex = Regex::new(r"\d+\.\s*\d+").unwrap();
-    static ref LIST_ITEM: Regex = Regex::new(r"^\s*\d+\.\s+").unwrap();
-
-    // Link detection patterns
-    static ref INLINE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\(([^)]*)\)").unwrap();
-    static ref REFERENCE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\[([^\]]*)\]").unwrap();
-}
 
 #[derive(Clone, Default)]
 pub struct MD013LineLength {

@@ -4,17 +4,12 @@ use crate::rule_config_serde::RuleConfig;
 ///
 /// See [docs/md010.md](../../docs/md010.md) for full documentation, configuration, and examples.
 use crate::utils::range_utils::{LineIndex, calculate_match_range};
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::{HTML_COMMENT_END, HTML_COMMENT_START};
 
 mod md010_config;
 use md010_config::MD010Config;
 
-lazy_static! {
-    // Pattern to detect HTML comments (start and end tags separately)
-    static ref HTML_COMMENT_START: Regex = Regex::new(r"<!--").unwrap();
-    static ref HTML_COMMENT_END: Regex = Regex::new(r"-->").unwrap();
-}
+// HTML comment patterns are now imported from regex_cache
 
 /// Rule MD010: Hard tabs
 #[derive(Clone, Default)]
