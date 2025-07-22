@@ -35,6 +35,49 @@ impl MD045NoAltText {
     pub fn from_config_struct(config: MD045Config) -> Self {
         Self { config }
     }
+
+    /// Generate a more context-aware placeholder text based on the image URL
+    fn generate_placeholder_text(&self, url_part: &str) -> String {
+        // If a custom placeholder is configured (not the default), always use it
+        if self.config.placeholder_text != "TODO: Add image description" {
+            return self.config.placeholder_text.clone();
+        }
+
+        // Extract the URL from the url_part (could be "(url)" or "[ref]")
+        let url = if url_part.starts_with('(') && url_part.ends_with(')') {
+            &url_part[1..url_part.len() - 1]
+        } else {
+            // For reference-style images, we can't determine the URL, use default
+            return self.config.placeholder_text.clone();
+        };
+
+        // Try to extract a meaningful filename from the URL
+        if let Some(filename) = url.split('/').next_back() {
+            // Remove the extension and common separators to create a readable description
+            if let Some(name_without_ext) = filename.split('.').next() {
+                // Replace common separators with spaces and capitalize words
+                let readable_name = name_without_ext
+                    .replace(['-', '_'], " ")
+                    .split_whitespace()
+                    .map(|word| {
+                        let mut chars = word.chars();
+                        match chars.next() {
+                            None => String::new(),
+                            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                if !readable_name.is_empty() {
+                    return format!("{readable_name} image");
+                }
+            }
+        }
+
+        // Fall back to the configured placeholder text
+        self.config.placeholder_text.clone()
+    }
 }
 
 impl Rule for MD045NoAltText {
@@ -62,6 +105,12 @@ impl Rule for MD045NoAltText {
                     format!("({})", image.url)
                 };
 
+                let placeholder = if image.is_reference {
+                    self.config.placeholder_text.clone()
+                } else {
+                    self.generate_placeholder_text(&format!("({})", &image.url))
+                };
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
                     line: image.line,
@@ -73,7 +122,7 @@ impl Rule for MD045NoAltText {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: image.byte_offset..image.byte_offset + (image.end_col - image.start_col),
-                        replacement: format!("![{}]{url_part}", self.config.placeholder_text),
+                        replacement: format!("![{placeholder}]{url_part}"),
                     }),
                 });
             }
@@ -101,8 +150,9 @@ impl Rule for MD045NoAltText {
                 // Keep the original image if it's in a code block
                 result.push_str(&caps[0]);
             } else if alt_text.trim().is_empty() {
-                // Fix the image if it's not in a code block and has empty alt text
-                result.push_str(&format!("![{}]{url_part}", self.config.placeholder_text));
+                // Generate a more helpful placeholder based on the image URL
+                let placeholder = self.generate_placeholder_text(url_part);
+                result.push_str(&format!("![{placeholder}]{url_part}"));
             } else {
                 // Keep the original if alt text is not empty
                 result.push_str(&caps[0]);
@@ -200,6 +250,54 @@ mod tests {
     }
 
     #[test]
+    fn test_placeholder_text_generation() {
+        let rule = MD045NoAltText::new();
+
+        // Test with a simple filename
+        assert_eq!(rule.generate_placeholder_text("(sunset.jpg)"), "Sunset image");
+
+        // Test with hyphens in filename
+        assert_eq!(
+            rule.generate_placeholder_text("(my-beautiful-sunset.png)"),
+            "My Beautiful Sunset image"
+        );
+
+        // Test with underscores in filename
+        assert_eq!(
+            rule.generate_placeholder_text("(team_photo_2024.jpg)"),
+            "Team Photo 2024 image"
+        );
+
+        // Test with URL path
+        assert_eq!(
+            rule.generate_placeholder_text("(https://example.com/images/profile-picture.png)"),
+            "Profile Picture image"
+        );
+
+        // Test with reference-style (should use default)
+        assert_eq!(
+            rule.generate_placeholder_text("[sunset]"),
+            "TODO: Add image description"
+        );
+
+        // Test with empty filename
+        assert_eq!(rule.generate_placeholder_text("(.jpg)"), "TODO: Add image description");
+    }
+
+    #[test]
+    fn test_fix_with_smart_placeholders() {
+        let rule = MD045NoAltText::new();
+        let content = "![](team-photo.jpg)\n![](product_screenshot.png)\n![Good alt](logo.png)";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(
+            fixed,
+            "![Team Photo image](team-photo.jpg)\n![Product Screenshot image](product_screenshot.png)\n![Good alt](logo.png)"
+        );
+    }
+
+    #[test]
     fn test_reference_style_with_alt_text() {
         let rule = MD045NoAltText::new();
         let content = "![Beautiful sunset][sunset]\n\n[sunset]: sunset.jpg";
@@ -238,7 +336,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert_eq!(fixed, "![TODO: Add image description](sunset.jpg)");
+        assert_eq!(fixed, "![Sunset image](sunset.jpg)");
     }
 
     #[test]
@@ -248,7 +346,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert_eq!(fixed, "![TODO: Add image description](sunset.jpg)");
+        assert_eq!(fixed, "![Sunset image](sunset.jpg)");
     }
 
     #[test]
@@ -260,7 +358,7 @@ mod tests {
 
         assert_eq!(
             fixed,
-            "![Good](img1.jpg) ![TODO: Add image description](img2.jpg) ![TODO: Add image description](img3.jpg)"
+            "![Good](img1.jpg) ![Img2 image](img2.jpg) ![Img3 image](img3.jpg)"
         );
     }
 
@@ -281,10 +379,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert_eq!(
-            fixed,
-            "```\n![](image.jpg)\n```\n![TODO: Add image description](real-image.jpg)"
-        );
+        assert_eq!(fixed, "```\n![](image.jpg)\n```\n![Real Image image](real-image.jpg)");
     }
 
     #[test]
@@ -325,7 +420,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert_eq!(fixed, "![TODO: Add image description](image.jpg \"Title text\")");
+        assert_eq!(fixed, "![Image image](image.jpg \"Title text\")");
     }
 
     #[test]
@@ -371,6 +466,7 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
 
+        // When custom placeholder is set, smart placeholders are not used
         assert_eq!(fixed, "![FIXME: Add alt text](image.jpg)");
     }
 
@@ -386,6 +482,7 @@ mod tests {
 
         assert_eq!(
             fixed,
+            // When custom placeholder is set, smart placeholders are not used
             "![Good](img1.jpg) ![MISSING ALT](img2.jpg) ![MISSING ALT](img3.jpg)"
         );
     }
