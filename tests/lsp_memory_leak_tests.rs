@@ -423,7 +423,7 @@ fn get_process_memory(pid: u32) -> Result<u64, Box<dyn std::error::Error>> {
 
     #[cfg(target_os = "linux")]
     {
-        let status_path = format!("/proc/{}/status", pid);
+        let status_path = format!("/proc/{pid}/status");
         let content = std::fs::read_to_string(status_path)?;
 
         for line in content.lines() {
