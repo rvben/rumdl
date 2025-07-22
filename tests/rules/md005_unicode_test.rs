@@ -35,9 +35,21 @@ fn test_unicode_list_items_invalid() {
         3,
         "Unicode list items with incorrect indentation should trigger warnings"
     );
-    assert_eq!(result[0].line, 2); // 1 space instead of 2
-    assert_eq!(result[1].line, 3); // 3 spaces instead of 4
-    assert_eq!(result[2].line, 4); // 2 spaces instead of 4 (should match line 3's level)
+
+    // Check that we have violations on the expected lines (order may vary)
+    let violation_lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+    assert!(
+        violation_lines.contains(&2),
+        "Should have violation on line 2 (1 space instead of 2)"
+    );
+    assert!(
+        violation_lines.contains(&3),
+        "Should have violation on line 3 (3 spaces instead of 4)"
+    );
+    assert!(
+        violation_lines.contains(&4),
+        "Should have violation on line 4 (2 spaces instead of 4)"
+    );
 }
 
 #[test]
