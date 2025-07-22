@@ -18,7 +18,7 @@ fn test_missing_alt_text() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "![TODO: Add image description](image.png)");
+    assert_eq!(fixed, "![Image image](image.png)");
 }
 
 #[test]
@@ -29,7 +29,7 @@ fn test_empty_alt_text() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "![TODO: Add image description](image.png)");
+    assert_eq!(fixed, "![Image image](image.png)");
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn test_multiple_images() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "![Alt text](image1.png)\n![TODO: Add image description](image2.png)\n![TODO: Add image description](image3.png)"
+        "![Alt text](image1.png)\n![Image2 image](image2.png)\n![Image3 image](image3.png)"
     );
 }
 
@@ -56,7 +56,7 @@ fn test_complex_urls() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "![TODO: Add image description](https://example.com/image.png?param=value#fragment)"
+        "![Image image](https://example.com/image.png?param=value#fragment)"
     );
 }
 
@@ -70,7 +70,7 @@ fn test_mixed_content() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "# Images\n\nSome text here\n\n![Alt text](image1.png)\n\nMore text\n\n![TODO: Add image description](image2.png)"
+        "# Images\n\nSome text here\n\n![Alt text](image1.png)\n\nMore text\n\n![Image2 image](image2.png)"
     );
 }
 
@@ -84,7 +84,7 @@ fn test_inline_images() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "Text with ![Alt text](inline1.png) and ![TODO: Add image description](inline2.png) images."
+        "Text with ![Alt text](inline1.png) and ![Inline2 image](inline2.png) images."
     );
 }
 
@@ -98,12 +98,12 @@ fn test_placeholder_clarity() {
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(
-        fixed.contains("TODO: Add image description"),
-        "Fixed content should include TODO reminder"
+        fixed.contains("Screenshot image"),
+        "Fixed content should include smart placeholder based on filename"
     );
     assert_eq!(
         fixed,
-        "![TODO: Add image description](screenshot.png)\n![TODO: Add image description](diagram.svg)"
+        "![Screenshot image](screenshot.png)\n![Diagram image](diagram.svg)"
     );
 }
 
@@ -140,12 +140,27 @@ And in inline code: `![](inline.png)` should also be ignored.
     // Test the fix
     let fixed = rule.fix(&ctx).unwrap();
 
-    // Should fix only the images outside code blocks
-    assert!(fixed.contains("![TODO: Add image description](actual-image.png)"));
-    assert!(fixed.contains("![TODO: Add image description](another-image.png)"));
+    // Should fix only the images outside code blocks with smart placeholders
+    assert!(fixed.contains("![Actual Image image](actual-image.png)"));
+    assert!(fixed.contains("![Another Image image](another-image.png)"));
 
     // Should NOT fix images inside code blocks
     assert!(fixed.contains("```markdown\n![](example1.png)"));
     assert!(fixed.contains("![ ](example2.png)"));
     assert!(fixed.contains("`![](inline.png)`"));
+}
+
+#[test]
+fn test_descriptive_filenames() {
+    let rule = MD045NoAltText::new();
+    let content = "![](user-profile.jpg)\n![](product_screenshot.png)\n![](logo-dark-mode.svg)";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 3);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "![User Profile image](user-profile.jpg)\n![Product Screenshot image](product_screenshot.png)\n![Logo Dark Mode image](logo-dark-mode.svg)"
+    );
 }

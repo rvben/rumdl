@@ -283,8 +283,8 @@ fn test_md045_unicode_alt_text() {
 
     // Verify fixes add placeholder
     let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("![TODO: Add image description](image.png)"));
-    assert!(fixed.contains("![TODO: Add image description](图片/photo.jpg)"));
+    assert!(fixed.contains("![Image image](image.png)"));
+    assert!(fixed.contains("![Photo image](图片/photo.jpg)"));
 }
 
 #[test]
