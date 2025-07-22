@@ -1263,52 +1263,130 @@ fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>, lines: &[LineInf
         return;
     }
 
-    let mut merged = Vec::new();
-    let mut current = list_blocks[0].clone();
+    let mut merger = ListBlockMerger::new(lines);
+    *list_blocks = merger.merge(list_blocks);
+}
 
-    for next in list_blocks.iter().skip(1) {
-        // Check if blocks should be merged
-        // For MD032 purposes, consecutive unordered lists with different markers
-        // should be treated as one list block only if truly consecutive
-        let consecutive = next.start_line == current.end_line + 1;
-        let only_blank_between = next.start_line == current.end_line + 2;
+/// Helper struct to manage the complex logic of merging list blocks
+struct ListBlockMerger<'a> {
+    lines: &'a [LineInfo],
+}
 
-        // For ordered lists, we need to be more careful about merging
-        let should_merge_condition = if current.is_ordered && next.is_ordered {
-            // Only merge ordered lists if there's meaningful content between them
-            // (like code blocks, continuation paragraphs) not just blank lines
-            consecutive || has_meaningful_content_between(&current, next, lines)
-        } else {
-            // For unordered lists, use original logic
-            consecutive || (only_blank_between && current.marker == next.marker)
-        };
+impl<'a> ListBlockMerger<'a> {
+    fn new(lines: &'a [LineInfo]) -> Self {
+        Self { lines }
+    }
 
-        let should_merge = next.is_ordered == current.is_ordered
-            && next.blockquote_prefix == current.blockquote_prefix
-            && next.nesting_level == current.nesting_level
-            && should_merge_condition;
+    fn merge(&mut self, list_blocks: &[ListBlock]) -> Vec<ListBlock> {
+        let mut merged = Vec::with_capacity(list_blocks.len());
+        let mut current = list_blocks[0].clone();
 
-        if should_merge {
-            // Merge blocks
-            current.end_line = next.end_line;
-            current.item_lines.extend_from_slice(&next.item_lines);
-
-            // Update marker consistency
-            if !current.is_ordered && current.marker.is_some() && next.marker.is_some() && current.marker != next.marker
-            {
-                current.marker = None; // Mixed markers
+        for next in list_blocks.iter().skip(1) {
+            if self.should_merge_blocks(&current, next) {
+                current = self.merge_two_blocks(current, next);
+            } else {
+                merged.push(current);
+                current = next.clone();
             }
-        } else {
-            // Save current and start new
-            merged.push(current);
-            current = next.clone();
+        }
+
+        merged.push(current);
+        merged
+    }
+
+    /// Determine if two adjacent list blocks should be merged
+    fn should_merge_blocks(&self, current: &ListBlock, next: &ListBlock) -> bool {
+        // Basic compatibility checks
+        if !self.blocks_are_compatible(current, next) {
+            return false;
+        }
+
+        // Check spacing and content between blocks
+        let spacing = self.analyze_spacing_between(current, next);
+        match spacing {
+            BlockSpacing::Consecutive => true,
+            BlockSpacing::SingleBlank => self.can_merge_with_blank_between(current, next),
+            BlockSpacing::MultipleBlanks | BlockSpacing::ContentBetween => {
+                self.can_merge_with_content_between(current, next)
+            }
         }
     }
 
-    // Don't forget the last block
-    merged.push(current);
+    /// Check if blocks have compatible structure for merging
+    fn blocks_are_compatible(&self, current: &ListBlock, next: &ListBlock) -> bool {
+        current.is_ordered == next.is_ordered
+            && current.blockquote_prefix == next.blockquote_prefix
+            && current.nesting_level == next.nesting_level
+    }
 
-    *list_blocks = merged;
+    /// Analyze the spacing between two list blocks
+    fn analyze_spacing_between(&self, current: &ListBlock, next: &ListBlock) -> BlockSpacing {
+        let gap = next.start_line - current.end_line;
+
+        match gap {
+            1 => BlockSpacing::Consecutive,
+            2 => BlockSpacing::SingleBlank,
+            _ if gap > 2 => {
+                if self.has_only_blank_lines_between(current, next) {
+                    BlockSpacing::MultipleBlanks
+                } else {
+                    BlockSpacing::ContentBetween
+                }
+            }
+            _ => BlockSpacing::Consecutive, // gap == 0, overlapping (shouldn't happen)
+        }
+    }
+
+    /// Check if unordered lists can be merged with a single blank line between
+    fn can_merge_with_blank_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
+        // Only merge unordered lists with same marker across single blank
+        !current.is_ordered && current.marker == next.marker
+    }
+
+    /// Check if ordered lists can be merged when there's content between them
+    fn can_merge_with_content_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
+        // Only consider merging ordered lists with meaningful content between
+        current.is_ordered && next.is_ordered && has_meaningful_content_between(current, next, self.lines)
+    }
+
+    /// Check if there are only blank lines between blocks
+    fn has_only_blank_lines_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
+        for line_num in (current.end_line + 1)..next.start_line {
+            if let Some(line_info) = self.lines.get(line_num - 1) {
+                if !line_info.content.trim().is_empty() {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Merge two compatible list blocks into one
+    fn merge_two_blocks(&self, mut current: ListBlock, next: &ListBlock) -> ListBlock {
+        current.end_line = next.end_line;
+        current.item_lines.extend_from_slice(&next.item_lines);
+
+        // Handle marker consistency for unordered lists
+        if !current.is_ordered && self.markers_differ(&current, next) {
+            current.marker = None; // Mixed markers
+        }
+
+        current
+    }
+
+    /// Check if two blocks have different markers
+    fn markers_differ(&self, current: &ListBlock, next: &ListBlock) -> bool {
+        current.marker.is_some() && next.marker.is_some() && current.marker != next.marker
+    }
+}
+
+/// Types of spacing between list blocks
+#[derive(Debug, PartialEq)]
+enum BlockSpacing {
+    Consecutive,    // No gap between blocks
+    SingleBlank,    // One blank line between blocks
+    MultipleBlanks, // Multiple blank lines but no content
+    ContentBetween, // Content exists between blocks
 }
 
 /// Check if there's meaningful content (not just blank lines) between two list blocks
