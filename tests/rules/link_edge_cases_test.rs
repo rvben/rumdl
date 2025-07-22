@@ -75,7 +75,9 @@ https://example.com in code block
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     for warning in &result {
-        println!("MD034 found URL at line {}: {}", warning.line, warning.message);
+        let line = warning.line;
+        let message = &warning.message;
+        println!("MD034 found URL at line {line}: {message}");
     }
     assert!(result.is_empty(), "Should ignore URLs in special contexts");
 }
@@ -244,7 +246,7 @@ fn test_md039_escaped_characters() {
 
     // Escaped characters should be preserved
     let fixed = rule.fix(&ctx).unwrap();
-    println!("Fixed content:\n{}", fixed);
+    println!("Fixed content:\n{fixed}");
     // MD039 removes spaces while preserving escaped characters
     assert!(fixed.contains("[link\\]](url1)"));
     assert!(fixed.contains("[\\[link](url2)"));

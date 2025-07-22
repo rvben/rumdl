@@ -94,29 +94,14 @@ impl MD044ProperNames {
             content_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
-    
+
     // Helper function for consistent ASCII normalization
     fn ascii_normalize(s: &str) -> String {
-        s.replace('é', "e")
-            .replace('è', "e")
-            .replace('ê', "e")
-            .replace('ë', "e")
-            .replace('à', "a")
-            .replace('á', "a")
-            .replace('â', "a")
-            .replace('ä', "a")
-            .replace('ï', "i")
-            .replace('î', "i")
-            .replace('í', "i")
-            .replace('ì', "i")
-            .replace('ü', "u")
-            .replace('ú', "u")
-            .replace('ù', "u")
-            .replace('û', "u")
-            .replace('ö', "o")
-            .replace('ó', "o")
-            .replace('ò', "o")
-            .replace('ô', "o")
+        s.replace(['é', 'è', 'ê', 'ë'], "e")
+            .replace(['à', 'á', 'â', 'ä'], "a")
+            .replace(['ï', 'î', 'í', 'ì'], "i")
+            .replace(['ü', 'ú', 'ù', 'û'], "u")
+            .replace(['ö', 'ó', 'ò', 'ô'], "o")
             .replace('ñ', "n")
             .replace('ç', "c")
     }
@@ -143,35 +128,35 @@ impl MD044ProperNames {
             .flat_map(|name| {
                 let mut variations = vec![];
                 let lower_name = name.to_lowercase();
-                
+
                 // Add the lowercase version
                 variations.push(escape_regex(&lower_name));
-                
+
                 // Add version without dots
                 let lower_name_no_dots = lower_name.replace('.', "");
                 if lower_name != lower_name_no_dots {
                     variations.push(escape_regex(&lower_name_no_dots));
                 }
-                
+
                 // Add ASCII-normalized versions for common accented characters
                 let ascii_normalized = Self::ascii_normalize(&lower_name);
-                    
+
                 if ascii_normalized != lower_name {
                     variations.push(escape_regex(&ascii_normalized));
-                    
+
                     // Also add version without dots
                     let ascii_no_dots = ascii_normalized.replace('.', "");
                     if ascii_normalized != ascii_no_dots {
                         variations.push(escape_regex(&ascii_no_dots));
                     }
                 }
-                
+
                 variations
             })
             .collect();
 
         // Sort patterns by length (longest first) to avoid shorter patterns matching within longer ones
-        patterns.sort_by(|a, b| b.len().cmp(&a.len()));
+        patterns.sort_by_key(|b| std::cmp::Reverse(b.len()));
 
         // Combine all patterns into a single regex with capture groups
         // Don't use \b as it doesn't work with Unicode - we'll check boundaries manually
@@ -190,15 +175,15 @@ impl MD044ProperNames {
         let has_potential_matches = self.config.names.iter().any(|name| {
             let name_lower = name.to_lowercase();
             let name_no_dots = name_lower.replace('.', "");
-            
+
             // Check direct match
             if content_lower.contains(&name_lower) || content_lower.contains(&name_no_dots) {
                 return true;
             }
-            
+
             // Also check ASCII-normalized version
             let ascii_normalized = Self::ascii_normalize(&name_lower);
-                
+
             if ascii_normalized != name_lower {
                 if content_lower.contains(&ascii_normalized) {
                     return true;
@@ -208,7 +193,7 @@ impl MD044ProperNames {
                     return true;
                 }
             }
-            
+
             false
         });
 
@@ -270,12 +255,12 @@ impl MD044ProperNames {
             let has_line_matches = self.config.names.iter().any(|name| {
                 let name_lower = name.to_lowercase();
                 let name_no_dots = name_lower.replace('.', "");
-                
+
                 // Check direct match
                 if line_lower.contains(&name_lower) || line_lower.contains(&name_no_dots) {
                     return true;
                 }
-                
+
                 // Also check ASCII-normalized version
                 let ascii_normalized = Self::ascii_normalize(&name_lower);
                 if ascii_normalized != name_lower {
@@ -287,7 +272,7 @@ impl MD044ProperNames {
                         return true;
                     }
                 }
-                
+
                 false
             });
 
@@ -300,16 +285,17 @@ impl MD044ProperNames {
                 match cap_result {
                     Ok(cap) => {
                         let found_name = &line[cap.start()..cap.end()];
-                        
+
                         // Check word boundaries manually for Unicode support
                         let start_pos = cap.start();
                         let end_pos = cap.end();
-                        
-                        if !self.is_at_word_boundary(line, start_pos, true) ||
-                           !self.is_at_word_boundary(line, end_pos, false) {
+
+                        if !self.is_at_word_boundary(line, start_pos, true)
+                            || !self.is_at_word_boundary(line, end_pos, false)
+                        {
                             continue; // Not at word boundary
                         }
-                        
+
                         // Skip if in inline code when code_blocks is true
                         if self.config.code_blocks {
                             let byte_pos = line_info.byte_offset + cap.start();
@@ -317,7 +303,7 @@ impl MD044ProperNames {
                                 continue;
                             }
                         }
-                        
+
                         // Find which proper name this matches
                         if let Some(proper_name) = self.get_proper_name_for(found_name) {
                             // Only flag if it's not already correct
@@ -352,19 +338,19 @@ impl MD044ProperNames {
     fn is_word_boundary_char(c: char) -> bool {
         !c.is_alphanumeric()
     }
-    
+
     // Check if position is at a word boundary
     fn is_at_word_boundary(&self, content: &str, pos: usize, is_start: bool) -> bool {
         let chars: Vec<char> = content.chars().collect();
         let char_indices: Vec<(usize, char)> = content.char_indices().collect();
-        
+
         // Find the character position
         let char_pos = char_indices.iter().position(|(idx, _)| *idx == pos);
         if char_pos.is_none() {
             return true; // If we can't find position, assume boundary
         }
         let char_pos = char_pos.unwrap();
-        
+
         if is_start {
             // Check character before position
             if char_pos == 0 {
@@ -383,22 +369,22 @@ impl MD044ProperNames {
     // Get the proper name that should be used for a found name
     fn get_proper_name_for(&self, found_name: &str) -> Option<String> {
         let found_lower = found_name.to_lowercase();
-        
+
         // Iterate through the configured proper names
         for name in &self.config.names {
             let lower_name = name.to_lowercase();
             let lower_name_no_dots = lower_name.replace('.', "");
-            
+
             // Direct match
             if found_lower == lower_name || found_lower == lower_name_no_dots {
                 return Some(name.clone());
             }
-            
+
             // Check ASCII-normalized version
             let ascii_normalized = Self::ascii_normalize(&lower_name);
-                
+
             let ascii_no_dots = ascii_normalized.replace('.', "");
-            
+
             if found_lower == ascii_normalized || found_lower == ascii_no_dots {
                 return Some(name.clone());
             }
@@ -427,15 +413,15 @@ impl Rule for MD044ProperNames {
         let has_potential_matches = self.config.names.iter().any(|name| {
             let name_lower = name.to_lowercase();
             let name_no_dots = name_lower.replace('.', "");
-            
+
             // Check direct match
             if content_lower.contains(&name_lower) || content_lower.contains(&name_no_dots) {
                 return true;
             }
-            
+
             // Also check ASCII-normalized version
             let ascii_normalized = Self::ascii_normalize(&name_lower);
-                
+
             if ascii_normalized != name_lower {
                 if content_lower.contains(&ascii_normalized) {
                     return true;
@@ -445,7 +431,7 @@ impl Rule for MD044ProperNames {
                     return true;
                 }
             }
-            
+
             false
         });
 
@@ -503,7 +489,7 @@ impl Rule for MD044ProperNames {
 
         // Sort violations within each line in reverse order
         for violations in violations_by_line.values_mut() {
-            violations.sort_by(|a, b| b.0.cmp(&a.0));
+            violations.sort_by_key(|b| std::cmp::Reverse(b.0));
         }
 
         // Process each line
@@ -673,11 +659,7 @@ javascript in code block
         let result = rule.check(&ctx).unwrap();
 
         // When code_blocks=true, inline code should be excluded
-        assert_eq!(
-            result.len(),
-            1,
-            "Should only flag javascript outside inline code"
-        );
+        assert_eq!(result.len(), 1, "Should only flag javascript outside inline code");
         assert_eq!(result[0].column, 41); // javascript outside
     }
 
@@ -878,24 +860,21 @@ Third line with RUST and PYTHON."#;
     fn test_large_name_count_performance() {
         // Verify MD044 can handle large numbers of names without regex limitations
         // This test confirms that fancy-regex handles large patterns well
-        let names = (0..1000)
-            .map(|i| format!("ProperName{}", i))
-            .collect::<Vec<_>>();
-        
+        let names = (0..1000).map(|i| format!("ProperName{i}")).collect::<Vec<_>>();
+
         let rule = MD044ProperNames::new(names, true);
-        
+
         // The combined pattern should be created successfully
         assert!(rule.combined_pattern.is_some());
-        
+
         // Should be able to check content without errors
         let content = "This has propername0 and propername999 in it.";
         let ctx = create_context(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should detect both incorrect names
         assert_eq!(result.len(), 2, "Should handle 1000 names without issues");
     }
-
 
     #[test]
     fn test_cache_behavior() {
