@@ -66,7 +66,9 @@ mod md029_unicode_test;
 mod md054_unicode_test;
 
 // Cross-rule integration test modules
+mod emphasis_edge_cases_test;
 mod heading_edge_cases_test;
+mod inline_content_edge_cases_test;
 mod link_edge_cases_test;
 mod list_rules_integration_test;
 
