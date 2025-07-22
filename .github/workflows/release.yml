@@ -35,19 +35,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       # Toolchain setup
       - uses: jdx/mise-action@v2
         with:
           experimental: true
           install: true
-      
+
       - name: Install mise tools
         run: mise install --yes
-      
+
+      # Ensure Rust components are installed from rust-toolchain.toml
+      - name: Install Rust components
+        run: |
+          rustup component add rustfmt clippy
+
       - name: Run linting
         run: make lint
-      
+
       - name: Run tests
         run: |
           # Use fast CI-optimized tests
@@ -82,11 +87,11 @@ jobs:
         with:
           experimental: true
           install: true
-      
+
       # Ensure all mise tools are installed (including zig for Linux)
       - name: Install mise tools
         run: mise install --yes
-      
+
       # Verify zig installation on Linux only
       - name: Verify zig installation
         if: matrix.os == 'ubuntu-latest'
@@ -140,17 +145,17 @@ jobs:
         run: |
           # Extract version from ref (e.g., refs/tags/v0.0.97 -> v0.0.97)
           VERSION=${GITHUB_REF#refs/tags/}
-          
+
           # Create directory structure for archive
           mkdir -p homebrew-package
           cp rumdl-${{ matrix.target }} homebrew-package/rumdl
-          
+
           # Create tar.gz archive
           tar -czf rumdl-${VERSION}-${{ matrix.target }}.tar.gz -C homebrew-package rumdl
-          
+
           # Calculate SHA256
           shasum -a 256 rumdl-${VERSION}-${{ matrix.target }}.tar.gz > rumdl-${VERSION}-${{ matrix.target }}.tar.gz.sha256
-          
+
           # Clean up
           rm -rf homebrew-package
         shell: bash
@@ -302,11 +307,11 @@ jobs:
           # Extract version from tag
           TAG_NAME=${GITHUB_REF#refs/tags/}
           VERSION=${TAG_NAME#v}
-          
+
           # Wait for GitHub release to be fully available
           echo "Waiting for GitHub release to be available..."
           sleep 30
-          
+
           # Send dispatch with version info
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
@@ -322,11 +327,11 @@ jobs:
           # Extract version from tag
           TAG_NAME=${GITHUB_REF#refs/tags/}
           VERSION=${TAG_NAME#v}
-          
+
           # Wait a bit for archives to be available
           echo "Waiting for release archives to be available..."
           sleep 10
-          
+
           # Send dispatch with version info
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
