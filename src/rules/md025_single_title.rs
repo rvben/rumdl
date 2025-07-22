@@ -3,25 +3,13 @@
 /// See [docs/md025.md](../../docs/md025.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::{LineIndex, calculate_match_range};
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::{
+    HR_ASTERISK, HR_DASH, HR_SPACED_ASTERISK, HR_SPACED_DASH, HR_SPACED_UNDERSCORE, HR_UNDERSCORE,
+};
 use toml;
 
 mod md025_config;
 use md025_config::MD025Config;
-
-lazy_static! {
-    // Pattern for quick check if content has any headings at all
-    static ref HEADING_CHECK: Regex = Regex::new(r"(?m)^(?:\s*)#").unwrap();
-
-    // Horizontal rule patterns (from MD035)
-    static ref HR_DASH: Regex = Regex::new(r"^\-{3,}\s*$").unwrap();
-    static ref HR_ASTERISK: Regex = Regex::new(r"^\*{3,}\s*$").unwrap();
-    static ref HR_UNDERSCORE: Regex = Regex::new(r"^_{3,}\s*$").unwrap();
-    static ref HR_SPACED_DASH: Regex = Regex::new(r"^(\-\s+){2,}\-\s*$").unwrap();
-    static ref HR_SPACED_ASTERISK: Regex = Regex::new(r"^(\*\s+){2,}\*\s*$").unwrap();
-    static ref HR_SPACED_UNDERSCORE: Regex = Regex::new(r"^(_\s+){2,}_\s*$").unwrap();
-}
 
 #[derive(Clone, Default)]
 pub struct MD025SingleTitle {

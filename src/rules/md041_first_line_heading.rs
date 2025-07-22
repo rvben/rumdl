@@ -1,15 +1,8 @@
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
-use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
+use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::regex_cache::HTML_HEADING_PATTERN;
 use regex::Regex;
-
-lazy_static! {
-    /// Pattern for HTML heading tags
-    static ref HTML_HEADING_PATTERN: FancyRegex = FancyRegex::new(r"^\s*<h([1-6])(?:\s[^>]*)?>.*</h\1>\s*$").unwrap();
-}
 
 /// Rule MD041: First line in file should be a top-level heading
 ///
