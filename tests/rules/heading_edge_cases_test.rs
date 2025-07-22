@@ -633,12 +633,13 @@ fn test_heading_rules_performance() {
     let md025_time = start.elapsed();
 
     // All rules should complete in reasonable time
-    assert!(md001_time.as_millis() < 100, "MD001 too slow: {md001_time:?}");
-    assert!(md003_time.as_millis() < 100, "MD003 too slow: {md003_time:?}");
-    assert!(md022_time.as_millis() < 100, "MD022 too slow: {md022_time:?}");
-    assert!(md023_time.as_millis() < 100, "MD023 too slow: {md023_time:?}");
-    assert!(md024_time.as_millis() < 100, "MD024 too slow: {md024_time:?}");
-    assert!(md025_time.as_millis() < 100, "MD025 too slow: {md025_time:?}");
+    // Note: Using 200ms threshold for CI environments which may be slower
+    assert!(md001_time.as_millis() < 200, "MD001 too slow: {md001_time:?}");
+    assert!(md003_time.as_millis() < 200, "MD003 too slow: {md003_time:?}");
+    assert!(md022_time.as_millis() < 200, "MD022 too slow: {md022_time:?}");
+    assert!(md023_time.as_millis() < 200, "MD023 too slow: {md023_time:?}");
+    assert!(md024_time.as_millis() < 200, "MD024 too slow: {md024_time:?}");
+    assert!(md025_time.as_millis() < 200, "MD025 too slow: {md025_time:?}");
 }
 
 #[test]

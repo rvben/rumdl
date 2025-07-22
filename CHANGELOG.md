@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.99] - 2025-07-18
+## [0.0.99] - 2025-07-22
+
+### Fixed
+- MD034: Added support for `ftps://` URLs 
+- MD034: Fixed detection of URLs in HTML comments (now properly ignored)
+- MD039: Fixed escaped character handling in link text
+- MD044: Fixed clippy warnings and improved pattern matching for proper names
+- MD052: Enhanced nested bracket handling in reference links and images
+- Fixed flaky performance tests by increasing timeout threshold for CI environments
+- Improved test stability for Unicode list indentation tests
 
 ## [0.0.98] - 2025-07-18
 
