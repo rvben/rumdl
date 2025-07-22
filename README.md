@@ -211,7 +211,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.0.45  # Use the latest release tag
+    rev: v0.0.99  # Use the latest release tag
     hooks:
       - id: rumdl
         # To only check (default):
