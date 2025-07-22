@@ -369,33 +369,10 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-
-        // Early return for empty content
-        if content.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Quick check for list markers
-        if !content.contains('-')
-            && !content.contains('*')
-            && !content.contains('+')
-            && !content.chars().any(|c| c.is_numeric())
-        {
-            return Ok(Vec::new());
-        }
-
-        let structure = document_structure_from_str(content);
-        let lines: Vec<&str> = content.lines().collect();
-        let line_index = LineIndex::new(content.to_string());
-
-        let list_blocks = self.convert_list_blocks(ctx);
-
-        if list_blocks.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        self.perform_checks(ctx, &structure, &lines, &list_blocks, &line_index)
+        // Delegate to optimized check_with_structure by creating a temporary DocumentStructure
+        // This fallback path should rarely be used since the main lint engine calls check_with_structure
+        let structure = document_structure_from_str(ctx.content);
+        self.check_with_structure(ctx, &structure)
     }
 
     /// Optimized check using pre-computed document structure
@@ -423,7 +400,64 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        // Delegate to helper method with temporary DocumentStructure
         let structure = document_structure_from_str(ctx.content);
+        self.fix_with_structure(ctx, &structure)
+    }
+
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || ctx.list_blocks.is_empty()
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::List
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let mut map = toml::map::Map::new();
+        map.insert(
+            "allow_after_headings".to_string(),
+            toml::Value::Boolean(self.allow_after_headings),
+        );
+        map.insert(
+            "allow_after_colons".to_string(),
+            toml::Value::Boolean(self.allow_after_colons),
+        );
+        Some((self.name().to_string(), toml::Value::Table(map)))
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let allow_after_headings =
+            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_headings").unwrap_or(true); // Default to true for better UX
+
+        let allow_after_colons =
+            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_colons").unwrap_or(true);
+
+        Box::new(MD032BlanksAroundLists {
+            allow_after_headings,
+            allow_after_colons,
+        })
+    }
+
+    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
+        Some(self)
+    }
+}
+
+impl MD032BlanksAroundLists {
+    /// Helper method for fixing with a pre-computed DocumentStructure
+    fn fix_with_structure(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+    ) -> Result<String, LintError> {
         let lines: Vec<&str> = ctx.content.lines().collect();
         let num_lines = lines.len();
         if num_lines == 0 {
@@ -452,7 +486,7 @@ impl Rule for MD032BlanksAroundLists {
                 let should_require = self.should_require_blank_line_before(
                     lines[prev_line_actual_idx_0],
                     ctx,
-                    &structure,
+                    structure,
                     prev_line_actual_idx_1,
                 );
                 if !is_prev_excluded
@@ -509,51 +543,6 @@ impl Rule for MD032BlanksAroundLists {
             result.push('\n');
         }
         Ok(result)
-    }
-
-    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || ctx.list_blocks.is_empty()
-    }
-
-    fn category(&self) -> RuleCategory {
-        RuleCategory::List
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "allow_after_headings".to_string(),
-            toml::Value::Boolean(self.allow_after_headings),
-        );
-        map.insert(
-            "allow_after_colons".to_string(),
-            toml::Value::Boolean(self.allow_after_colons),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let allow_after_headings =
-            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_headings").unwrap_or(true); // Default to true for better UX
-
-        let allow_after_colons =
-            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_colons").unwrap_or(true);
-
-        Box::new(MD032BlanksAroundLists {
-            allow_after_headings,
-            allow_after_colons,
-        })
-    }
-
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
     }
 }
 
