@@ -791,18 +791,38 @@ impl DocumentStructure {
     /// OPTIMIZATION 2: Detect links and images in the document
     fn detect_links_and_images(&mut self, content: &str) {
         lazy_static! {
-            // Regex for inline links: [text](url)
-            static ref INLINE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\(([^)]*)\)").unwrap();
-            // Regex for reference links: [text][id] or [text][] (implicit)
-            static ref REFERENCE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\[([^\]]*)\]").unwrap();
+            // Regex for inline links: [text](url) - handles escaped brackets
+            static ref INLINE_LINK: FancyRegex = FancyRegex::new(r"(?x)
+                (?<!\\)                               # Not preceded by backslash
+                \[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]  # Link text (handles nested brackets and escapes)
+                \(([^)]*)\)                           # URL in parentheses
+            ").unwrap();
+            // Regex for reference links: [text][id] or [text][] (implicit) - handles escaped brackets
+            static ref REFERENCE_LINK: FancyRegex = FancyRegex::new(r"(?x)
+                (?<!\\)                               # Not preceded by backslash
+                \[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]  # Link text (handles nested brackets and escapes)
+                \[([^\]]*)\]                          # Reference ID
+            ").unwrap();
             // Regex for shortcut reference links: [text]
-            static ref SHORTCUT_LINK: FancyRegex = FancyRegex::new(r"\[([^\]]+)\](?!\(|\[)").unwrap();
+            static ref SHORTCUT_LINK: FancyRegex = FancyRegex::new(r"(?x)
+                (?<!\\)                               # Not preceded by backslash
+                \[([^\]]+)\]                          # Link text
+                (?!\(|\[)                             # Not followed by ( or [
+            ").unwrap();
             // Regex for link definitions: [id]: url
             static ref LINK_DEFINITION: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap();
-            // Regex for inline images: ![alt](src)
-            static ref INLINE_IMAGE: Regex = Regex::new(r"!\[([^\]]*)\]\(([^)]*)\)").unwrap();
-            // Regex for reference images: ![alt][id]
-            static ref REFERENCE_IMAGE: Regex = Regex::new(r"!\[([^\]]*)\]\[([^\]]*)\]").unwrap();
+            // Regex for inline images: ![alt](src) - handles escaped brackets
+            static ref INLINE_IMAGE: FancyRegex = FancyRegex::new(r"(?x)
+                (?<!\\)                               # Not preceded by backslash
+                !\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\] # Alt text (handles nested brackets and escapes)
+                \(([^)]*)\)                           # Source URL
+            ").unwrap();
+            // Regex for reference images: ![alt][id] - handles escaped brackets
+            static ref REFERENCE_IMAGE: FancyRegex = FancyRegex::new(r"(?x)
+                (?<!\\)                               # Not preceded by backslash
+                !\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\] # Alt text (handles nested brackets and escapes)
+                \[([^\]]*)\]                          # Reference ID
+            ").unwrap();
         }
 
         // Clear existing data
@@ -856,117 +876,137 @@ impl DocumentStructure {
                 // Check for inline links starting at this position
                 if let Some(rest) = line.get(i..) {
                     if rest.starts_with('[') {
-                        if let Some(cap) = INLINE_LINK.captures(rest) {
-                            let whole_match = cap.get(0).unwrap();
-                            let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
-                            let url = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                        // Check if this bracket is escaped or part of an escaped image
+                        let is_escaped = i > 0 && line.chars().nth(i - 1) == Some('\\');
+                        let is_escaped_image =
+                            i > 1 && line.chars().nth(i - 2) == Some('\\') && line.chars().nth(i - 1) == Some('!');
+                        if !is_escaped && !is_escaped_image {
+                            if let Ok(Some(cap)) = INLINE_LINK.captures(rest) {
+                                let whole_match = cap.get(0).unwrap();
+                                let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                                let url = cap.get(2).map_or("", |m| m.as_str()).to_string();
 
-                            // Ensure we're not inside a code span
-                            let is_in_span = (i..i + whole_match.end())
-                                .any(|pos| pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]);
-
-                            if !is_in_span {
-                                self.links.push(Link {
-                                    line: line_num + 1,             // 1-indexed
-                                    start_col: i + 1,               // 1-indexed
-                                    end_col: i + whole_match.end(), // 1-indexed
-                                    text,
-                                    url,
-                                    is_reference: false,
-                                    reference_id: None,
+                                // Ensure we're not inside a code span
+                                let is_in_span = (i..i + whole_match.end()).any(|pos| {
+                                    pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
                                 });
-                            }
 
-                            // Skip past this link
-                            i += whole_match.end();
-                        } else if let Some(cap) = REFERENCE_LINK.captures(rest) {
-                            let whole_match = cap.get(0).unwrap();
-                            let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
-                            let id = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                                if !is_in_span {
+                                    self.links.push(Link {
+                                        line: line_num + 1,             // 1-indexed
+                                        start_col: i + 1,               // 1-indexed
+                                        end_col: i + whole_match.end(), // 1-indexed
+                                        text,
+                                        url,
+                                        is_reference: false,
+                                        reference_id: None,
+                                    });
+                                }
 
-                            // Use the ID or text as the reference
-                            let ref_id = if id.is_empty() { text.clone() } else { id };
+                                // Skip past this link
+                                i += whole_match.end();
+                            } else if let Ok(Some(cap)) = REFERENCE_LINK.captures(rest) {
+                                let whole_match = cap.get(0).unwrap();
+                                let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                                let id = cap.get(2).map_or("", |m| m.as_str()).to_string();
 
-                            // Look up the URL from link definitions
-                            let url = link_defs.get(&ref_id.to_lowercase()).cloned().unwrap_or_default();
+                                // Use the ID or text as the reference
+                                let ref_id = if id.is_empty() { text.clone() } else { id };
 
-                            // Ensure we're not inside a code span
-                            let is_in_span = (i..i + whole_match.end())
-                                .any(|pos| pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]);
+                                // Look up the URL from link definitions
+                                let url = link_defs.get(&ref_id.to_lowercase()).cloned().unwrap_or_default();
 
-                            if !is_in_span {
-                                self.links.push(Link {
-                                    line: line_num + 1,             // 1-indexed
-                                    start_col: i + 1,               // 1-indexed
-                                    end_col: i + whole_match.end(), // 1-indexed
-                                    text,
-                                    url,
-                                    is_reference: true,
-                                    reference_id: Some(ref_id),
+                                // Ensure we're not inside a code span
+                                let is_in_span = (i..i + whole_match.end()).any(|pos| {
+                                    pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
                                 });
-                            }
 
-                            // Skip past this link
-                            i += whole_match.end();
+                                if !is_in_span {
+                                    self.links.push(Link {
+                                        line: line_num + 1,             // 1-indexed
+                                        start_col: i + 1,               // 1-indexed
+                                        end_col: i + whole_match.end(), // 1-indexed
+                                        text,
+                                        url,
+                                        is_reference: true,
+                                        reference_id: Some(ref_id),
+                                    });
+                                }
+
+                                // Skip past this link
+                                i += whole_match.end();
+                            } else {
+                                // No match found, move to next character
+                                i += 1;
+                            }
                         } else {
-                            // No match found, move to next character
+                            // Bracket is escaped or part of escaped image, skip it
                             i += 1;
                         }
                     } else if rest.starts_with("![") {
-                        if let Some(cap) = INLINE_IMAGE.captures(rest) {
-                            let whole_match = cap.get(0).unwrap();
-                            let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
-                            let src = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                        // Check if this image is escaped
+                        let is_escaped = i > 0 && line.chars().nth(i - 1) == Some('\\');
+                        if !is_escaped {
+                            if let Ok(Some(cap)) = INLINE_IMAGE.captures(rest) {
+                                let whole_match = cap.get(0).unwrap();
+                                let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                                let src = cap.get(2).map_or("", |m| m.as_str()).to_string();
 
-                            // Ensure we're not inside a code span
-                            let is_in_span = (i..i + whole_match.end())
-                                .any(|pos| pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]);
-
-                            if !is_in_span {
-                                self.images.push(Image {
-                                    line: line_num + 1,             // 1-indexed
-                                    start_col: i + 1,               // 1-indexed
-                                    end_col: i + whole_match.end(), // 1-indexed
-                                    alt_text,
-                                    src,
-                                    is_reference: false,
-                                    reference_id: None,
+                                // Ensure we're not inside a code span
+                                let is_in_span = (i..i + whole_match.end()).any(|pos| {
+                                    pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
                                 });
-                            }
 
-                            // Skip past this image
-                            i += whole_match.end();
-                        } else if let Some(cap) = REFERENCE_IMAGE.captures(rest) {
-                            let whole_match = cap.get(0).unwrap();
-                            let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
-                            let id = cap.get(2).map_or("", |m| m.as_str()).to_string();
+                                if !is_in_span {
+                                    self.images.push(Image {
+                                        line: line_num + 1,             // 1-indexed
+                                        start_col: i + 1,               // 1-indexed
+                                        end_col: i + whole_match.end(), // 1-indexed
+                                        alt_text,
+                                        src,
+                                        is_reference: false,
+                                        reference_id: None,
+                                    });
+                                }
 
-                            // Use the ID or alt_text as the reference
-                            let ref_id = if id.is_empty() { alt_text.clone() } else { id };
+                                // Skip past this image
+                                i += whole_match.end();
+                            } else if let Ok(Some(cap)) = REFERENCE_IMAGE.captures(rest) {
+                                let whole_match = cap.get(0).unwrap();
+                                let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                                let id = cap.get(2).map_or("", |m| m.as_str()).to_string();
 
-                            // Look up the URL from link definitions
-                            let src = link_defs.get(&ref_id.to_lowercase()).cloned().unwrap_or_default();
+                                // Use the ID or alt_text as the reference
+                                let ref_id = if id.is_empty() { alt_text.clone() } else { id };
 
-                            // Ensure we're not inside a code span
-                            let is_in_span = (i..i + whole_match.end())
-                                .any(|pos| pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]);
+                                // Look up the URL from link definitions
+                                let src = link_defs.get(&ref_id.to_lowercase()).cloned().unwrap_or_default();
 
-                            if !is_in_span {
-                                self.images.push(Image {
-                                    line: line_num + 1,             // 1-indexed
-                                    start_col: i + 1,               // 1-indexed
-                                    end_col: i + whole_match.end(), // 1-indexed
-                                    alt_text,
-                                    src,
-                                    is_reference: true,
-                                    reference_id: Some(ref_id),
+                                // Ensure we're not inside a code span
+                                let is_in_span = (i..i + whole_match.end()).any(|pos| {
+                                    pos < self.in_code_span[line_num].len() && self.in_code_span[line_num][pos]
                                 });
-                            }
 
-                            // Skip past this image
-                            i += whole_match.end();
+                                if !is_in_span {
+                                    self.images.push(Image {
+                                        line: line_num + 1,             // 1-indexed
+                                        start_col: i + 1,               // 1-indexed
+                                        end_col: i + whole_match.end(), // 1-indexed
+                                        alt_text,
+                                        src,
+                                        is_reference: true,
+                                        reference_id: Some(ref_id),
+                                    });
+                                }
+
+                                // Skip past this image
+                                i += whole_match.end();
+                            } else {
+                                // No match found, move to next character
+                                i += 1;
+                            }
                         } else {
-                            // No match found, move to next character
+                            // Image is escaped, skip it
                             i += 1;
                         }
                     } else {
