@@ -7,7 +7,7 @@ lazy_static! {
     // Use (?s) flag to make . match newlines
     static ref LINK_PATTERN: Regex = Regex::new(
         r"(?sx)
-        \[([^\]]*)\]          # Link text in group 1
+        \[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]          # Link text in group 1 (handles nested brackets)
         (?:
             \(([^)]*)\)       # Inline URL in group 2 (can be empty)
             |
@@ -19,7 +19,7 @@ lazy_static! {
     // Use (?s) flag to make . match newlines
     static ref IMAGE_PATTERN: Regex = Regex::new(
         r"(?sx)
-        !\[([^\]]*)\]         # Alt text in group 1
+        !\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]         # Alt text in group 1 (handles nested brackets)
         (?:
             \(([^)]*)\)       # Inline URL in group 2 (can be empty)
             |
@@ -388,6 +388,11 @@ impl<'a> LintContext<'a> {
             let match_start = full_match.start();
             let match_end = full_match.end();
 
+            // Skip if the opening bracket is escaped (preceded by \)
+            if match_start > 0 && content.as_bytes().get(match_start - 1) == Some(&b'\\') {
+                continue;
+            }
+
             // Skip if this is actually an image (preceded by !)
             if match_start > 0 && content.as_bytes().get(match_start - 1) == Some(&b'!') {
                 continue;
@@ -481,6 +486,11 @@ impl<'a> LintContext<'a> {
             let full_match = cap.get(0).unwrap();
             let match_start = full_match.start();
             let match_end = full_match.end();
+
+            // Skip if the ! is escaped (preceded by \)
+            if match_start > 0 && content.as_bytes().get(match_start - 1) == Some(&b'\\') {
+                continue;
+            }
 
             // Skip if in code block or span
             if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {

@@ -1,8 +1,6 @@
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
-use rumdl::rules::{
-    MD044ProperNames, MD045NoAltText, MD052ReferenceLinkImages,
-};
+use rumdl::rules::{MD044ProperNames, MD045NoAltText, MD052ReferenceLinkImages};
 
 /// Comprehensive edge case tests for inline content rules (MD044, MD045, MD052)
 ///
@@ -23,7 +21,7 @@ fn test_md044_unicode_proper_names() {
         ],
         true,
     );
-    
+
     // Test 1: Unicode proper names with various scripts
     let content = "\
 I love javascript and javascript is great.
@@ -37,13 +35,17 @@ Try the cafe in zurich.
 The implementation is naive.
 
 🚀rocket is launching soon.";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: MD044 MUST detect ALL improper capitalizations including accented characters
     // KNOWN ISSUE: Currently only detects 4/7 due to Unicode word boundary limitations (see docs/KNOWN_PRODUCTION_ISSUES.md)
-    assert_eq!(result.len(), 7, "Should detect ALL improper capitalizations: javascript(x2), 中文名称, москва, cafe, zurich, naive, 🚀rocket");
-    
+    assert_eq!(
+        result.len(),
+        7,
+        "Should detect ALL improper capitalizations: javascript(x2), 中文名称, москва, cafe, zurich, naive, 🚀rocket"
+    );
+
     // Verify fixes handle Unicode correctly
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("JavaScript"));
@@ -71,7 +73,7 @@ fn test_md044_special_characters_names() {
         ],
         true,
     );
-    
+
     // Test 2: Names with special characters
     let content = "\
 I use node.js and nodejs for development.
@@ -89,11 +91,11 @@ Edit the Package.json file.
 Connect to wifi or wi-fi network.
 
 Send an Email or e-Mail message.";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.len() >= 8, "Should detect special character names");
-    
+
     // Verify fixes preserve special characters
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("Node.js"));
@@ -108,15 +110,10 @@ Send an Email or e-Mail message.";
 #[test]
 fn test_md044_word_boundaries() {
     let rule = MD044ProperNames::new(
-        vec![
-            "Go".to_string(),
-            "IT".to_string(),
-            "I".to_string(),
-            "A".to_string(),
-        ],
+        vec!["Go".to_string(), "IT".to_string(), "I".to_string(), "A".to_string()],
         true,
     );
-    
+
     // Test 3: Short names and word boundary edge cases
     let content = "\
 Let's go with Go programming.
@@ -130,12 +127,20 @@ i think I should use a framework.
 This is a test of A versus a.
 
 Don't match 'ago' or 'bit' or 'ai'.";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // Should only match whole words
-    assert!(result.iter().any(|r| r.message.contains("go") && !r.message.contains("going")));
-    assert!(result.iter().any(|r| r.message.contains("it") && !r.message.contains("bit")));
+    assert!(
+        result
+            .iter()
+            .any(|r| r.message.contains("go") && !r.message.contains("going"))
+    );
+    assert!(
+        result
+            .iter()
+            .any(|r| r.message.contains("it") && !r.message.contains("bit"))
+    );
 }
 
 #[test]
@@ -144,7 +149,7 @@ fn test_md044_code_exclusion() {
         vec!["JavaScript".to_string(), "Python".to_string()],
         true, // true = exclude code blocks from checking
     );
-    
+
     // Test 4: Code block and inline code exclusion
     let content = "\
 Use javascript in production.
@@ -161,7 +166,7 @@ plain javascript and python in code block
 ```
 
 More javascript and python outside code.";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: When code_blocks=true, MD044 MUST exclude ALL code (blocks AND inline)
@@ -169,18 +174,19 @@ More javascript and python outside code.";
     // - "javascript" on line 1
     // - "javascript" and "python" on last line (line 10)
     // Total: 3 warnings
-    assert_eq!(result.len(), 3, "Should detect only javascript and python outside ALL code contexts");
+    assert_eq!(
+        result.len(),
+        3,
+        "Should detect only javascript and python outside ALL code contexts"
+    );
 }
 
 #[test]
 fn test_md044_html_comment_handling() {
     // Note: Can't control html_comments parameter with public API
     // Default is to check HTML comments, so this test is adjusted
-    let rule = MD044ProperNames::new(
-        vec!["JavaScript".to_string()],
-        true,
-    );
-    
+    let rule = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
+
     // Test 5: HTML comment handling
     let content = "\
 Use javascript here.
@@ -195,11 +201,15 @@ should also be ignored
 More javascript usage.
 
 <!-- javascript --> between <!-- javascript --> comments";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: Default MUST check HTML comments
-    assert_eq!(result.len(), 6, "Should detect all 6 javascript occurrences including in HTML comments");
+    assert_eq!(
+        result.len(),
+        6,
+        "Should detect all 6 javascript occurrences including in HTML comments"
+    );
 }
 
 #[test]
@@ -217,7 +227,7 @@ fn test_md044_complex_patterns() {
         ],
         true,
     );
-    
+
     // Test 6: Complex capitalization patterns
     let content = "\
 Upload to github, GITHUB, or Github.
@@ -231,10 +241,10 @@ Develop for macos, MacOS, and ios.
 Use typescript with javascript.
 
 Support for ipados and IpadOS.";
-    
+
     let ctx = LintContext::new(content);
     let _result = rule.check(&ctx).unwrap();
-    
+
     // Verify all variations are caught
     let fixed = rule.fix(&ctx).unwrap();
     assert!(!fixed.contains("github"));
@@ -248,7 +258,7 @@ Support for ipados and IpadOS.";
 #[test]
 fn test_md045_unicode_alt_text() {
     let rule = MD045NoAltText::new();
-    
+
     // Test 1: Images with Unicode in paths and missing alt text
     let content = "\
 ![](image.png)
@@ -266,11 +276,11 @@ fn test_md045_unicode_alt_text() {
 ![\t](tab-only.jpg)
 
 ![　](full-width-space.jpg)";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 8, "Should detect all images with missing/empty alt text");
-    
+
     // Verify fixes add placeholder
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("![TODO: Add image description](image.png)"));
@@ -280,7 +290,7 @@ fn test_md045_unicode_alt_text() {
 #[test]
 fn test_md045_reference_style_images() {
     let rule = MD045NoAltText::new();
-    
+
     // Test 2: Reference-style images
     let content = "\
 ![][ref1]
@@ -299,7 +309,7 @@ fn test_md045_reference_style_images() {
 Shortcut reference: ![shortcut]
 
 [shortcut]: shortcut.png";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "Should detect reference images without alt text");
@@ -308,7 +318,7 @@ Shortcut reference: ![shortcut]
 #[test]
 fn test_md045_nested_constructs() {
     let rule = MD045NoAltText::new();
-    
+
     // Test 3: Images in various contexts
     let content = "\
 - List item with ![](image1.png)
@@ -326,7 +336,7 @@ fn test_md045_nested_constructs() {
 *Emphasis with ![](image7.png) inside*
 
 **Strong with ![](image8.png) inside**";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 8, "Should detect images in all contexts");
@@ -335,7 +345,7 @@ fn test_md045_nested_constructs() {
 #[test]
 fn test_md045_code_exclusion() {
     let rule = MD045NoAltText::new();
-    
+
     // Test 4: Images in code should be excluded
     let content = "\
 Regular image: ![](regular.png)
@@ -353,7 +363,7 @@ Even in markdown code blocks ![](still-ignored.png)
     Four spaces code ![](indented-ignored.png)
 
 More regular: ![](regular2.png)";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should only detect images outside code");
@@ -362,7 +372,7 @@ More regular: ![](regular2.png)";
 #[test]
 fn test_md045_edge_patterns() {
     let rule = MD045NoAltText::new();
-    
+
     // Test 5: Edge cases and malformed images
     let content = "\
 ![]()
@@ -382,7 +392,7 @@ fn test_md045_edge_patterns() {
 \\![](escaped.png)
 
 ![Existing alt](image.png)";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // Should handle edge cases gracefully
@@ -392,7 +402,7 @@ fn test_md045_edge_patterns() {
 #[test]
 fn test_md045_html_images() {
     let rule = MD045NoAltText::new();
-    
+
     // Test 6: Mixed Markdown and HTML images
     let content = "\
 ![](markdown.png)
@@ -404,7 +414,7 @@ fn test_md045_html_images() {
 <img src=\"html-empty-alt.png\" alt=\"\">
 
 Mixed: ![](md.png) and <img src=\"html2.png\">";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // MD045 only checks Markdown images, not HTML
@@ -414,7 +424,7 @@ Mixed: ![](md.png) and <img src=\"html2.png\">";
 #[test]
 fn test_md052_unicode_references() {
     let rule = MD052ReferenceLinkImages::new();
-    
+
     // Test 1: Unicode in reference names and definitions
     let content = "\
 Check [this link][中文引用]
@@ -432,7 +442,7 @@ Missing: [undefined][参照なし]
 [图片引用]: image.png
 
 Note: 🔗link is not defined";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should detect missing Unicode references");
@@ -443,7 +453,7 @@ Note: 🔗link is not defined";
 #[test]
 fn test_md052_case_sensitivity() {
     let rule = MD052ReferenceLinkImages::new();
-    
+
     // Test 2: Case-insensitive reference matching
     let content = "\
 Links: [text][REF], [text][ref], [text][Ref]
@@ -454,18 +464,22 @@ Missing: [text][MISSING], [text][missing]
 
 [ref]: https://example.com
 [IMG]: image.png";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: MD052 MUST be case-insensitive
     // [MISSING] and [missing] are the same undefined reference
-    assert_eq!(result.len(), 1, "Should detect exactly 1 unique missing reference (case-insensitive)");
+    assert_eq!(
+        result.len(),
+        1,
+        "Should detect exactly 1 unique missing reference (case-insensitive)"
+    );
 }
 
 #[test]
 fn test_md052_shortcut_references() {
     let rule = MD052ReferenceLinkImages::new();
-    
+
     // Test 3: Shortcut reference syntax
     let content = "\
 Shortcut link: [shortcut]
@@ -482,7 +496,7 @@ Undefined: [no-definition]
 Mixed with [normal][ref] syntax
 
 [ref]: https://ref.com";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should detect undefined shortcut references");
@@ -491,7 +505,7 @@ Mixed with [normal][ref] syntax
 #[test]
 fn test_md052_code_exclusion() {
     let rule = MD052ReferenceLinkImages::new();
-    
+
     // Test 4: References in code should be excluded
     let content = "\
 Real reference: [link][ref1]
@@ -512,7 +526,7 @@ List context might affect this:
 [ref1]: url1
 [ref6]: url6
 [ref7]: url7";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // Should not check references in code blocks
@@ -524,7 +538,7 @@ List context might affect this:
 #[test]
 fn test_md052_complex_references() {
     let rule = MD052ReferenceLinkImages::new();
-    
+
     // Test 5: Complex reference patterns
     let content = "\
 Multiple on line: [a][ref1] and [b][ref2] and [c][ref3]
@@ -546,7 +560,7 @@ Special chars: [text][ref-with-dash_and_underscore]
 [ref-with-dash_and_underscore]: special-url
 
 Missing: ref2, ref4, ref7, ref with spaces";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(result.len() >= 4, "Should detect various missing references");
@@ -555,7 +569,7 @@ Missing: ref2, ref4, ref7, ref with spaces";
 #[test]
 fn test_md052_reference_definitions() {
     let rule = MD052ReferenceLinkImages::new();
-    
+
     // Test 6: Various reference definition formats
     let content = "\
 Use [link1][ref1] and [link2][ref2]
@@ -571,7 +585,7 @@ Also ![image1][img1] and ![image2][img2]
 Undefined: [missing][undefined]
 
 Empty definition should work: [empty][empty-ref]
-[empty-ref]: 
+[empty-ref]:
 
 Duplicate definitions:
 [dup]: first.com
@@ -579,7 +593,7 @@ Duplicate definitions:
 [dup]: third.com
 
 Using [dup][dup] should work";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: MD052 MUST detect ONLY truly undefined references
@@ -591,13 +605,10 @@ Using [dup][dup] should work";
 #[test]
 fn test_inline_rules_interaction() {
     // Test all inline rules together
-    let md044 = MD044ProperNames::new(
-        vec!["JavaScript".to_string(), "GitHub".to_string()],
-        true,
-    );
+    let md044 = MD044ProperNames::new(vec!["JavaScript".to_string(), "GitHub".to_string()], true);
     let md045 = MD045NoAltText::new();
     let md052 = MD052ReferenceLinkImages::new();
-    
+
     let content = "\
 Use javascript to upload images to github.
 
@@ -611,18 +622,26 @@ Another image reference: ![github logo][gh-logo]
 [gh-logo]: github-logo.png
 
 Note: js-guide is not defined";
-    
+
     let ctx = LintContext::new(content);
-    
+
     // Each rule should detect its issues independently and correctly
     let result044 = md044.check(&ctx).unwrap();
     let result045 = md045.check(&ctx).unwrap();
     let result052 = md052.check(&ctx).unwrap();
-    
+
     // PRODUCTION REQUIREMENTS:
-    assert_eq!(result044.len(), 7, "MD044: Must detect all 7 improper names (javascript x3, github x4)");
+    assert_eq!(
+        result044.len(),
+        7,
+        "MD044: Must detect all 7 improper names (javascript x3, github x4)"
+    );
     assert_eq!(result045.len(), 1, "MD045: Must detect 1 image without alt text");
-    assert_eq!(result052.len(), 1, "MD052: Must detect 1 undefined reference [js-guide]");
+    assert_eq!(
+        result052.len(),
+        1,
+        "MD052: Must detect 1 undefined reference [js-guide]"
+    );
 }
 
 #[test]
@@ -631,10 +650,10 @@ fn test_md044_performance_edge_cases() {
         vec!["Test".to_string(); 100], // Many names
         true,
     );
-    
+
     // Test with many occurrences
     let content = "test ".repeat(1000);
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1000, "Should handle many occurrences efficiently");
@@ -643,7 +662,7 @@ fn test_md044_performance_edge_cases() {
 #[test]
 fn test_md045_image_title_attribute() {
     let rule = MD045NoAltText::new();
-    
+
     // Test images with title but no alt
     let content = "\
 ![](image.png \"Title\")
@@ -655,7 +674,7 @@ fn test_md045_image_title_attribute() {
 ![][ref]
 
 [ref]: image.png \"Reference title\"";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "Title attribute doesn't replace alt text requirement");
@@ -664,7 +683,7 @@ fn test_md045_image_title_attribute() {
 #[test]
 fn test_md052_nested_brackets() {
     let rule = MD052ReferenceLinkImages::new();
-    
+
     // Test nested brackets and edge cases
     let content = "\
 Link with [brackets [inside]][ref1]
@@ -680,7 +699,7 @@ But this is real: [link][ref5]
 [ref1]: url1
 [ref2]: url2
 [ref5]: url5";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: MD052 MUST handle escaped brackets correctly
@@ -689,11 +708,8 @@ But this is real: [link][ref5]
 
 #[test]
 fn test_inline_content_front_matter() {
-    let md044 = MD044ProperNames::new(
-        vec!["JavaScript".to_string()],
-        true,
-    );
-    
+    let md044 = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
+
     // Test with front matter
     let content = "\
 ---
@@ -704,7 +720,7 @@ tags: [javascript, programming]
 # Learning javascript
 
 The javascript ecosystem is vast.";
-    
+
     let ctx = LintContext::new(content);
     let result = md044.check(&ctx).unwrap();
     // Should detect in front matter and content
@@ -715,7 +731,7 @@ The javascript ecosystem is vast.";
 fn test_inline_content_html_mixed() {
     let md045 = MD045NoAltText::new();
     let md052 = MD052ReferenceLinkImages::new();
-    
+
     // Test mixed HTML and Markdown
     let content = "\
 <div>
@@ -730,11 +746,11 @@ Regular ![](outside.png) image.
 <!-- Comment with ![](in-comment.png) -->
 
 [ref]: defined.com";
-    
+
     let ctx = LintContext::new(content);
     let result045 = md045.check(&ctx).unwrap();
     let result052 = md052.check(&ctx).unwrap();
-    
+
     // Should handle mixed content appropriately
     assert_eq!(result045.len(), 3, "Should detect Markdown images in HTML");
     assert_eq!(result052.len(), 0, "All references should be defined");
@@ -751,7 +767,7 @@ fn test_md044_overlapping_names() {
         ],
         true,
     );
-    
+
     // Test overlapping name patterns
     let content = "\
 I love javascript and java programming.
@@ -761,10 +777,10 @@ The script uses typescript features.
 Don't match 'manuscript' or 'subscription'.
 
 But do match java and script separately.";
-    
+
     let ctx = LintContext::new(content);
     let _result = rule.check(&ctx).unwrap();
-    
+
     // Should handle overlapping patterns correctly
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("JavaScript"));
@@ -775,14 +791,14 @@ But do match java and script separately.";
 #[test]
 fn test_md045_multiline_images() {
     let rule = MD045NoAltText::new();
-    
+
     // Test multiline image syntax
     let content = "\
 ![
 ](multiline1.png)
 
 ![
-  
+
 ](multiline2.png)
 
 ![Good
@@ -790,7 +806,7 @@ alt
 text](multiline3.png)
 
 ![    ](spaces.png)";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "Should handle multiline image syntax");
@@ -799,7 +815,7 @@ text](multiline3.png)
 #[test]
 fn test_md052_example_sections() {
     let rule = MD052ReferenceLinkImages::new();
-    
+
     // Test example section exclusion
     let content = "\
 Regular reference: [link][ref1]
@@ -815,7 +831,7 @@ Examples:
 [ref1]: defined.com
 
 Note: ref2 and ref3 in example sections might be excluded";
-    
+
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     // Behavior depends on implementation details

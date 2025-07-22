@@ -7,15 +7,19 @@ use std::collections::{HashMap, HashSet};
 
 lazy_static! {
     // Pattern to match reference definitions [ref]: url (standard regex is fine)
-    static ref REF_REGEX: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*\S+").unwrap();
+    // Note: \S* instead of \S+ to allow empty definitions like [ref]:
+    static ref REF_REGEX: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*.*").unwrap();
 
     // Pattern to match reference links and images ONLY: [text][reference] or ![text][reference]
     // These need lookbehind for escaped brackets
-    static ref REF_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\[([^\]]*)\]").unwrap();
-    static ref REF_IMAGE_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)!\[([^\]]+)\]\[([^\]]*)\]").unwrap();
+    // Use a more sophisticated pattern that handles nested brackets
+    static ref REF_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
+    static ref REF_IMAGE_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)!\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
 
     // Pattern for shortcut reference links [reference]
-    static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\](?!\s*[\[\(])").unwrap();
+    // Must not be preceded by ] (to avoid matching second part of [text][ref])
+    // Must not be followed by [ or ( (to avoid matching first part of [text][ref] or [text](url))
+    static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\])\[([^\]]+)\](?!\s*[\[\(])").unwrap();
 
     // Pattern to match inline links and images (to exclude them)
     static ref INLINE_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap();
@@ -189,6 +193,22 @@ impl MD052ReferenceLinkImages {
             }
         }
 
+        // Build a set of byte ranges that are already covered by parsed links/images
+        let mut covered_ranges: Vec<(usize, usize)> = Vec::new();
+
+        // Add ranges from parsed links
+        for link in &ctx.links {
+            covered_ranges.push((link.byte_offset, link.byte_end));
+        }
+
+        // Add ranges from parsed images
+        for image in &ctx.images {
+            covered_ranges.push((image.byte_offset, image.byte_end));
+        }
+
+        // Sort ranges by start position
+        covered_ranges.sort_by_key(|&(start, _)| start);
+
         // Handle shortcut references [text] which aren't captured in ctx.links
         // Need to use regex for these
         let lines: Vec<&str> = content.lines().collect();
@@ -249,6 +269,80 @@ impl MD052ReferenceLinkImages {
                             let code_spans = ctx.code_spans();
                             if Self::is_in_code_span(line_num + 1, col, &code_spans) {
                                 continue;
+                            }
+
+                            // Check if this position is within a covered range
+                            let line_start_byte = ctx.line_offsets[line_num];
+                            let byte_pos = line_start_byte + col;
+                            let byte_end = byte_pos + (full_match.end() - full_match.start());
+
+                            // Check if this shortcut ref overlaps with any parsed link/image
+                            let mut is_covered = false;
+                            for &(range_start, range_end) in &covered_ranges {
+                                if range_start <= byte_pos && byte_end <= range_end {
+                                    // This shortcut ref is completely within a parsed link/image
+                                    is_covered = true;
+                                    break;
+                                }
+                                if range_start > byte_end {
+                                    // No need to check further (ranges are sorted)
+                                    break;
+                                }
+                            }
+
+                            if is_covered {
+                                continue;
+                            }
+
+                            // More sophisticated checks to avoid false positives
+
+                            // Check 1: If preceded by ], this might be part of [text][ref]
+                            // Look for the pattern ...][ref] and check if there's a matching [ before
+                            if col > 0 && line.chars().nth(col.saturating_sub(1)) == Some(']') {
+                                // Look backwards for a [ that would make this [text][ref]
+                                let mut bracket_count = 1; // We already saw one ]
+                                let mut check_pos = col.saturating_sub(2);
+                                let mut found_opening = false;
+
+                                while check_pos > 0 {
+                                    match line.chars().nth(check_pos) {
+                                        Some(']') => bracket_count += 1,
+                                        Some('[') => {
+                                            bracket_count -= 1;
+                                            if bracket_count == 0 {
+                                                // Check if this [ is escaped
+                                                if check_pos == 0 || line.chars().nth(check_pos - 1) != Some('\\') {
+                                                    found_opening = true;
+                                                }
+                                                break;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                    if check_pos == 0 {
+                                        break;
+                                    }
+                                    check_pos = check_pos.saturating_sub(1);
+                                }
+
+                                if found_opening {
+                                    // This is part of [text][ref], skip it
+                                    continue;
+                                }
+                            }
+
+                            // Check 2: If there's an escaped bracket pattern before this
+                            // e.g., \[text\][ref], the [ref] shouldn't be treated as a shortcut
+                            let before_text = &line[..col];
+                            if before_text.contains("\\]") {
+                                // Check if there's a \[ before the \]
+                                if let Some(escaped_close_pos) = before_text.rfind("\\]") {
+                                    let search_text = &before_text[..escaped_close_pos];
+                                    if search_text.contains("\\[") {
+                                        // This looks like \[...\][ref], skip it
+                                        continue;
+                                    }
+                                }
                             }
 
                             let match_len = full_match.end() - full_match.start();
