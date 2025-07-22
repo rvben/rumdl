@@ -15,12 +15,12 @@ use regex::Regex;
 
 lazy_static! {
     // Simple pattern to quickly check if a line might contain a URL or email
-    static ref URL_QUICK_CHECK: Regex = Regex::new(r#"(?:https?|ftp)://|@"#).unwrap();
+    static ref URL_QUICK_CHECK: Regex = Regex::new(r#"(?:https?|ftps?)://|@"#).unwrap();
 
     // Use fancy-regex for look-behind/look-ahead
     // Updated to support IPv6 addresses in square brackets
-    static ref URL_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftp)://(?:\[[0-9a-fA-F:%]+\]|[^\s<>\[\]()\\'\"]+)(?::\d+)?(?:/[^\s<>\[\]()\\'\"]*)?(?:\?[^\s<>\[\]()\\'\"]*)?(?:#[^\s<>\[\]()\\'\"]*)?)"#).unwrap();
-    static ref URL_FIX_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftp)://(?:\[[0-9a-fA-F:%]+\]|[^\s<>\[\]()\\'\"]+)(?::\d+)?(?:/[^\s<>\[\]()\\'\"]*)?(?:\?[^\s<>\[\]()\\'\"]*)?(?:#[^\s<>\[\]()\\'\"]*)?)"#).unwrap();
+    static ref URL_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftps?)://(?:\[[0-9a-fA-F:%]+\]|[^\s<>\[\]()\\'\"]+)(?::\d+)?(?:/[^\s<>\[\]()\\'\"]*)?(?:\?[^\s<>\[\]()\\'\"]*)?(?:#[^\s<>\[\]()\\'\"]*)?)"#).unwrap();
+    static ref URL_FIX_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftps?)://(?:\[[0-9a-fA-F:%]+\]|[^\s<>\[\]()\\'\"]+)(?::\d+)?(?:/[^\s<>\[\]()\\'\"]*)?(?:\?[^\s<>\[\]()\\'\"]*)?(?:#[^\s<>\[\]()\\'\"]*)?)"#).unwrap();
 
     // Pattern to match markdown link format - capture destination in Group 1
     // Updated to handle nested brackets in badge links like [![badge](img)](link)
@@ -28,7 +28,7 @@ lazy_static! {
 
     // Pattern to match angle bracket link format (URLs and emails)
     // Updated to support IPv6 addresses
-    static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r#"<((?:https?|ftp)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#).unwrap();
+    static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#).unwrap();
 
     // Pattern to match code fences
     static ref CODE_FENCE_RE: Regex = Regex::new(r#"^(`{3,}|~{3,})"#).unwrap();
@@ -49,11 +49,11 @@ lazy_static! {
     // Now supports IPv6 addresses in square brackets
     // Note: We need two separate patterns - one for IPv6 and one for regular URLs
     // Updated to avoid matching partial IPv6 patterns (e.g., "https://::1]" without opening bracket)
-    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`:\]]+(?::\d+)?)(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
+    static ref SIMPLE_URL_REGEX: Regex = Regex::new(r#"(https?|ftps?)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`:\]]+(?::\d+)?)(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
 
     // Special pattern just for IPv6 URLs to handle them separately
     // Note: This is permissive to match markdownlint behavior, allowing technically invalid IPv6 for examples
-    static ref IPV6_URL_REGEX: Regex = Regex::new(r#"(https?|ftp)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
+    static ref IPV6_URL_REGEX: Regex = Regex::new(r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
 
     // Add regex for email addresses - matches markdownlint behavior
     // Detects email addresses that should be autolinked like URLs
@@ -61,10 +61,13 @@ lazy_static! {
 
     // Add regex for reference definitions
     // Updated to support IPv6 addresses
-    static ref REFERENCE_DEF_RE: Regex = Regex::new(r"^\s*\[[^\]]+\]:\s*(?:https?|ftp)://\S+$").unwrap();
+    static ref REFERENCE_DEF_RE: Regex = Regex::new(r"^\s*\[[^\]]+\]:\s*(?:https?|ftps?)://\S+$").unwrap();
 
     // Pattern to match URLs inside HTML attributes (src, href, srcset, etc.)
     static ref HTML_ATTRIBUTE_URL: Regex = Regex::new(r#"(?:src|href|srcset|content|data-\w+)\s*=\s*["']([^"']*)["']"#).unwrap();
+
+    // Pattern to match HTML comments
+    static ref HTML_COMMENT_PATTERN: Regex = Regex::new(r#"<!--[\s\S]*?-->"#).unwrap();
 }
 
 #[derive(Default, Clone)]
@@ -142,6 +145,13 @@ impl MD034NoBareUrls {
         for cap in HTML_ATTRIBUTE_URL.captures_iter(content) {
             if let Some(url_attr) = cap.get(1) {
                 excluded_ranges.push((url_attr.start(), url_attr.end()));
+            }
+        }
+
+        // HTML comments: <!-- url -->
+        for cap in HTML_COMMENT_PATTERN.captures_iter(content) {
+            if let Some(comment) = cap.get(0) {
+                excluded_ranges.push((comment.start(), comment.end()));
             }
         }
 
@@ -257,10 +267,13 @@ impl MD034NoBareUrls {
                 continue;
             }
 
-            // Skip if within any excluded range (link/image dest)
-            let in_any_range = merged
-                .iter()
-                .any(|(start, end)| match_start >= *start && match_end <= *end);
+            // Skip if within any excluded range (link/image dest/HTML comment)
+            let in_any_range = merged.iter().any(|(start, end)| {
+                // For HTML comments and other exclusions, check if URL overlaps the range
+                (match_start >= *start && match_start < *end)
+                    || (match_end > *start && match_end <= *end)
+                    || (match_start < *start && match_end > *end)
+            });
             if in_any_range {
                 continue;
             }
@@ -508,6 +521,7 @@ impl Rule for MD034NoBareUrls {
         if !content.contains("http://")
             && !content.contains("https://")
             && !content.contains("ftp://")
+            && !content.contains("ftps://")
             && !content.contains('@')
         {
             return Ok(Vec::new());
@@ -615,6 +629,7 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD034NoBa
             && (content.contains("http://")
                 || content.contains("https://")
                 || content.contains("ftp://")
+                || content.contains("ftps://")
                 || content.contains('@'))
     }
 }
