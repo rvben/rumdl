@@ -6,13 +6,7 @@ use crate::utils::document_structure::{DocumentStructure, DocumentStructureExten
 use crate::utils::emphasis_utils::{
     EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
 };
-use lazy_static::lazy_static;
-use regex::Regex;
-
-lazy_static! {
-    // List markers pattern - used to avoid confusion with emphasis
-    static ref LIST_MARKER: Regex = Regex::new(r"^\s*[*+-]\s+").unwrap();
-}
+use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 
 /// Check if an emphasis span has spacing issues that should be flagged
 #[inline]
@@ -198,9 +192,9 @@ impl MD037NoSpaceInEmphasis {
 
         // Optimized list detection with fast path
         if (line.starts_with(' ') || line.starts_with('*') || line.starts_with('+') || line.starts_with('-'))
-            && LIST_MARKER.is_match(line)
+            && UNORDERED_LIST_MARKER_REGEX.is_match(line)
         {
-            if let Some(caps) = LIST_MARKER.captures(line) {
+            if let Some(caps) = UNORDERED_LIST_MARKER_REGEX.captures(line) {
                 if let Some(full_match) = caps.get(0) {
                     let list_marker_end = full_match.end();
                     if list_marker_end < line.len() {

@@ -5,8 +5,7 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severi
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::element_cache::{ElementCache, ListMarkerType};
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::{CODE_FENCE_REGEX, UNORDERED_LIST_MARKER_REGEX};
 use toml;
 
 mod md007_config;
@@ -15,10 +14,6 @@ use md007_config::MD007Config;
 #[derive(Debug, Clone, Default)]
 pub struct MD007ULIndent {
     config: MD007Config,
-}
-
-lazy_static! {
-    static ref LIST_ITEM_PATTERN: Regex = Regex::new(r"^(\s*)([*+-])(\s+)(.*)$").unwrap();
 }
 
 impl MD007ULIndent {
@@ -38,9 +33,7 @@ impl MD007ULIndent {
 
     #[allow(dead_code)]
     fn is_in_code_block(content: &str, line_idx: usize) -> bool {
-        lazy_static! {
-            static ref CODE_BLOCK_MARKER: Regex = Regex::new(r"^(```|~~~)").unwrap();
-        }
+        // Use centralized code fence pattern
 
         let lines: Vec<&str> = content.lines().collect();
         let mut in_code_block = false;
@@ -50,7 +43,7 @@ impl MD007ULIndent {
                 break;
             }
 
-            if CODE_BLOCK_MARKER.is_match(line.trim_start()) {
+            if CODE_FENCE_REGEX.is_match(line.trim_start()) {
                 in_code_block = !in_code_block;
             }
 
@@ -116,7 +109,7 @@ impl Rule for MD007ULIndent {
                         let lines: Vec<&str> = content.lines().collect();
                         if let Some(line) = lines.get(item.line_number - 1) {
                             // Extract the marker and content
-                            if LIST_ITEM_PATTERN.captures(line).is_some() {
+                            if UNORDERED_LIST_MARKER_REGEX.captures(line).is_some() {
                                 let correct_indent = " ".repeat(expected_indent);
 
                                 // Fix range should match warning range - only the problematic indentation
@@ -212,7 +205,7 @@ impl Rule for MD007ULIndent {
                         let lines: Vec<&str> = content.lines().collect();
                         if let Some(line) = lines.get(item.line_number - 1) {
                             // Extract the marker and content
-                            if LIST_ITEM_PATTERN.captures(line).is_some() {
+                            if UNORDERED_LIST_MARKER_REGEX.captures(line).is_some() {
                                 let correct_indent = " ".repeat(expected_indent);
 
                                 // Fix range should match warning range - only the problematic indentation

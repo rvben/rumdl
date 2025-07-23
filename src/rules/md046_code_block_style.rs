@@ -2,16 +2,10 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::rules::code_block_utils::CodeBlockStyle;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
-use lazy_static::lazy_static;
-use regex::Regex;
 use toml;
 
 mod md046_config;
 use md046_config::MD046Config;
-
-lazy_static! {
-    static ref LIST_MARKER: Regex = Regex::new(r"^[\s]*[-+*][\s]+|^[\s]*\d+\.[\s]+").unwrap();
-}
 
 /// Rule MD046: Code block style
 ///

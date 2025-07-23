@@ -14,7 +14,6 @@ lazy_static! {
     static ref REVERSED_LINK_CHECK_REGEX: Regex = Regex::new(
         r"\(([^)]*(?:\([^)]*\)[^)]*)*)\)\[([^\]]+)\]"
     ).unwrap();
-    static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)").unwrap();
 
     // Pattern to detect escaped brackets and parentheses
     static ref ESCAPED_CHARS: Regex = Regex::new(r"\\[\[\]()]").unwrap();

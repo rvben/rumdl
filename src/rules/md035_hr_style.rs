@@ -6,21 +6,13 @@
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::{
+    HR_ASTERISK, HR_DASH, HR_SPACED_ASTERISK, HR_SPACED_DASH, HR_SPACED_UNDERSCORE, HR_UNDERSCORE,
+};
 use toml;
 
 mod md035_config;
 use md035_config::MD035Config;
-
-lazy_static! {
-    static ref HR_DASH: Regex = Regex::new(r"^-{3,}\s*$").unwrap();
-    static ref HR_ASTERISK: Regex = Regex::new(r"^\*{3,}\s*$").unwrap();
-    static ref HR_UNDERSCORE: Regex = Regex::new(r"^_{3,}\s*$").unwrap();
-    static ref HR_SPACED_DASH: Regex = Regex::new(r"^(-\s+){2,}-\s*$").unwrap();
-    static ref HR_SPACED_ASTERISK: Regex = Regex::new(r"^(\*\s+){2,}\*\s*$").unwrap();
-    static ref HR_SPACED_UNDERSCORE: Regex = Regex::new(r"^(_\s+){2,}_\s*$").unwrap();
-}
 
 /// Represents the style for horizontal rules
 #[derive(Clone, Default)]
