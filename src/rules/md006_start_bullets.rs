@@ -16,6 +16,32 @@ use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 pub struct MD006StartBullets;
 
 impl MD006StartBullets {
+    /// Check if a bullet is nested under an ordered list item
+    fn is_nested_under_ordered_item(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        current_line: usize,
+        current_indent: usize,
+    ) -> bool {
+        // Look backward from current line to find parent item
+        for line_idx in (1..current_line).rev() {
+            if let Some(line_info) = ctx.line_info(line_idx) {
+                if let Some(list_item) = &line_info.list_item {
+                    // Found a list item - check if it's at a lower indentation (parent level)
+                    if list_item.marker_column < current_indent {
+                        // This is a parent item - check if it's ordered
+                        return list_item.is_ordered;
+                    }
+                }
+                // If we encounter non-blank, non-list content at column 0, stop looking
+                else if !line_info.is_blank && line_info.indent == 0 {
+                    break;
+                }
+            }
+        }
+        false
+    }
+
     /// Optimized check using centralized list blocks
     fn check_optimized(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
@@ -47,21 +73,26 @@ impl MD006StartBullets {
                             // Top-level items are always valid
                             is_valid = true;
                         } else {
-                            // Check if this is a valid nested item
-                            match Self::find_relevant_previous_bullet(&lines, line_idx) {
-                                Some((prev_idx, prev_indent)) => {
-                                    match prev_indent.cmp(&indent) {
-                                        std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
-                                            // Valid nesting or sibling if previous item was valid
-                                            is_valid = valid_bullet_lines[prev_idx];
-                                        }
-                                        std::cmp::Ordering::Greater => {
-                                            // remains invalid
+                            // Check if this is nested under an ordered item with correct indentation (3 spaces)
+                            if indent == 3 && self.is_nested_under_ordered_item(ctx, item_line, indent) {
+                                is_valid = true;
+                            } else {
+                                // Check if this is a valid nested item under another bullet
+                                match Self::find_relevant_previous_bullet(&lines, line_idx) {
+                                    Some((prev_idx, prev_indent)) => {
+                                        match prev_indent.cmp(&indent) {
+                                            std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
+                                                // Valid nesting or sibling if previous item was valid
+                                                is_valid = valid_bullet_lines[prev_idx];
+                                            }
+                                            std::cmp::Ordering::Greater => {
+                                                // remains invalid
+                                            }
                                         }
                                     }
-                                }
-                                None => {
-                                    // Indented item with no previous bullet remains invalid
+                                    None => {
+                                        // Indented item with no previous bullet remains invalid
+                                    }
                                 }
                             }
                         }
@@ -442,6 +473,60 @@ mod tests {
         assert!(
             result.is_empty(),
             "Standard nesting (* Item ->   * Item) should NOT generate warnings, found: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_bullets_nested_under_numbered_items() {
+        let rule = MD006StartBullets;
+        let content = "\
+1. **Active Directory/LDAP**
+   - User authentication and directory services
+   - LDAP for user information and validation
+
+2. **Oracle Unified Directory (OUD)**
+   - Extended user directory services";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should have no warnings - 3 spaces is valid for bullets under numbered items
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for bullets with 3 spaces under numbered items, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_bullets_nested_under_numbered_items_wrong_indent() {
+        let rule = MD006StartBullets;
+        let content = "\
+1. **Active Directory/LDAP**
+  - Wrong: only 2 spaces
+    - Also wrong: 4 spaces";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should flag the incorrect indentations
+        assert_eq!(
+            result.len(),
+            2,
+            "Expected warnings for bullets with incorrect spacing under numbered items"
+        );
+        assert!(result.iter().any(|w| w.line == 2));
+        assert!(result.iter().any(|w| w.line == 3));
+    }
+
+    #[test]
+    fn test_regular_bullet_nesting_still_works() {
+        let rule = MD006StartBullets;
+        let content = "\
+* Top level
+  * Nested bullet (2 spaces is correct)
+    * Deeply nested (4 spaces)";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should have no warnings - standard bullet nesting still works
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for standard bullet nesting, got: {result:?}"
         );
     }
 }

@@ -31,6 +31,32 @@ impl MD007ULIndent {
         Self { config }
     }
 
+    /// Check if this unordered list item is nested under an ordered list item
+    fn is_nested_under_ordered_item(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        line_number: usize,
+        indentation: usize,
+    ) -> bool {
+        // Look backward from current line to find parent item
+        for line_idx in (1..line_number).rev() {
+            if let Some(line_info) = ctx.line_info(line_idx) {
+                if let Some(list_item) = &line_info.list_item {
+                    // Found a list item - check if it's at a lower indentation (parent level)
+                    if list_item.marker_column < indentation {
+                        // This is a parent item - check if it's ordered
+                        return list_item.is_ordered;
+                    }
+                }
+                // If we encounter non-blank, non-list content at column 0, stop looking
+                else if !line_info.is_blank && line_info.indent == 0 {
+                    break;
+                }
+            }
+        }
+        false
+    }
+
     #[allow(dead_code)]
     fn is_in_code_block(content: &str, line_idx: usize) -> bool {
         // Use centralized code fence pattern
@@ -100,7 +126,15 @@ impl Rule for MD007ULIndent {
                 let expected_indent = if self.config.start_indented {
                     self.config.start_indent + (item.nesting_level * self.config.indent)
                 } else {
-                    item.nesting_level * self.config.indent
+                    // Check if this unordered item is nested under an ordered item
+                    if item.nesting_level == 1
+                        && self.is_nested_under_ordered_item(ctx, item.line_number, item.indentation)
+                    {
+                        // Unordered bullets nested directly under ordered items need 3 spaces
+                        3
+                    } else {
+                        item.nesting_level * self.config.indent
+                    }
                 };
 
                 if item.indentation != expected_indent {
@@ -196,7 +230,15 @@ impl Rule for MD007ULIndent {
                 let expected_indent = if self.config.start_indented {
                     self.config.start_indent + (item.nesting_level * self.config.indent)
                 } else {
-                    item.nesting_level * self.config.indent
+                    // Check if this unordered item is nested under an ordered item
+                    if item.nesting_level == 1
+                        && self.is_nested_under_ordered_item(ctx, item.line_number, item.indentation)
+                    {
+                        // Unordered bullets nested directly under ordered items need 3 spaces
+                        3
+                    } else {
+                        item.nesting_level * self.config.indent
+                    }
                 };
 
                 if item.indentation != expected_indent {
@@ -607,8 +649,9 @@ repos:
         let rule = MD007ULIndent::default();
 
         // MD007 only checks unordered lists, so ordered lists should be ignored
+        // Note: 3 spaces is now correct for bullets under ordered items
         let content = r#"1. Ordered item
-   * Unordered sub-item (wrong indent)
+   * Unordered sub-item (correct - 3 spaces under ordered)
    2. Ordered sub-item
 * Unordered item
   1. Ordered sub-item
@@ -616,18 +659,11 @@ repos:
 
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Only unordered list indentation should be checked");
-        assert_eq!(result[0].line, 2, "Error should be on line 2");
+        assert_eq!(result.len(), 0, "All unordered list indentation should be correct");
 
-        // Fix should only correct unordered lists
+        // No fix needed as all indentation is correct
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = r#"1. Ordered item
-  * Unordered sub-item (wrong indent)
-   2. Ordered sub-item
-* Unordered item
-  1. Ordered sub-item
-  * Unordered sub-item"#;
-        assert_eq!(fixed, expected);
+        assert_eq!(fixed, content);
     }
 
     #[test]
@@ -792,5 +828,61 @@ tags:
         let ctx = LintContext::new(wrong_content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2, "Deep nesting errors should be detected");
+    }
+
+    #[test]
+    fn test_bullets_nested_under_numbered_items() {
+        let rule = MD007ULIndent::default();
+        let content = "\
+1. **Active Directory/LDAP**
+   - User authentication and directory services
+   - LDAP for user information and validation
+
+2. **Oracle Unified Directory (OUD)**
+   - Extended user directory services";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should have no warnings - 3 spaces is correct for bullets under numbered items
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for bullets with 3 spaces under numbered items, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_bullets_nested_under_numbered_items_wrong_indent() {
+        let rule = MD007ULIndent::default();
+        let content = "\
+1. **Active Directory/LDAP**
+  - Wrong: only 2 spaces";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should flag incorrect indentation
+        assert_eq!(
+            result.len(),
+            1,
+            "Expected warning for incorrect indentation under numbered items"
+        );
+        assert!(
+            result
+                .iter()
+                .any(|w| w.line == 2 && w.message.contains("Expected 3 spaces"))
+        );
+    }
+
+    #[test]
+    fn test_regular_bullet_nesting_still_works() {
+        let rule = MD007ULIndent::default();
+        let content = "\
+* Top level
+  * Nested bullet (2 spaces is correct)
+    * Deeply nested (4 spaces)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should have no warnings - standard bullet nesting still uses 2-space increments
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for standard bullet nesting, got: {result:?}"
+        );
     }
 }
