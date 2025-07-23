@@ -609,6 +609,37 @@ fn find_markdown_files(
     // Add support for .markdownlintignore file
     walk_builder.add_custom_ignore_filename(".markdownlintignore");
 
+    // --- Pre-check for explicit file paths ---
+    // If not in discovery mode, validate that specified paths exist
+    if !is_discovery_mode {
+        for path_str in paths {
+            let path = Path::new(path_str);
+            if !path.exists() {
+                return Err(format!("File not found: {path_str}").into());
+            }
+            // If it's a file, check if it's a markdown file and add it directly
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext == "md" || ext == "markdown" {
+                        let cleaned_path = if let Some(stripped) = path_str.strip_prefix("./") {
+                            stripped.to_string()
+                        } else {
+                            path_str.clone()
+                        };
+                        file_paths.push(cleaned_path);
+                    }
+                }
+            }
+        }
+
+        // If we found files directly, skip the walker
+        if !file_paths.is_empty() {
+            file_paths.sort();
+            file_paths.dedup();
+            return Ok(file_paths);
+        }
+    }
+
     // --- Execute Walk ---
 
     for result in walk_builder.build() {
@@ -628,7 +659,12 @@ fn find_markdown_files(
                     file_paths.push(cleaned_path);
                 }
             }
-            Err(err) => eprintln!("Error walking directory: {err}"),
+            Err(err) => {
+                // Only show generic walking errors for directories, not for missing files
+                if is_discovery_mode {
+                    eprintln!("Error walking directory: {err}");
+                }
+            }
         }
     }
 
