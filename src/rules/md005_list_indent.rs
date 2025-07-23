@@ -17,13 +17,45 @@ pub struct MD005ListIndent;
 
 impl MD005ListIndent {
     // Determine the expected indentation for a list item at a specific level
+    // considering parent context (ordered vs unordered lists)
     #[inline]
-    fn get_expected_indent(level: usize) -> usize {
+    fn get_expected_indent(level: usize, is_nested_under_ordered: bool, is_current_unordered: bool) -> usize {
         if level == 1 {
             0 // Top level items should be at the start of the line
+        } else if is_nested_under_ordered && level == 2 && is_current_unordered {
+            // ONLY unordered bullets nested directly under numbered items need 3 spaces to align with content
+            // e.g., "1. Item\n   - Sub-item" (3 spaces to align with "Item")
+            // Ordered items nested under ordered items still use 2 spaces
+            3
         } else {
-            2 * (level - 1) // Nested items should be indented by 2 spaces per level
+            2 * (level - 1) // Standard nested indentation: 2 spaces per level
         }
+    }
+
+    /// Determine if a list item is nested under an ordered list item
+    fn is_nested_under_ordered_item(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        current_line: usize,
+        current_indent: usize,
+    ) -> bool {
+        // Look backward from current line to find parent item
+        for line_idx in (1..current_line).rev() {
+            if let Some(line_info) = ctx.line_info(line_idx) {
+                if let Some(list_item) = &line_info.list_item {
+                    // Found a list item - check if it's at a lower indentation (parent level)
+                    if list_item.marker_column < current_indent {
+                        // This is a parent item - check if it's ordered
+                        return list_item.is_ordered;
+                    }
+                }
+                // If we encounter non-blank, non-list content at column 0, stop looking
+                else if !line_info.is_blank && line_info.indent == 0 {
+                    break;
+                }
+            }
+        }
+        false
     }
 
     /// Group related list blocks that should be treated as one logical list structure
@@ -138,7 +170,33 @@ impl MD005ListIndent {
             // Sort by line number to process in order
             group.sort_by_key(|(line_num, _, _)| *line_num);
 
-            let expected_indent = Self::get_expected_indent(level);
+            // Determine if items at this level are nested under ordered items and if current items are unordered
+            let (is_nested_under_ordered, is_current_unordered) = if level > 1 {
+                let is_nested = group
+                    .iter()
+                    .any(|(line_num, indent, _)| self.is_nested_under_ordered_item(ctx, *line_num, *indent));
+
+                // Check if the current items are unordered by looking at the first item
+                let is_unordered = if let Some((line_num, _, _)) = group.first() {
+                    if let Some(line_info) = ctx.line_info(*line_num) {
+                        if let Some(list_item) = &line_info.list_item {
+                            !list_item.is_ordered
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                (is_nested, is_unordered)
+            } else {
+                (false, false)
+            };
+
+            let expected_indent = Self::get_expected_indent(level, is_nested_under_ordered, is_current_unordered);
 
             // Check if items in this level have consistent indentation
             let indents: std::collections::HashSet<usize> = group.iter().map(|(_, indent, _)| *indent).collect();
@@ -783,6 +841,56 @@ Even more text";
         // Both items get warnings due to inconsistent indentation
         assert_eq!(result.len(), 2);
         assert!(result.iter().any(|w| w.line == 2 && w.message.contains("found 3")));
+    }
+
+    #[test]
+    fn test_nested_bullets_under_numbered_items() {
+        let rule = MD005ListIndent;
+        let content = "\
+1. **Active Directory/LDAP**
+   - User authentication and directory services
+   - LDAP for user information and validation
+
+2. **Oracle Unified Directory (OUD)**
+   - Extended user directory services
+   - Verification of project account presence and changes";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should have no warnings - 3 spaces is correct for bullets under numbered items
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for bullets with 3 spaces under numbered items, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_nested_bullets_under_numbered_items_wrong_indent() {
+        let rule = MD005ListIndent;
+        let content = "\
+1. **Active Directory/LDAP**
+  - Wrong: only 2 spaces
+   - Correct: 3 spaces";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should flag the 2-space indentation as wrong
+        assert_eq!(result.len(), 2); // Both items flagged due to inconsistency
+        assert!(result.iter().any(|w| w.line == 2 && w.message.contains("found 2")));
+    }
+
+    #[test]
+    fn test_regular_nested_bullets_still_work() {
+        let rule = MD005ListIndent;
+        let content = "\
+* Top level
+  * Second level (2 spaces is correct for bullets under bullets)
+    * Third level (4 spaces)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should have no warnings - regular bullet nesting still uses 2-space increments
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for regular bullet nesting, got: {result:?}"
+        );
     }
 
     #[test]
