@@ -241,6 +241,16 @@ impl Rule for MD026NoTrailingPunctuation {
         "Trailing punctuation in heading"
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if no heading markers
+        if !ctx.content.contains('#') {
+            return true;
+        }
+        // Skip if none of the configured punctuation exists
+        let punctuation = &self.config.punctuation;
+        !punctuation.chars().any(|p| ctx.content.contains(p))
+    }
+
     fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
         None
     }

@@ -402,6 +402,19 @@ impl Rule for MD044ProperNames {
         "Proper names should have the correct capitalization"
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        if self.config.names.is_empty() {
+            return true;
+        }
+        // Quick check if any configured names exist (case-insensitive)
+        let content_lower = ctx.content.to_lowercase();
+        !self
+            .config
+            .names
+            .iter()
+            .any(|name| content_lower.contains(&name.to_lowercase()))
+    }
+
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         if content.is_empty() || self.config.names.is_empty() || self.combined_pattern.is_none() {

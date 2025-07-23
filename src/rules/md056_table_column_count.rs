@@ -85,6 +85,11 @@ impl Rule for MD056TableColumnCount {
         "Table column count should be consistent"
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if no pipe characters present (no tables)
+        !ctx.content.contains('|')
+    }
+
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let mut warnings = Vec::new();

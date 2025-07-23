@@ -33,6 +33,11 @@ impl Rule for MD058BlanksAroundTables {
         "Tables should be surrounded by blank lines"
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if no pipe characters present (no tables)
+        !ctx.content.contains('|')
+    }
+
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let _line_index = LineIndex::new(content.to_string());
