@@ -171,6 +171,11 @@ impl Rule for MD055TablePipeStyle {
         "Table pipe style should be consistent"
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if no pipe characters present (no tables)
+        !ctx.content.contains('|')
+    }
+
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let line_index = LineIndex::new(content.to_string());

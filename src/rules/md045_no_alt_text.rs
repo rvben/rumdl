@@ -84,6 +84,11 @@ impl Rule for MD045NoAltText {
         "Images should have alternate text (alt text)"
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if no image syntax present
+        !ctx.content.contains("![")
+    }
+
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
 
