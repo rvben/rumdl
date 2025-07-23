@@ -4,12 +4,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
-use lazy_static::lazy_static;
-use regex::Regex;
-
-lazy_static! {
-    static ref CODE_FENCE: Regex = Regex::new(r"^(```|~~~)").unwrap();
-}
 
 /// Rule MD031: Fenced code blocks should be surrounded by blank lines
 #[derive(Clone)]

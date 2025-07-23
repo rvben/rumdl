@@ -2,11 +2,11 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::document_structure::document_structure_from_str;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
 use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    static ref BLOCKQUOTE_PREFIX_RE: Regex = Regex::new(r"^(\s*>)+(\s*)").unwrap();
     static ref BLANK_LINE_RE: Regex = Regex::new(r"^\s*$").unwrap();
 }
 

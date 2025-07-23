@@ -4,13 +4,12 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
+use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 lazy_static! {
-    static ref ORDERED_LIST_ITEM_REGEX: Regex = Regex::new(r"^(\s*)\d+\.\s").unwrap();
-    static ref LIST_NUMBER_REGEX: Regex = Regex::new(r"^\s*(\d+)\.\s").unwrap();
     static ref FIX_LINE_REGEX: Regex = Regex::new(r"^(\s*)\d+(\.\s.*)$").unwrap();
 }
 
@@ -43,9 +42,9 @@ impl MD029OrderedListPrefix {
 
     #[inline]
     fn get_list_number(line: &str) -> Option<usize> {
-        LIST_NUMBER_REGEX
+        ORDERED_LIST_MARKER_REGEX
             .captures(line)
-            .and_then(|cap| cap[1].parse::<usize>().ok())
+            .and_then(|cap| cap[2].parse::<usize>().ok())
     }
 
     #[inline]
@@ -93,7 +92,7 @@ impl Rule for MD029OrderedListPrefix {
         }
 
         // Quick check for any ordered list markers before processing
-        if !ctx.content.contains('.') || !ctx.content.lines().any(|line| ORDERED_LIST_ITEM_REGEX.is_match(line)) {
+        if !ctx.content.contains('.') || !ctx.content.lines().any(|line| ORDERED_LIST_MARKER_REGEX.is_match(line)) {
             return Ok(Vec::new());
         }
 

@@ -6,6 +6,7 @@ use crate::rule::{
 };
 use crate::utils::early_returns;
 use crate::utils::range_utils::calculate_url_range;
+use crate::utils::regex_cache::EMAIL_PATTERN;
 
 use crate::lint_context::LintContext;
 use fancy_regex::Regex as FancyRegex;
@@ -30,9 +31,6 @@ lazy_static! {
     // Updated to support IPv6 addresses
     static ref ANGLE_LINK_PATTERN: Regex = Regex::new(r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#).unwrap();
 
-    // Pattern to match code fences
-    static ref CODE_FENCE_RE: Regex = Regex::new(r#"^(`{3,}|~{3,})"#).unwrap();
-
     // Add regex to identify lines containing only a badge link
     static ref BADGE_LINK_LINE: Regex = Regex::new(r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#).unwrap();
 
@@ -54,10 +52,6 @@ lazy_static! {
     // Special pattern just for IPv6 URLs to handle them separately
     // Note: This is permissive to match markdownlint behavior, allowing technically invalid IPv6 for examples
     static ref IPV6_URL_REGEX: Regex = Regex::new(r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#).unwrap();
-
-    // Add regex for email addresses - matches markdownlint behavior
-    // Detects email addresses that should be autolinked like URLs
-    static ref EMAIL_REGEX: Regex = Regex::new(r#"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"#).unwrap();
 
     // Add regex for reference definitions
     // Updated to support IPv6 addresses
@@ -219,7 +213,7 @@ impl MD034NoBareUrls {
             }
 
             // Check for emails in this line
-            for email_match in EMAIL_REGEX.find_iter(line_content) {
+            for email_match in EMAIL_PATTERN.find_iter(line_content) {
                 let global_start = line_info.byte_offset + email_match.start();
                 let global_end = line_info.byte_offset + email_match.end();
                 all_matches.push((global_start, global_end, true));
@@ -383,7 +377,7 @@ impl MD034NoBareUrls {
                 }
 
                 // Check for email addresses
-                for email_match in EMAIL_REGEX.find_iter(text_str) {
+                for email_match in EMAIL_PATTERN.find_iter(text_str) {
                     let email_start = email_match.start();
                     let email_end = email_match.end();
                     let before = if email_start == 0 {

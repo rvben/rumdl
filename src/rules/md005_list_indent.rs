@@ -7,15 +7,9 @@ use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::DocumentStructure;
-use lazy_static::lazy_static;
-use regex::Regex;
+// No regex patterns needed for this rule
 use std::collections::HashMap;
 use toml;
-
-lazy_static! {
-    // Regex to match blockquote prefixes (one or more '>' with optional spaces)
-    static ref BLOCKQUOTE_PREFIX: Regex = Regex::new(r"^(\s*>\s*)+").unwrap();
-}
 
 /// Rule MD005: Inconsistent indentation for list items at the same level
 #[derive(Clone)]

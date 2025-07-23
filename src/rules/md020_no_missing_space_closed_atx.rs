@@ -7,16 +7,9 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    static ref CLOSED_ATX_NO_SPACE_PATTERN: Regex =
-        Regex::new(r"^(\s*)(#+)([^#\s].*?)([^#\s])(#+)\s*$").unwrap();
-    static ref CLOSED_ATX_NO_SPACE_START_PATTERN: Regex =
-        Regex::new(r"^(\s*)(#+)([^#\s].*?)\s(#+)\s*$").unwrap();
-    static ref CLOSED_ATX_NO_SPACE_END_PATTERN: Regex =
-        Regex::new(r"^(\s*)(#+)\s(.*?)([^#\s])(#+)\s*$").unwrap();
-
-    // Matches code fence blocks
-    static ref CODE_FENCE_PATTERN: Regex =
-        Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
+    static ref CLOSED_ATX_NO_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)(#+)([^#\s].*?)([^#\s])(#+)\s*$").unwrap();
+    static ref CLOSED_ATX_NO_SPACE_START_PATTERN: Regex = Regex::new(r"^(\s*)(#+)([^#\s].*?)\s(#+)\s*$").unwrap();
+    static ref CLOSED_ATX_NO_SPACE_END_PATTERN: Regex = Regex::new(r"^(\s*)(#+)\s(.*?)([^#\s])(#+)\s*$").unwrap();
 }
 
 #[derive(Clone)]

@@ -2,8 +2,7 @@ use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 
 /// Rule MD006: Consider starting bulleted lists at the leftmost column
 ///
@@ -15,14 +14,6 @@ use regex::Regex;
 /// - A bullet item following non-list content should start a new list at column 0
 #[derive(Clone)]
 pub struct MD006StartBullets;
-
-lazy_static! {
-    // Pattern to match bullet list items: captures indentation, marker, and space after marker
-    static ref BULLET_PATTERN: Regex = Regex::new(r"^(\s*)([*+-])(\s+)").unwrap();
-
-    // Pattern to match code fence markers
-    static ref CODE_FENCE_PATTERN: Regex = Regex::new(r"^(\s*)(```|~~~)").unwrap();
-}
 
 impl MD006StartBullets {
     /// Optimized check using centralized list blocks
@@ -84,7 +75,7 @@ impl MD006StartBullets {
 
                             // For the fix, we need to replace the highlighted part with just the bullet marker
                             let trimmed = line.trim_start();
-                            let bullet_part = if let Some(captures) = BULLET_PATTERN.captures(trimmed) {
+                            let bullet_part = if let Some(captures) = UNORDERED_LIST_MARKER_REGEX.captures(trimmed) {
                                 let marker = captures.get(2).map_or("*", |m| m.as_str());
                                 format!("{marker} ")
                             } else {
@@ -123,7 +114,7 @@ impl MD006StartBullets {
     }
     /// Checks if a line is a bullet list item and returns its indentation level
     fn is_bullet_list_item(line: &str) -> Option<usize> {
-        if let Some(captures) = BULLET_PATTERN.captures(line) {
+        if let Some(captures) = UNORDERED_LIST_MARKER_REGEX.captures(line) {
             if let Some(indent) = captures.get(1) {
                 return Some(indent.as_str().len());
             }
@@ -338,7 +329,7 @@ impl Rule for MD006StartBullets {
                     let line = lines[line_idx];
                     let trimmed = line.trim_start();
                     // Extract just the bullet marker and normalize to single space
-                    let bullet_part = if let Some(captures) = BULLET_PATTERN.captures(trimmed) {
+                    let bullet_part = if let Some(captures) = UNORDERED_LIST_MARKER_REGEX.captures(trimmed) {
                         format!("{} ", captures.get(2).unwrap().as_str()) // Always use single space
                     } else {
                         "* ".to_string() // fallback
