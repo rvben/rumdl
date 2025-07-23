@@ -160,11 +160,11 @@ fn test_deep_nesting_with_multiple_list_types() {
 
     let content = "\
 1. Top level ordered
-  * Second level unordered
-    1. Third level ordered
-      * Fourth level unordered
-        1. Fifth level ordered (independent numbering)
-  * Back to second level
+   * Second level unordered
+     1. Third level ordered
+        * Fourth level unordered
+          1. Fifth level ordered (independent numbering)
+   * Back to second level
 2. Second top level";
 
     let ctx = LintContext::new(content);
@@ -315,9 +315,9 @@ fn test_empty_lines_between_list_items() {
 
 3. Third item
 
-  * Nested unordered with empty line above
+   * Nested unordered with empty line above
 
-  * Another nested item
+   * Another nested item
 
 4. Fourth item";
 
