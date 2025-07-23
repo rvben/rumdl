@@ -332,8 +332,9 @@ mod comprehensive_tests {
         let rule = MD007ULIndent::default();
 
         // MD007 only checks unordered lists, so ordered lists should be ignored
+        // Note: 3 spaces is now correct for bullets under numbered items
         let content = r#"1. Ordered item
-   * Unordered sub-item (wrong indent)
+  * Unordered sub-item (wrong indent - only 2 spaces)
    2. Ordered sub-item
 * Unordered item
   1. Ordered sub-item
@@ -347,7 +348,7 @@ mod comprehensive_tests {
         // Fix should only correct unordered lists
         let fixed = rule.fix(&ctx).unwrap();
         let expected = r#"1. Ordered item
-  * Unordered sub-item (wrong indent)
+   * Unordered sub-item (wrong indent - only 2 spaces)
    2. Ordered sub-item
 * Unordered item
   1. Ordered sub-item

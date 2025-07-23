@@ -16,37 +16,48 @@ use toml;
 pub struct MD005ListIndent;
 
 impl MD005ListIndent {
-    // Determine the expected indentation for a list item at a specific level
-    // considering parent context (ordered vs unordered lists)
+    // Determine the expected indentation for a list item
+    // Each nested item should align with the text content of its parent
     #[inline]
-    fn get_expected_indent(level: usize, is_nested_under_ordered: bool, is_current_unordered: bool) -> usize {
+    fn get_expected_indent(
+        level: usize, 
+        parent_text_position: Option<usize>
+    ) -> usize {
         if level == 1 {
             0 // Top level items should be at the start of the line
-        } else if is_nested_under_ordered && level == 2 && is_current_unordered {
-            // ONLY unordered bullets nested directly under numbered items need 3 spaces to align with content
-            // e.g., "1. Item\n   - Sub-item" (3 spaces to align with "Item")
-            // Ordered items nested under ordered items still use 2 spaces
-            3
+        } else if let Some(pos) = parent_text_position {
+            // Align with parent's text content
+            pos
         } else {
-            2 * (level - 1) // Standard nested indentation: 2 spaces per level
+            // Fallback to standard nested indentation: 2 spaces per level
+            2 * (level - 1)
         }
     }
 
-    /// Determine if a list item is nested under an ordered list item
-    fn is_nested_under_ordered_item(
+    /// Get parent info for any list item to determine proper text alignment
+    /// Returns parent_text_position where the child should align
+    fn get_parent_text_position(
         &self,
         ctx: &crate::lint_context::LintContext,
         current_line: usize,
         current_indent: usize,
-    ) -> bool {
+    ) -> Option<usize> {
         // Look backward from current line to find parent item
         for line_idx in (1..current_line).rev() {
             if let Some(line_info) = ctx.line_info(line_idx) {
                 if let Some(list_item) = &line_info.list_item {
                     // Found a list item - check if it's at a lower indentation (parent level)
                     if list_item.marker_column < current_indent {
-                        // This is a parent item - check if it's ordered
-                        return list_item.is_ordered;
+                        // This is a parent item - calculate where child should align
+                        if list_item.is_ordered {
+                            // For ordered lists, align with text start
+                            let text_start_pos = list_item.marker_column + list_item.marker.len() + 1; // +1 for space after marker
+                            return Some(text_start_pos);
+                        } else {
+                            // For unordered lists, align with text start
+                            let text_start_pos = list_item.marker_column + 2; // "* " or "- " or "+ "
+                            return Some(text_start_pos);
+                        }
                     }
                 }
                 // If we encounter non-blank, non-list content at column 0, stop looking
@@ -55,7 +66,7 @@ impl MD005ListIndent {
                 }
             }
         }
-        false
+        None
     }
 
     /// Group related list blocks that should be treated as one logical list structure
@@ -170,33 +181,19 @@ impl MD005ListIndent {
             // Sort by line number to process in order
             group.sort_by_key(|(line_num, _, _)| *line_num);
 
-            // Determine if items at this level are nested under ordered items and if current items are unordered
-            let (is_nested_under_ordered, is_current_unordered) = if level > 1 {
-                let is_nested = group
-                    .iter()
-                    .any(|(line_num, indent, _)| self.is_nested_under_ordered_item(ctx, *line_num, *indent));
-
-                // Check if the current items are unordered by looking at the first item
-                let is_unordered = if let Some((line_num, _, _)) = group.first() {
-                    if let Some(line_info) = ctx.line_info(*line_num) {
-                        if let Some(list_item) = &line_info.list_item {
-                            !list_item.is_ordered
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
+            // Get parent text position for proper alignment
+            let parent_text_position = if level > 1 {
+                // Get parent info from the first item in the group
+                if let Some((line_num, indent, _)) = group.first() {
+                    self.get_parent_text_position(ctx, *line_num, *indent)
                 } else {
-                    false
-                };
-
-                (is_nested, is_unordered)
+                    None
+                }
             } else {
-                (false, false)
+                None
             };
 
-            let expected_indent = Self::get_expected_indent(level, is_nested_under_ordered, is_current_unordered);
+            let expected_indent = Self::get_expected_indent(level, parent_text_position);
 
             // Check if items in this level have consistent indentation
             let indents: std::collections::HashSet<usize> = group.iter().map(|(_, indent, _)| *indent).collect();

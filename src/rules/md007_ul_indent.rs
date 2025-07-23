@@ -31,21 +31,34 @@ impl MD007ULIndent {
         Self { config }
     }
 
-    /// Check if this unordered list item is nested under an ordered list item
-    fn is_nested_under_ordered_item(
+    /// Get parent info for any list item to determine proper text alignment
+    /// Returns (has_parent, expected_indent_position)
+    fn get_parent_info(
         &self,
         ctx: &crate::lint_context::LintContext,
         line_number: usize,
         indentation: usize,
-    ) -> bool {
+    ) -> (bool, Option<usize>) {
         // Look backward from current line to find parent item
         for line_idx in (1..line_number).rev() {
             if let Some(line_info) = ctx.line_info(line_idx) {
                 if let Some(list_item) = &line_info.list_item {
                     // Found a list item - check if it's at a lower indentation (parent level)
                     if list_item.marker_column < indentation {
-                        // This is a parent item - check if it's ordered
-                        return list_item.is_ordered;
+                        // This is a parent item - calculate where child content should align
+                        if list_item.is_ordered {
+                            // For ordered lists, calculate the position where text starts
+                            // e.g., "1. Text" -> text starts at position 3
+                            // e.g., "10. Text" -> text starts at position 4
+                            // e.g., "100. Text" -> text starts at position 5
+                            let text_start_pos = list_item.marker_column + list_item.marker.len() + 1; // +1 for space after marker
+                            return (true, Some(text_start_pos));
+                        } else {
+                            // For unordered lists, calculate where text starts
+                            // e.g., "  * Text" -> text starts at position 4 (2 spaces + "* ")
+                            let text_start_pos = list_item.marker_column + 2; // "* " or "- " or "+ "
+                            return (true, Some(text_start_pos));
+                        }
                     }
                 }
                 // If we encounter non-blank, non-list content at column 0, stop looking
@@ -54,7 +67,7 @@ impl MD007ULIndent {
                 }
             }
         }
-        false
+        (false, None)
     }
 
     #[allow(dead_code)]
@@ -126,12 +139,20 @@ impl Rule for MD007ULIndent {
                 let expected_indent = if self.config.start_indented {
                     self.config.start_indent + (item.nesting_level * self.config.indent)
                 } else {
-                    // Check if this unordered item is nested under an ordered item
-                    if item.nesting_level == 1
-                        && self.is_nested_under_ordered_item(ctx, item.line_number, item.indentation)
-                    {
-                        // Unordered bullets nested directly under ordered items need 3 spaces
-                        3
+                    // For any nested item, check if it should align with parent's text content
+                    if item.nesting_level > 0 {
+                        let (has_parent, expected_pos) = self.get_parent_info(ctx, item.line_number, item.indentation);
+                        if has_parent {
+                            if let Some(pos) = expected_pos {
+                                // Align with parent's text content
+                                pos
+                            } else {
+                                // Fallback to standard indentation
+                                item.nesting_level * self.config.indent
+                            }
+                        } else {
+                            item.nesting_level * self.config.indent
+                        }
                     } else {
                         item.nesting_level * self.config.indent
                     }
@@ -230,12 +251,20 @@ impl Rule for MD007ULIndent {
                 let expected_indent = if self.config.start_indented {
                     self.config.start_indent + (item.nesting_level * self.config.indent)
                 } else {
-                    // Check if this unordered item is nested under an ordered item
-                    if item.nesting_level == 1
-                        && self.is_nested_under_ordered_item(ctx, item.line_number, item.indentation)
-                    {
-                        // Unordered bullets nested directly under ordered items need 3 spaces
-                        3
+                    // For any nested item, check if it should align with parent's text content
+                    if item.nesting_level > 0 {
+                        let (has_parent, expected_pos) = self.get_parent_info(ctx, item.line_number, item.indentation);
+                        if has_parent {
+                            if let Some(pos) = expected_pos {
+                                // Align with parent's text content
+                                pos
+                            } else {
+                                // Fallback to standard indentation
+                                item.nesting_level * self.config.indent
+                            }
+                        } else {
+                            item.nesting_level * self.config.indent
+                        }
                     } else {
                         item.nesting_level * self.config.indent
                     }
