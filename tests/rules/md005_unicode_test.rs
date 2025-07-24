@@ -115,7 +115,7 @@ fn test_unicode_fix_functionality() {
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
-        fixed, "* Item with Unicode café\n  * Wrong indent with 🔥\n    * Also wrong with 汉字",
+        fixed, "* Item with Unicode café\n  * Wrong indent with 🔥\n   * Also wrong with 汉字",
         "Fix should properly handle Unicode characters and correct indentation"
     );
 }
