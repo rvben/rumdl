@@ -190,6 +190,12 @@ impl Rule for MD048CodeFenceStyle {
         Ok(warnings)
     }
 
+    /// Check if this rule should be skipped for performance
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if content is empty or has no code fence markers
+        ctx.content.is_empty() || (!ctx.content.contains("```") && !ctx.content.contains("~~~"))
+    }
+
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
 

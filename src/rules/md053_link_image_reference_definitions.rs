@@ -410,6 +410,12 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         Ok(cleaned)
     }
 
+    /// Check if this rule should be skipped for performance
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if content is empty or has no reference definitions
+        ctx.content.is_empty() || !ctx.content.contains("]:")
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

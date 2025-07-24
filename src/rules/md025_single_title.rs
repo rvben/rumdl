@@ -440,10 +440,40 @@ impl Rule for MD025SingleTitle {
         RuleCategory::Heading
     }
 
-    /// Check if this rule should be skipped
+    /// Check if this rule should be skipped for performance
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty()
-            || (!ctx.content.contains('#') && !ctx.content.contains('=') && !ctx.content.contains('-'))
+        // Skip if content is empty
+        if ctx.content.is_empty() {
+            return true;
+        }
+
+        // Skip if no heading markers at all
+        if !ctx.content.contains('#') && !ctx.content.contains('=') && !ctx.content.contains('-') {
+            return true;
+        }
+
+        // Fast path: count target level headings efficiently
+        let mut target_level_count = 0;
+        for line_info in &ctx.lines {
+            if let Some(heading) = &line_info.heading {
+                if heading.level as usize == self.config.level {
+                    // Ignore if indented 4+ spaces (code block)
+                    if line_info.indent >= 4 {
+                        continue;
+                    }
+                    target_level_count += 1;
+
+                    // If we find more than 1, we need to run the full check
+                    // to determine if they're legitimate document sections
+                    if target_level_count > 1 {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        // If we have 0 or 1 target level headings, skip the rule
+        target_level_count <= 1
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
