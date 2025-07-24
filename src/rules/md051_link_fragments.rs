@@ -408,6 +408,12 @@ impl Rule for MD051LinkFragments {
         Ok(warnings)
     }
 
+    /// Check if this rule should be skipped for performance
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if content is empty or has no links with fragments
+        ctx.content.is_empty() || (!ctx.content.contains('[') || !ctx.content.contains('#'))
+    }
+
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         // No automatic fix for missing fragments, just return content as-is
         Ok(ctx.content.to_owned())
