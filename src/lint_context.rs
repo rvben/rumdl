@@ -245,6 +245,111 @@ pub struct ListBlock {
 
 use std::sync::{Arc, Mutex};
 
+/// Character frequency data for fast content analysis
+#[derive(Debug, Clone, Default)]
+pub struct CharFrequency {
+    /// Count of # characters (headings)
+    pub hash_count: usize,
+    /// Count of * characters (emphasis, lists, horizontal rules)
+    pub asterisk_count: usize,
+    /// Count of _ characters (emphasis, horizontal rules)
+    pub underscore_count: usize,
+    /// Count of - characters (lists, horizontal rules, setext headings)
+    pub hyphen_count: usize,
+    /// Count of + characters (lists)
+    pub plus_count: usize,
+    /// Count of > characters (blockquotes)
+    pub gt_count: usize,
+    /// Count of | characters (tables)
+    pub pipe_count: usize,
+    /// Count of [ characters (links, images)
+    pub bracket_count: usize,
+    /// Count of ` characters (code spans, code blocks)
+    pub backtick_count: usize,
+    /// Count of < characters (HTML tags, autolinks)
+    pub lt_count: usize,
+    /// Count of ! characters (images)
+    pub exclamation_count: usize,
+    /// Count of newline characters
+    pub newline_count: usize,
+}
+
+/// Pre-parsed HTML tag information
+#[derive(Debug, Clone)]
+pub struct HtmlTag {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Start column (0-indexed) in the line
+    pub start_col: usize,
+    /// End column (0-indexed) in the line
+    pub end_col: usize,
+    /// Byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+    /// Tag name (e.g., "div", "img", "br")
+    pub tag_name: String,
+    /// Whether it's a closing tag (</tag>)
+    pub is_closing: bool,
+    /// Whether it's self-closing (<tag />)
+    pub is_self_closing: bool,
+    /// Raw tag content
+    pub raw_content: String,
+}
+
+/// Pre-parsed emphasis span information
+#[derive(Debug, Clone)]
+pub struct EmphasisSpan {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Start column (0-indexed) in the line
+    pub start_col: usize,
+    /// End column (0-indexed) in the line
+    pub end_col: usize,
+    /// Byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+    /// Type of emphasis ('*' or '_')
+    pub marker: char,
+    /// Number of markers (1 for italic, 2 for bold, 3+ for bold+italic)
+    pub marker_count: usize,
+    /// Content inside the emphasis
+    pub content: String,
+}
+
+/// Pre-parsed table row information
+#[derive(Debug, Clone)]
+pub struct TableRow {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Whether this is a separator row (contains only |, -, :, and spaces)
+    pub is_separator: bool,
+    /// Number of columns (pipe-separated cells)
+    pub column_count: usize,
+    /// Alignment info from separator row
+    pub column_alignments: Vec<String>, // "left", "center", "right", "none"
+}
+
+/// Pre-parsed bare URL information (not in links)
+#[derive(Debug, Clone)]
+pub struct BareUrl {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Start column (0-indexed) in the line
+    pub start_col: usize,
+    /// End column (0-indexed) in the line
+    pub end_col: usize,
+    /// Byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+    /// The URL string
+    pub url: String,
+    /// Type of URL ("http", "https", "ftp", "email")
+    pub url_type: String,
+}
+
 pub struct LintContext<'a> {
     pub content: &'a str,
     pub line_offsets: Vec<usize>,
@@ -255,6 +360,11 @@ pub struct LintContext<'a> {
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
     code_spans_cache: Mutex<Option<Arc<Vec<CodeSpan>>>>, // Lazy-loaded inline code spans
     pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
+    pub char_frequency: CharFrequency,    // Character frequency analysis
+    html_tags_cache: Mutex<Option<Arc<Vec<HtmlTag>>>>, // Lazy-loaded HTML tags
+    emphasis_spans_cache: Mutex<Option<Arc<Vec<EmphasisSpan>>>>, // Lazy-loaded emphasis spans
+    table_rows_cache: Mutex<Option<Arc<Vec<TableRow>>>>, // Lazy-loaded table rows
+    bare_urls_cache: Mutex<Option<Arc<Vec<BareUrl>>>>, // Lazy-loaded bare URLs
 }
 
 impl<'a> LintContext<'a> {
@@ -279,6 +389,9 @@ impl<'a> LintContext<'a> {
         let reference_defs = Self::parse_reference_defs(content, &lines);
         let list_blocks = Self::parse_list_blocks(&lines);
 
+        // Compute character frequency for fast content analysis
+        let char_frequency = Self::compute_char_frequency(content);
+
         Self {
             content,
             line_offsets,
@@ -289,6 +402,11 @@ impl<'a> LintContext<'a> {
             reference_defs,
             code_spans_cache: Mutex::new(None),
             list_blocks,
+            char_frequency,
+            html_tags_cache: Mutex::new(None),
+            emphasis_spans_cache: Mutex::new(None),
+            table_rows_cache: Mutex::new(None),
+            bare_urls_cache: Mutex::new(None),
         }
     }
 
@@ -303,6 +421,54 @@ impl<'a> LintContext<'a> {
         }
 
         // Return a reference to the cached code spans
+        cache.as_ref().unwrap().clone()
+    }
+
+    /// Get HTML tags - computed lazily on first access
+    pub fn html_tags(&self) -> Arc<Vec<HtmlTag>> {
+        let mut cache = self.html_tags_cache.lock().unwrap();
+
+        if cache.is_none() {
+            let html_tags = Self::parse_html_tags(self.content, &self.lines, &self.code_blocks);
+            *cache = Some(Arc::new(html_tags));
+        }
+
+        cache.as_ref().unwrap().clone()
+    }
+
+    /// Get emphasis spans - computed lazily on first access
+    pub fn emphasis_spans(&self) -> Arc<Vec<EmphasisSpan>> {
+        let mut cache = self.emphasis_spans_cache.lock().unwrap();
+
+        if cache.is_none() {
+            let emphasis_spans = Self::parse_emphasis_spans(self.content, &self.lines, &self.code_blocks);
+            *cache = Some(Arc::new(emphasis_spans));
+        }
+
+        cache.as_ref().unwrap().clone()
+    }
+
+    /// Get table rows - computed lazily on first access
+    pub fn table_rows(&self) -> Arc<Vec<TableRow>> {
+        let mut cache = self.table_rows_cache.lock().unwrap();
+
+        if cache.is_none() {
+            let table_rows = Self::parse_table_rows(&self.lines);
+            *cache = Some(Arc::new(table_rows));
+        }
+
+        cache.as_ref().unwrap().clone()
+    }
+
+    /// Get bare URLs - computed lazily on first access
+    pub fn bare_urls(&self) -> Arc<Vec<BareUrl>> {
+        let mut cache = self.bare_urls_cache.lock().unwrap();
+
+        if cache.is_none() {
+            let bare_urls = Self::parse_bare_urls(self.content, &self.lines, &self.code_blocks);
+            *cache = Some(Arc::new(bare_urls));
+        }
+
         cache.as_ref().unwrap().clone()
     }
 
@@ -375,6 +541,122 @@ impl<'a> LintContext<'a> {
         self.list_blocks
             .iter()
             .find(|block| line_num >= block.start_line && line_num <= block.end_line)
+    }
+
+    /// Check if content has any instances of a specific character (fast)
+    pub fn has_char(&self, ch: char) -> bool {
+        match ch {
+            '#' => self.char_frequency.hash_count > 0,
+            '*' => self.char_frequency.asterisk_count > 0,
+            '_' => self.char_frequency.underscore_count > 0,
+            '-' => self.char_frequency.hyphen_count > 0,
+            '+' => self.char_frequency.plus_count > 0,
+            '>' => self.char_frequency.gt_count > 0,
+            '|' => self.char_frequency.pipe_count > 0,
+            '[' => self.char_frequency.bracket_count > 0,
+            '`' => self.char_frequency.backtick_count > 0,
+            '<' => self.char_frequency.lt_count > 0,
+            '!' => self.char_frequency.exclamation_count > 0,
+            '\n' => self.char_frequency.newline_count > 0,
+            _ => self.content.contains(ch), // Fallback for other characters
+        }
+    }
+
+    /// Get count of a specific character (fast)
+    pub fn char_count(&self, ch: char) -> usize {
+        match ch {
+            '#' => self.char_frequency.hash_count,
+            '*' => self.char_frequency.asterisk_count,
+            '_' => self.char_frequency.underscore_count,
+            '-' => self.char_frequency.hyphen_count,
+            '+' => self.char_frequency.plus_count,
+            '>' => self.char_frequency.gt_count,
+            '|' => self.char_frequency.pipe_count,
+            '[' => self.char_frequency.bracket_count,
+            '`' => self.char_frequency.backtick_count,
+            '<' => self.char_frequency.lt_count,
+            '!' => self.char_frequency.exclamation_count,
+            '\n' => self.char_frequency.newline_count,
+            _ => self.content.matches(ch).count(), // Fallback for other characters
+        }
+    }
+
+    /// Check if content likely contains headings (fast)
+    pub fn likely_has_headings(&self) -> bool {
+        self.char_frequency.hash_count > 0 || self.char_frequency.hyphen_count > 2 // Potential setext underlines
+    }
+
+    /// Check if content likely contains lists (fast)
+    pub fn likely_has_lists(&self) -> bool {
+        self.char_frequency.asterisk_count > 0
+            || self.char_frequency.hyphen_count > 0
+            || self.char_frequency.plus_count > 0
+    }
+
+    /// Check if content likely contains emphasis (fast)
+    pub fn likely_has_emphasis(&self) -> bool {
+        self.char_frequency.asterisk_count > 1 || self.char_frequency.underscore_count > 1
+    }
+
+    /// Check if content likely contains tables (fast)
+    pub fn likely_has_tables(&self) -> bool {
+        self.char_frequency.pipe_count > 2
+    }
+
+    /// Check if content likely contains blockquotes (fast)
+    pub fn likely_has_blockquotes(&self) -> bool {
+        self.char_frequency.gt_count > 0
+    }
+
+    /// Check if content likely contains code (fast)
+    pub fn likely_has_code(&self) -> bool {
+        self.char_frequency.backtick_count > 0
+    }
+
+    /// Check if content likely contains links or images (fast)
+    pub fn likely_has_links_or_images(&self) -> bool {
+        self.char_frequency.bracket_count > 0 || self.char_frequency.exclamation_count > 0
+    }
+
+    /// Check if content likely contains HTML (fast)
+    pub fn likely_has_html(&self) -> bool {
+        self.char_frequency.lt_count > 0
+    }
+
+    /// Get HTML tags on a specific line
+    pub fn html_tags_on_line(&self, line_num: usize) -> Vec<HtmlTag> {
+        self.html_tags()
+            .iter()
+            .filter(|tag| tag.line == line_num)
+            .cloned()
+            .collect()
+    }
+
+    /// Get emphasis spans on a specific line
+    pub fn emphasis_spans_on_line(&self, line_num: usize) -> Vec<EmphasisSpan> {
+        self.emphasis_spans()
+            .iter()
+            .filter(|span| span.line == line_num)
+            .cloned()
+            .collect()
+    }
+
+    /// Get table rows on a specific line
+    pub fn table_rows_on_line(&self, line_num: usize) -> Vec<TableRow> {
+        self.table_rows()
+            .iter()
+            .filter(|row| row.line == line_num)
+            .cloned()
+            .collect()
+    }
+
+    /// Get bare URLs on a specific line
+    pub fn bare_urls_on_line(&self, line_num: usize) -> Vec<BareUrl> {
+        self.bare_urls()
+            .iter()
+            .filter(|url| url.line == line_num)
+            .cloned()
+            .collect()
     }
 
     /// Parse all links in the content
@@ -1254,6 +1536,322 @@ impl<'a> LintContext<'a> {
         merge_adjacent_list_blocks(&mut list_blocks, lines);
 
         list_blocks
+    }
+
+    /// Compute character frequency for fast content analysis
+    fn compute_char_frequency(content: &str) -> CharFrequency {
+        let mut frequency = CharFrequency::default();
+
+        for ch in content.chars() {
+            match ch {
+                '#' => frequency.hash_count += 1,
+                '*' => frequency.asterisk_count += 1,
+                '_' => frequency.underscore_count += 1,
+                '-' => frequency.hyphen_count += 1,
+                '+' => frequency.plus_count += 1,
+                '>' => frequency.gt_count += 1,
+                '|' => frequency.pipe_count += 1,
+                '[' => frequency.bracket_count += 1,
+                '`' => frequency.backtick_count += 1,
+                '<' => frequency.lt_count += 1,
+                '!' => frequency.exclamation_count += 1,
+                '\n' => frequency.newline_count += 1,
+                _ => {}
+            }
+        }
+
+        frequency
+    }
+
+    /// Parse HTML tags in the content
+    fn parse_html_tags(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<HtmlTag> {
+        lazy_static! {
+            static ref HTML_TAG_REGEX: regex::Regex =
+                regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*(/?)>").unwrap();
+        }
+
+        let mut html_tags = Vec::with_capacity(content.matches('<').count());
+
+        for cap in HTML_TAG_REGEX.captures_iter(content) {
+            let full_match = cap.get(0).unwrap();
+            let match_start = full_match.start();
+            let match_end = full_match.end();
+
+            // Skip if in code block
+            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+                continue;
+            }
+
+            let is_closing = !cap.get(1).unwrap().as_str().is_empty();
+            let tag_name = cap.get(2).unwrap().as_str().to_lowercase();
+            let is_self_closing = !cap.get(3).unwrap().as_str().is_empty();
+
+            // Find which line this tag is on
+            let mut line_num = 1;
+            let mut col_start = match_start;
+            let mut col_end = match_end;
+            for (idx, line_info) in lines.iter().enumerate() {
+                if match_start >= line_info.byte_offset {
+                    line_num = idx + 1;
+                    col_start = match_start - line_info.byte_offset;
+                    col_end = match_end - line_info.byte_offset;
+                } else {
+                    break;
+                }
+            }
+
+            html_tags.push(HtmlTag {
+                line: line_num,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: match_start,
+                byte_end: match_end,
+                tag_name,
+                is_closing,
+                is_self_closing,
+                raw_content: full_match.as_str().to_string(),
+            });
+        }
+
+        html_tags
+    }
+
+    /// Parse emphasis spans in the content
+    fn parse_emphasis_spans(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<EmphasisSpan> {
+        lazy_static! {
+            static ref EMPHASIS_REGEX: regex::Regex =
+                regex::Regex::new(r"(\*{1,3}|_{1,3})([^*_\s][^*_]*?)(\*{1,3}|_{1,3})").unwrap();
+        }
+
+        let mut emphasis_spans = Vec::with_capacity(content.matches('*').count() + content.matches('_').count() / 4);
+
+        for cap in EMPHASIS_REGEX.captures_iter(content) {
+            let full_match = cap.get(0).unwrap();
+            let match_start = full_match.start();
+            let match_end = full_match.end();
+
+            // Skip if in code block
+            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+                continue;
+            }
+
+            let opening_markers = cap.get(1).unwrap().as_str();
+            let content_part = cap.get(2).unwrap().as_str();
+            let closing_markers = cap.get(3).unwrap().as_str();
+
+            // Validate matching markers
+            if opening_markers.chars().next() != closing_markers.chars().next()
+                || opening_markers.len() != closing_markers.len()
+            {
+                continue;
+            }
+
+            let marker = opening_markers.chars().next().unwrap();
+            let marker_count = opening_markers.len();
+
+            // Find which line this emphasis is on
+            let mut line_num = 1;
+            let mut col_start = match_start;
+            let mut col_end = match_end;
+            for (idx, line_info) in lines.iter().enumerate() {
+                if match_start >= line_info.byte_offset {
+                    line_num = idx + 1;
+                    col_start = match_start - line_info.byte_offset;
+                    col_end = match_end - line_info.byte_offset;
+                } else {
+                    break;
+                }
+            }
+
+            emphasis_spans.push(EmphasisSpan {
+                line: line_num,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: match_start,
+                byte_end: match_end,
+                marker,
+                marker_count,
+                content: content_part.to_string(),
+            });
+        }
+
+        emphasis_spans
+    }
+
+    /// Parse table rows in the content
+    fn parse_table_rows(lines: &[LineInfo]) -> Vec<TableRow> {
+        let mut table_rows = Vec::with_capacity(lines.len() / 20);
+
+        for (line_idx, line_info) in lines.iter().enumerate() {
+            // Skip lines in code blocks or blank lines
+            if line_info.in_code_block || line_info.is_blank {
+                continue;
+            }
+
+            let line = &line_info.content;
+            let line_num = line_idx + 1;
+
+            // Check if this line contains pipes (potential table row)
+            if !line.contains('|') {
+                continue;
+            }
+
+            // Count columns by splitting on pipes
+            let parts: Vec<&str> = line.split('|').collect();
+            let column_count = if parts.len() > 2 { parts.len() - 2 } else { parts.len() };
+
+            // Check if this is a separator row
+            let is_separator = line.chars().all(|c| "|:-+ \t".contains(c));
+            let mut column_alignments = Vec::new();
+
+            if is_separator {
+                for part in &parts[1..parts.len() - 1] {
+                    // Skip first and last empty parts
+                    let trimmed = part.trim();
+                    let alignment = if trimmed.starts_with(':') && trimmed.ends_with(':') {
+                        "center".to_string()
+                    } else if trimmed.ends_with(':') {
+                        "right".to_string()
+                    } else if trimmed.starts_with(':') {
+                        "left".to_string()
+                    } else {
+                        "none".to_string()
+                    };
+                    column_alignments.push(alignment);
+                }
+            }
+
+            table_rows.push(TableRow {
+                line: line_num,
+                is_separator,
+                column_count,
+                column_alignments,
+            });
+        }
+
+        table_rows
+    }
+
+    /// Parse bare URLs and emails in the content
+    fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<BareUrl> {
+        let mut bare_urls = Vec::with_capacity(content.matches("http").count() + content.matches('@').count());
+
+        // Check for bare URLs (not in angle brackets or markdown links)
+        for cap in BARE_URL_PATTERN.captures_iter(content) {
+            let full_match = cap.get(0).unwrap();
+            let match_start = full_match.start();
+            let match_end = full_match.end();
+
+            // Skip if in code block
+            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+                continue;
+            }
+
+            // Skip if already in angle brackets or markdown links
+            let preceding_char = if match_start > 0 {
+                content.chars().nth(match_start - 1)
+            } else {
+                None
+            };
+            let following_char = content.chars().nth(match_end);
+
+            if preceding_char == Some('<') || preceding_char == Some('(') || preceding_char == Some('[') {
+                continue;
+            }
+            if following_char == Some('>') || following_char == Some(')') || following_char == Some(']') {
+                continue;
+            }
+
+            let url = full_match.as_str();
+            let url_type = if url.starts_with("https://") {
+                "https"
+            } else if url.starts_with("http://") {
+                "http"
+            } else if url.starts_with("ftp://") {
+                "ftp"
+            } else {
+                "other"
+            };
+
+            // Find which line this URL is on
+            let mut line_num = 1;
+            let mut col_start = match_start;
+            let mut col_end = match_end;
+            for (idx, line_info) in lines.iter().enumerate() {
+                if match_start >= line_info.byte_offset {
+                    line_num = idx + 1;
+                    col_start = match_start - line_info.byte_offset;
+                    col_end = match_end - line_info.byte_offset;
+                } else {
+                    break;
+                }
+            }
+
+            bare_urls.push(BareUrl {
+                line: line_num,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: match_start,
+                byte_end: match_end,
+                url: url.to_string(),
+                url_type: url_type.to_string(),
+            });
+        }
+
+        // Check for bare email addresses
+        for cap in BARE_EMAIL_PATTERN.captures_iter(content) {
+            let full_match = cap.get(0).unwrap();
+            let match_start = full_match.start();
+            let match_end = full_match.end();
+
+            // Skip if in code block
+            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+                continue;
+            }
+
+            // Skip if already in angle brackets or markdown links
+            let preceding_char = if match_start > 0 {
+                content.chars().nth(match_start - 1)
+            } else {
+                None
+            };
+            let following_char = content.chars().nth(match_end);
+
+            if preceding_char == Some('<') || preceding_char == Some('(') || preceding_char == Some('[') {
+                continue;
+            }
+            if following_char == Some('>') || following_char == Some(')') || following_char == Some(']') {
+                continue;
+            }
+
+            let email = full_match.as_str();
+
+            // Find which line this email is on
+            let mut line_num = 1;
+            let mut col_start = match_start;
+            let mut col_end = match_end;
+            for (idx, line_info) in lines.iter().enumerate() {
+                if match_start >= line_info.byte_offset {
+                    line_num = idx + 1;
+                    col_start = match_start - line_info.byte_offset;
+                    col_end = match_end - line_info.byte_offset;
+                } else {
+                    break;
+                }
+            }
+
+            bare_urls.push(BareUrl {
+                line: line_num,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: match_start,
+                byte_end: match_end,
+                url: email.to_string(),
+                url_type: "email".to_string(),
+            });
+        }
+
+        bare_urls
     }
 }
 
