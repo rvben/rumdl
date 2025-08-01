@@ -2,42 +2,35 @@
 ///
 /// See [docs/md029.md](../../docs/md029.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
 use lazy_static::lazy_static;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use toml;
+
+mod md029_config;
+pub use md029_config::{ListStyle, MD029Config};
 
 lazy_static! {
     static ref FIX_LINE_REGEX: Regex = Regex::new(r"^(\s*)\d+(\.\s.*)$").unwrap();
 }
 
-/// Represents the style for ordered lists
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
-pub enum ListStyle {
-    One,      // Use '1.' for all items
-    OneOne,   // All ones (1. 1. 1.)
-    Ordered,  // Sequential (1. 2. 3.)
-    Ordered0, // Zero-based (0. 1. 2.)
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MD029OrderedListPrefix {
-    pub style: ListStyle,
-}
-
-impl Default for MD029OrderedListPrefix {
-    fn default() -> Self {
-        Self {
-            style: ListStyle::Ordered,
-        }
-    }
+    config: MD029Config,
 }
 
 impl MD029OrderedListPrefix {
     pub fn new(style: ListStyle) -> Self {
-        Self { style }
+        Self {
+            config: MD029Config { style },
+        }
+    }
+
+    pub fn from_config_struct(config: MD029Config) -> Self {
+        Self { config }
     }
 
     #[inline]
@@ -60,7 +53,7 @@ impl MD029OrderedListPrefix {
 
     #[inline]
     fn get_expected_number(&self, index: usize) -> usize {
-        match self.style {
+        match self.config.style {
             ListStyle::One => 1,
             ListStyle::OneOne => 1,
             ListStyle::Ordered => index + 1,
@@ -319,19 +312,27 @@ impl Rule for MD029OrderedListPrefix {
         Some(self)
     }
 
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let default_config = MD029Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD029Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let style_str = crate::config::get_rule_config_value::<String>(config, "MD029", "style")
-            .unwrap_or_else(|| "ordered".to_string());
-        let style = match style_str.as_str() {
-            "one" => ListStyle::One,
-            "one_one" => ListStyle::OneOne,
-            "ordered0" => ListStyle::Ordered0,
-            _ => ListStyle::Ordered,
-        };
-        Box::new(MD029OrderedListPrefix::new(style))
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD029Config>(config);
+        Box::new(MD029OrderedListPrefix::from_config_struct(rule_config))
     }
 }
 
