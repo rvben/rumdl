@@ -33,7 +33,7 @@ impl RuleConfig for MD031Config {
 }
 
 /// Rule MD031: Fenced code blocks should be surrounded by blank lines
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD031BlanksAroundFences {
     config: MD031Config,
 }
@@ -66,7 +66,7 @@ impl MD031BlanksAroundFences {
             }
 
             // Check for ordered list (number followed by . or ))
-            if trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+            if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                 let mut chars = trimmed.chars().skip_while(|c| c.is_ascii_digit());
                 if let Some(next) = chars.next() {
                     if (next == '.' || next == ')') && chars.next() == Some(' ') {
@@ -106,13 +106,6 @@ impl MD031BlanksAroundFences {
     }
 }
 
-impl Default for MD031BlanksAroundFences {
-    fn default() -> Self {
-        Self {
-            config: MD031Config::default(),
-        }
-    }
-}
 
 impl Rule for MD031BlanksAroundFences {
     fn name(&self) -> &'static str {

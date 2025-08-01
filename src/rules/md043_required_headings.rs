@@ -49,18 +49,11 @@ impl RuleConfig for MD043Config {
 /// Rule MD043: Required headings present
 ///
 /// See [docs/md043.md](../../docs/md043.md) for full documentation, configuration, and examples.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD043RequiredHeadings {
     config: MD043Config,
 }
 
-impl Default for MD043RequiredHeadings {
-    fn default() -> Self {
-        Self {
-            config: MD043Config::default(),
-        }
-    }
-}
 
 impl MD043RequiredHeadings {
     pub fn new(headings: Vec<String>) -> Self {

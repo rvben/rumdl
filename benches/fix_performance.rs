@@ -320,7 +320,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD031 - Blanks around fences
     c.bench_function("MD031 fix", |b| {
-        let rule = MD031BlanksAroundFences;
+        let rule = MD031BlanksAroundFences::default();
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// See [docs/md058.md](../../docs/md058.md) for full documentation, configuration, and examples.
 ///
 /// Ensures tables have blank lines before and after them
-
+///
 /// Configuration for MD058 rule
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -43,18 +43,11 @@ impl RuleConfig for MD058Config {
     const RULE_NAME: &'static str = "MD058";
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD058BlanksAroundTables {
     config: MD058Config,
 }
 
-impl Default for MD058BlanksAroundTables {
-    fn default() -> Self {
-        Self {
-            config: MD058Config::default(),
-        }
-    }
-}
 
 impl MD058BlanksAroundTables {
     /// Create a new instance with the given configuration
@@ -136,7 +129,7 @@ impl Rule for MD058BlanksAroundTables {
                     let message = if self.config.minimum_before == 1 {
                         "Missing blank line before table".to_string()
                     } else {
-                        format!("Missing {} blank lines before table", needed)
+                        format!("Missing {needed} blank lines before table")
                     };
 
                     warnings.push(LintWarning {
@@ -163,7 +156,7 @@ impl Rule for MD058BlanksAroundTables {
                     let message = if self.config.minimum_after == 1 {
                         "Missing blank line after table".to_string()
                     } else {
-                        format!("Missing {} blank lines after table", needed)
+                        format!("Missing {needed} blank lines after table")
                     };
 
                     warnings.push(LintWarning {
