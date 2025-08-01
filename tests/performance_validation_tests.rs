@@ -27,7 +27,7 @@ fn test_performance_with_large_content() {
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD011NoReversedLinks),
         // Skip MD022 in performance test due to complex edge cases with large content
-        Box::new(MD031BlanksAroundFences),
+        Box::new(MD031BlanksAroundFences::default()),
     ];
 
     for rule in &rules {
@@ -225,7 +225,7 @@ More content
         Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::default()),
         Box::new(MD040FencedCodeLanguage),
-        Box::new(MD031BlanksAroundFences),
+        Box::new(MD031BlanksAroundFences::default()),
     ];
 
     // Test each rule individually first

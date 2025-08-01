@@ -4,13 +4,13 @@ use rumdl::rules::MD058BlanksAroundTables;
 
 #[test]
 fn test_name() {
-    let rule = MD058BlanksAroundTables;
+    let rule = MD058BlanksAroundTables::default();
     assert_eq!(rule.name(), "MD058");
 }
 
 #[test]
 fn test_proper_blank_lines() {
-    let rule = MD058BlanksAroundTables;
+    let rule = MD058BlanksAroundTables::default();
 
     // Table with proper blank lines before and after
     let content = r#"
@@ -30,7 +30,7 @@ Some text after the table.
 
 #[test]
 fn test_missing_blank_line_before() {
-    let rule = MD058BlanksAroundTables;
+    let rule = MD058BlanksAroundTables::default();
 
     let content = r#"
 Some text before the table.
@@ -50,7 +50,7 @@ Some text after the table.
 
 #[test]
 fn test_missing_blank_line_after() {
-    let rule = MD058BlanksAroundTables;
+    let rule = MD058BlanksAroundTables::default();
 
     let content = r#"
 Some text before the table.
@@ -70,7 +70,7 @@ Some text after the table.
 
 #[test]
 fn test_missing_blank_lines_both() {
-    let rule = MD058BlanksAroundTables;
+    let rule = MD058BlanksAroundTables::default();
 
     let content = r#"
 Some text before the table.
@@ -89,7 +89,7 @@ Some text after the table.
 
 #[test]
 fn test_multiple_tables() {
-    let rule = MD058BlanksAroundTables;
+    let rule = MD058BlanksAroundTables::default();
 
     let content = r#"
 Some text before tables.
@@ -133,7 +133,7 @@ Some text after tables.
 
 #[test]
 fn test_code_blocks_ignored() {
-    let rule = MD058BlanksAroundTables;
+    let rule = MD058BlanksAroundTables::default();
 
     let content = r#"
 Some text.
@@ -158,7 +158,7 @@ More text.
 
 #[test]
 fn test_table_at_document_start() {
-    let rule = MD058BlanksAroundTables;
+    let rule = MD058BlanksAroundTables::default();
 
     // Table at the start of the document doesn't need blank line before
     let content = r#"| Header 1 | Header 2 |
@@ -175,7 +175,7 @@ Some text after the table.
 
 #[test]
 fn test_table_at_document_end() {
-    let rule = MD058BlanksAroundTables;
+    let rule = MD058BlanksAroundTables::default();
 
     // Table at the end of the document doesn't need blank line after
     let content = r#"
@@ -192,7 +192,7 @@ Some text before the table.
 
 #[test]
 fn test_fix_missing_blank_lines() {
-    let rule = MD058BlanksAroundTables;
+    let rule = MD058BlanksAroundTables::default();
 
     let content = r#"Text before.
 | Header 1 | Header 2 |

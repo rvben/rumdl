@@ -124,7 +124,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             "1.  Multiple spaces after marker",
             Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1)),
         )),
-        "MD031" => Some(("Text\n```\ncode\n```\nText", Box::new(MD031BlanksAroundFences))),
+        "MD031" => Some(("Text\n```\ncode\n```\nText", Box::new(MD031BlanksAroundFences::default()))),
         "MD032" => Some(("Text\n* List item\nText", Box::new(MD032BlanksAroundLists::default()))),
         "MD033" => Some(("Text with <div>HTML</div>", Box::new(MD033NoInlineHtml::default()))),
         "MD034" => Some(("Visit https://example.com", Box::new(MD034NoBareUrls))),
@@ -172,7 +172,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         "MD055" => Some(("|col1|col2|\n|--|--|\n|a|b|", Box::new(MD055TablePipeStyle::default()))),
         "MD056" => Some(("|col1|col2|\n|--|--|\n|a|", Box::new(MD056TableColumnCount))),
         "MD057" => Some(("[link](missing.md)", Box::new(MD057ExistingRelativeLinks::default()))),
-        "MD058" => Some(("Text\n|table|\nText", Box::new(MD058BlanksAroundTables))),
+        "MD058" => Some(("Text\n|table|\nText", Box::new(MD058BlanksAroundTables::default()))),
         _ => None,
     }
 }

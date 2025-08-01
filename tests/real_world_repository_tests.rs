@@ -18,7 +18,7 @@ fn test_large_repository_simulation() {
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::default()),
-        Box::new(MD031BlanksAroundFences),
+        Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD032BlanksAroundLists::default()),
     ];
 

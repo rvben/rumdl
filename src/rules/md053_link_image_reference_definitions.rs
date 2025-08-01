@@ -1,9 +1,11 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::calculate_line_range;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 lazy_static! {
@@ -31,6 +33,31 @@ lazy_static! {
     // Code block regex
     static ref CODE_BLOCK_START_REGEX: Regex = Regex::new(r"^```").unwrap();
     static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
+}
+
+/// Configuration for MD053 rule
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct MD053Config {
+    /// List of reference names to keep even if unused
+    #[serde(default = "default_ignored_definitions")]
+    pub ignored_definitions: Vec<String>,
+}
+
+impl Default for MD053Config {
+    fn default() -> Self {
+        Self {
+            ignored_definitions: default_ignored_definitions(),
+        }
+    }
+}
+
+fn default_ignored_definitions() -> Vec<String> {
+    Vec::new()
+}
+
+impl RuleConfig for MD053Config {
+    const RULE_NAME: &'static str = "MD053";
 }
 
 /// Rule MD053: Link and image reference definitions should be used
@@ -85,13 +112,22 @@ lazy_static! {
 /// When fixing issues, this rule removes unused reference definitions while preserving
 /// the document's structure, including handling proper blank line formatting around
 /// the removed definitions.
-#[derive(Clone, Default)]
-pub struct MD053LinkImageReferenceDefinitions {}
+#[derive(Clone)]
+pub struct MD053LinkImageReferenceDefinitions {
+    config: MD053Config,
+}
 
 impl MD053LinkImageReferenceDefinitions {
     /// Create a new instance of the MD053 rule
     pub fn new() -> Self {
-        Self {}
+        Self {
+            config: MD053Config::default(),
+        }
+    }
+
+    /// Create a new instance with the given configuration
+    pub fn from_config_struct(config: MD053Config) -> Self {
+        Self { config }
     }
 
     /// Unescape a reference string by removing backslashes before special characters.
@@ -254,14 +290,20 @@ impl MD053LinkImageReferenceDefinitions {
     ) -> Vec<(String, usize, usize)> {
         let mut unused = Vec::new();
         for (id, ranges) in definitions {
-            // If this id is not used anywhere, all its ranges are unused
-            if !usages.contains(id) {
+            // If this id is not used anywhere and is not in the ignored list, all its ranges are unused
+            if !usages.contains(id) && !self.is_ignored_definition(id) {
                 for (start, end) in ranges {
                     unused.push((id.clone(), *start, *end));
                 }
             }
         }
         unused
+    }
+
+    /// Check if a definition should be ignored (kept even if unused)
+    fn is_ignored_definition(&self, definition_id: &str) -> bool {
+        self.config.ignored_definitions.iter()
+            .any(|ignored| ignored.eq_ignore_ascii_case(definition_id))
     }
 
     /// Clean up multiple consecutive blank lines that might be created after removing references
@@ -293,6 +335,12 @@ impl MD053LinkImageReferenceDefinitions {
 
         // Don't add trailing newlines - let the content determine its own ending
         result_lines.join("\n")
+    }
+}
+
+impl Default for MD053LinkImageReferenceDefinitions {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -420,11 +468,27 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let default_config = MD053Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD053Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD053LinkImageReferenceDefinitions::new())
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD053Config>(config);
+        Box::new(MD053LinkImageReferenceDefinitions::from_config_struct(rule_config))
     }
 }
 
@@ -653,5 +717,81 @@ mod tests {
 
         // Test leading/trailing blank lines
         assert_eq!(rule.clean_up_blank_lines("\n\ntext\n\n"), "text");
+    }
+
+    #[test]
+    fn test_ignored_definitions_config() {
+        
+        // Test with ignored definitions
+        let config = MD053Config {
+            ignored_definitions: vec!["todo".to_string(), "draft".to_string()],
+        };
+        let rule = MD053LinkImageReferenceDefinitions::from_config_struct(config);
+        
+        let content = "[todo]: https://example.com/todo\n[draft]: https://example.com/draft\n[unused]: https://example.com/unused";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should only flag "unused", not "todo" or "draft"
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("unused"));
+        assert!(!result[0].message.contains("todo"));
+        assert!(!result[0].message.contains("draft"));
+    }
+
+    #[test]
+    fn test_ignored_definitions_case_insensitive() {
+        
+        // Test case-insensitive matching of ignored definitions
+        let config = MD053Config {
+            ignored_definitions: vec!["TODO".to_string()],
+        };
+        let rule = MD053LinkImageReferenceDefinitions::from_config_struct(config);
+        
+        let content = "[todo]: https://example.com/todo\n[unused]: https://example.com/unused";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        
+        // Should only flag "unused", not "todo" (matches "TODO" case-insensitively)
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("unused"));
+        assert!(!result[0].message.contains("todo"));
+    }
+
+    #[test]
+    fn test_default_config_section() {
+        let rule = MD053LinkImageReferenceDefinitions::default();
+        let config_section = rule.default_config_section();
+        
+        assert!(config_section.is_some());
+        let (name, value) = config_section.unwrap();
+        assert_eq!(name, "MD053");
+        
+        // Should contain the ignored_definitions option with default empty array
+        if let toml::Value::Table(table) = value {
+            assert!(table.contains_key("ignored-definitions"));
+            assert_eq!(table["ignored-definitions"], toml::Value::Array(vec![]));
+        } else {
+            panic!("Expected TOML table");
+        }
+    }
+
+    #[test]
+    fn test_fix_respects_ignored_definitions() {
+        
+        // Test that fix respects ignored definitions
+        let config = MD053Config {
+            ignored_definitions: vec!["template".to_string()],
+        };
+        let rule = MD053LinkImageReferenceDefinitions::from_config_struct(config);
+        
+        let content = "[template]: https://example.com/template\n[unused]: https://example.com/unused\n\nSome content.";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Should keep template but remove unused
+        assert!(fixed.contains("[template]: https://example.com/template"));
+        assert!(!fixed.contains("[unused]: https://example.com/unused"));
+        assert!(fixed.contains("Some content."));
     }
 }

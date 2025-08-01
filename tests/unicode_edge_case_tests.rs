@@ -146,7 +146,7 @@ fn test_unicode_byte_boundary_validation() {
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD031BlanksAroundFences),
+        Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD047SingleTrailingNewline),
     ];
 

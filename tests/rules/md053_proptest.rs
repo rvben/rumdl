@@ -24,7 +24,7 @@ proptest! {
             content.push_str(&format!("Text {} ", u));
         }
 
-        let rule = MD053LinkImageReferenceDefinitions::new(vec![]);
+        let rule = MD053LinkImageReferenceDefinitions::default();
         let result = rule.check(&content);
         
         prop_assert_eq!(

@@ -4,7 +4,7 @@ use rumdl::rules::MD031BlanksAroundFences;
 
 #[test]
 fn test_valid_fenced_blocks() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
     let content = "Text before\n\n```\ncode block\n```\n\nText after";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
@@ -13,7 +13,7 @@ fn test_valid_fenced_blocks() {
 
 #[test]
 fn test_no_blank_before() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
     let content = "Text before\n```\ncode block\n```\n\nText after";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
@@ -24,7 +24,7 @@ fn test_no_blank_before() {
 
 #[test]
 fn test_no_blank_after() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
     let content = "Text before\n\n```\ncode block\n```\nText after";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
@@ -35,7 +35,7 @@ fn test_no_blank_after() {
 
 #[test]
 fn test_fix_missing_blanks() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
     let content = "Text before\n```\ncode block\n```\nText after";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
@@ -46,7 +46,7 @@ fn test_fix_missing_blanks() {
 
 #[test]
 fn test_nested_code_blocks_no_internal_blanks() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Test nested markdown code blocks (4 backticks containing 3 backticks)
     let content = "# Test\n\n````markdown\nHere's some text.\n\n```python\ndef hello():\n    print(\"Hello!\")\n```\n\nMore text.\n````\n\nAfter.";
@@ -71,7 +71,7 @@ fn test_nested_code_blocks_no_internal_blanks() {
 
 #[test]
 fn test_nested_code_blocks_different_fence_types() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Test ~~~ containing ```
     let content = "Text\n~~~markdown\n```python\ncode\n```\n~~~\nAfter";
@@ -86,7 +86,7 @@ fn test_nested_code_blocks_different_fence_types() {
 
 #[test]
 fn test_multiple_nested_levels() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Test 5 backticks containing 4 backticks containing 3 backticks
     let content = "`````text\n````markdown\n```python\ncode\n```\n````\n`````";
@@ -101,7 +101,7 @@ fn test_multiple_nested_levels() {
 
 #[test]
 fn test_nested_vs_standalone_distinction() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Test that standalone ``` blocks still get blank lines, but nested ones don't
     let content = "# Test\nStandalone:\n```python\ncode1\n```\nNested:\n````markdown\n```python\ncode2\n```\n````\nEnd";
@@ -122,7 +122,7 @@ fn test_nested_vs_standalone_distinction() {
 
 #[test]
 fn test_mixed_fence_markers_nested() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Test ``` inside ~~~ and ~~~ inside ```
     let content = "Test1:\n~~~text\n```python\ncode\n```\n~~~\nTest2:\n````text\n~~~bash\nscript\n~~~\n````\nEnd";
@@ -142,7 +142,7 @@ fn test_mixed_fence_markers_nested() {
 
 #[test]
 fn test_documentation_example_scenario() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Test the exact scenario from docs/md031.md that was causing issues
     let content = "### Example\n\n````markdown\nHere's some text explaining the code.\n\n```python\ndef hello():\n    print(\"Hello, world!\")\n```\n\nAnd here's more text after the code.\n````\n\n## Next section";
@@ -163,7 +163,7 @@ fn test_documentation_example_scenario() {
 
 #[test]
 fn test_fence_length_specificity() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Test that fence length matters - ``` inside ```` should not close the outer block
     let content = "````markdown\n```python\ncode\n```\nmore content\n````";
@@ -183,7 +183,7 @@ fn test_fence_length_specificity() {
 
 #[test]
 fn test_code_blocks_in_lists() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Test code blocks inside list items - this was causing issues in docs/md031.md
     let content = r#"# Test
