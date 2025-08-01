@@ -48,7 +48,6 @@ pub struct MD058BlanksAroundTables {
     config: MD058Config,
 }
 
-
 impl MD058BlanksAroundTables {
     /// Create a new instance with the given configuration
     pub fn from_config_struct(config: MD058Config) -> Self {
@@ -630,11 +629,11 @@ Next paragraph.";
     fn test_indented_table() {
         let rule = MD058BlanksAroundTables::default();
         let content = "List item:
-    
+
     | Indented | Table |
     |----------|-------|
     | Data     | Here  |
-    
+
     More content.";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();

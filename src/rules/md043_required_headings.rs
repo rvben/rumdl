@@ -54,7 +54,6 @@ pub struct MD043RequiredHeadings {
     config: MD043Config,
 }
 
-
 impl MD043RequiredHeadings {
     pub fn new(headings: Vec<String>) -> Self {
         Self {
@@ -201,7 +200,7 @@ impl Rule for MD043RequiredHeadings {
             if idx > 0 {
                 result.push_str("\n\n");
             }
-            result.push_str(&format!("# {heading}"));
+            result.push_str(heading);
         }
 
         Ok(result)
@@ -590,7 +589,7 @@ mod tests {
     #[test]
     fn test_fix_respects_configuration() {
         let config = MD043Config {
-            headings: vec!["Title".to_string(), "Content".to_string()],
+            headings: vec!["# Title".to_string(), "# Content".to_string()],
             match_case: false,
         };
         let rule = MD043RequiredHeadings::from_config_struct(config);
