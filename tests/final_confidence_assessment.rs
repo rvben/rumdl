@@ -43,7 +43,7 @@ fn validate_core_functionality() {
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD018NoMissingSpaceAtx),
         Box::new(MD022BlanksAroundHeadings::default()),
-        Box::new(MD031BlanksAroundFences),
+        Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD040FencedCodeLanguage),
     ];
 
@@ -131,7 +131,7 @@ fn validate_performance_characteristics() {
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD022BlanksAroundHeadings::default()),
-        Box::new(MD031BlanksAroundFences),
+        Box::new(MD031BlanksAroundFences::default()),
     ];
 
     let start_time = Instant::now();
@@ -249,7 +249,7 @@ fn validate_integration_scenarios() {
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::default()),
-        Box::new(MD031BlanksAroundFences),
+        Box::new(MD031BlanksAroundFences::default()),
     ];
 
     for (scenario_name, content) in &integration_tests {

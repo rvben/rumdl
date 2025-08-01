@@ -117,7 +117,7 @@ fn test_malformed_markdown_edge_cases() {
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD031BlanksAroundFences),
+        Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD032BlanksAroundLists::default()),
         Box::new(MD040FencedCodeLanguage),
     ];
@@ -254,7 +254,7 @@ fn test_memory_intensive_scenarios() {
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD031BlanksAroundFences),
+        Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD040FencedCodeLanguage),
         Box::new(MD042NoEmptyLinks),
     ];

@@ -215,7 +215,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD027" => Some(Box::new(MD027MultipleSpacesBlockquote)),
         "MD028" => Some(Box::new(MD028NoBlanksBlockquote)),
         "MD030" => Some(Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1))),
-        "MD031" => Some(Box::new(MD031BlanksAroundFences)),
+        "MD031" => Some(Box::new(MD031BlanksAroundFences::default())),
         "MD032" => Some(Box::new(MD032BlanksAroundLists::default())),
         "MD033" => Some(Box::new(MD033NoInlineHtml::new())),
         "MD034" => Some(Box::new(MD034NoBareUrls)),
@@ -232,7 +232,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD045" => Some(Box::new(MD045NoAltText::new())),
         "MD047" => Some(Box::new(MD047SingleTrailingNewline)),
         "MD051" => Some(Box::new(MD051LinkFragments)),
-        "MD053" => Some(Box::new(MD053LinkImageReferenceDefinitions {})),
+        "MD053" => Some(Box::new(MD053LinkImageReferenceDefinitions::default())),
         _ => None,
     }
 }

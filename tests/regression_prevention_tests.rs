@@ -23,7 +23,7 @@ fn test_pattern_1_empty_byte_ranges_prevention() {
         // MD031: Should insert only newlines, not duplicate content
         (
             "```rust\ncode\n```\nText",
-            Box::new(MD031BlanksAroundFences) as Box<dyn Rule>,
+            Box::new(MD031BlanksAroundFences::default()) as Box<dyn Rule>,
         ),
         // MD032: Should insert blank lines around lists
         (
@@ -181,7 +181,7 @@ fn test_pattern_3_missing_lsp_implementations_prevention() {
         // MD053: Should provide proper fix ranges for unused reference removal
         (
             "[link]: unused reference",
-            Box::new(MD053LinkImageReferenceDefinitions::new()) as Box<dyn Rule>,
+            Box::new(MD053LinkImageReferenceDefinitions::default()) as Box<dyn Rule>,
         ),
         // MD055: Should detect formatting differences and generate warnings
         (
@@ -228,7 +228,7 @@ fn test_byte_range_boundaries() {
         Box::new(MD021NoMultipleSpaceClosedAtx::new()),
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)),
-        Box::new(MD031BlanksAroundFences),
+        Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD032BlanksAroundLists::strict()),
         Box::new(MD041FirstLineHeading::new(1, false)),
         Box::new(MD042NoEmptyLinks),
@@ -237,7 +237,7 @@ fn test_byte_range_boundaries() {
         Box::new(MD048CodeFenceStyle::new(
             rumdl::rules::code_fence_utils::CodeFenceStyle::Backtick,
         )),
-        Box::new(MD053LinkImageReferenceDefinitions::new()),
+        Box::new(MD053LinkImageReferenceDefinitions::default()),
         Box::new(MD055TablePipeStyle::new("consistent".to_string())),
     ];
 

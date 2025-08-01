@@ -828,7 +828,7 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
         Box::new(MD028NoBlanksBlockquote {}),
         Box::new(MD029OrderedListPrefix::default()),
         Box::new(MD030ListMarkerSpace::default()),
-        Box::new(MD031BlanksAroundFences {}),
+        Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD032BlanksAroundLists::default()),
         Box::new(MD033NoInlineHtml::default()),
         Box::new(MD034NoBareUrls {}),
@@ -850,11 +850,11 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
         Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
         Box::new(MD051LinkFragments::new()),
         Box::new(MD052ReferenceLinkImages::new()),
-        Box::new(MD053LinkImageReferenceDefinitions::new()),
+        Box::new(MD053LinkImageReferenceDefinitions::default()),
         Box::new(MD054LinkImageStyle::default()),
         Box::new(MD055TablePipeStyle::default()),
         Box::new(MD056TableColumnCount),
-        Box::new(MD058BlanksAroundTables),
+        Box::new(MD058BlanksAroundTables::default()),
     ];
     let mut rule_names: Vec<_> = all_rules.iter().map(|r| r.name().to_string()).collect();
     rule_names.sort();
@@ -1194,7 +1194,7 @@ build-backend = \"setuptools.build_meta\"
                     Box::new(MD028NoBlanksBlockquote {}),
                     Box::new(MD029OrderedListPrefix::default()),
                     Box::new(MD030ListMarkerSpace::default()),
-                    Box::new(MD031BlanksAroundFences {}),
+                    Box::new(MD031BlanksAroundFences::default()),
                     Box::new(MD032BlanksAroundLists::default()),
                     Box::new(MD033NoInlineHtml::default()),
                     Box::new(MD034NoBareUrls {}),
@@ -1216,11 +1216,11 @@ build-backend = \"setuptools.build_meta\"
                     Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
                     Box::new(MD051LinkFragments::new()),
                     Box::new(MD052ReferenceLinkImages::new()),
-                    Box::new(MD053LinkImageReferenceDefinitions::new()),
+                    Box::new(MD053LinkImageReferenceDefinitions::default()),
                     Box::new(MD054LinkImageStyle::default()),
                     Box::new(MD055TablePipeStyle::default()),
                     Box::new(MD056TableColumnCount),
-                    Box::new(MD058BlanksAroundTables),
+                    Box::new(MD058BlanksAroundTables::default()),
                 ];
                 if let Some(rule_query) = rule {
                     let rule_query = rule_query.to_ascii_uppercase();
@@ -2282,7 +2282,7 @@ fn handle_explain_command(rule_query: &str) {
         Box::new(MD028NoBlanksBlockquote {}),
         Box::new(MD029OrderedListPrefix::default()),
         Box::new(MD030ListMarkerSpace::default()),
-        Box::new(MD031BlanksAroundFences {}),
+        Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD032BlanksAroundLists::default()),
         Box::new(MD033NoInlineHtml::default()),
         Box::new(MD034NoBareUrls {}),
@@ -2304,11 +2304,11 @@ fn handle_explain_command(rule_query: &str) {
         Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
         Box::new(MD051LinkFragments::new()),
         Box::new(MD052ReferenceLinkImages::new()),
-        Box::new(MD053LinkImageReferenceDefinitions::new()),
+        Box::new(MD053LinkImageReferenceDefinitions::default()),
         Box::new(MD054LinkImageStyle::default()),
         Box::new(MD055TablePipeStyle::default()),
         Box::new(MD056TableColumnCount),
-        Box::new(MD058BlanksAroundTables),
+        Box::new(MD058BlanksAroundTables::default()),
     ];
 
     // Find the rule

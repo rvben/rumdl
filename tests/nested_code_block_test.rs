@@ -4,7 +4,7 @@ use rumdl::rules::{MD031BlanksAroundFences, MD040FencedCodeLanguage};
 
 #[test]
 fn test_md031_should_not_modify_nested_code_blocks() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Test content with nested code blocks (common in documentation)
     let content = r#"# Documentation
@@ -30,7 +30,7 @@ More text"#;
 
 #[test]
 fn test_md031_should_handle_deeply_nested_code_blocks() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Test with 5-backtick outer block containing 4-backtick and 3-backtick blocks
     let content = r#"`````markdown
@@ -79,7 +79,7 @@ This should be flagged
 
 #[test]
 fn test_md031_fix_should_not_corrupt_nested_blocks() {
-    let rule = MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
 
     // Content where MD031 might try to add blank lines inside nested blocks
     let content = r#"````markdown
@@ -98,7 +98,7 @@ content
 
 #[test]
 fn test_documentation_example_preservation() {
-    let md031 = MD031BlanksAroundFences;
+    let md031 = MD031BlanksAroundFences::default();
     let md040 = MD040FencedCodeLanguage;
 
     // Real documentation example that was getting corrupted
