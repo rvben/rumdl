@@ -106,7 +106,6 @@ impl MD031BlanksAroundFences {
     }
 }
 
-
 impl Rule for MD031BlanksAroundFences {
     fn name(&self) -> &'static str {
         "MD031"
