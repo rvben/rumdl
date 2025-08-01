@@ -68,7 +68,7 @@ impl MD043RequiredHeadings {
             config: MD043Config {
                 headings,
                 match_case: default_match_case(),
-            }
+            },
         }
     }
 
@@ -131,7 +131,8 @@ impl Rule for MD043RequiredHeadings {
         let headings_match = if actual_headings.len() != self.config.headings.len() {
             false
         } else {
-            actual_headings.iter()
+            actual_headings
+                .iter()
                 .zip(self.config.headings.iter())
                 .all(|(actual, expected)| self.headings_match(expected, actual))
         };
@@ -315,7 +316,11 @@ mod tests {
     #[test]
     fn test_with_document_structure() {
         // Test with required headings (now with hash symbols)
-        let required = vec!["# Introduction".to_string(), "# Method".to_string(), "# Results".to_string()];
+        let required = vec![
+            "# Introduction".to_string(),
+            "# Method".to_string(),
+            "# Results".to_string(),
+        ];
         let rule = MD043RequiredHeadings::new(required);
 
         // Test with matching headings
@@ -338,12 +343,16 @@ mod tests {
         let content = "No headings here, just plain text";
         let structure = document_structure_from_str(content);
         let warnings = rule
-            .check_with_structure(&LintContext::new(content), &structure)  
+            .check_with_structure(&LintContext::new(content), &structure)
             .unwrap();
         assert!(!warnings.is_empty(), "Expected warnings when headings are missing");
 
         // Test with setext headings - use the correct format (marker text)
-        let required_setext = vec!["=========== Introduction".to_string(), "------ Method".to_string(), "======= Results".to_string()];
+        let required_setext = vec![
+            "=========== Introduction".to_string(),
+            "------ Method".to_string(),
+            "======= Results".to_string(),
+        ];
         let rule_setext = MD043RequiredHeadings::new(required_setext);
         let content = "Introduction\n===========\n\nContent\n\nMethod\n------\n\nMore content\n\nResults\n=======\n\nFinal content";
         let structure = document_structure_from_str(content);
@@ -444,13 +453,16 @@ mod tests {
             match_case: true,
         };
         let rule = MD043RequiredHeadings::from_config_struct(config);
-        
+
         // Should fail with different case
         let content = "# introduction\n\n# method";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
-        assert!(!result.is_empty(), "Should detect case mismatch when match_case is true");
+
+        assert!(
+            !result.is_empty(),
+            "Should detect case mismatch when match_case is true"
+        );
     }
 
     #[test]
@@ -460,12 +472,12 @@ mod tests {
             match_case: false,
         };
         let rule = MD043RequiredHeadings::from_config_struct(config);
-        
+
         // Should pass with different case
         let content = "# introduction\n\n# method";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert!(result.is_empty(), "Should allow case mismatch when match_case is false");
     }
 
@@ -476,13 +488,16 @@ mod tests {
             match_case: false,
         };
         let rule = MD043RequiredHeadings::from_config_struct(config);
-        
+
         // Should pass with mixed case variations
         let content = "# INTRODUCTION\n\n# method";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
-        assert!(result.is_empty(), "Should allow mixed case variations when match_case is false");
+
+        assert!(
+            result.is_empty(),
+            "Should allow mixed case variations when match_case is false"
+        );
     }
 
     #[test]
@@ -492,24 +507,27 @@ mod tests {
             match_case: true,
         };
         let rule = MD043RequiredHeadings::from_config_struct(config);
-        
+
         // Should pass with exact case match
         let content = "# Introduction\n\n# Method";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
-        assert!(result.is_empty(), "Should pass with exact case match when match_case is true");
+
+        assert!(
+            result.is_empty(),
+            "Should pass with exact case match when match_case is true"
+        );
     }
 
     #[test]
     fn test_default_config() {
         let rule = MD043RequiredHeadings::default();
-        
+
         // Should be disabled with empty headings
         let content = "# Any heading\n\n# Another heading";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert!(result.is_empty(), "Should be disabled with default empty headings");
     }
 
@@ -517,11 +535,11 @@ mod tests {
     fn test_default_config_section() {
         let rule = MD043RequiredHeadings::default();
         let config_section = rule.default_config_section();
-        
+
         assert!(config_section.is_some());
         let (name, value) = config_section.unwrap();
         assert_eq!(name, "MD043");
-        
+
         // Should contain both headings and match_case options with default values
         if let toml::Value::Table(table) = value {
             assert!(table.contains_key("headings"));
@@ -540,7 +558,7 @@ mod tests {
             match_case: true,
         };
         let rule = MD043RequiredHeadings::from_config_struct(config);
-        
+
         assert!(rule.headings_match("Test", "Test"));
         assert!(!rule.headings_match("Test", "test"));
         assert!(!rule.headings_match("test", "Test"));
@@ -553,7 +571,7 @@ mod tests {
             match_case: false,
         };
         let rule = MD043RequiredHeadings::from_config_struct(config);
-        
+
         assert!(rule.headings_match("Test", "Test"));
         assert!(rule.headings_match("Test", "test"));
         assert!(rule.headings_match("test", "Test"));
@@ -567,12 +585,12 @@ mod tests {
             match_case: true,
         };
         let rule = MD043RequiredHeadings::from_config_struct(config);
-        
+
         // Should skip processing when no headings are required
         let content = "# Any heading\n\n# Another heading";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         assert!(result.is_empty(), "Should be disabled with empty headings list");
     }
 
@@ -583,11 +601,11 @@ mod tests {
             match_case: false,
         };
         let rule = MD043RequiredHeadings::from_config_struct(config);
-        
+
         let content = "Wrong content";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         let expected = "# Title\n\n# Content";
         assert_eq!(fixed, expected);
     }

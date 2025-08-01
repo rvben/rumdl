@@ -302,7 +302,9 @@ impl MD053LinkImageReferenceDefinitions {
 
     /// Check if a definition should be ignored (kept even if unused)
     fn is_ignored_definition(&self, definition_id: &str) -> bool {
-        self.config.ignored_definitions.iter()
+        self.config
+            .ignored_definitions
+            .iter()
             .any(|ignored| ignored.eq_ignore_ascii_case(definition_id))
     }
 
@@ -721,17 +723,16 @@ mod tests {
 
     #[test]
     fn test_ignored_definitions_config() {
-        
         // Test with ignored definitions
         let config = MD053Config {
             ignored_definitions: vec!["todo".to_string(), "draft".to_string()],
         };
         let rule = MD053LinkImageReferenceDefinitions::from_config_struct(config);
-        
+
         let content = "[todo]: https://example.com/todo\n[draft]: https://example.com/draft\n[unused]: https://example.com/unused";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should only flag "unused", not "todo" or "draft"
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("unused"));
@@ -741,17 +742,16 @@ mod tests {
 
     #[test]
     fn test_ignored_definitions_case_insensitive() {
-        
         // Test case-insensitive matching of ignored definitions
         let config = MD053Config {
             ignored_definitions: vec!["TODO".to_string()],
         };
         let rule = MD053LinkImageReferenceDefinitions::from_config_struct(config);
-        
+
         let content = "[todo]: https://example.com/todo\n[unused]: https://example.com/unused";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        
+
         // Should only flag "unused", not "todo" (matches "TODO" case-insensitively)
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("unused"));
@@ -762,11 +762,11 @@ mod tests {
     fn test_default_config_section() {
         let rule = MD053LinkImageReferenceDefinitions::default();
         let config_section = rule.default_config_section();
-        
+
         assert!(config_section.is_some());
         let (name, value) = config_section.unwrap();
         assert_eq!(name, "MD053");
-        
+
         // Should contain the ignored_definitions option with default empty array
         if let toml::Value::Table(table) = value {
             assert!(table.contains_key("ignored-definitions"));
@@ -778,17 +778,16 @@ mod tests {
 
     #[test]
     fn test_fix_respects_ignored_definitions() {
-        
         // Test that fix respects ignored definitions
         let config = MD053Config {
             ignored_definitions: vec!["template".to_string()],
         };
         let rule = MD053LinkImageReferenceDefinitions::from_config_struct(config);
-        
+
         let content = "[template]: https://example.com/template\n[unused]: https://example.com/unused\n\nSome content.";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Should keep template but remove unused
         assert!(fixed.contains("[template]: https://example.com/template"));
         assert!(!fixed.contains("[unused]: https://example.com/unused"));
