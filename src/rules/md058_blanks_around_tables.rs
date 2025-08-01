@@ -138,7 +138,7 @@ impl Rule for MD058BlanksAroundTables {
                     } else {
                         format!("Missing {} blank lines before table", needed)
                     };
-                    
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message,
@@ -165,7 +165,7 @@ impl Rule for MD058BlanksAroundTables {
                     } else {
                         format!("Missing {} blank lines after table", needed)
                     };
-                    
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
                         message,
@@ -175,8 +175,10 @@ impl Rule for MD058BlanksAroundTables {
                         end_column: lines[table_block.end_line].len() + 2,
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index
-                                .line_col_to_byte_range(table_block.end_line + 1, lines[table_block.end_line].len() + 1),
+                            range: _line_index.line_col_to_byte_range(
+                                table_block.end_line + 1,
+                                lines[table_block.end_line].len() + 1,
+                            ),
                             replacement: format!("{}{}", lines[table_block.end_line], "\n".repeat(needed)),
                         }),
                     });
@@ -230,7 +232,7 @@ impl Rule for MD058BlanksAroundTables {
 
             result.push(lines[i].to_string());
 
-            // Check for warnings about missing blank lines after table  
+            // Check for warnings about missing blank lines after table
             let warning_after = warnings
                 .iter()
                 .position(|w| w.line == i + 1 && w.message.contains("after table"));
@@ -242,7 +244,7 @@ impl Rule for MD058BlanksAroundTables {
                     1
                 } else if let Some(start) = warning.message.find("Missing ") {
                     if let Some(end) = warning.message.find(" blank lines after") {
-                        warning.message[start + 8..end].parse::<usize>().unwrap_or(1)  
+                        warning.message[start + 8..end].parse::<usize>().unwrap_or(1)
                     } else {
                         1
                     }
@@ -670,7 +672,7 @@ Text after.";
             minimum_after: 1,
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
-        
+
         let content = "Text before.
 
 | Header | Col 2 |
@@ -693,7 +695,7 @@ Text after.";
             minimum_after: 3,
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
-        
+
         let content = "Text before.
 
 | Header | Col 2 |
@@ -716,7 +718,7 @@ More text.";
             minimum_after: 2,
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
-        
+
         let content = "Text before.
 | Header | Col 2 |
 |--------|-------|
@@ -738,7 +740,7 @@ More text.";
             minimum_after: 0,
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
-        
+
         let content = "Text before.
 | Header | Col 2 |
 |--------|-------|
@@ -758,7 +760,7 @@ More text.";
             minimum_after: 3,
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
-        
+
         let content = "Text before.
 | Header | Col 2 |
 |--------|-------|
@@ -784,11 +786,11 @@ Text after.";
     fn test_default_config_section() {
         let rule = MD058BlanksAroundTables::default();
         let config_section = rule.default_config_section();
-        
+
         assert!(config_section.is_some());
         let (name, value) = config_section.unwrap();
         assert_eq!(name, "MD058");
-        
+
         // Should contain both minimum_before and minimum_after options with default values
         if let toml::Value::Table(table) = value {
             assert!(table.contains_key("minimum-before"));
@@ -804,16 +806,16 @@ Text after.";
     fn test_blank_lines_counting() {
         let rule = MD058BlanksAroundTables::default();
         let lines = vec!["text", "", "", "table", "more", "", "end"];
-        
+
         // Test counting blank lines before line index 3 (table)
         assert_eq!(rule.count_blank_lines_before(&lines, 3), 2);
-        
+
         // Test counting blank lines after line index 4 (more)
         assert_eq!(rule.count_blank_lines_after(&lines, 4), 1);
-        
+
         // Test at beginning
         assert_eq!(rule.count_blank_lines_before(&lines, 0), 0);
-        
+
         // Test at end
         assert_eq!(rule.count_blank_lines_after(&lines, 6), 0);
     }

@@ -59,12 +59,12 @@ impl MD031BlanksAroundFences {
         for i in (0..=line_index).rev() {
             let line = lines[i];
             let trimmed = line.trim_start();
-            
+
             // If we hit a blank line, we're no longer in a list
             if trimmed.is_empty() {
                 return false;
             }
-            
+
             // Check for ordered list (number followed by . or ))
             if trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) {
                 let mut chars = trimmed.chars().skip_while(|c| c.is_ascii_digit());
@@ -74,23 +74,23 @@ impl MD031BlanksAroundFences {
                     }
                 }
             }
-            
+
             // Check for unordered list
             if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
                 return true;
             }
-            
+
             // If this line is indented, it might be a continuation of a list item
             let is_indented = line.starts_with("    ") || line.starts_with("\t") || line.starts_with("   ");
             if is_indented {
                 continue; // Keep looking backwards for the list marker
             }
-            
+
             // If we reach here and haven't found a list marker, and we're not at an indented line,
             // then we're not in a list
             return false;
         }
-        
+
         false
     }
 
@@ -177,7 +177,10 @@ impl Rule for MD031BlanksAroundFences {
                             current_fence_marker = None;
 
                             // Check for blank line after closing fence
-                            if i + 1 < lines.len() && !Self::is_empty_line(lines[i + 1]) && self.should_require_blank_line(i, &lines) {
+                            if i + 1 < lines.len()
+                                && !Self::is_empty_line(lines[i + 1])
+                                && self.should_require_blank_line(i, &lines)
+                            {
                                 let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
                                 warnings.push(LintWarning {
@@ -282,7 +285,10 @@ impl Rule for MD031BlanksAroundFences {
                             current_fence_marker = None;
 
                             // Add blank line after closing fence if needed
-                            if i + 1 < lines.len() && !Self::is_empty_line(lines[i + 1]) && self.should_require_blank_line(i, &lines) {
+                            if i + 1 < lines.len()
+                                && !Self::is_empty_line(lines[i + 1])
+                                && self.should_require_blank_line(i, &lines)
+                            {
                                 result.push(String::new());
                             }
                         } else {
@@ -360,7 +366,10 @@ impl Rule for MD031BlanksAroundFences {
             let line_num = start_line;
 
             // Check for blank line before fence
-            if line_num > 1 && !Self::is_empty_line(lines[line_num - 2]) && self.should_require_blank_line(line_num - 1, &lines) {
+            if line_num > 1
+                && !Self::is_empty_line(lines[line_num - 2])
+                && self.should_require_blank_line(line_num - 1, &lines)
+            {
                 // Calculate precise character range for the entire fence line that needs a blank line before it
                 let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, lines[line_num - 1]);
 
@@ -384,7 +393,10 @@ impl Rule for MD031BlanksAroundFences {
             let line_num = end_line;
 
             // Check for blank line after fence
-            if line_num < lines.len() && !Self::is_empty_line(lines[line_num]) && self.should_require_blank_line(line_num - 1, &lines) {
+            if line_num < lines.len()
+                && !Self::is_empty_line(lines[line_num])
+                && self.should_require_blank_line(line_num - 1, &lines)
+            {
                 // Calculate precise character range for the entire fence line that needs a blank line after it
                 let (start_line_fence, start_col_fence, end_line_fence, end_col_fence) =
                     calculate_line_range(line_num, lines[line_num - 1]);
@@ -604,11 +616,11 @@ echo "nested"
     fn test_list_items_config_true() {
         // Test with list_items: true (default) - should require blank lines even in lists
         let rule = MD031BlanksAroundFences::new(true);
-        
+
         let content = "1. First item\n   ```python\n   code_in_list()\n   ```\n2. Second item";
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
-        
+
         // Should flag missing blank lines before and after code block in list
         assert_eq!(warnings.len(), 2);
         assert!(warnings[0].message.contains("before"));
@@ -619,11 +631,11 @@ echo "nested"
     fn test_list_items_config_false() {
         // Test with list_items: false - should NOT require blank lines in lists
         let rule = MD031BlanksAroundFences::new(false);
-        
+
         let content = "1. First item\n   ```python\n   code_in_list()\n   ```\n2. Second item";
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
-        
+
         // Should not flag missing blank lines inside lists
         assert_eq!(warnings.len(), 0);
     }
@@ -632,11 +644,11 @@ echo "nested"
     fn test_list_items_config_false_outside_list() {
         // Test with list_items: false - should still require blank lines outside lists
         let rule = MD031BlanksAroundFences::new(false);
-        
+
         let content = "Some text\n```python\ncode_outside_list()\n```\nMore text";
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
-        
+
         // Should still flag missing blank lines outside lists
         assert_eq!(warnings.len(), 2);
         assert!(warnings[0].message.contains("before"));
@@ -647,11 +659,11 @@ echo "nested"
     fn test_default_config_section() {
         let rule = MD031BlanksAroundFences::default();
         let config_section = rule.default_config_section();
-        
+
         assert!(config_section.is_some());
         let (name, value) = config_section.unwrap();
         assert_eq!(name, "MD031");
-        
+
         // Should contain the list_items option with default value true
         if let toml::Value::Table(table) = value {
             assert!(table.contains_key("list-items"));
@@ -665,11 +677,11 @@ echo "nested"
     fn test_fix_list_items_config_false() {
         // Test that fix respects list_items: false configuration
         let rule = MD031BlanksAroundFences::new(false);
-        
+
         let content = "1. First item\n   ```python\n   code()\n   ```\n2. Second item";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Should not add blank lines when list_items is false
         assert_eq!(fixed, content);
     }
@@ -678,11 +690,11 @@ echo "nested"
     fn test_fix_list_items_config_true() {
         // Test that fix respects list_items: true configuration
         let rule = MD031BlanksAroundFences::new(true);
-        
+
         let content = "1. First item\n   ```python\n   code()\n   ```\n2. Second item";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Should add blank lines when list_items is true
         let expected = "1. First item\n\n   ```python\n   code()\n   ```\n\n2. Second item";
         assert_eq!(fixed, expected);
