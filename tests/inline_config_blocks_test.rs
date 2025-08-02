@@ -521,7 +521,7 @@ This is a very long line that exceeds 80 characters but is under 120 characters 
 
     // The test expectation might need adjustment based on how MD007 works with configure-file
     // For now, we're testing that the configuration was parsed
-    println!("MD007 warnings: {:?}", md007_warnings);
+    println!("MD007 warnings: {md007_warnings:?}");
 }
 
 #[test]
