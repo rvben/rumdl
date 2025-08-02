@@ -166,7 +166,7 @@ This is a very long line that exceeds 80 characters and would normally trigger M
 This is another very long line that exceeds 80 characters and should trigger MD013 but MD009 is still disabled
 
 <!-- markdownlint-enable MD009 -->
-Trailing spaces should now trigger MD009
+Trailing spaces should now trigger MD009   
 "#;
 
     let rules = all_rules(&Config::default());
