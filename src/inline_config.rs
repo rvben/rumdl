@@ -12,12 +12,16 @@
 //!
 //! Also supports rumdl-specific syntax with same semantics.
 
+use crate::utils::code_block_utils::CodeBlockUtils;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct InlineConfig {
     /// Rules that are disabled at each line (1-indexed line -> set of disabled rules)
     disabled_at_line: HashMap<usize, HashSet<String>>,
+    /// Rules that are explicitly enabled when all rules are disabled (1-indexed line -> set of enabled rules)
+    /// Only used when "*" is in disabled_at_line
+    enabled_at_line: HashMap<usize, HashSet<String>>,
     /// Rules disabled for specific lines via disable-line (1-indexed)
     line_disabled_rules: HashMap<usize, HashSet<String>>,
 }
@@ -32,6 +36,7 @@ impl InlineConfig {
     pub fn new() -> Self {
         Self {
             disabled_at_line: HashMap::new(),
+            enabled_at_line: HashMap::new(),
             line_disabled_rules: HashMap::new(),
         }
     }
@@ -41,9 +46,21 @@ impl InlineConfig {
         let mut config = Self::new();
         let lines: Vec<&str> = content.lines().collect();
 
+        // Detect code blocks to skip comments within them
+        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
+
+        // Pre-compute line positions for checking if a line is in a code block
+        let mut line_positions = Vec::with_capacity(lines.len());
+        let mut pos = 0;
+        for line in &lines {
+            line_positions.push(pos);
+            pos += line.len() + 1; // +1 for newline
+        }
+
         // Track current state of disabled rules
         let mut currently_disabled = HashSet::new();
-        let mut capture_stack: Vec<HashSet<String>> = Vec::new();
+        let mut currently_enabled = HashSet::new(); // For when all rules are disabled
+        let mut capture_stack: Vec<(HashSet<String>, HashSet<String>)> = Vec::new();
 
         for (idx, line) in lines.iter().enumerate() {
             let line_num = idx + 1; // 1-indexed
@@ -51,10 +68,23 @@ impl InlineConfig {
             // Store the current state for this line BEFORE processing comments
             // This way, comments on a line don't affect that same line
             config.disabled_at_line.insert(line_num, currently_disabled.clone());
+            config.enabled_at_line.insert(line_num, currently_enabled.clone());
 
-            // Process comments in order of specificity to avoid conflicts
+            // Skip processing if this line is inside a code block
+            let line_start = line_positions[idx];
+            let line_end = line_start + line.len();
+            let in_code_block = code_blocks
+                .iter()
+                .any(|&(block_start, block_end)| line_start >= block_start && line_end <= block_end);
 
-            // Check for disable-next-line first (more specific than disable)
+            if in_code_block {
+                continue;
+            }
+
+            // Process comments - handle multiple comment types on same line
+            // Process line-specific comments first (they don't affect state)
+
+            // Check for disable-next-line
             if let Some(rules) = parse_disable_next_line_comment(line) {
                 let next_line = line_num + 1;
                 let line_rules = config.line_disabled_rules.entry(next_line).or_default();
@@ -67,8 +97,9 @@ impl InlineConfig {
                     }
                 }
             }
-            // Check for disable-line (more specific than disable)
-            else if let Some(rules) = parse_disable_line_comment(line) {
+
+            // Check for disable-line
+            if let Some(rules) = parse_disable_line_comment(line) {
                 let line_rules = config.line_disabled_rules.entry(line_num).or_default();
                 if rules.is_empty() {
                     // Disable all rules for current line
@@ -79,38 +110,118 @@ impl InlineConfig {
                     }
                 }
             }
-            // Check for capture
-            else if is_capture_comment(line) {
-                capture_stack.push(currently_disabled.clone());
-            }
-            // Check for restore
-            else if is_restore_comment(line) {
-                if let Some(captured) = capture_stack.pop() {
-                    currently_disabled = captured;
+
+            // Process state-changing comments in the order they appear
+            // This handles multiple comments on the same line correctly
+            let mut processed_capture = false;
+            let mut processed_restore = false;
+
+            // Find all comments on this line and process them in order
+            let mut comment_positions = Vec::new();
+
+            if let Some(pos) = line.find("<!-- markdownlint-disable") {
+                if !line[pos..].contains("<!-- markdownlint-disable-line")
+                    && !line[pos..].contains("<!-- markdownlint-disable-next-line")
+                {
+                    comment_positions.push((pos, "disable"));
                 }
             }
-            // Check for disable (persistent)
-            else if let Some(rules) = parse_disable_comment(line) {
-                if rules.is_empty() {
-                    // Disable all rules - we'll use "*" as a marker
-                    currently_disabled.clear();
-                    currently_disabled.insert("*".to_string());
-                } else {
-                    for rule in rules {
-                        currently_disabled.insert(rule.to_string());
-                    }
+            if let Some(pos) = line.find("<!-- rumdl-disable") {
+                if !line[pos..].contains("<!-- rumdl-disable-line")
+                    && !line[pos..].contains("<!-- rumdl-disable-next-line")
+                {
+                    comment_positions.push((pos, "disable"));
                 }
             }
-            // Check for enable (persistent)
-            else if let Some(rules) = parse_enable_comment(line) {
-                if rules.is_empty() {
-                    // Enable all rules
-                    currently_disabled.clear();
-                } else {
-                    // Enable specific rules
-                    for rule in rules {
-                        currently_disabled.remove(rule);
+
+            if let Some(pos) = line.find("<!-- markdownlint-enable") {
+                comment_positions.push((pos, "enable"));
+            }
+            if let Some(pos) = line.find("<!-- rumdl-enable") {
+                comment_positions.push((pos, "enable"));
+            }
+
+            if let Some(pos) = line.find("<!-- markdownlint-capture") {
+                comment_positions.push((pos, "capture"));
+            }
+            if let Some(pos) = line.find("<!-- rumdl-capture") {
+                comment_positions.push((pos, "capture"));
+            }
+
+            if let Some(pos) = line.find("<!-- markdownlint-restore") {
+                comment_positions.push((pos, "restore"));
+            }
+            if let Some(pos) = line.find("<!-- rumdl-restore") {
+                comment_positions.push((pos, "restore"));
+            }
+
+            // Sort by position to process in order
+            comment_positions.sort_by_key(|&(pos, _)| pos);
+
+            // Process each comment in order
+            for (_, comment_type) in comment_positions {
+                match comment_type {
+                    "disable" => {
+                        if let Some(rules) = parse_disable_comment(line) {
+                            if rules.is_empty() {
+                                // Disable all rules
+                                currently_disabled.clear();
+                                currently_disabled.insert("*".to_string());
+                                currently_enabled.clear(); // Reset enabled list
+                            } else {
+                                // Disable specific rules
+                                if currently_disabled.contains("*") {
+                                    // All rules are disabled, so remove from enabled list
+                                    for rule in rules {
+                                        currently_enabled.remove(rule);
+                                    }
+                                } else {
+                                    // Normal case: add to disabled list
+                                    for rule in rules {
+                                        currently_disabled.insert(rule.to_string());
+                                    }
+                                }
+                            }
+                        }
                     }
+                    "enable" => {
+                        if let Some(rules) = parse_enable_comment(line) {
+                            if rules.is_empty() {
+                                // Enable all rules
+                                currently_disabled.clear();
+                                currently_enabled.clear();
+                            } else {
+                                // Enable specific rules
+                                if currently_disabled.contains("*") {
+                                    // All rules are disabled, so add to enabled list
+                                    for rule in rules {
+                                        currently_enabled.insert(rule.to_string());
+                                    }
+                                } else {
+                                    // Normal case: remove from disabled list
+                                    for rule in rules {
+                                        currently_disabled.remove(rule);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "capture" => {
+                        if !processed_capture && is_capture_comment(line) {
+                            capture_stack.push((currently_disabled.clone(), currently_enabled.clone()));
+                            processed_capture = true;
+                        }
+                    }
+                    "restore" => {
+                        if !processed_restore && is_restore_comment(line) {
+                            if let Some((disabled, enabled)) = capture_stack.pop() {
+                                currently_disabled = disabled;
+                                currently_enabled = enabled;
+                            }
+                            processed_restore = true;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -129,10 +240,18 @@ impl InlineConfig {
 
         // Check persistent disables at this line
         if let Some(disabled_set) = self.disabled_at_line.get(&line_number) {
-            disabled_set.contains("*") || disabled_set.contains(rule_name)
-        } else {
-            false
+            if disabled_set.contains("*") {
+                // All rules are disabled, check if this rule is explicitly enabled
+                if let Some(enabled_set) = self.enabled_at_line.get(&line_number) {
+                    return !enabled_set.contains(rule_name);
+                }
+                return true; // All disabled and not explicitly enabled
+            } else {
+                return disabled_set.contains(rule_name);
+            }
         }
+
+        false
     }
 
     /// Get all disabled rules at a specific line
@@ -141,8 +260,15 @@ impl InlineConfig {
 
         // Add persistent disables
         if let Some(disabled_set) = self.disabled_at_line.get(&line_number) {
-            for rule in disabled_set {
-                disabled.insert(rule.clone());
+            if disabled_set.contains("*") {
+                // All rules are disabled except those explicitly enabled
+                disabled.insert("*".to_string());
+                // We could subtract enabled rules here, but that would require knowing all rules
+                // For now, we'll just return "*" to indicate all rules are disabled
+            } else {
+                for rule in disabled_set {
+                    disabled.insert(rule.clone());
+                }
             }
         }
 
