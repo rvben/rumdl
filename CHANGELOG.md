@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.104] - 2025-08-02
+
 ### Added
 - File-wide inline configuration support with `disable-file`, `enable-file`, and `configure-file` comments
 - Support for JSON configuration within inline comments to customize rule behavior per file
@@ -257,7 +259,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.102...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.104...HEAD
+[0.0.104]: https://github.com/rvben/rumdl/compare/v0.0.103...v0.0.104
 [0.0.102]: https://github.com/rvben/rumdl/compare/v0.0.101...v0.0.102
 [0.0.101]: https://github.com/rvben/rumdl/compare/v0.0.100...v0.0.101
 [0.0.100]: https://github.com/rvben/rumdl/compare/v0.0.99...v0.0.100
