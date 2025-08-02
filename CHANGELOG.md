@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- File-wide inline configuration support with `disable-file`, `enable-file`, and `configure-file` comments
+- Support for JSON configuration within inline comments to customize rule behavior per file
+- Enhanced inline configuration to handle edge cases with multiple comments on the same line
+- Support for enabling specific rules when all rules are disabled
+
+### Fixed
+- Process inline configuration comments in order of appearance on the same line
+- Skip processing inline configuration comments inside code blocks
+
 ## [0.0.102] - 2025-07-24
 
 ## [0.0.101] - 2025-07-23
