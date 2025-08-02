@@ -80,14 +80,14 @@ fn test_markdownlint_capture_restore() {
     let content = r#"# Test Document
 
 <!-- markdownlint-disable MD013 MD009 -->
-This is a very long line that exceeds 80 characters and would normally trigger MD013 but is disabled  
+This is a very long line that exceeds 80 characters and would normally trigger MD013 but is disabled
 
 <!-- markdownlint-capture -->
 <!-- markdownlint-disable MD025 -->
 # This heading would trigger MD025 but it's disabled
 <!-- markdownlint-restore -->
 
-This is another very long line that exceeds 80 characters and should not trigger MD013 (still disabled)  
+This is another very long line that exceeds 80 characters and should not trigger MD013 (still disabled)
 # This heading should trigger MD025 (was restored)
 "#;
 
@@ -129,7 +129,7 @@ This is a very long line that exceeds 80 characters and would normally trigger M
 
 # This would trigger MD025 (single title) but all rules are disabled
 
-Trailing spaces here  
+Trailing spaces here
 
 <!-- markdownlint-enable -->
 This is another very long line that exceeds 80 characters and should trigger MD013 because rules are re-enabled
@@ -160,13 +160,13 @@ fn test_multiple_rules_in_comment() {
     let content = r#"# Test Document
 
 <!-- markdownlint-disable MD013 MD009 -->
-This is a very long line that exceeds 80 characters and would normally trigger MD013 but is disabled  
+This is a very long line that exceeds 80 characters and would normally trigger MD013 but is disabled
 
 <!-- markdownlint-enable MD013 -->
-This is another very long line that exceeds 80 characters and should trigger MD013 but MD009 is still disabled  
+This is another very long line that exceeds 80 characters and should trigger MD013 but MD009 is still disabled
 
 <!-- markdownlint-enable MD009 -->
-Trailing spaces should now trigger MD009   
+Trailing spaces should now trigger MD009
 "#;
 
     let rules = all_rules(&Config::default());
@@ -261,6 +261,50 @@ Text
 
     // MD001 should be enabled after line 11
     assert!(!config.is_rule_disabled("MD001", 11));
+}
+
+#[test]
+fn test_rumdl_capture_restore() {
+    let content = r#"# Test Document
+
+<!-- rumdl-disable MD013 MD009 -->
+This is a very long line that exceeds 80 characters and would normally trigger MD013 but is disabled
+
+<!-- rumdl-capture -->
+<!-- rumdl-disable MD025 -->
+# This heading would trigger MD025 but it's disabled
+<!-- rumdl-restore -->
+This is another very long line that exceeds 80 characters and should not trigger MD013 (still disabled)
+# This heading should trigger MD025 (was restored)
+"#;
+
+    let rules = all_rules(&Config::default());
+    let warnings = lint(content, &rules, false).unwrap();
+
+    // Find warnings by rule
+    let md013_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
+        .collect();
+    let md025_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD025"))
+        .collect();
+    let md009_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD009"))
+        .collect();
+
+    // MD013 should be disabled throughout
+    assert_eq!(md013_warnings.len(), 0);
+
+    // MD009 should be disabled throughout (trailing spaces)
+    assert_eq!(md009_warnings.len(), 0);
+
+    // MD025 should only be disabled between capture and restore
+    // Line 11 should have MD025 warning
+    assert_eq!(md025_warnings.len(), 1);
+    assert_eq!(md025_warnings[0].line, 11);
 }
 
 #[test]

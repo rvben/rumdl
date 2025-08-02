@@ -162,6 +162,46 @@ impl Rule for MD013LineLength {
 
         // Early return was already done in check(), so we know there are long lines
 
+        // Check for inline configuration overrides
+        let inline_config = crate::inline_config::InlineConfig::from_content(content);
+        let config_override = inline_config.get_rule_config("MD013");
+
+        // Apply configuration override if present
+        let effective_config = if let Some(json_config) = config_override {
+            if let Some(obj) = json_config.as_object() {
+                let mut config = self.config.clone();
+                if let Some(line_length) = obj.get("line_length").and_then(|v| v.as_u64()) {
+                    config.line_length = line_length as usize;
+                }
+                if let Some(code_blocks) = obj.get("code_blocks").and_then(|v| v.as_bool()) {
+                    config.code_blocks = code_blocks;
+                }
+                if let Some(tables) = obj.get("tables").and_then(|v| v.as_bool()) {
+                    config.tables = tables;
+                }
+                if let Some(headings) = obj.get("headings").and_then(|v| v.as_bool()) {
+                    config.headings = headings;
+                }
+                if let Some(strict) = obj.get("strict").and_then(|v| v.as_bool()) {
+                    config.strict = strict;
+                }
+                if let Some(stern) = obj.get("stern").and_then(|v| v.as_bool()) {
+                    config.stern = stern;
+                }
+                if let Some(heading_line_length) = obj.get("heading_line_length").and_then(|v| v.as_u64()) {
+                    config.heading_line_length = Some(heading_line_length as usize);
+                }
+                if let Some(code_block_line_length) = obj.get("code_block_line_length").and_then(|v| v.as_u64()) {
+                    config.code_block_line_length = Some(code_block_line_length as usize);
+                }
+                config
+            } else {
+                self.config.clone()
+            }
+        } else {
+            self.config.clone()
+        };
+
         // Use ctx.lines if available for better performance
         let lines: Vec<&str> = if !ctx.lines.is_empty() {
             ctx.lines.iter().map(|l| l.content.as_str()).collect()
@@ -176,7 +216,7 @@ impl Rule for MD013LineLength {
         let heading_lines_set: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
 
         // Pre-compute table lines for efficiency instead of calling is_in_table for each line
-        let table_lines_set: std::collections::HashSet<usize> = if self.config.tables {
+        let table_lines_set: std::collections::HashSet<usize> = if effective_config.tables {
             let mut table_lines = std::collections::HashSet::new();
             let mut in_table = false;
 
@@ -214,11 +254,15 @@ impl Rule for MD013LineLength {
 
             // Determine the appropriate line length limit based on line type
             let line_limit = if heading_lines_set.contains(&line_number) {
-                self.config.heading_line_length.unwrap_or(self.config.line_length)
+                effective_config
+                    .heading_line_length
+                    .unwrap_or(effective_config.line_length)
             } else if structure.is_in_code_block(line_number) {
-                self.config.code_block_line_length.unwrap_or(self.config.line_length)
+                effective_config
+                    .code_block_line_length
+                    .unwrap_or(effective_config.line_length)
             } else {
-                self.config.line_length
+                effective_config.line_length
             };
 
             // Skip short lines immediately
@@ -227,20 +271,20 @@ impl Rule for MD013LineLength {
             }
 
             // Skip various block types efficiently
-            if !self.config.strict && !self.config.stern {
+            if !effective_config.strict && !effective_config.stern {
                 // Skip setext heading underlines
                 if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
                     continue;
                 }
 
                 // Skip block elements according to config flags (optimized checks)
-                if (self.config.headings
+                if (effective_config.headings
                     && heading_lines_set.contains(&line_number)
-                    && self.config.heading_line_length.is_none())
-                    || (!self.config.code_blocks
+                    && effective_config.heading_line_length.is_none())
+                    || (!effective_config.code_blocks
                         && structure.is_in_code_block(line_number)
-                        && self.config.code_block_line_length.is_none())
-                    || (self.config.tables && table_lines_set.contains(&line_number))
+                        && effective_config.code_block_line_length.is_none())
+                    || (effective_config.tables && table_lines_set.contains(&line_number))
                     || structure.is_in_blockquote(line_number)
                     || structure.is_in_html_block(line_number)
                 {
@@ -251,15 +295,15 @@ impl Rule for MD013LineLength {
                 if self.should_ignore_line(line, &lines, line_num, structure) {
                     continue;
                 }
-            } else if self.config.stern {
+            } else if effective_config.stern {
                 // In stern mode, only skip if explicitly configured
-                if (self.config.headings
+                if (effective_config.headings
                     && heading_lines_set.contains(&line_number)
-                    && self.config.heading_line_length.is_none())
-                    || (!self.config.code_blocks
+                    && effective_config.heading_line_length.is_none())
+                    || (!effective_config.code_blocks
                         && structure.is_in_code_block(line_number)
-                        && self.config.code_block_line_length.is_none())
-                    || (self.config.tables && table_lines_set.contains(&line_number))
+                        && effective_config.code_block_line_length.is_none())
+                    || (effective_config.tables && table_lines_set.contains(&line_number))
                 {
                     continue;
                 }

@@ -9,10 +9,16 @@
 //! - `<!-- markdownlint-disable-next-line MD001 -->` - Disable rules for next line
 //! - `<!-- markdownlint-capture -->` - Capture current configuration state
 //! - `<!-- markdownlint-restore -->` - Restore captured configuration state
+//! - `<!-- markdownlint-disable-file -->` - Disable all rules for entire file
+//! - `<!-- markdownlint-enable-file -->` - Re-enable all rules for entire file
+//! - `<!-- markdownlint-disable-file MD001 MD002 -->` - Disable specific rules for entire file
+//! - `<!-- markdownlint-enable-file MD001 MD002 -->` - Re-enable specific rules for entire file
+//! - `<!-- markdownlint-configure-file { "MD013": { "line_length": 120 } } -->` - Configure rules for entire file
 //!
 //! Also supports rumdl-specific syntax with same semantics.
 
 use crate::utils::code_block_utils::CodeBlockUtils;
+use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -24,6 +30,13 @@ pub struct InlineConfig {
     enabled_at_line: HashMap<usize, HashSet<String>>,
     /// Rules disabled for specific lines via disable-line (1-indexed)
     line_disabled_rules: HashMap<usize, HashSet<String>>,
+    /// Rules disabled for the entire file
+    file_disabled_rules: HashSet<String>,
+    /// Rules explicitly enabled for the entire file (used when all rules are disabled)
+    file_enabled_rules: HashSet<String>,
+    /// Configuration overrides for specific rules from configure-file comments
+    /// Maps rule name to configuration JSON value
+    file_rule_config: HashMap<String, JsonValue>,
 }
 
 impl Default for InlineConfig {
@@ -38,6 +51,9 @@ impl InlineConfig {
             disabled_at_line: HashMap::new(),
             enabled_at_line: HashMap::new(),
             line_disabled_rules: HashMap::new(),
+            file_disabled_rules: HashSet::new(),
+            file_enabled_rules: HashSet::new(),
+            file_rule_config: HashMap::new(),
         }
     }
 
@@ -79,6 +95,61 @@ impl InlineConfig {
 
             if in_code_block {
                 continue;
+            }
+
+            // Process file-wide comments first as they affect the entire file
+            // Check for disable-file
+            if let Some(rules) = parse_disable_file_comment(line) {
+                if rules.is_empty() {
+                    // Disable all rules for entire file
+                    config.file_disabled_rules.clear();
+                    config.file_disabled_rules.insert("*".to_string());
+                } else {
+                    // Disable specific rules for entire file
+                    if config.file_disabled_rules.contains("*") {
+                        // All rules are disabled, so remove from enabled list
+                        for rule in rules {
+                            config.file_enabled_rules.remove(rule);
+                        }
+                    } else {
+                        // Normal case: add to disabled list
+                        for rule in rules {
+                            config.file_disabled_rules.insert(rule.to_string());
+                        }
+                    }
+                }
+            }
+
+            // Check for enable-file
+            if let Some(rules) = parse_enable_file_comment(line) {
+                if rules.is_empty() {
+                    // Enable all rules for entire file
+                    config.file_disabled_rules.clear();
+                    config.file_enabled_rules.clear();
+                } else {
+                    // Enable specific rules for entire file
+                    if config.file_disabled_rules.contains("*") {
+                        // All rules are disabled, so add to enabled list
+                        for rule in rules {
+                            config.file_enabled_rules.insert(rule.to_string());
+                        }
+                    } else {
+                        // Normal case: remove from disabled list
+                        for rule in rules {
+                            config.file_disabled_rules.remove(rule);
+                        }
+                    }
+                }
+            }
+
+            // Check for configure-file
+            if let Some(json_config) = parse_configure_file_comment(line) {
+                // Process the JSON configuration
+                if let Some(obj) = json_config.as_object() {
+                    for (rule_name, rule_config) in obj {
+                        config.file_rule_config.insert(rule_name.clone(), rule_config.clone());
+                    }
+                }
             }
 
             // Process comments - handle multiple comment types on same line
@@ -231,7 +302,15 @@ impl InlineConfig {
 
     /// Check if a rule is disabled at a specific line
     pub fn is_rule_disabled(&self, rule_name: &str, line_number: usize) -> bool {
-        // Check line-specific disables first (disable-line, disable-next-line)
+        // Check file-wide disables first (highest priority)
+        if self.file_disabled_rules.contains("*") {
+            // All rules are disabled for the file, check if this rule is explicitly enabled
+            return !self.file_enabled_rules.contains(rule_name);
+        } else if self.file_disabled_rules.contains(rule_name) {
+            return true;
+        }
+
+        // Check line-specific disables (disable-line, disable-next-line)
         if let Some(line_rules) = self.line_disabled_rules.get(&line_number) {
             if line_rules.contains("*") || line_rules.contains(rule_name) {
                 return true;
@@ -280,6 +359,16 @@ impl InlineConfig {
         }
 
         disabled
+    }
+
+    /// Get configuration overrides for a specific rule from configure-file comments
+    pub fn get_rule_config(&self, rule_name: &str) -> Option<&JsonValue> {
+        self.file_rule_config.get(rule_name)
+    }
+
+    /// Get all configuration overrides from configure-file comments
+    pub fn get_all_rule_configs(&self) -> &HashMap<String, JsonValue> {
+        &self.file_rule_config
     }
 }
 
@@ -395,6 +484,81 @@ pub fn is_capture_comment(line: &str) -> bool {
 /// Check if line contains a restore comment
 pub fn is_restore_comment(line: &str) -> bool {
     line.contains("<!-- markdownlint-restore -->") || line.contains("<!-- rumdl-restore -->")
+}
+
+/// Parse a disable-file comment and return the list of rules (empty vec means all rules)
+pub fn parse_disable_file_comment(line: &str) -> Option<Vec<&str>> {
+    // Check for both rumdl and markdownlint variants
+    for prefix in &["<!-- rumdl-disable-file", "<!-- markdownlint-disable-file"] {
+        if let Some(start) = line.find(prefix) {
+            let after_prefix = &line[start + prefix.len()..];
+
+            // Global disable-file: <!-- markdownlint-disable-file -->
+            if after_prefix.trim_start().starts_with("-->") {
+                return Some(Vec::new()); // Empty vec means all rules
+            }
+
+            // Rule-specific disable-file: <!-- markdownlint-disable-file MD001 MD002 -->
+            if let Some(end) = after_prefix.find("-->") {
+                let rules_str = after_prefix[..end].trim();
+                if !rules_str.is_empty() {
+                    let rules: Vec<&str> = rules_str.split_whitespace().collect();
+                    return Some(rules);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Parse an enable-file comment and return the list of rules (empty vec means all rules)
+pub fn parse_enable_file_comment(line: &str) -> Option<Vec<&str>> {
+    // Check for both rumdl and markdownlint variants
+    for prefix in &["<!-- rumdl-enable-file", "<!-- markdownlint-enable-file"] {
+        if let Some(start) = line.find(prefix) {
+            let after_prefix = &line[start + prefix.len()..];
+
+            // Global enable-file: <!-- markdownlint-enable-file -->
+            if after_prefix.trim_start().starts_with("-->") {
+                return Some(Vec::new()); // Empty vec means all rules
+            }
+
+            // Rule-specific enable-file: <!-- markdownlint-enable-file MD001 MD002 -->
+            if let Some(end) = after_prefix.find("-->") {
+                let rules_str = after_prefix[..end].trim();
+                if !rules_str.is_empty() {
+                    let rules: Vec<&str> = rules_str.split_whitespace().collect();
+                    return Some(rules);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Parse a configure-file comment and return the JSON configuration
+pub fn parse_configure_file_comment(line: &str) -> Option<JsonValue> {
+    // Check for both rumdl and markdownlint variants
+    for prefix in &["<!-- rumdl-configure-file", "<!-- markdownlint-configure-file"] {
+        if let Some(start) = line.find(prefix) {
+            let after_prefix = &line[start + prefix.len()..];
+
+            // Find the JSON content between the prefix and -->
+            if let Some(end) = after_prefix.find("-->") {
+                let json_str = after_prefix[..end].trim();
+                if !json_str.is_empty() {
+                    // Try to parse as JSON
+                    if let Ok(value) = serde_json::from_str(json_str) {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
