@@ -264,3 +264,27 @@ fn test_mixed_fence_types() {
     assert!(fixed.contains("~~~go"), "Tilde fence preserved");
     assert_eq!(fixed.matches("\"Go\"").count(), 2, "Both contents capitalized");
 }
+
+#[test]
+fn test_html_comments() {
+    // Since the html_comments configuration is not accessible via the public API,
+    // and the default is true (check HTML comments), we can test that behavior
+    let names = vec!["JavaScript".to_string(), "TypeScript".to_string()];
+    let rule = MD044ProperNames::new(names, true);
+    let content = "# JavaScript Guide\n\n<!-- javascript and typescript are mentioned here -->\n\nJavaScript is great!";
+    let ctx = rumdl::lint_context::LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // By default (html_comments=true), it should detect names inside HTML comments
+    assert_eq!(
+        result.len(),
+        2,
+        "Should detect 'javascript' and 'typescript' in HTML comments by default"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.contains("<!-- JavaScript and TypeScript are mentioned here -->"),
+        "Should fix names in HTML comments by default"
+    );
+}
