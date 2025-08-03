@@ -40,7 +40,7 @@ repos:
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
-        exclude: \.md$
+        exclude: \.md$|tests/inline_config_test\.rs$
       - id: end-of-file-fixer
         exclude: \.md$
       - id: check-yaml
