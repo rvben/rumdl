@@ -53,7 +53,7 @@ impl VsCodeExtension {
         }
 
         // Fallback to finding the first available command
-        let commands = ["code", "cursor", "windsurf"];
+        let commands = ["code", "cursor", "windsurf", "codium", "vscodium"];
 
         for cmd in &commands {
             if Self::command_exists(cmd) {
@@ -69,7 +69,13 @@ impl VsCodeExtension {
 
     /// Find all available VS Code-compatible editors
     pub fn find_all_editors() -> Vec<(&'static str, &'static str)> {
-        let editors = [("code", "VS Code"), ("cursor", "Cursor"), ("windsurf", "Windsurf")];
+        let editors = [
+            ("code", "VS Code"),
+            ("cursor", "Cursor"),
+            ("windsurf", "Windsurf"),
+            ("codium", "VSCodium"),
+            ("vscodium", "VSCodium"),
+        ];
 
         editors
             .into_iter()
@@ -109,6 +115,24 @@ impl VsCodeExtension {
         }
     }
 
+    /// Check if the editor uses Open VSX by default
+    fn uses_open_vsx(&self) -> bool {
+        // VSCodium and some other forks use Open VSX by default
+        matches!(self.code_command.as_str(), "codium" | "vscodium")
+    }
+
+    /// Get the marketplace URL for the current editor
+    fn get_marketplace_url(&self) -> &str {
+        if self.uses_open_vsx() {
+            "https://open-vsx.org/extension/rvben/rumdl"
+        } else {
+            match self.code_command.as_str() {
+                "cursor" | "windsurf" => "https://open-vsx.org/extension/rvben/rumdl",
+                _ => "https://marketplace.visualstudio.com/items?itemName=rvben.rumdl",
+            }
+        }
+    }
+
     pub fn install(&self, force: bool) -> Result<(), String> {
         if !force && self.is_installed()? {
             println!("{}", "✓ Rumdl VS Code extension is already installed".green());
@@ -116,6 +140,17 @@ impl VsCodeExtension {
         }
 
         println!("Installing {} extension...", EXTENSION_NAME.cyan());
+
+        // For editors that use Open VSX, provide different instructions
+        if matches!(self.code_command.as_str(), "cursor" | "windsurf") {
+            println!(
+                "{}",
+                "ℹ Note: Cursor/Windsurf may default to VS Code Marketplace.".yellow()
+            );
+            println!("  If the extension is not found, please install from Open VSX:");
+            println!("  {}", self.get_marketplace_url().cyan());
+            println!();
+        }
 
         let output = Command::new(&self.code_command)
             .args(["--install-extension", EXTENSION_ID])
@@ -134,9 +169,27 @@ impl VsCodeExtension {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.contains("not found") {
-                Err("The rumdl VS Code extension is not yet available in the marketplace.\n\
-                    Please check https://github.com/rvben/rumdl for updates on when it will be published."
-                    .to_string())
+                // Provide marketplace-specific error message
+                match self.code_command.as_str() {
+                    "cursor" | "windsurf" => Err(format!(
+                        "Extension not found in marketplace. Please install from Open VSX:\n\
+                            {}\n\n\
+                            Or download the VSIX directly and install with:\n\
+                            {} --install-extension path/to/rumdl-*.vsix",
+                        self.get_marketplace_url().cyan(),
+                        self.code_command.cyan()
+                    )),
+                    "codium" | "vscodium" => Err(format!(
+                        "Extension not found. VSCodium uses Open VSX by default.\n\
+                            Please check: {}",
+                        self.get_marketplace_url().cyan()
+                    )),
+                    _ => Err(format!(
+                        "Extension not found in VS Code Marketplace.\n\
+                            Please check: {}",
+                        self.get_marketplace_url().cyan()
+                    )),
+                }
             } else {
                 Err(format!("Failed to install extension: {stderr}"))
             }
@@ -245,8 +298,8 @@ mod tests {
         for (cmd, name) in &editors {
             assert!(!cmd.is_empty());
             assert!(!name.is_empty());
-            assert!(["code", "cursor", "windsurf"].contains(cmd));
-            assert!(["VS Code", "Cursor", "Windsurf"].contains(name));
+            assert!(["code", "cursor", "windsurf", "codium", "vscodium"].contains(cmd));
+            assert!(["VS Code", "Cursor", "Windsurf", "VSCodium"].contains(name));
         }
     }
 
