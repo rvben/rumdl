@@ -26,7 +26,7 @@ mod vscode_tests {
     #[test]
     fn test_handle_vscode_command_status() {
         // Test status command - should not fail even if VS Code is not installed
-        match rumdl::vscode::handle_vscode_command(false, true) {
+        match rumdl::vscode::handle_vscode_command(false, false, true) {
             Ok(_) => {}
             Err(e) => {
                 // Only acceptable error is VS Code not found

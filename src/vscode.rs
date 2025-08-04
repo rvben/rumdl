@@ -147,7 +147,7 @@ impl VsCodeExtension {
                     if current_version != latest_version && current_version != "unknown" {
                         println!();
                         println!("{}", "  ↑ Update available!".yellow());
-                        println!("  Run {} to update", "rumdl vscode --force".cyan());
+                        println!("  Run {} to update", "rumdl vscode --update".cyan());
                     }
                 }
                 Err(_) => {
@@ -159,7 +159,11 @@ impl VsCodeExtension {
             return Ok(());
         }
 
-        println!("Installing {} extension...", EXTENSION_NAME.cyan());
+        if force {
+            println!("Force reinstalling {} extension...", EXTENSION_NAME.cyan());
+        } else {
+            println!("Installing {} extension...", EXTENSION_NAME.cyan());
+        }
 
         // For editors that use Open VSX, provide different instructions
         if matches!(self.code_command.as_str(), "cursor" | "windsurf") {
@@ -172,8 +176,13 @@ impl VsCodeExtension {
             println!();
         }
 
+        let mut args = vec!["--install-extension", EXTENSION_ID];
+        if force {
+            args.push("--force");
+        }
+
         let output = Command::new(&self.code_command)
-            .args(["--install-extension", EXTENSION_ID])
+            .args(&args)
             .output()
             .map_err(|e| format!("Failed to run VS Code command: {e}"))?;
 
@@ -333,7 +342,7 @@ impl VsCodeExtension {
                     if current_version != latest_version && current_version != "unknown" {
                         println!();
                         println!("{}", "  ↑ Update available!".yellow());
-                        println!("  Run {} to update", "rumdl vscode --force".cyan());
+                        println!("  Run {} to update", "rumdl vscode --update".cyan());
                     }
                 }
                 Err(_) => {
@@ -346,13 +355,70 @@ impl VsCodeExtension {
         }
         Ok(())
     }
+
+    /// Update to the latest version
+    pub fn update(&self) -> Result<(), String> {
+        if !self.is_installed()? {
+            println!("{}", "✗ Rumdl VS Code extension is not installed".yellow());
+            println!("  Run {} to install it", "rumdl vscode".cyan());
+            return Ok(());
+        }
+
+        let current_version = self.get_installed_version().unwrap_or_else(|_| "unknown".to_string());
+        println!("Current version: {}", current_version.cyan());
+
+        // Check for updates
+        match self.get_latest_version() {
+            Ok(latest_version) => {
+                println!("Latest version:  {}", latest_version.cyan());
+
+                if current_version == latest_version {
+                    println!();
+                    println!("{}", "✓ Already up to date!".green());
+                    return Ok(());
+                }
+
+                // Install the update
+                println!();
+                println!("Updating to version {}...", latest_version.cyan());
+
+                let output = Command::new(&self.code_command)
+                    .args(["--install-extension", EXTENSION_ID, "--force"])
+                    .output()
+                    .map_err(|e| format!("Failed to run VS Code command: {e}"))?;
+
+                if output.status.success() {
+                    println!("{}", "✓ Successfully updated Rumdl VS Code extension!".green());
+
+                    // Verify the update
+                    if let Ok(new_version) = self.get_installed_version() {
+                        println!("  New version: {}", new_version.cyan());
+                    }
+                    Ok(())
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    Err(format!("Failed to update extension: {stderr}"))
+                }
+            }
+            Err(e) => {
+                println!("{}", "⚠ Unable to check for updates".yellow());
+                println!("  {}", e.dimmed());
+                println!();
+                println!("You can try forcing a reinstall with:");
+                println!("  {}", "rumdl vscode --force".cyan());
+                Ok(())
+            }
+        }
+    }
 }
 
-pub fn handle_vscode_command(force: bool, status: bool) -> Result<(), String> {
+pub fn handle_vscode_command(force: bool, update: bool, status: bool) -> Result<(), String> {
     let vscode = VsCodeExtension::new()?;
 
     if status {
         vscode.show_status()
+    } else if update {
+        vscode.update()
     } else {
         vscode.install(force)
     }
@@ -499,7 +565,7 @@ mod tests {
         // but we can verify it doesn't panic with invalid inputs
 
         // This will fail to find a VS Code command in most test environments
-        let result = handle_vscode_command(false, true);
+        let result = handle_vscode_command(false, false, true);
         // Should return an error about VS Code not being found
         assert!(result.is_err() || result.is_ok());
     }

@@ -219,9 +219,12 @@ enum Commands {
     },
     /// Install the rumdl VS Code extension
     Vscode {
-        /// Force reinstall even if already installed
+        /// Force reinstall the current version even if already installed
         #[arg(long)]
         force: bool,
+        /// Update to the latest version (only if newer version available)
+        #[arg(long)]
+        update: bool,
         /// Show installation status without installing
         #[arg(long)]
         status: bool,
@@ -1782,9 +1785,9 @@ build-backend = \"setuptools.build_meta\"
                     }
                 }
             }
-            Some(Commands::Vscode { force, status }) => {
+            Some(Commands::Vscode { force, update, status }) => {
                 // Handle VS Code extension installation
-                match rumdl::vscode::handle_vscode_command(*force, *status) {
+                match rumdl::vscode::handle_vscode_command(*force, *update, *status) {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("{}: {}", "Error".red().bold(), e);

@@ -157,12 +157,17 @@ fn test_term_program_variations() {
 #[test]
 fn test_handle_vscode_command_status_flag() {
     // Test status=true path
-    let result = handle_vscode_command(false, true);
+    let result = handle_vscode_command(false, false, true);
     // Will fail if VS Code not installed, but tests the path
     let _ = result;
 
-    // Test status=false path
-    let result = handle_vscode_command(false, false);
+    // Test normal install path
+    let result = handle_vscode_command(false, false, false);
+    // Will fail if VS Code not installed, but tests the path
+    let _ = result;
+
+    // Test update path
+    let result = handle_vscode_command(false, true, false);
     // Will fail if VS Code not installed, but tests the path
     let _ = result;
 }
