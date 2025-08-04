@@ -40,7 +40,18 @@ impl VsCodeExtension {
         // First, check if we're in an integrated terminal
         if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
             let preferred_cmd = match term_program.to_lowercase().as_str() {
-                "vscode" => "code",
+                "vscode" => {
+                    // Check if we're actually in Cursor (which also sets TERM_PROGRAM=vscode)
+                    // by checking for Cursor-specific environment variables
+                    if std::env::var("CURSOR_TRACE_ID").is_ok() || std::env::var("CURSOR_SETTINGS").is_ok() {
+                        "cursor"
+                    } else if Self::command_exists("cursor") && !Self::command_exists("code") {
+                        // If only cursor exists, use it
+                        "cursor"
+                    } else {
+                        "code"
+                    }
+                }
                 "cursor" => "cursor",
                 "windsurf" => "windsurf",
                 _ => "",
@@ -358,6 +369,8 @@ impl VsCodeExtension {
 
     /// Update to the latest version
     pub fn update(&self) -> Result<(), String> {
+        // Debug: show which command we're using
+        log::debug!("Using command: {}", self.code_command);
         if !self.is_installed()? {
             println!("{}", "✗ Rumdl VS Code extension is not installed".yellow());
             println!("  Run {} to install it", "rumdl vscode".cyan());
@@ -382,6 +395,9 @@ impl VsCodeExtension {
                 println!();
                 println!("Updating to version {}...", latest_version.cyan());
 
+                // Try to install normally first, even for VS Code forks
+                // They might have Open VSX configured or other marketplace settings
+
                 let output = Command::new(&self.code_command)
                     .args(["--install-extension", EXTENSION_ID, "--force"])
                     .output()
@@ -397,7 +413,32 @@ impl VsCodeExtension {
                     Ok(())
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    Err(format!("Failed to update extension: {stderr}"))
+
+                    // Check if it's a marketplace issue for VS Code forks
+                    if stderr.contains("not found") && matches!(self.code_command.as_str(), "cursor" | "windsurf") {
+                        println!();
+                        println!(
+                            "{}",
+                            "The extension is not available in your editor's default marketplace.".yellow()
+                        );
+                        println!();
+                        println!("To install from Open VSX:");
+                        println!("1. Open {} (Cmd+Shift+X)", "Extensions".cyan());
+                        println!("2. Search for {}", "'rumdl'".cyan());
+                        println!("3. Click {} on the rumdl extension", "Install".green());
+                        println!();
+                        println!("Or download the VSIX manually:");
+                        println!("1. Download from: {}", self.get_marketplace_url().cyan());
+                        println!(
+                            "2. Install with: {} --install-extension path/to/rumdl-{}.vsix",
+                            self.code_command.cyan(),
+                            latest_version.cyan()
+                        );
+
+                        Ok(()) // Don't treat as error, just provide instructions
+                    } else {
+                        Err(format!("Failed to update extension: {stderr}"))
+                    }
                 }
             }
             Err(e) => {
