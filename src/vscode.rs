@@ -135,7 +135,27 @@ impl VsCodeExtension {
 
     pub fn install(&self, force: bool) -> Result<(), String> {
         if !force && self.is_installed()? {
+            // Get version information
+            let current_version = self.get_installed_version().unwrap_or_else(|_| "unknown".to_string());
             println!("{}", "✓ Rumdl VS Code extension is already installed".green());
+            println!("  Current version: {}", current_version.cyan());
+
+            // Try to check for updates
+            match self.get_latest_version() {
+                Ok(latest_version) => {
+                    println!("  Latest version:  {}", latest_version.cyan());
+                    if current_version != latest_version && current_version != "unknown" {
+                        println!();
+                        println!("{}", "  ↑ Update available!".yellow());
+                        println!("  Run {} to update", "rumdl vscode --force".cyan());
+                    }
+                }
+                Err(_) => {
+                    // Don't show error if we can't check latest version
+                    // This is common for VS Code Marketplace
+                }
+            }
+
             return Ok(());
         }
 
@@ -228,13 +248,97 @@ impl VsCodeExtension {
         Err("Could not determine installed version".to_string())
     }
 
+    /// Get the latest version from the marketplace
+    fn get_latest_version(&self) -> Result<String, String> {
+        let api_url = if self.uses_open_vsx() || matches!(self.code_command.as_str(), "cursor" | "windsurf") {
+            // Open VSX API - simple JSON endpoint
+            "https://open-vsx.org/api/rvben/rumdl".to_string()
+        } else {
+            // VS Code Marketplace API - requires POST request with specific query
+            // Using the official API endpoint
+            "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery".to_string()
+        };
+
+        let output = if api_url.contains("open-vsx.org") {
+            // Simple GET request for Open VSX
+            Command::new("curl")
+                .args(["-s", "-f", &api_url])
+                .output()
+                .map_err(|e| format!("Failed to query marketplace: {e}"))?
+        } else {
+            // POST request for VS Code Marketplace with query
+            let query = r#"{
+                "filters": [{
+                    "criteria": [
+                        {"filterType": 7, "value": "rvben.rumdl"}
+                    ]
+                }],
+                "flags": 914
+            }"#;
+
+            Command::new("curl")
+                .args([
+                    "-s",
+                    "-f",
+                    "-X",
+                    "POST",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-H",
+                    "Accept: application/json;api-version=3.0-preview.1",
+                    "-d",
+                    query,
+                    &api_url,
+                ])
+                .output()
+                .map_err(|e| format!("Failed to query marketplace: {e}"))?
+        };
+
+        if output.status.success() {
+            let response = String::from_utf8_lossy(&output.stdout);
+
+            if api_url.contains("open-vsx.org") {
+                // Parse Open VSX JSON response
+                if let Some(version_start) = response.find("\"version\":\"") {
+                    let start = version_start + 11;
+                    if let Some(version_end) = response[start..].find('"') {
+                        return Ok(response[start..start + version_end].to_string());
+                    }
+                }
+            } else {
+                // Parse VS Code Marketplace response
+                // Look for version in the complex JSON structure
+                if let Some(version_start) = response.find("\"version\":\"") {
+                    let start = version_start + 11;
+                    if let Some(version_end) = response[start..].find('"') {
+                        return Ok(response[start..start + version_end].to_string());
+                    }
+                }
+            }
+        }
+
+        Err("Unable to check latest version from marketplace".to_string())
+    }
+
     pub fn show_status(&self) -> Result<(), String> {
         if self.is_installed()? {
+            let current_version = self.get_installed_version().unwrap_or_else(|_| "unknown".to_string());
             println!("{}", "✓ Rumdl VS Code extension is installed".green());
+            println!("  Current version: {}", current_version.cyan());
 
-            // Try to get version info
-            if let Ok(version) = self.get_installed_version() {
-                println!("  Version: {}", version.dimmed());
+            // Try to check for updates
+            match self.get_latest_version() {
+                Ok(latest_version) => {
+                    println!("  Latest version:  {}", latest_version.cyan());
+                    if current_version != latest_version && current_version != "unknown" {
+                        println!();
+                        println!("{}", "  ↑ Update available!".yellow());
+                        println!("  Run {} to update", "rumdl vscode --force".cyan());
+                    }
+                }
+                Err(_) => {
+                    // Don't show error if we can't check latest version
+                }
             }
         } else {
             println!("{}", "✗ Rumdl VS Code extension is not installed".yellow());
