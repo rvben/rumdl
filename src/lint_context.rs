@@ -1072,7 +1072,8 @@ impl<'a> LintContext<'a> {
 
                 // Check for various blockquote issues
                 let has_no_space = spaces_after.is_empty() && !content.is_empty();
-                let has_multiple_spaces = spaces_after.len() > 1;
+                // Consider tabs as multiple spaces, or actual multiple spaces
+                let has_multiple_spaces = spaces_after.len() > 1 || spaces_after.contains('\t');
 
                 // Check if needs MD028 fix (empty blockquote without proper spacing)
                 let needs_md028_fix = content.trim().is_empty() && spaces_after.is_empty();

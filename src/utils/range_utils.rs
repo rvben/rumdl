@@ -267,9 +267,24 @@ pub fn calculate_match_range(
     match_start: usize,
     match_len: usize,
 ) -> (usize, usize, usize, usize) {
+    // Bounds check to prevent panic
+    let line_len = line_content.len();
+    if match_start > line_len {
+        // If match_start is beyond line bounds, return a safe range at end of line
+        let char_count = line_content.chars().count();
+        return (line, char_count + 1, line, char_count + 1);
+    }
+
+    let safe_match_end = (match_start + match_len).min(line_len);
+    let safe_match_len = safe_match_end.saturating_sub(match_start);
+
     // Convert byte positions to character positions
     let char_start = line_content[..match_start].chars().count() + 1; // 1-indexed
-    let char_len = line_content[match_start..match_start + match_len].chars().count();
+    let char_len = if safe_match_len > 0 {
+        line_content[match_start..safe_match_end].chars().count()
+    } else {
+        0
+    };
     (line, char_start, line, char_start + char_len)
 }
 
@@ -443,5 +458,40 @@ mod tests {
         // Test bounds checking
         let range = line_index.line_text_range(1, 1, 100); // Should clamp to line end
         assert_eq!(range, 0..11); // "Hello world"
+    }
+
+    #[test]
+    fn test_calculate_match_range_bounds_checking() {
+        // Test case 1: match_start beyond line bounds
+        let line_content = "] not a link [";
+        let (line, start_col, end_line, end_col) = calculate_match_range(121, line_content, 57, 10);
+        assert_eq!(line, 121);
+        assert_eq!(start_col, 15); // line length + 1
+        assert_eq!(end_line, 121);
+        assert_eq!(end_col, 15); // same as start when out of bounds
+
+        // Test case 2: match extends beyond line end
+        let line_content = "short";
+        let (line, start_col, end_line, end_col) = calculate_match_range(1, line_content, 2, 10);
+        assert_eq!(line, 1);
+        assert_eq!(start_col, 3); // position 2 + 1
+        assert_eq!(end_line, 1);
+        assert_eq!(end_col, 6); // clamped to line length + 1
+
+        // Test case 3: normal case within bounds
+        let line_content = "normal text here";
+        let (line, start_col, end_line, end_col) = calculate_match_range(5, line_content, 7, 4);
+        assert_eq!(line, 5);
+        assert_eq!(start_col, 8); // position 7 + 1
+        assert_eq!(end_line, 5);
+        assert_eq!(end_col, 12); // position 7 + 4 + 1
+
+        // Test case 4: zero length match
+        let line_content = "test line";
+        let (line, start_col, end_line, end_col) = calculate_match_range(10, line_content, 5, 0);
+        assert_eq!(line, 10);
+        assert_eq!(start_col, 6); // position 5 + 1
+        assert_eq!(end_line, 10);
+        assert_eq!(end_col, 6); // same as start for zero length
     }
 }

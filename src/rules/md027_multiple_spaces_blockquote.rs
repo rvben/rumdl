@@ -55,37 +55,56 @@ impl Rule for MD027MultipleSpacesBlockquote {
             if let Some(blockquote) = &line_info.blockquote {
                 // Part 1: Check for multiple spaces after the blockquote marker
                 if blockquote.has_multiple_spaces_after_marker {
-                    // Calculate the position of the extra spaces
-                    let extra_spaces_start = blockquote.marker_column + blockquote.nesting_level + 1; // Position after all '>' markers + 1 for the first space
-                    let spaces_in_prefix = blockquote
-                        .prefix
+                    // Find where the extra spaces start in the line
+                    // We need to find the position after the markers and first space/tab
+                    let mut byte_pos = 0;
+                    let mut found_markers = 0;
+                    let mut found_first_space = false;
+
+                    for (i, ch) in line_info.content.char_indices() {
+                        if found_markers < blockquote.nesting_level {
+                            if ch == '>' {
+                                found_markers += 1;
+                            }
+                        } else if !found_first_space && (ch == ' ' || ch == '\t') {
+                            // This is the first space/tab after markers
+                            found_first_space = true;
+                        } else if found_first_space && (ch == ' ' || ch == '\t') {
+                            // This is where extra spaces start
+                            byte_pos = i;
+                            break;
+                        }
+                    }
+
+                    // Count how many extra spaces/tabs there are
+                    let extra_spaces_bytes = line_info.content[byte_pos..]
                         .chars()
-                        .skip(blockquote.indent.len() + blockquote.nesting_level)
-                        .take_while(|&c| c == ' ')
-                        .count();
-                    let extra_spaces_len = spaces_in_prefix - 1; // All spaces except the first one
+                        .take_while(|&c| c == ' ' || c == '\t')
+                        .fold(0, |acc, ch| acc + ch.len_utf8());
 
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_match_range(line_num, &line_info.content, extra_spaces_start, extra_spaces_len);
+                    if extra_spaces_bytes > 0 {
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_match_range(line_num, &line_info.content, byte_pos, extra_spaces_bytes);
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: "Multiple spaces after quote marker (>)".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: {
-                                let line_index = LineIndex::new(ctx.content.to_string());
-                                let start_byte = line_index.line_col_to_byte_range(line_num, start_col).start;
-                                let end_byte = line_index.line_col_to_byte_range(line_num, end_col).start;
-                                start_byte..end_byte
-                            },
-                            replacement: "".to_string(), // Remove the extra spaces
-                        }),
-                    });
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: "Multiple spaces after quote marker (>)".to_string(),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: {
+                                    let line_index = LineIndex::new(ctx.content.to_string());
+                                    let start_byte = line_index.line_col_to_byte_range(line_num, start_col).start;
+                                    let end_byte = line_index.line_col_to_byte_range(line_num, end_col).start;
+                                    start_byte..end_byte
+                                },
+                                replacement: "".to_string(), // Remove the extra spaces
+                            }),
+                        });
+                    }
                 }
             } else {
                 // Part 2: Check for malformed blockquote attempts on non-blockquote lines
@@ -514,5 +533,62 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "  > Indented with multiple spaces");
+    }
+
+    #[test]
+    fn test_tabs_after_marker() {
+        let rule = MD027MultipleSpacesBlockquote;
+        // Tab after marker - should be flagged as multiple spaces
+        let content = ">\tTab after marker";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Tab after marker should be flagged");
+        assert_eq!(result[0].message, "Multiple spaces after quote marker (>)");
+
+        // Tab and space after marker
+        let content2 = ">\t Space then tab";
+        let ctx2 = LintContext::new(content2);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert_eq!(result2.len(), 1, "Tab and space should be flagged");
+
+        // Two tabs after marker
+        let content3 = ">\t\tTwo tabs";
+        let ctx3 = LintContext::new(content3);
+        let result3 = rule.check(&ctx3).unwrap();
+        assert_eq!(result3.len(), 1, "Two tabs should be flagged");
+    }
+
+    #[test]
+    fn test_mixed_spaces_and_tabs() {
+        let rule = MD027MultipleSpacesBlockquote;
+        // Space then tab
+        let content = "> \tSpace then tab";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].column, 3); // Points to the tab
+
+        // Tab then space
+        let content2 = ">\t Tab then space";
+        let ctx2 = LintContext::new(content2);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert_eq!(result2.len(), 1);
+        assert_eq!(result2[0].column, 3); // Points to the space after tab
+    }
+
+    #[test]
+    fn test_fix_tabs() {
+        let rule = MD027MultipleSpacesBlockquote;
+        // Fix should remove extra tabs
+        let content = ">\t\tTwo tabs";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "> Two tabs");
+
+        // Fix mixed spaces and tabs
+        let content2 = "> \t Mixed";
+        let ctx2 = LintContext::new(content2);
+        let fixed2 = rule.fix(&ctx2).unwrap();
+        assert_eq!(fixed2, "> Mixed");
     }
 }
