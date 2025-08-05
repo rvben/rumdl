@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.105] - 2025-08-05
 
+## [0.0.105] - 2025-08-05
+
 ### Fixed
 - MD029: Fixed list continuation detection to properly handle variable marker widths (fixes #16)
   - List items with double-digit markers (e.g., "10. ") now correctly require 4+ spaces for continuation
@@ -279,6 +281,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial implementation of remaining rules for markdownlint parity
 
 [Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.105...HEAD
+[0.0.105]: https://github.com/rvben/rumdl/compare/v0.0.104...v0.0.105
 [0.0.105]: https://github.com/rvben/rumdl/compare/v0.0.104...v0.0.105
 [0.0.104]: https://github.com/rvben/rumdl/compare/v0.0.103...v0.0.104
 [0.0.102]: https://github.com/rvben/rumdl/compare/v0.0.101...v0.0.102
