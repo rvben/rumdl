@@ -445,3 +445,191 @@ fn test_single_item_edge_cases() {
         }
     }
 }
+
+// Additional tests for multiline list item issue (Issue #16)
+
+#[test]
+fn test_md029_multiline_no_indent() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // No indentation - should be treated as lazy continuation
+    let content = r#"1. First item first line
+second line of first item
+1. Second item first line
+second line of second item"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have warning for second "1." since it should be "2."
+    assert_eq!(result.len(), 1, "No indentation should be treated as continuation");
+    assert!(result[0].message.contains("1 does not match style (expected 2)"));
+}
+
+#[test]
+fn test_md029_multiline_3_space_indent() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // 3-space indentation - should be treated as continuation
+    let content = r#"1. First item first line
+   second line of first item
+1. Second item first line
+   second line of second item"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have warning for second "1." since it should be "2."
+    assert_eq!(result.len(), 1, "3-space indentation should be treated as continuation");
+    assert!(result[0].message.contains("1 does not match style (expected 2)"));
+}
+
+#[test]
+fn test_md029_multiline_4_space_indent() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // 4-space indentation - should be treated as continuation
+    let content = r#"1. First item first line
+    second line of first item
+1. Second item first line
+    second line of second item"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have warning for second "1." since it should be "2."
+    assert_eq!(result.len(), 1);
+    assert!(result[0].message.contains("1 does not match style (expected 2)"));
+}
+
+#[test]
+fn test_md029_multiline_2_space_indent() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // 2-space indentation - edge case
+    let content = r#"1. First item first line
+  second line of first item
+1. Second item first line
+  second line of second item"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // 2 spaces is not enough for ordered list continuation (need 3)
+    // So these should be treated as separate lists
+    assert!(result.is_empty(), "2-space indentation breaks the list");
+}
+
+#[test]
+fn test_md029_multiline_mixed_content() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // Test with code blocks between items
+    let content = r#"1. First item
+   continuation line
+```
+code block
+```
+2. Second item
+   continuation line"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Code blocks should not break list numbering");
+}
+
+#[test]
+fn test_md029_fix_multiline_3_space() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    let content = r#"1. First item first line
+   second line of first item
+1. Second item first line
+   second line of second item"#;
+
+    let ctx = LintContext::new(content);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let expected = r#"1. First item first line
+   second line of first item
+2. Second item first line
+   second line of second item"#;
+
+    assert_eq!(fixed, expected, "Fix should preserve indentation and update numbering");
+}
+
+#[test]
+fn test_md029_double_digit_marker_width() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // Test that continuation indentation respects actual marker width
+    let content = r#"9. Ninth item
+   continuation with 3 spaces
+10. Tenth item  
+    continuation with 4 spaces  
+11. Eleventh item
+     continuation with 5 spaces"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // All items should be part of the same list
+    assert_eq!(result.len(), 3, "All items should be flagged for renumbering");
+    assert!(result[0].message.contains("9 does not match style (expected 1)"));
+    assert!(result[1].message.contains("10 does not match style (expected 2)"));
+    assert!(result[2].message.contains("11 does not match style (expected 3)"));
+}
+
+#[test]
+fn test_md029_double_digit_insufficient_indent() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // Test that insufficient indentation breaks the list
+    let content = r#"9. Ninth item
+   continuation
+10. Tenth item  
+   text
+11. Eleventh item
+    text"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Line 2 has 3 spaces (OK for "9. ")
+    // Line 4 has 3 spaces (NOT OK for "10. " which needs 4)
+    // Line 6 has 4 spaces (NOT OK for "11. " which needs 5)
+    // So item 10 and 11 should be separate lists
+
+    // Actually, we should have 3 warnings:
+    // - Item 9 should be 1 (first item in first list)
+    // - Item 10 should be 2 (continues first list because line 4 has 3 spaces which is OK for item 9)
+    // - Item 11 should be 1 (starts new list because line 6 has only 4 spaces which is not enough for item 10)
+    assert_eq!(result.len(), 3, "Should have 3 warnings");
+    assert!(result[0].message.contains("9 does not match style (expected 1)"));
+    assert!(result[1].message.contains("10 does not match style (expected 2)"));
+    assert!(result[2].message.contains("11 does not match style (expected 1)"));
+}
+
+#[test]
+fn test_md029_simple_insufficient_indent() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // Simple test case - second item has insufficient indentation
+    let content = r#"10. Item ten
+   not enough spaces
+10. Item ten again"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Line 2 has 3 spaces but needs 4 for "10. "
+    // So item on line 3 should start a new list
+
+    // The list should be split into 2 blocks because line 2 doesn't have enough indentation
+    assert_eq!(ctx.list_blocks.len(), 2, "Should have 2 separate list blocks");
+
+    // And MD029 should flag both "10." items as starting with the wrong number
+    assert_eq!(result.len(), 2, "Both '10.' items should be flagged");
+    assert!(result[0].message.contains("10 does not match style (expected 1)"));
+    assert!(result[1].message.contains("10 does not match style (expected 1)"));
+}

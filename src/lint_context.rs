@@ -241,6 +241,8 @@ pub struct ListBlock {
     pub item_lines: Vec<usize>,
     /// Nesting level (0 for top-level lists)
     pub nesting_level: usize,
+    /// Maximum marker width seen in this block (e.g., 3 for "1. ", 4 for "10. ")
+    pub max_marker_width: usize,
 }
 
 use std::sync::{Arc, Mutex};
@@ -1294,6 +1296,7 @@ impl<'a> LintContext<'a> {
         let mut current_block: Option<ListBlock> = None;
         let mut last_list_item_line = 0;
         let mut current_indent_level = 0;
+        let mut last_marker_width = 0;
 
         for (line_idx, line_info) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
@@ -1303,7 +1306,16 @@ impl<'a> LintContext<'a> {
                 if let Some(ref mut block) = current_block {
                     // For code blocks to continue a list, they need to be indented
                     // at least 2 spaces beyond the list marker
-                    if line_info.indent >= current_indent_level + 2 {
+                    // Calculate minimum indentation for list continuation
+                    // For ordered lists, use the last marker width (e.g., 3 for "1. ", 4 for "10. ")
+                    // For unordered lists like "- ", content starts at column 2, so continuations need at least 2 spaces
+                    let min_continuation_indent = if block.is_ordered {
+                        current_indent_level + last_marker_width
+                    } else {
+                        current_indent_level + 2 // Unordered lists need at least 2 spaces (e.g., "- " = 2 chars)
+                    };
+
+                    if line_info.indent >= min_continuation_indent {
                         // Code blocks at list continuation level should continue the list
                         block.end_line = line_num;
                         continue;
@@ -1349,8 +1361,28 @@ impl<'a> LintContext<'a> {
                                 let check_info = &lines[check_idx];
                                 if !check_info.is_blank && !check_info.in_code_block && check_info.list_item.is_none() {
                                     // Found non-blank, non-list content
-                                    if check_info.indent < 2 {
-                                        // Not indented, so it's not list continuation
+                                    // Check if it's indented enough to be a continuation
+                                    // Get the marker width of the last list item
+                                    let last_item_marker_width =
+                                        if last_list_item_line > 0 && last_list_item_line <= lines.len() {
+                                            lines[last_list_item_line - 1]
+                                                .list_item
+                                                .as_ref()
+                                                .map(|li| {
+                                                    if li.is_ordered {
+                                                        li.marker.len() + 1 // Add 1 for the space after ordered list markers
+                                                    } else {
+                                                        li.marker.len()
+                                                    }
+                                                })
+                                                .unwrap_or(3) // fallback to 3 if no list item found
+                                        } else {
+                                            3 // fallback
+                                        };
+
+                                    let min_continuation = if block.is_ordered { last_item_marker_width } else { 2 };
+                                    if check_info.indent < min_continuation {
+                                        // Not indented enough, so it breaks the list
                                         found_non_list = true;
                                         break;
                                     }
@@ -1364,6 +1396,13 @@ impl<'a> LintContext<'a> {
                         // Extend current block
                         block.end_line = line_num;
                         block.item_lines.push(line_num);
+
+                        // Update max marker width
+                        block.max_marker_width = block.max_marker_width.max(if list_item.is_ordered {
+                            list_item.marker.len() + 1
+                        } else {
+                            list_item.marker.len()
+                        });
 
                         // Update marker consistency for unordered lists
                         if !block.is_ordered
@@ -1389,6 +1428,11 @@ impl<'a> LintContext<'a> {
                             blockquote_prefix: blockquote_prefix.clone(),
                             item_lines: vec![line_num],
                             nesting_level: nesting,
+                            max_marker_width: if list_item.is_ordered {
+                                list_item.marker.len() + 1
+                            } else {
+                                list_item.marker.len()
+                            },
                         };
                     }
                 } else {
@@ -1405,11 +1449,17 @@ impl<'a> LintContext<'a> {
                         blockquote_prefix,
                         item_lines: vec![line_num],
                         nesting_level: nesting,
+                        max_marker_width: list_item.marker.len(),
                     });
                 }
 
                 last_list_item_line = line_num;
                 current_indent_level = item_indent;
+                last_marker_width = if list_item.is_ordered {
+                    list_item.marker.len() + 1 // Add 1 for the space after ordered list markers
+                } else {
+                    list_item.marker.len()
+                };
             } else if let Some(ref mut block) = current_block {
                 // Not a list item - check if it continues the current block
 
@@ -1418,7 +1468,16 @@ impl<'a> LintContext<'a> {
                 // - Blank lines followed by indented content continue the list
                 // - Everything else ends the list
 
-                if line_info.indent >= current_indent_level + 2 {
+                // Calculate minimum indentation for list continuation
+                // For ordered lists, use the last marker width (e.g., 3 for "1. ", 4 for "10. ")
+                // For unordered lists like "- ", content starts at column 2, so continuations need at least 2 spaces
+                let min_continuation_indent = if block.is_ordered {
+                    current_indent_level + last_marker_width
+                } else {
+                    current_indent_level + 2 // Unordered lists need at least 2 spaces (e.g., "- " = 2 chars)
+                };
+
+                if line_info.indent >= min_continuation_indent {
                     // Indented line continues the list
                     block.end_line = line_num;
                 } else if line_info.is_blank {
@@ -1435,7 +1494,7 @@ impl<'a> LintContext<'a> {
                     if check_idx < lines.len() {
                         let next_line = &lines[check_idx];
                         // Check if followed by indented content (list continuation)
-                        if !next_line.in_code_block && next_line.indent >= current_indent_level + 2 {
+                        if !next_line.in_code_block && next_line.indent >= min_continuation_indent {
                             found_continuation = true;
                         }
                         // Check if followed by another list item at the same level
@@ -1462,7 +1521,7 @@ impl<'a> LintContext<'a> {
                                             // Code fences or properly indented content
                                             trimmed.starts_with("```")
                                                 || trimmed.starts_with("~~~")
-                                                || line_indent >= current_indent_level + 2
+                                                || line_indent >= min_continuation_indent
                                         } else {
                                             false
                                         }
@@ -1490,8 +1549,20 @@ impl<'a> LintContext<'a> {
                     }
                 } else {
                     // Check for lazy continuation - non-indented line immediately after a list item
-                    let is_lazy_continuation =
-                        last_list_item_line == line_num - 1 && line_info.heading.is_none() && !line_info.is_blank;
+                    // But only if the line has sufficient indentation for the list type
+                    let min_required_indent = if block.is_ordered {
+                        current_indent_level + last_marker_width
+                    } else {
+                        current_indent_level + 2
+                    };
+
+                    // For lazy continuation to apply, the line must either:
+                    // 1. Have no indentation (true lazy continuation)
+                    // 2. Have sufficient indentation for the list type
+                    let is_lazy_continuation = last_list_item_line == line_num - 1
+                        && line_info.heading.is_none()
+                        && !line_info.is_blank
+                        && (line_info.indent == 0 || line_info.indent >= min_required_indent);
 
                     if is_lazy_continuation {
                         // Additional check: if the line starts with uppercase and looks like a new sentence,
@@ -1965,6 +2036,9 @@ impl<'a> ListBlockMerger<'a> {
         current.end_line = next.end_line;
         current.item_lines.extend_from_slice(&next.item_lines);
 
+        // Update max marker width
+        current.max_marker_width = current.max_marker_width.max(next.max_marker_width);
+
         // Handle marker consistency for unordered lists
         if !current.is_ordered && self.markers_differ(&current, next) {
             current.marker = None; // Mixed markers
@@ -2005,8 +2079,15 @@ fn has_meaningful_content_between(current: &ListBlock, next: &ListBlock, lines: 
             let line_indent = line_info.content.len() - line_info.content.trim_start().len();
 
             // If the line is indented enough to be list continuation content, it's meaningful
-            // List content should be indented at least 2 spaces beyond the marker
-            if line_indent >= current.nesting_level + 2 {
+            // For ordered lists, use actual marker width; for unordered, 2 spaces
+            let min_indent = if current.is_ordered {
+                current.nesting_level + current.max_marker_width
+            } else {
+                current.nesting_level + 2
+            };
+
+            // Check if the line has sufficient indentation to be a continuation
+            if line_indent >= min_indent {
                 return true;
             }
 

@@ -355,8 +355,12 @@ fn test_performance_with_large_mixed_lists() {
         content.push_str(&format!("{i}. Ordered item {i}\n"));
         if i % 3 == 0 {
             // Add indented paragraph content (not new list items)
-            content.push_str("   This item has extended content with proper indentation.\n");
-            content.push_str("   It includes multiple lines to test performance.\n");
+            // For double-digit items, we need 4+ spaces of indentation
+            let indent = if i < 10 { "   " } else { "    " };
+            content.push_str(&format!(
+                "{indent}This item has extended content with proper indentation.\n"
+            ));
+            content.push_str(&format!("{indent}It includes multiple lines to test performance.\n"));
         }
     }
 
