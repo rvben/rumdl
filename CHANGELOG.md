@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.105] - 2025-08-05
+
+### Fixed
+- MD029: Fixed list continuation detection to properly handle variable marker widths (fixes #16)
+  - List items with double-digit markers (e.g., "10. ") now correctly require 4+ spaces for continuation
+  - List items with triple-digit markers (e.g., "100. ") now correctly require 5+ spaces for continuation
+  - List items with any number of digits now correctly calculate required continuation indentation
+- MD027: Improved tab handling and added bounds checking for range calculations
+- Installation: Improved update experience for Cursor/Windsurf editors
+
+### Added
+- `--update` flag to check for newer versions and update if available
+- Version checking with update notifications
+- Marketplace-aware installation for VS Code forks
+- Comprehensive tests for MD029 with large number markers (triple and quadruple digits)
+
+### Changed
+- Clarified `--force` flag behavior in help text
+
 ## [0.0.104] - 2025-08-02
 
 ### Added
@@ -259,7 +278,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.104...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.105...HEAD
+[0.0.105]: https://github.com/rvben/rumdl/compare/v0.0.104...v0.0.105
 [0.0.104]: https://github.com/rvben/rumdl/compare/v0.0.103...v0.0.104
 [0.0.102]: https://github.com/rvben/rumdl/compare/v0.0.101...v0.0.102
 [0.0.101]: https://github.com/rvben/rumdl/compare/v0.0.100...v0.0.101
