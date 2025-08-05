@@ -2,7 +2,9 @@ target/
 **/__pycache__
 **/*.egg-info
 cov-report
-benchmark
+# Ignore benchmark directory but not benchmark/bin
+benchmark/*
+!benchmark/bin/
 *.bak*
 .env
 *.log

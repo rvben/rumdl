@@ -22,6 +22,32 @@ crate-type = ["cdylib", "rlib"]
 name = "rumdl"
 path = "src/main.rs"
 
+# Benchmark binaries - only built when explicitly requested
+[[bin]]
+name = "benchmark"
+path = "benchmark/bin/benchmark.rs"
+required-features = ["build-benchmarks"]
+
+[[bin]]
+name = "bench_lint_context"
+path = "benchmark/bin/bench_lint_context.rs"
+required-features = ["build-benchmarks"]
+
+[[bin]]
+name = "benchmark_rule"
+path = "benchmark/bin/benchmark_rule.rs"
+required-features = ["build-benchmarks"]
+
+[[bin]]
+name = "file_parallel_benchmark"
+path = "benchmark/bin/file_parallel_benchmark.rs"
+required-features = ["build-benchmarks"]
+
+[[bin]]
+name = "measure_code_span_performance"
+path = "benchmark/bin/measure_code_span_performance.rs"
+required-features = ["build-benchmarks"]
+
 [[bench]]
 name = "rule_performance"
 harness = false
@@ -93,6 +119,7 @@ parallel = ["rayon"]
 profiling = []
 python = ["pyo3"]
 structure_preprocessing = []
+build-benchmarks = []
 
 [dev-dependencies]
 assert_cmd = "2.0.17"
