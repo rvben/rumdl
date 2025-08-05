@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.106] - 2025-08-05
+
+### Changed
+- Moved benchmark binaries from Python package distribution
+  - Benchmark tools are now in `benchmark/bin/` directory
+  - Added `build-benchmarks` feature flag to explicitly build benchmarks
+  - Python package now only includes the main `rumdl` binary
+  - Significantly reduced installed package size
+
 ## [0.0.105] - 2025-08-05
 
 ## [0.0.105] - 2025-08-05
