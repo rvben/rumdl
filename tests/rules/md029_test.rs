@@ -565,8 +565,8 @@ fn test_md029_double_digit_marker_width() {
     // Test that continuation indentation respects actual marker width
     let content = r#"9. Ninth item
    continuation with 3 spaces
-10. Tenth item  
-    continuation with 4 spaces  
+10. Tenth item
+    continuation with 4 spaces
 11. Eleventh item
      continuation with 5 spaces"#;
 
@@ -587,7 +587,7 @@ fn test_md029_double_digit_insufficient_indent() {
     // Test that insufficient indentation breaks the list
     let content = r#"9. Ninth item
    continuation
-10. Tenth item  
+10. Tenth item
    text
 11. Eleventh item
     text"#;
@@ -608,6 +608,74 @@ fn test_md029_double_digit_insufficient_indent() {
     assert!(result[0].message.contains("9 does not match style (expected 1)"));
     assert!(result[1].message.contains("10 does not match style (expected 2)"));
     assert!(result[2].message.contains("11 does not match style (expected 1)"));
+}
+
+#[test]
+fn test_md029_triple_digit_marker_width() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // Test that continuation indentation works for triple-digit markers
+    let content = r#"99. Ninety-ninth item
+    continuation with 4 spaces
+100. One hundredth item
+     continuation with 5 spaces
+101. One hundred first item
+     continuation with 5 spaces"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // All items should be part of the same list
+    assert_eq!(result.len(), 3, "All items should be flagged for renumbering");
+    assert!(result[0].message.contains("99 does not match style (expected 1)"));
+    assert!(result[1].message.contains("100 does not match style (expected 2)"));
+    assert!(result[2].message.contains("101 does not match style (expected 3)"));
+}
+
+#[test]
+fn test_md029_quadruple_digit_marker_width() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // Test that continuation indentation works for quadruple-digit markers
+    let content = r#"999. Nine hundred ninety-ninth item
+     continuation with 5 spaces
+1000. One thousandth item
+      continuation with 6 spaces
+1111. Eleven eleven item
+      continuation with 6 spaces"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // All items should be part of the same list
+    assert_eq!(result.len(), 3, "All items should be flagged for renumbering");
+    assert!(result[0].message.contains("999 does not match style (expected 1)"));
+    assert!(result[1].message.contains("1000 does not match style (expected 2)"));
+    assert!(result[2].message.contains("1111 does not match style (expected 3)"));
+}
+
+#[test]
+fn test_md029_large_digit_insufficient_indent() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // Test that insufficient indentation breaks the list for large numbers
+    let content = r#"99. Item ninety-nine
+    continuation with 4 spaces
+100. Item one hundred
+    only 4 spaces (not enough for "100. " which needs 5)
+1000. Item one thousand
+     only 5 spaces (not enough for "1000. " which needs 6)"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // We expect the list to be broken into multiple blocks
+    // Item 99 and 100 should be in one list (since 4 spaces is enough for "99. ")
+    // Item 1000 should start a new list (since 5 spaces is not enough for "100. ")
+    assert_eq!(result.len(), 3, "Should have 3 warnings");
+    assert!(result[0].message.contains("99 does not match style (expected 1)"));
+    assert!(result[1].message.contains("100 does not match style (expected 2)"));
+    assert!(result[2].message.contains("1000 does not match style (expected 1)")); // New list
 }
 
 #[test]
