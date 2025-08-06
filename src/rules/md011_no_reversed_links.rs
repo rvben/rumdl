@@ -204,17 +204,17 @@ impl Rule for MD011NoReversedLinks {
         let mut byte_pos = 0;
 
         for (line_num, line) in content.lines().enumerate() {
-            // Skip if this line is in a code block
-            if ctx.is_in_code_block_or_span(byte_pos) {
-                byte_pos += line.len() + 1;
-                continue;
-            }
-
             // Part 1: Check for existing perfectly formed reversed links
             for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
                 let match_obj = cap.get(0).unwrap();
                 let match_start = match_obj.start();
                 let match_end = match_obj.end();
+
+                // Check if this specific match is within a code block or inline code span
+                let match_byte_pos = byte_pos + match_start;
+                if ctx.is_in_code_block_or_span(match_byte_pos) {
+                    continue;
+                }
 
                 // Check if the match contains escaped brackets or parentheses
                 let match_text = match_obj.as_str();
@@ -277,6 +277,12 @@ impl Rule for MD011NoReversedLinks {
             // Part 2: Check for malformed link attempts where user intent is clear
             let malformed_attempts = self.detect_malformed_link_attempts(line);
             for (start, len, url, text) in malformed_attempts {
+                // Check if this specific match is within a code block or inline code span
+                let match_byte_pos = byte_pos + start;
+                if ctx.is_in_code_block_or_span(match_byte_pos) {
+                    continue;
+                }
+
                 // Calculate precise character range for the malformed syntax
                 let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, start, len);
 
@@ -592,5 +598,46 @@ But this (https://example.com)[reversed link] should be flagged."#;
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should still flag URLs with nested parentheses");
+    }
+
+    #[test]
+    fn test_inline_code_patterns() {
+        // Test for issue #19 - MD011 should not flag patterns inside inline code
+        let rule = MD011NoReversedLinks;
+
+        // Test the exact case from issue #19
+        let content = "I find `inspect.stack()[1].frame` a lot easier to understand (or at least guess about) at a glance than `inspect.stack()[1][0]`.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "Should not flag ()[1] patterns inside inline code");
+
+        // Test other patterns that might look like reversed links in code
+        let content = "Use `array()[0]` or `func()[1]` to access elements.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "Should not flag array access patterns in inline code");
+
+        // Test that actual reversed links outside code are still caught
+        let content = "Check out (https://example.com)[this link] and use `array()[1]`.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag actual reversed link but not code pattern");
+        assert!(result[0].message.contains("Reversed link syntax"));
+
+        // Test mixed scenario with code blocks
+        let content = r#"
+Here's some code: `func()[1]` and `other()[2]`.
+
+But this is wrong: (https://example.com)[Click here]
+
+```python
+# This should not be flagged
+result = inspect.stack()[1]
+```
+"#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should only flag the actual reversed link");
+        assert_eq!(result[0].line, 4, "Should flag the reversed link on line 4");
     }
 }
