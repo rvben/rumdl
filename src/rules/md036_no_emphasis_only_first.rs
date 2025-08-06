@@ -3,9 +3,9 @@
 //!
 //! See [docs/md036.md](../../docs/md036.md) for full documentation, configuration, and examples.
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::document_structure::DocumentStructure;
-use crate::utils::range_utils::{LineIndex, calculate_emphasis_range};
+use crate::utils::range_utils::calculate_emphasis_range;
 use lazy_static::lazy_static;
 use regex::Regex;
 use toml;
@@ -156,51 +156,6 @@ impl MD036NoEmphasisAsHeading {
 
         None
     }
-
-    fn get_heading_for_emphasis(&self, level: usize, text: &str) -> String {
-        let prefix = "#".repeat(level);
-        // Remove trailing punctuation based on configuration
-        let text = if self.config.punctuation.is_empty() {
-            text.trim()
-        } else {
-            let chars_to_remove: Vec<char> = self.config.punctuation.chars().collect();
-            text.trim().trim_end_matches(&chars_to_remove[..])
-        };
-
-        // Split long text into multiple lines if needed
-        if text.len() > 80 {
-            let words = text.split_whitespace();
-            let mut current_line = String::new();
-            let mut result = String::new();
-            let mut first_line = true;
-
-            for word in words {
-                if current_line.len() + word.len() + 1 > 80 {
-                    if first_line {
-                        result.push_str(&format!("{} {}\n", prefix, current_line.trim()));
-                        first_line = false;
-                    } else {
-                        result.push_str(&format!("{}\n", current_line.trim()));
-                    }
-                    current_line = word.to_string();
-                } else {
-                    if !current_line.is_empty() {
-                        current_line.push(' ');
-                    }
-                    current_line.push_str(word);
-                }
-            }
-
-            if first_line {
-                result.push_str(&format!("{} {}", prefix, current_line.trim()));
-            } else {
-                result.push_str(current_line.trim());
-            }
-            result
-        } else {
-            format!("{prefix} {text}")
-        }
-    }
 }
 
 impl Rule for MD036NoEmphasisAsHeading {
@@ -237,7 +192,6 @@ impl Rule for MD036NoEmphasisAsHeading {
         }
 
         let mut warnings = Vec::new();
-        let line_index = LineIndex::new(content.to_string());
 
         for (i, line) in content.lines().enumerate() {
             // Skip obvious non-matches quickly
@@ -245,7 +199,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                 continue;
             }
 
-            if let Some((level, text, start_pos, end_pos)) = self.is_entire_line_emphasized(line, doc_structure, i) {
+            if let Some((_level, text, start_pos, end_pos)) = self.is_entire_line_emphasized(line, doc_structure, i) {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_emphasis_range(i + 1, line, start_pos, end_pos);
 
@@ -257,10 +211,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                     end_column: end_col,
                     message: format!("Emphasis used instead of a heading: '{text}'"),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_content_range(i + 1),
-                        replacement: self.get_heading_for_emphasis(level, &text),
-                    }),
+                    fix: None, // No automatic fix - too risky to convert to heading
                 });
             }
         }
@@ -269,34 +220,10 @@ impl Rule for MD036NoEmphasisAsHeading {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        // Fast path for empty content or content without emphasis markers
-        if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
-            return Ok(content.to_string());
-        }
-
-        let mut result = String::with_capacity(content.len());
-        let lines: Vec<&str> = content.lines().collect();
-        let ends_with_newline = content.ends_with('\n');
-        let doc_structure = DocumentStructure::new(content);
-
-        for i in 0..lines.len() {
-            let line = lines[i];
-            if let Some((level, text, _start_pos, _end_pos)) = self.is_entire_line_emphasized(line, &doc_structure, i) {
-                result.push_str(&self.get_heading_for_emphasis(level, &text));
-            } else {
-                result.push_str(line);
-            }
-
-            if i < lines.len() - 1 {
-                result.push('\n');
-            } else if ends_with_newline {
-                // Preserve newline at end of file
-                result.push('\n');
-            }
-        }
-
-        Ok(result)
+        // MD036 does not provide automatic fixes
+        // Converting bold text to headings is too risky and can corrupt documents
+        // Users should manually decide if bold text should be a heading
+        Ok(ctx.content.to_string())
     }
 
     /// Check if this rule should be skipped for performance
@@ -476,34 +403,25 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_single_emphasis() {
+    fn test_fix_no_changes() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "*Convert to heading*\n\nRegular text";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert_eq!(fixed, "# Convert to heading\n\nRegular text");
+        // MD036 no longer provides automatic fixes
+        assert_eq!(fixed, content);
     }
 
     #[test]
-    fn test_fix_double_emphasis() {
+    fn test_fix_preserves_content() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "**Convert to heading**\n\nRegular text";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert_eq!(fixed, "## Convert to heading\n\nRegular text");
-    }
-
-    #[test]
-    fn test_fix_removes_punctuation() {
-        let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
-        // Use emphasis without punctuation so it gets flagged
-        let content = "**Important Note**\n\nRegular text";
-        let ctx = LintContext::new(content);
-        let fixed = rule.fix(&ctx).unwrap();
-
-        assert_eq!(fixed, "## Important Note\n\nRegular text");
+        // MD036 no longer provides automatic fixes
+        assert_eq!(fixed, content);
     }
 
     #[test]
@@ -517,8 +435,8 @@ mod tests {
         assert_eq!(result.len(), 1);
 
         let fixed = rule.fix(&ctx).unwrap();
-        // With empty punctuation config, keeps the colon
-        assert_eq!(fixed, "## Important Note:\n\nRegular text");
+        // MD036 no longer provides automatic fixes
+        assert_eq!(fixed, content);
     }
 
     #[test]
@@ -573,7 +491,8 @@ mod tests {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert_eq!(fixed, "# Convert to heading\n");
+        // MD036 no longer provides automatic fixes
+        assert_eq!(fixed, content);
     }
 
     #[test]
@@ -584,5 +503,51 @@ mod tests {
 
         let table = config.as_table().unwrap();
         assert_eq!(table.get("punctuation").unwrap().as_str().unwrap(), ".,;:!?");
+    }
+
+    #[test]
+    fn test_image_caption_scenario() {
+        // Test the specific issue from #23 - bold text used as image caption
+        let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+        let content = "#### Métriques\n\n**commits par année : rumdl**\n\n![rumdl Commits By Year image](commits_by_year.png \"commits par année : rumdl\")";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should detect the bold text even though it's followed by an image
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 3);
+        assert!(result[0].message.contains("commits par année : rumdl"));
+
+        // But should NOT provide a fix
+        assert!(result[0].fix.is_none());
+
+        // And the fix method should return unchanged content
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_bold_with_colon_no_punctuation_config() {
+        // Test that with empty punctuation config, even text ending with colon is flagged
+        let rule = MD036NoEmphasisAsHeading::new("".to_string());
+        let content = "**commits par année : rumdl**\n\nSome text";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // With empty punctuation config, this should be flagged
+        assert_eq!(result.len(), 1);
+        assert!(result[0].fix.is_none());
+    }
+
+    #[test]
+    fn test_bold_with_colon_default_config() {
+        // Test that with default punctuation config, text ending with colon is NOT flagged
+        let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+        let content = "**Important Note:**\n\nSome text";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // With default punctuation including colon, this should NOT be flagged
+        assert_eq!(result.len(), 0);
     }
 }

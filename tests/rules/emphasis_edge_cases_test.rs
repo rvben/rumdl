@@ -27,12 +27,9 @@ _Привет мир_";
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4, "Should detect all Unicode emphasis as headings");
 
-    // Verify fixes work with Unicode
+    // MD036 no longer provides automatic fixes
     let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("## Hello 👋 World"));
-    assert!(fixed.contains("# 你好世界"));
-    assert!(fixed.contains("## مرحبا بالعالم"));
-    assert!(fixed.contains("# Привет мир"));
+    assert_eq!(fixed, content, "Content should remain unchanged");
 }
 
 #[test]

@@ -18,8 +18,9 @@ fn test_emphasis_only() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
+    // MD036 no longer provides automatic fixes
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Emphasized\n# Also emphasized");
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -29,8 +30,9 @@ fn test_strong_only() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
+    // MD036 no longer provides automatic fixes
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "## Strong\n## Also strong");
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -40,8 +42,9 @@ fn test_multiple_emphasis() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
+    // MD036 no longer provides automatic fixes
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "\n# First emphasis\n\nNormal line\n\n# Second emphasis\n");
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -98,9 +101,9 @@ fn test_preserve_punctuation_when_disabled() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
+    // MD036 no longer provides automatic fixes
     let fixed = rule.fix(&ctx).unwrap();
-    // Colon should be preserved when punctuation removal is disabled
-    assert_eq!(fixed, "## Example output:");
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -318,18 +321,18 @@ const result = myFunction("test", 42);
 
 #[test]
 fn test_fix_without_punctuation() {
-    // Test that fix works correctly for emphasis without punctuation
+    // Test that MD036 detects emphasis without punctuation but doesn't auto-fix
     let test_cases = vec![
-        ("**Introduction**", "## Introduction"),
-        ("*Setup*", "# Setup"),
-        ("**Configure**", "## Configure"),
-        ("__Note__", "## Note"),
-        ("**What**", "## What"),
-        ("**First Second**", "## First Second"),
-        ("**Comma**", "## Comma"),
+        "**Introduction**",
+        "*Setup*",
+        "**Configure**",
+        "__Note__",
+        "**What**",
+        "**First Second**",
+        "**Comma**",
     ];
 
-    for (content, expected_fix) in test_cases {
+    for content in test_cases {
         let ctx = LintContext::new(content);
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
 
@@ -341,15 +344,8 @@ fn test_fix_without_punctuation() {
             "Emphasis without punctuation '{content}' should be flagged"
         );
 
-        // Fix should convert to heading
+        // MD036 no longer provides automatic fixes
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(
-            fixed.trim(),
-            expected_fix,
-            "Fix for '{}' should produce '{}' but got '{}'",
-            content,
-            expected_fix,
-            fixed.trim()
-        );
+        assert_eq!(fixed, content, "Content should remain unchanged for '{content}'");
     }
 }
