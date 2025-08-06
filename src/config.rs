@@ -862,6 +862,46 @@ local_time = 07:32:00
             // Note: local_date and local_time might not be parsed by the current implementation
         }
     }
+
+    #[test]
+    fn test_default_config_passes_validation() {
+        use crate::rules;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_path_str = config_path.to_str().unwrap();
+
+        // Create the default config using the same function that `rumdl init` uses
+        create_default_config(config_path_str).unwrap();
+
+        // Load it back as a SourcedConfig
+        let sourced =
+            SourcedConfig::load(Some(config_path_str), None).expect("Default config should load successfully");
+
+        // Create the rule registry
+        let all_rules = rules::all_rules(&Config::default());
+        let registry = RuleRegistry::from_rules(&all_rules);
+
+        // Validate the config
+        let warnings = validate_config_sourced(&sourced, &registry);
+
+        // The default config should have no warnings
+        if !warnings.is_empty() {
+            for warning in &warnings {
+                eprintln!("Config validation warning: {}", warning.message);
+                if let Some(rule) = &warning.rule {
+                    eprintln!("  Rule: {rule}");
+                }
+                if let Some(key) = &warning.key {
+                    eprintln!("  Key: {key}");
+                }
+            }
+        }
+        assert!(
+            warnings.is_empty(),
+            "Default config from rumdl init should pass validation without warnings"
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

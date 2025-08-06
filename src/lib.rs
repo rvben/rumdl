@@ -1,6 +1,5 @@
 pub mod config;
 pub mod exit_codes;
-pub mod init;
 pub mod inline_config;
 pub mod lint_context;
 pub mod lsp;

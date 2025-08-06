@@ -1,4 +1,4 @@
-use rumdl::init::{InitError, create_default_config};
+use rumdl::config::{ConfigError, create_default_config};
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
@@ -13,16 +13,15 @@ fn test_create_default_config_new_file() {
     // Create a new config file
     let result = create_default_config(config_path_str);
     assert!(result.is_ok());
-    assert!(result.unwrap()); // Should return true for new file
 
     // Verify the file exists and contains the default configuration
     assert!(Path::new(config_path_str).exists());
     let content = fs::read_to_string(config_path_str).unwrap();
-    assert!(content.contains("[general]"));
-    assert!(content.contains("line_length = 80"));
-    assert!(content.contains("[rules]"));
-    assert!(content.contains("[rules.MD007]"));
-    assert!(content.contains("indent = 2"));
+    assert!(content.contains("[global]"));
+    assert!(content.contains("# rumdl configuration file"));
+    assert!(content.contains("exclude ="));
+    assert!(content.contains("respect_gitignore = true"));
+    assert!(content.contains("# [MD007]"));
 
     // Cleanup is handled automatically by tempdir
 }
@@ -37,10 +36,15 @@ fn test_create_default_config_existing_file() {
     // Create a dummy file first
     fs::write(config_path_str, "dummy content").unwrap();
 
-    // Try to create config file (should not overwrite existing file)
+    // Try to create config file (should error because file exists)
     let result = create_default_config(config_path_str);
-    assert!(result.is_ok());
-    assert!(!result.unwrap()); // Should return false for existing file
+    assert!(result.is_err());
+
+    // Verify the error is FileExists
+    match result {
+        Err(ConfigError::FileExists { .. }) => {}
+        _ => panic!("Expected FileExists error"),
+    }
 
     // Verify the file still contains the original content
     let content = fs::read_to_string(config_path_str).unwrap();
@@ -68,7 +72,7 @@ fn test_create_default_config_permission_error() {
         let result = create_default_config(config_path_str);
         assert!(result.is_err());
         match result {
-            Err(InitError::IoError { path, .. }) => {
+            Err(ConfigError::IoError { path, .. }) => {
                 assert_eq!(path, config_path_str);
             }
             _ => panic!("Expected IoError variant"),
@@ -90,45 +94,18 @@ fn test_create_default_config_content_validation() {
     // Read the content and verify all expected sections are present
     let content = fs::read_to_string(config_path_str).unwrap();
 
-    // Verify general section
-    assert!(content.contains("[general]"));
-    assert!(content.contains("line_length = 80"));
+    // Verify global section
+    assert!(content.contains("[global]"));
+    assert!(content.contains("# rumdl configuration file"));
+    assert!(content.contains("exclude ="));
+    assert!(content.contains("respect_gitignore = true"));
 
-    // Verify rules section
-    assert!(content.contains("[rules]"));
-    assert!(content.contains("disabled = []"));
-
-    // Verify specific rule configurations
-    assert!(content.contains("[rules.MD007]"));
-    assert!(content.contains("indent = 2"));
-
-    assert!(content.contains("[rules.MD013]"));
-    assert!(content.contains("code_blocks = true"));
-    assert!(content.contains("tables = false"));
-    assert!(content.contains("headings = true"));
-    assert!(content.contains("strict = false"));
-
-    assert!(content.contains("[rules.MD022]"));
-    assert!(content.contains("lines_above = 1"));
-    assert!(content.contains("lines_below = 1"));
-
-    assert!(content.contains("[rules.MD024]"));
-    assert!(content.contains("allow_different_nesting = true"));
-
-    assert!(content.contains("[rules.MD029]"));
-    assert!(content.contains("style = \"one\""));
-
-    assert!(content.contains("[rules.MD035]"));
-    assert!(content.contains("style = \"---\""));
-
-    assert!(content.contains("[rules.MD048]"));
-    assert!(content.contains("style = \"```\""));
-
-    assert!(content.contains("[rules.MD049]"));
-    assert!(content.contains("style = \"*\""));
-
-    assert!(content.contains("[rules.MD050]"));
-    assert!(content.contains("style = \"**\""));
+    // Verify some example rule configurations are present (commented out)
+    assert!(content.contains("# [MD003]"));
+    assert!(content.contains("# [MD004]"));
+    assert!(content.contains("# [MD007]"));
+    assert!(content.contains("# [MD013]"));
+    assert!(content.contains("# [MD044]"));
 
     // Verify the config is valid TOML
     let parsed_toml: Result<toml::Value, _> = toml::from_str(&content);
