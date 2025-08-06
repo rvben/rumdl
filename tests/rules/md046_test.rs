@@ -404,3 +404,126 @@ fn test_fence_in_list_context() {
 
     assert!(result.is_empty(), "Code blocks in lists should not cause issues");
 }
+
+#[test]
+fn test_python_traceback_tilde_markers() {
+    // Test that Python traceback decoration lines are not treated as code fences
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = r#"# Python Traceback Example
+
+```pycon
+>>> swap_ends([])
+Traceback (most recent call last):
+  File "/home/trey/swap_ends.py", line 4, in swap_ends
+    sequence[0], sequence[-1] = sequence[-1], sequence[0]
+                                ~~~~~~~~^^^^
+IndexError: list index out of range
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/home/trey/swap_ends.py", line 7, in swap_ends
+    raise ValueError("Empty sequence not allowed")
+ValueError: Empty sequence not allowed
+```
+
+The `~~~~~~~~^^^^` markers show where the error occurred.
+"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Python traceback tilde markers should not be treated as code fences"
+    );
+}
+
+#[test]
+fn test_various_tilde_patterns_in_code() {
+    // Test various patterns with tildes that should not be treated as fences
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = r#"# Various Tilde Patterns
+
+```python
+# ASCII art dividers
+print("~" * 50)  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+print("~=~=~=~=~=~=~=~=~=~")
+
+# Python traceback style
+#     sequence[0], sequence[-1] = sequence[-1], sequence[0]
+#                                 ~~~~~~~~^^^^
+# IndexError: list index out of range
+
+# Other patterns
+# ~~~~ This is not a fence ~~~~
+# ~!@#$%^&*()  # Random characters after tildes
+```
+
+All the above should be fine.
+"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Tilde patterns inside code blocks should not be treated as fences"
+    );
+}
+
+#[test]
+fn test_valid_tilde_fences() {
+    // Test that valid tilde fences still work correctly
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = r#"# Valid Tilde Fences
+
+~~~
+Simple fence
+~~~
+
+~~~ python
+Code with language
+~~~
+
+~~~~
+Four tildes
+~~~~
+
+~~~~~
+Five tildes with trailing spaces
+~~~~~
+"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(result.is_empty(), "Valid tilde fences should work correctly");
+}
+
+#[test]
+fn test_invalid_fence_patterns() {
+    // Test patterns that look like fences but aren't valid
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = r#"# Invalid Fence Patterns
+
+```
+# These lines inside the code block should not be treated as fences:
+~~~notafence
+```~~~stillnotafence
+~~~!@#$%
+~~~~~~~~^^^^
+```
+
+The code block above should be properly closed.
+"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Invalid fence patterns inside code blocks should be ignored"
+    );
+}

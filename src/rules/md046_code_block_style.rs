@@ -247,6 +247,135 @@ impl MD046CodeBlockStyle {
                 // Count the fence length
                 let fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
 
+                // Check what comes after the fence characters
+                let after_fence = &trimmed[fence_length..];
+
+                // Check if this is a valid fence pattern
+                // Valid markdown code fence syntax:
+                // - ``` or ~~~ (just fence)
+                // - ``` language or ~~~ language (fence with space then language)
+                // - ```language (without space) is accepted by many parsers but only for actual languages
+                let is_valid_fence_pattern = if after_fence.is_empty() {
+                    // Empty after fence is always valid (e.g., ``` or ~~~)
+                    true
+                } else if after_fence.starts_with(' ') || after_fence.starts_with('\t') {
+                    // Space after fence - anything following is valid as info string
+                    true
+                } else {
+                    // No space after fence - must be a valid language identifier
+                    // Be strict to avoid false positives on content that looks like fences
+                    let identifier = after_fence.trim().to_lowercase();
+
+                    // Reject obvious non-language patterns
+                    if identifier.contains("fence") || identifier.contains("still") {
+                        false
+                    } else if identifier.len() > 20 {
+                        // Most language identifiers are short
+                        false
+                    } else if let Some(first_char) = identifier.chars().next() {
+                        // Must start with letter or # (for C#, F#)
+                        if !first_char.is_alphabetic() && first_char != '#' {
+                            false
+                        } else {
+                            // Check all characters are valid for a language identifier
+                            // Also check it's not just random text
+                            let valid_chars = identifier.chars().all(|c| {
+                                c.is_alphanumeric() || c == '-' || c == '_' || c == '+' || c == '#' || c == '.'
+                            });
+
+                            // Additional check: at least 2 chars and not all consonants (helps filter random words)
+                            valid_chars && identifier.len() >= 2
+                        }
+                    } else {
+                        false
+                    }
+                };
+
+                // When inside a code block, be conservative about what we treat as a fence
+                if !fence_stack.is_empty() {
+                    // Skip if not a valid fence pattern to begin with
+                    if !is_valid_fence_pattern {
+                        continue;
+                    }
+
+                    // Check if this could be a closing fence for the current block
+                    if let Some((open_marker, open_length, _, _, _)) = fence_stack.last() {
+                        if fence_char == open_marker.chars().next().unwrap() && fence_length >= *open_length {
+                            // Potential closing fence - check if it has content after
+                            if !after_fence.trim().is_empty() {
+                                // Has content after - likely not a closing fence
+                                // Apply structural validation to determine if it's a nested fence
+
+                                // Skip patterns that are clearly decorative or content
+                                // 1. Contains special characters not typical in language identifiers
+                                let has_special_chars = after_fence.chars().any(|c| {
+                                    !c.is_alphanumeric()
+                                        && c != '-'
+                                        && c != '_'
+                                        && c != '+'
+                                        && c != '#'
+                                        && c != '.'
+                                        && c != ' '
+                                        && c != '\t'
+                                });
+
+                                if has_special_chars {
+                                    continue; // e.g., ~~~!@#$%, ~~~~~~~~^^^^
+                                }
+
+                                // 2. Check for repetitive non-alphanumeric patterns
+                                if fence_length > 4 && after_fence.chars().take(4).all(|c| !c.is_alphanumeric()) {
+                                    continue; // e.g., ~~~~~~~~~~ or ````````
+                                }
+
+                                // 3. If no space after fence, must look like a valid language identifier
+                                if !after_fence.starts_with(' ') && !after_fence.starts_with('\t') {
+                                    let identifier = after_fence.trim();
+
+                                    // Must start with letter or # (for C#, F#)
+                                    if let Some(first) = identifier.chars().next() {
+                                        if !first.is_alphabetic() && first != '#' {
+                                            continue;
+                                        }
+                                    }
+
+                                    // Reasonable length for a language identifier
+                                    if identifier.len() > 30 {
+                                        continue;
+                                    }
+                                }
+                            }
+                            // Otherwise, could be a closing fence - let it through
+                        } else {
+                            // Different fence type or insufficient length
+                            // Only treat as nested if it looks like a real fence with language
+
+                            // Must have proper spacing or no content after fence
+                            if !after_fence.is_empty()
+                                && !after_fence.starts_with(' ')
+                                && !after_fence.starts_with('\t')
+                            {
+                                // No space after fence - be very strict
+                                let identifier = after_fence.trim();
+
+                                // Skip if contains any special characters beyond common ones
+                                if identifier.chars().any(|c| {
+                                    !c.is_alphanumeric() && c != '-' && c != '_' && c != '+' && c != '#' && c != '.'
+                                }) {
+                                    continue;
+                                }
+
+                                // Skip if doesn't start with letter or #
+                                if let Some(first) = identifier.chars().next() {
+                                    if !first.is_alphabetic() && first != '#' {
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // We'll check if this is a markdown block after determining if it's an opening fence
 
                 // Check if this is a closing fence for the current open fence
@@ -271,7 +400,7 @@ impl MD046CodeBlockStyle {
                 }
 
                 // This is an opening fence (has content after marker or no matching open fence)
-                let after_fence = &trimmed[fence_length..];
+                // Note: after_fence was already calculated above during validation
                 if !after_fence.trim().is_empty() || fence_stack.is_empty() {
                     // Only flag as problematic if we're opening a new fence while another is still open
                     // AND they use the same fence character (indicating potential confusion)
