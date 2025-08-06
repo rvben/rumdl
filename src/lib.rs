@@ -190,8 +190,18 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
                 let filtered_warnings: Vec<_> = rule_warnings
                     .into_iter()
                     .filter(|warning| {
+                        // Use the warning's rule_name if available, otherwise use the rule's name
+                        let rule_name_to_check = warning.rule_name.unwrap_or(rule.name());
+
+                        // Extract the base rule name for sub-rules like "MD029-style" -> "MD029"
+                        let base_rule_name = if let Some(dash_pos) = rule_name_to_check.find('-') {
+                            &rule_name_to_check[..dash_pos]
+                        } else {
+                            rule_name_to_check
+                        };
+
                         !inline_config.is_rule_disabled(
-                            rule.name(),
+                            base_rule_name,
                             warning.line, // Already 1-indexed
                         )
                     })

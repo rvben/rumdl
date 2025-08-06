@@ -4,7 +4,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::range_utils::LineIndex;
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -136,10 +135,22 @@ impl Rule for MD029OrderedListPrefix {
         let mut indent_stack: Vec<(usize, usize)> = Vec::new(); // (indent, index)
         let lines: Vec<&str> = content.lines().collect();
         let mut byte_pos = 0;
+        let mut in_code_fence = false;
 
         for line in lines.iter() {
-            // Skip if in code block
-            if ctx.is_in_code_block_or_span(byte_pos) {
+            let trimmed = line.trim();
+
+            // Track code fences
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_code_fence = !in_code_fence;
+                result.push_str(line);
+                result.push('\n');
+                byte_pos += line.len() + 1;
+                continue;
+            }
+
+            // Skip if in code block or fence
+            if in_code_fence || ctx.is_in_code_block_or_span(byte_pos) {
                 result.push_str(line);
                 result.push('\n');
                 byte_pos += line.len() + 1;
@@ -177,30 +188,50 @@ impl Rule for MD029OrderedListPrefix {
                     *idx += 1;
                 }
             } else if !line.trim().is_empty() {
-                // Check if this is a code fence line - don't break the list for these
-                let trimmed = line.trim();
-                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                    // Code fence lines don't break the list
-                    result.push_str(line);
-                    result.push('\n');
-                } else {
-                    // Check if the line is indented enough to be part of a list item
-                    let line_indent = line.chars().take_while(|c| c.is_whitespace()).count();
-                    let is_continuation = indent_stack
-                        .last()
-                        .map(|&(list_indent, _)| line_indent >= list_indent + 3)
-                        .unwrap_or(false);
+                // Check if the line is indented enough to be part of a list item
+                let line_indent = line.chars().take_while(|c| c.is_whitespace()).count();
+                let is_continuation = indent_stack
+                    .last()
+                    .map(|&(list_indent, _)| {
+                        // Allow lazy continuation (0-2 spaces) or proper continuation (3+ spaces)
+                        line_indent <= 2 || line_indent >= list_indent + 3
+                    })
+                    .unwrap_or(false);
 
-                    if is_continuation {
-                        // This line is part of the list item (indented continuation)
-                        result.push_str(line);
-                        result.push('\n');
+                if is_continuation {
+                    if line_indent <= 2 && !indent_stack.is_empty() {
+                        // Check if this line is itself a list item
+                        let trimmed = line.trim();
+                        let is_list_item = trimmed.starts_with("* ")
+                            || trimmed.starts_with("- ")
+                            || trimmed.starts_with("+ ")
+                            || (trimmed.len() > 2
+                                && trimmed.chars().next().unwrap().is_ascii_digit()
+                                && trimmed.contains(". "));
+
+                        if !is_list_item {
+                            // This is a lazy continuation - fix it by adding proper indentation
+                            let (list_indent, _) = indent_stack.last().unwrap();
+                            let proper_indent = " ".repeat(list_indent + 3);
+                            result.push_str(&proper_indent);
+                            result.push_str(line.trim_start());
+                            result.push('\n');
+                        } else {
+                            // This is a list item, not a continuation - it breaks the list
+                            indent_stack.clear();
+                            result.push_str(line);
+                            result.push('\n');
+                        }
                     } else {
-                        // Non-list, non-blank line breaks the list
-                        indent_stack.clear();
+                        // This line is properly indented
                         result.push_str(line);
                         result.push('\n');
                     }
+                } else {
+                    // Non-list, non-blank line breaks the list
+                    indent_stack.clear();
+                    result.push_str(line);
+                    result.push('\n');
                 }
             } else {
                 // Blank line - don't clear the stack, as lists can have blank lines within them
@@ -221,74 +252,11 @@ impl Rule for MD029OrderedListPrefix {
     fn check_with_structure(
         &self,
         ctx: &crate::lint_context::LintContext,
-        structure: &crate::utils::document_structure::DocumentStructure,
+        _structure: &crate::utils::document_structure::DocumentStructure,
     ) -> LintResult {
-        let content = ctx.content;
-
-        // Early return if no lists
-        if structure.list_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Quick check if there are no ordered lists
-        if !content.contains('1') || (!content.contains("1.") && !content.contains("2.") && !content.contains("0.")) {
-            return Ok(Vec::new());
-        }
-
-        let mut warnings = Vec::new();
-        let mut list_items = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Create a set of list line indices for faster lookup
-        let mut list_line_set = std::collections::HashSet::new();
-        for &line_num in &structure.list_lines {
-            list_line_set.insert(line_num); // Keep as 1-indexed for easier comparison
-        }
-
-        // Group ordered list items into sections
-        let mut in_list = false;
-
-        for (line_idx, line) in lines.iter().enumerate() {
-            let line_num = line_idx + 1; // Convert to 1-indexed
-
-            // Skip lines in code blocks
-            if structure.is_in_code_block(line_num) {
-                // Code blocks don't break the list - just skip them
-                continue;
-            }
-
-            if list_line_set.contains(&line_num) {
-                if Self::get_list_number(line).is_some() {
-                    // If this is the first item of a new list, record the list start
-                    if !in_list {
-                        in_list = true;
-                    }
-
-                    list_items.push((line_idx, line.to_string()));
-                }
-            } else if !line.trim().is_empty() {
-                // Check if this is a code fence line - don't break the list for these
-                let trimmed = line.trim();
-                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                    // Code fence lines don't break the list - just skip them
-                    continue;
-                }
-
-                // Non-empty, non-list line breaks the list
-                if in_list && !list_items.is_empty() {
-                    self.check_list_section(&list_items, &mut warnings, content);
-                    list_items.clear();
-                    in_list = false;
-                }
-            }
-        }
-
-        // Check last section if it exists
-        if !list_items.is_empty() {
-            self.check_list_section(&list_items, &mut warnings, content);
-        }
-
-        Ok(warnings)
+        // For MD029, we need to use the regular check method to get lazy continuation detection
+        // The document structure optimization doesn't provide enough context for proper lazy continuation checking
+        self.check(ctx)
     }
 
     /// Get the category of this rule for selective processing
@@ -337,15 +305,74 @@ impl Rule for MD029OrderedListPrefix {
 }
 
 impl DocumentStructureExtensions for MD029OrderedListPrefix {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, doc_structure: &DocumentStructure) -> bool {
-        let content = ctx.content;
-        // This rule is only relevant if there are list items AND they might be ordered lists
-        !doc_structure.list_lines.is_empty()
-            && (content.contains("1.") || content.contains("2.") || content.contains("0."))
+    fn has_relevant_elements(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        _doc_structure: &DocumentStructure,
+    ) -> bool {
+        // This rule is relevant if there are any ordered list items
+        // We need to check even lists with all "1." items for:
+        // 1. Incorrect numbering according to configured style
+        // 2. Lazy continuation issues
+        ctx.list_blocks.iter().any(|block| block.is_ordered)
     }
 }
 
 impl MD029OrderedListPrefix {
+    /// Check for lazy continuation lines in a list block
+    fn check_for_lazy_continuation(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        list_block: &crate::lint_context::ListBlock,
+        warnings: &mut Vec<LintWarning>,
+    ) {
+        // Check all lines in the block for lazy continuation
+        for line_num in list_block.start_line..=list_block.end_line {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                // Skip list item lines themselves
+                if list_block.item_lines.contains(&line_num) {
+                    continue;
+                }
+
+                // Skip blank lines
+                if line_info.is_blank {
+                    continue;
+                }
+
+                // Skip lines that are in code blocks
+                if line_info.in_code_block {
+                    continue;
+                }
+
+                // Skip code fence lines
+                let trimmed = line_info.content.trim();
+                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                    continue;
+                }
+
+                // Check if this is a lazy continuation (0-2 spaces)
+                if line_info.indent <= 2 && !line_info.content.trim().is_empty() {
+                    // This is a lazy continuation - add a style warning
+                    let col = line_info.indent + 1;
+
+                    warnings.push(LintWarning {
+                        rule_name: Some("MD029-style"),
+                        message: "List continuation should be indented (lazy continuation detected)".to_string(),
+                        line: line_num,
+                        column: col,
+                        end_line: line_num,
+                        end_column: col,
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_info.byte_offset..line_info.byte_offset,
+                            replacement: "   ".to_string(), // Add 3 spaces
+                        }),
+                    });
+                }
+            }
+        }
+    }
+
     /// Check if there's only code blocks/fences between two list blocks
     fn is_only_code_between_blocks(
         &self,
@@ -395,6 +422,9 @@ impl MD029OrderedListPrefix {
         let mut all_items = Vec::new();
 
         for list_block in group {
+            // First, check for lazy continuation in this block
+            self.check_for_lazy_continuation(ctx, list_block, warnings);
+
             for &item_line in &list_block.item_lines {
                 if let Some(line_info) = ctx.line_info(item_line) {
                     if let Some(list_item) = &line_info.list_item {
@@ -457,58 +487,6 @@ impl MD029OrderedListPrefix {
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: marker_start..marker_start + number_len,
-                                replacement: expected_num.to_string(),
-                            }),
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    fn check_list_section(&self, items: &[(usize, String)], warnings: &mut Vec<LintWarning>, content: &str) {
-        // Group items by indentation level and process each level independently
-        let mut level_groups: std::collections::HashMap<usize, Vec<(usize, String)>> = std::collections::HashMap::new();
-
-        for (line_num, line) in items {
-            let indent = line.chars().take_while(|c| c.is_whitespace()).count();
-            level_groups.entry(indent).or_default().push((*line_num, line.clone()));
-        }
-
-        // Process each indentation level separately
-        for (_indent, mut group) in level_groups {
-            // Sort by line number to ensure correct order
-            group.sort_by_key(|(line_num, _)| *line_num);
-
-            // Check each item in the group for correct sequence
-            for (idx, (line_num, line)) in group.iter().enumerate() {
-                if let Some(actual_num) = Self::get_list_number(line) {
-                    let expected_num = self.get_expected_number(idx);
-
-                    if actual_num != expected_num {
-                        // Create a LineIndex for the actual content
-                        let line_index = LineIndex::new(content.to_string());
-
-                        // Find the number position in the line for precise replacement
-                        let number_start = line.find(char::is_numeric).unwrap_or(0);
-                        let number_len = actual_num.to_string().len();
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            message: format!(
-                                "Ordered list item number {actual_num} does not match style (expected {expected_num})"
-                            ),
-                            line: line_num + 1,
-                            column: number_start + 1,
-                            end_line: line_num + 1,
-                            end_column: number_start + number_len + 1,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(
-                                    line_num + 1,
-                                    number_start + 1,
-                                    number_len,
-                                ),
                                 replacement: expected_num.to_string(),
                             }),
                         });
