@@ -47,8 +47,8 @@ impl TableUtils {
             if part_trimmed.is_empty() {
                 continue;
             }
-            // Count parts that look like table cells (not too long, reasonable content)
-            if part_trimmed.len() <= 100 && !part_trimmed.contains('\n') {
+            // Count parts that look like table cells (reasonable content, no newlines)
+            if !part_trimmed.contains('\n') {
                 valid_parts += 1;
             }
         }
@@ -238,9 +238,9 @@ mod tests {
         assert!(!TableUtils::is_potential_table_row("Just one |"));
         assert!(!TableUtils::is_potential_table_row("| Just one"));
 
-        // Very long cells (>100 chars)
-        let long_cell = "a".repeat(101);
-        assert!(!TableUtils::is_potential_table_row(&format!("| {long_cell} | b |")));
+        // Very long cells are valid in tables (no length limit for cell content)
+        let long_cell = "a".repeat(150);
+        assert!(TableUtils::is_potential_table_row(&format!("| {long_cell} | b |")));
 
         // Cells with newlines
         assert!(!TableUtils::is_potential_table_row("| Cell with\nnewline | Other |"));
@@ -502,9 +502,9 @@ But no delimiter row
         assert!(!TableUtils::is_delimiter_row("|"));
         assert_eq!(TableUtils::count_cells("|"), 0); // Need at least 2 parts
 
-        // Test very long lines
+        // Test very long lines are valid table rows (no length limit)
         let long_line = format!("| {} |", "a".repeat(200));
-        assert!(!TableUtils::is_potential_table_row(&long_line)); // Too long
+        assert!(TableUtils::is_potential_table_row(&long_line)); // Valid table row regardless of length
 
         // Test unicode
         assert!(TableUtils::is_potential_table_row("| 你好 | 世界 |"));

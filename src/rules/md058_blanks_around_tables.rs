@@ -811,4 +811,34 @@ Text after.";
         // Test at end
         assert_eq!(rule.count_blank_lines_after(&lines, 6), 0);
     }
+
+    #[test]
+    fn test_issue_25_table_with_long_line() {
+        // Test case from issue #25 - table with very long line
+        let rule = MD058BlanksAroundTables::default();
+        let content = "# Title\n\nThis is a table:\n\n| Name          | Query                                                    |\n| ------------- | -------------------------------------------------------- |\n| b             | a                                                        |\n| c             | a                                                        |\n| d             | a                                                        |\n| long          | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |\n| e             | a                                                        |\n| f             | a                                                        |\n| g             | a                                                        |";
+        let ctx = LintContext::new(content);
+
+        // Debug: Print detected table blocks
+        let table_blocks = TableUtils::find_table_blocks(content, &ctx);
+        for (i, block) in table_blocks.iter().enumerate() {
+            eprintln!(
+                "Table {}: start={}, end={}, header={}, delimiter={}, content_lines={:?}",
+                i + 1,
+                block.start_line + 1,
+                block.end_line + 1,
+                block.header_line + 1,
+                block.delimiter_line + 1,
+                block.content_lines.iter().map(|x| x + 1).collect::<Vec<_>>()
+            );
+        }
+
+        let result = rule.check(&ctx).unwrap();
+
+        // This should detect one table, not multiple tables
+        assert_eq!(table_blocks.len(), 1, "Should detect exactly one table block");
+
+        // Should not flag any issues since table is complete and doesn't need blanks
+        assert_eq!(result.len(), 0, "Should not flag any MD058 issues for a complete table");
+    }
 }

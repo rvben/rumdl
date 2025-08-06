@@ -1,4 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::HTML_COMMENT_PATTERN;
 use fancy_regex::Regex as FancyRegex;
@@ -140,6 +141,11 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
+            // Skip links inside frontmatter (convert from 1-based to 0-based line numbers)
+            if FrontMatterUtils::is_in_front_matter(content, link.line.saturating_sub(1)) {
+                continue;
+            }
+
             if let Some(ref_id) = &link.reference_id {
                 let reference_lower = ref_id.to_lowercase();
 
@@ -182,6 +188,11 @@ impl MD052ReferenceLinkImages {
 
             // Skip images inside HTML comments
             if Self::is_in_html_comment(content, image.byte_offset) {
+                continue;
+            }
+
+            // Skip images inside frontmatter (convert from 1-based to 0-based line numbers)
+            if FrontMatterUtils::is_in_front_matter(content, image.line.saturating_sub(1)) {
                 continue;
             }
 
@@ -236,6 +247,11 @@ impl MD052ReferenceLinkImages {
         in_example_section = false; // Reset for line-by-line processing
 
         for (line_num, line) in lines.iter().enumerate() {
+            // Skip lines in frontmatter (line_num is already 0-based)
+            if FrontMatterUtils::is_in_front_matter(content, line_num) {
+                continue;
+            }
+
             // Handle code blocks
             if let Some(cap) = FENCED_CODE_START.captures(line) {
                 if let Some(marker) = cap.get(0) {
@@ -821,6 +837,60 @@ Valid [link][ref]
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should only flag missing image reference");
+        assert!(result[0].message.contains("missing"));
+    }
+
+    #[test]
+    fn test_frontmatter_ignored() {
+        // Test for issue #24 - MD052 should not flag content inside frontmatter
+        let rule = MD052ReferenceLinkImages::new();
+
+        // Test YAML frontmatter with arrays and references
+        let content = r#"---
+layout: post
+title: "My Jekyll Post"
+date: 2023-01-01
+categories: blog
+tags: ["test", "example"]
+author: John Doe
+---
+
+# My Blog Post
+
+This is the actual markdown content that should be linted.
+
+[undefined] reference should be flagged.
+
+## Section 1
+
+Some content here."#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag [undefined] in the content, not the ["test", "example"] array in frontmatter
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only flag the undefined reference outside frontmatter"
+        );
+        assert!(result[0].message.contains("undefined"));
+
+        // Test TOML frontmatter
+        let content = r#"+++
+title = "My Post"
+tags = ["example", "test"]
++++
+
+# Content
+
+[missing] reference should be flagged."#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only flag the undefined reference outside TOML frontmatter"
+        );
         assert!(result[0].message.contains("missing"));
     }
 }
