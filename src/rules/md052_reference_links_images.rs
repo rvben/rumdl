@@ -1,5 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
+use crate::utils::regex_cache::HTML_COMMENT_PATTERN;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -59,6 +60,16 @@ impl MD052ReferenceLinkImages {
         code_spans
             .iter()
             .any(|span| span.line == line && col >= span.start_col && col < span.end_col)
+    }
+
+    /// Check if a byte position is within an HTML comment
+    fn is_in_html_comment(content: &str, byte_pos: usize) -> bool {
+        for m in HTML_COMMENT_PATTERN.find_iter(content) {
+            if m.start() <= byte_pos && byte_pos < m.end() {
+                return true;
+            }
+        }
+        false
     }
 
     fn extract_references(&self, content: &str) -> HashSet<String> {
@@ -124,6 +135,11 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
+            // Skip links inside HTML comments
+            if Self::is_in_html_comment(content, link.byte_offset) {
+                continue;
+            }
+
             if let Some(ref_id) = &link.reference_id {
                 let reference_lower = ref_id.to_lowercase();
 
@@ -161,6 +177,11 @@ impl MD052ReferenceLinkImages {
 
             // Skip images inside code spans
             if Self::is_in_code_span(image.line, image.start_col, &code_spans) {
+                continue;
+            }
+
+            // Skip images inside HTML comments
+            if Self::is_in_html_comment(content, image.byte_offset) {
                 continue;
             }
 
@@ -274,6 +295,11 @@ impl MD052ReferenceLinkImages {
                             // Check if this position is within a covered range
                             let line_start_byte = ctx.line_offsets[line_num];
                             let byte_pos = line_start_byte + col;
+                            
+                            // Skip if inside HTML comment
+                            if Self::is_in_html_comment(content, byte_pos) {
+                                continue;
+                            }
                             let byte_end = byte_pos + (full_match.end() - full_match.start());
 
                             // Check if this shortcut ref overlaps with any parsed link/image
@@ -737,5 +763,56 @@ And this `[inline code]` should not be flagged.
         // Should only flag [real-undefined], not the ones in code block
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("'real-undefined'"));
+    }
+
+    #[test]
+    fn test_html_comments_ignored() {
+        // Test for issue #20 - MD052 should not flag content inside HTML comments
+        let rule = MD052ReferenceLinkImages::new();
+
+        // Test the exact case from issue #20
+        let content = r#"<!--- write fake_editor.py 'import sys\nopen(*sys.argv[1:], mode="wt").write("2 3 4 4 2 3 2")' -->
+<!--- set_env EDITOR 'python3 fake_editor.py' -->
+
+```bash
+$ python3 vote.py
+3 votes for: 2
+2 votes for: 3, 4
+```"#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "Should not flag [1:] inside HTML comments");
+
+        // Test various reference patterns inside HTML comments
+        let content = r#"<!-- This is [ref1] and [ref2][ref3] -->
+Normal [text][undefined]
+<!-- Another [comment][with] references -->"#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should only flag the undefined reference outside comments");
+        assert!(result[0].message.contains("undefined"));
+
+        // Test multi-line HTML comments
+        let content = r#"<!--
+[ref1]
+[ref2][ref3]
+-->
+[actual][undefined]"#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should not flag references in multi-line HTML comments");
+        assert!(result[0].message.contains("undefined"));
+
+        // Test mixed scenarios
+        let content = r#"<!-- Comment with [1:] pattern -->
+Valid [link][ref]
+<!-- More [refs][in][comments] -->
+![image][missing]
+
+[ref]: https://example.com"#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should only flag missing image reference");
+        assert!(result[0].message.contains("missing"));
     }
 }
