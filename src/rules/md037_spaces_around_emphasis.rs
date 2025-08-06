@@ -123,23 +123,23 @@ impl Rule for MD037NoSpaceInEmphasis {
         // Filter out warnings for emphasis markers that are inside links
         let mut filtered_warnings = Vec::new();
         let mut line_start_pos = 0;
-        
+
         for (line_idx, line) in content.lines().enumerate() {
             let line_num = line_idx + 1;
-            
+
             // Find warnings for this line
             for warning in &warnings {
                 if warning.line == line_num {
                     // Calculate byte position of the warning
                     let byte_pos = line_start_pos + (warning.column - 1);
-                    
+
                     // Only keep warnings that are not inside links
                     if !self.is_in_link(ctx, byte_pos) {
                         filtered_warnings.push(warning.clone());
                     }
                 }
             }
-            
+
             line_start_pos += line.len() + 1; // +1 for newline
         }
 
@@ -440,7 +440,12 @@ This has * real spaced emphasis * that should be flagged."#;
         // Test passed - emphasis inside links are filtered out correctly
 
         // Only the real emphasis outside links should be flagged
-        assert_eq!(result.len(), 1, "Expected exactly 1 warning, but got: {:?}", result.len());
+        assert_eq!(
+            result.len(),
+            1,
+            "Expected exactly 1 warning, but got: {:?}",
+            result.len()
+        );
         assert!(result[0].message.contains("Spaces inside emphasis markers"));
         // Should flag "* real spaced emphasis *" but not emphasis patterns inside links
         assert!(result[0].line == 3); // Line with "* real spaced emphasis *"

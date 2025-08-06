@@ -295,7 +295,7 @@ impl MD052ReferenceLinkImages {
                             // Check if this position is within a covered range
                             let line_start_byte = ctx.line_offsets[line_num];
                             let byte_pos = line_start_byte + col;
-                            
+
                             // Skip if inside HTML comment
                             if Self::is_in_html_comment(content, byte_pos) {
                                 continue;
@@ -789,7 +789,11 @@ Normal [text][undefined]
 <!-- Another [comment][with] references -->"#;
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Should only flag the undefined reference outside comments");
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only flag the undefined reference outside comments"
+        );
         assert!(result[0].message.contains("undefined"));
 
         // Test multi-line HTML comments
@@ -800,7 +804,11 @@ Normal [text][undefined]
 [actual][undefined]"#;
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Should not flag references in multi-line HTML comments");
+        assert_eq!(
+            result.len(),
+            1,
+            "Should not flag references in multi-line HTML comments"
+        );
         assert!(result[0].message.contains("undefined"));
 
         // Test mixed scenarios

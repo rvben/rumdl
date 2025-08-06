@@ -380,8 +380,13 @@ Image with ![*alt text*](img.png) emphasis";
 
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // Should detect asterisk emphasis
-    assert!(result.len() >= 3, "Should detect nested emphasis");
+    // With link filtering, should detect only standalone asterisk emphasis (not in links/images)
+    // Only the asterisk emphasis outside of links should be flagged
+    assert_eq!(
+        result.len(),
+        2,
+        "Should detect 2 standalone asterisk emphasis (not in links)"
+    );
 }
 
 #[test]

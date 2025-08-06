@@ -142,7 +142,8 @@ fn test_fix_adjacent_to_markdown() {
     let ctx = rumdl::lint_context::LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
     // When code_blocks=true, inline code should not be fixed
-    assert_eq!(fixed, "*Markdown* _Markdown_ `markdown` [Markdown](link)");
+    // With link filtering, proper names inside links should not be corrected
+    assert_eq!(fixed, "*Markdown* _Markdown_ `markdown` [markdown](link)");
 }
 
 #[test]

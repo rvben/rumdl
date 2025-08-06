@@ -13,6 +13,10 @@ use md044_config::MD044Config;
 
 lazy_static! {
     static ref HTML_COMMENT_REGEX: Regex = Regex::new(r"<!--([\s\S]*?)-->").unwrap();
+    // Reference definition pattern - matches [ref]: url "title"
+    static ref REF_DEF_REGEX: regex::Regex = regex::Regex::new(
+        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
+    ).unwrap();
 }
 
 type WarningPosition = (usize, usize, String); // (line, column, found_name)
@@ -304,6 +308,12 @@ impl MD044ProperNames {
                             }
                         }
 
+                        // Skip if in link (inline links, reference links, or reference definitions)
+                        let byte_pos = line_info.byte_offset + cap.start();
+                        if self.is_in_link(ctx, byte_pos) {
+                            continue;
+                        }
+
                         // Find which proper name this matches
                         if let Some(proper_name) = self.get_proper_name_for(found_name) {
                             // Only flag if it's not already correct
@@ -331,6 +341,32 @@ impl MD044ProperNames {
                 return true;
             }
         }
+        false
+    }
+
+    /// Check if a byte position is within a link (inline links, reference links, or reference definitions)
+    fn is_in_link(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+        // Check inline and reference links
+        for link in &ctx.links {
+            if link.byte_offset <= byte_pos && byte_pos < link.byte_end {
+                return true;
+            }
+        }
+
+        // Check images (which use similar syntax)
+        for image in &ctx.images {
+            if image.byte_offset <= byte_pos && byte_pos < image.byte_end {
+                return true;
+            }
+        }
+
+        // Check reference definitions [ref]: url "title" using regex pattern
+        for m in REF_DEF_REGEX.find_iter(ctx.content) {
+            if m.start() <= byte_pos && byte_pos < m.end() {
+                return true;
+            }
+        }
+
         false
     }
 
@@ -1002,5 +1038,76 @@ More JavaScript."#;
             fixed, expected,
             "Should not fix names inside HTML comments when disabled"
         );
+    }
+
+    #[test]
+    fn test_proper_names_in_links_not_flagged() {
+        let rule = MD044ProperNames::new(
+            vec!["JavaScript".to_string(), "Node.js".to_string(), "Python".to_string()],
+            true,
+        );
+
+        let content = r#"Check this [javascript documentation](https://javascript.info) for info.
+
+Visit [node.js homepage](https://nodejs.org) and [python tutorial](https://python.org).
+
+Real javascript should be flagged.
+
+Also see the [typescript guide][ts-ref] for more.
+
+Real python should be flagged too.
+
+[ts-ref]: https://typescript.org/handbook"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the real standalone proper names should be flagged
+        assert_eq!(
+            result.len(),
+            2,
+            "Expected exactly 2 warnings for standalone proper names"
+        );
+        assert!(result[0].message.contains("'javascript' should be 'JavaScript'"));
+        assert!(result[1].message.contains("'python' should be 'Python'"));
+        // Should be on lines with standalone instances
+        assert!(result[0].line == 5); // "Real javascript should be flagged."
+        assert!(result[1].line == 9); // "Real python should be flagged too."
+    }
+
+    #[test]
+    fn test_proper_names_in_images_not_flagged() {
+        let rule = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
+
+        let content = r#"Here is a ![javascript logo](javascript.png "javascript icon") image.
+
+Real javascript should be flagged."#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the standalone proper name should be flagged
+        assert_eq!(result.len(), 1, "Expected exactly 1 warning for standalone proper name");
+        assert!(result[0].message.contains("'javascript' should be 'JavaScript'"));
+        assert!(result[0].line == 3); // "Real javascript should be flagged."
+    }
+
+    #[test]
+    fn test_proper_names_in_reference_definitions_not_flagged() {
+        let rule = MD044ProperNames::new(vec!["JavaScript".to_string(), "TypeScript".to_string()], true);
+
+        let content = r#"Check the [javascript guide][js-ref] for details.
+
+Real javascript should be flagged.
+
+[js-ref]: https://javascript.info/typescript/guide"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the standalone proper name should be flagged
+        assert_eq!(result.len(), 1, "Expected exactly 1 warning for standalone proper name");
+        assert!(result[0].message.contains("'javascript' should be 'JavaScript'"));
+        assert!(result[0].line == 3); // "Real javascript should be flagged."
     }
 }
