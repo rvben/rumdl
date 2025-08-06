@@ -3,6 +3,15 @@ use crate::utils::regex_cache::{BOLD_ASTERISK_REGEX, BOLD_UNDERSCORE_REGEX};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    // Reference definition pattern - matches [ref]: url "title"
+    static ref REF_DEF_REGEX: Regex = Regex::new(
+        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
+    ).unwrap();
+}
 
 mod md050_config;
 use md050_config::MD050Config;
@@ -28,13 +37,39 @@ impl MD050StrongStyle {
         Self { config }
     }
 
+    /// Check if a byte position is within a link (inline links, reference links, or reference definitions)
+    fn is_in_link(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+        // Check inline and reference links
+        for link in &ctx.links {
+            if link.byte_offset <= byte_pos && byte_pos < link.byte_end {
+                return true;
+            }
+        }
+
+        // Check images (which use similar syntax)
+        for image in &ctx.images {
+            if image.byte_offset <= byte_pos && byte_pos < image.byte_end {
+                return true;
+            }
+        }
+
+        // Check reference definitions [ref]: url "title" using regex pattern
+        for m in REF_DEF_REGEX.find_iter(ctx.content) {
+            if m.start() <= byte_pos && byte_pos < m.end() {
+                return true;
+            }
+        }
+
+        false
+    }
+
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
         let content = ctx.content;
 
-        // Find the first occurrence of either style that's not in a code block
+        // Find the first occurrence of either style that's not in a code block or link
         let mut first_asterisk = None;
         for m in BOLD_ASTERISK_REGEX.find_iter(content) {
-            if !ctx.is_in_code_block_or_span(m.start()) {
+            if !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) {
                 first_asterisk = Some(m);
                 break;
             }
@@ -42,7 +77,7 @@ impl MD050StrongStyle {
 
         let mut first_underscore = None;
         for m in BOLD_UNDERSCORE_REGEX.find_iter(content) {
-            if !ctx.is_in_code_block_or_span(m.start()) {
+            if !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) {
                 first_underscore = Some(m);
                 break;
             }
@@ -120,8 +155,8 @@ impl Rule for MD050StrongStyle {
                 // Calculate the byte position of this match in the document
                 let match_byte_pos = byte_pos + m.start();
 
-                // Skip if this strong text is inside a code block or code span
-                if ctx.is_in_code_block_or_span(match_byte_pos) {
+                // Skip if this strong text is inside a code block, code span, or link
+                if ctx.is_in_code_block_or_span(match_byte_pos) || self.is_in_link(ctx, match_byte_pos) {
                     continue;
                 }
 
@@ -194,7 +229,7 @@ impl Rule for MD050StrongStyle {
 
         let matches: Vec<(usize, usize)> = strong_regex
             .find_iter(content)
-            .filter(|m| !ctx.is_in_code_block_or_span(m.start()))
+            .filter(|m| !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()))
             .filter(|m| !self.is_escaped(content, m.start()))
             .map(|m| (m.start(), m.end()))
             .collect();
@@ -474,5 +509,47 @@ mod tests {
         let rule = MD050StrongStyle::new(StrongStyle::Consistent);
         let (name, _config) = rule.default_config_section().unwrap();
         assert_eq!(name, "MD050");
+    }
+
+    #[test]
+    fn test_strong_in_links_not_flagged() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = r#"Instead of assigning to `self.value`, we're relying on the [`__dict__`][__dict__] in our object to hold that value instead.
+
+Hint:
+
+- [An article on something](https://blog.yuo.be/2018/08/16/__init_subclass__-a-simpler-way-to-implement-class-registries-in-python/ "Some details on using `__init_subclass__`")
+
+
+[__dict__]: https://www.pythonmorsels.com/where-are-attributes-stored/"#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // None of the __ patterns in links should be flagged
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_strong_in_links_vs_outside_links() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = r#"We're doing this because generator functions return a generator object which [is an iterator][generators are iterators] and **we need `__iter__` to return an [iterator][]**.
+
+Instead of assigning to `self.value`, we're relying on the [`__dict__`][__dict__] in our object to hold that value instead.
+
+This is __real strong text__ that should be flagged.
+
+[__dict__]: https://www.pythonmorsels.com/where-are-attributes-stored/"#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the real strong text should be flagged, not the __ in links
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0]
+                .message
+                .contains("Strong emphasis should use ** instead of __")
+        );
+        // The flagged text should be "real strong text"
+        assert!(result[0].line > 4); // Should be on the line with "real strong text"
     }
 }
