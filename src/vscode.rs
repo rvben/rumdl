@@ -28,12 +28,22 @@ impl VsCodeExtension {
 
     /// Check if a command exists and works
     fn command_exists(cmd: &str) -> bool {
-        Command::new("which").arg(cmd).output().is_ok()
-            && Command::new(cmd)
-                .arg("--version")
-                .output()
-                .map(|output| output.status.success())
-                .unwrap_or(false)
+        // First, try to run the command directly with --version
+        // This is more reliable than using which/where
+        if let Ok(output) = Command::new(cmd).arg("--version").output() {
+            if output.status.success() {
+                return true;
+            }
+        }
+
+        // Fallback: use platform-appropriate command lookup
+        let lookup_cmd = if cfg!(windows) { "where" } else { "which" };
+
+        Command::new(lookup_cmd)
+            .arg(cmd)
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
     }
 
     fn find_code_command() -> Result<String, String> {
@@ -494,6 +504,21 @@ mod tests {
         // Test with commands that are likely to exist on most systems
         // Note: We can't guarantee these exist in all test environments
         // The actual behavior depends on the system
+    }
+
+    #[test]
+    fn test_command_exists_cross_platform() {
+        // Test that the function handles the direct execution approach
+        // This tests our fix for Windows PATH detection
+
+        // Test with a command that definitely doesn't exist
+        assert!(!VsCodeExtension::command_exists("definitely-nonexistent-command-12345"));
+
+        // Test that it tries the direct approach first
+        // We can't test positive cases reliably in CI, but we can verify
+        // the function doesn't panic and follows expected logic
+        let _result = VsCodeExtension::command_exists("code");
+        // Result depends on system, but should not panic
     }
 
     #[test]
