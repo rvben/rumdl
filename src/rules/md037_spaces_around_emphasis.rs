@@ -7,6 +7,15 @@ use crate::utils::emphasis_utils::{
     EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
 };
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    // Reference definition pattern - matches [ref]: url "title"
+    static ref REF_DEF_REGEX: Regex = Regex::new(
+        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
+    ).unwrap();
+}
 
 /// Check if an emphasis span has spacing issues that should be flagged
 #[inline]
@@ -21,6 +30,34 @@ pub struct MD037NoSpaceInEmphasis;
 impl Default for MD037NoSpaceInEmphasis {
     fn default() -> Self {
         Self
+    }
+}
+
+impl MD037NoSpaceInEmphasis {
+    /// Check if a byte position is within a link (inline links, reference links, or reference definitions)
+    fn is_in_link(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+        // Check inline and reference links
+        for link in &ctx.links {
+            if link.byte_offset <= byte_pos && byte_pos < link.byte_end {
+                return true;
+            }
+        }
+
+        // Check images (which use similar syntax)
+        for image in &ctx.images {
+            if image.byte_offset <= byte_pos && byte_pos < image.byte_end {
+                return true;
+            }
+        }
+
+        // Check reference definitions [ref]: url "title" using regex pattern
+        for m in REF_DEF_REGEX.find_iter(ctx.content) {
+            if m.start() <= byte_pos && byte_pos < m.end() {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
@@ -83,7 +120,30 @@ impl Rule for MD037NoSpaceInEmphasis {
             self.check_line_for_emphasis_issues_fast(&line_no_code, line_num + 1, &mut warnings);
         }
 
-        Ok(warnings)
+        // Filter out warnings for emphasis markers that are inside links
+        let mut filtered_warnings = Vec::new();
+        let mut line_start_pos = 0;
+        
+        for (line_idx, line) in content.lines().enumerate() {
+            let line_num = line_idx + 1;
+            
+            // Find warnings for this line
+            for warning in &warnings {
+                if warning.line == line_num {
+                    // Calculate byte position of the warning
+                    let byte_pos = line_start_pos + (warning.column - 1);
+                    
+                    // Only keep warnings that are not inside links
+                    if !self.is_in_link(ctx, byte_pos) {
+                        filtered_warnings.push(warning.clone());
+                    }
+                }
+            }
+            
+            line_start_pos += line.len() + 1; // +1 for newline
+        }
+
+        Ok(filtered_warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -366,5 +426,39 @@ mod tests {
             !result.is_empty(),
             "Expected warnings for spaces in emphasis outside code block"
         );
+    }
+
+    #[test]
+    fn test_emphasis_in_links_not_flagged() {
+        let rule = MD037NoSpaceInEmphasis;
+        let content = r#"Check this [* spaced asterisk *](https://example.com/*test*) link.
+
+This has * real spaced emphasis * that should be flagged."#;
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Test passed - emphasis inside links are filtered out correctly
+
+        // Only the real emphasis outside links should be flagged
+        assert_eq!(result.len(), 1, "Expected exactly 1 warning, but got: {:?}", result.len());
+        assert!(result[0].message.contains("Spaces inside emphasis markers"));
+        // Should flag "* real spaced emphasis *" but not emphasis patterns inside links
+        assert!(result[0].line == 3); // Line with "* real spaced emphasis *"
+    }
+
+    #[test]
+    fn test_emphasis_in_links_vs_outside_links() {
+        let rule = MD037NoSpaceInEmphasis;
+        let content = r#"Check [* spaced *](https://example.com/*test*) and inline * real spaced * text.
+
+[* link *]: https://example.com/*path*"#;
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the actual emphasis outside links should be flagged
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Spaces inside emphasis markers"));
+        // Should be the "* real spaced *" text on line 1
+        assert!(result[0].line == 1);
     }
 }
