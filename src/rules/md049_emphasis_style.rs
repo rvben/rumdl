@@ -2,6 +2,15 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::utils::document_structure::DocumentStructure;
 use crate::utils::emphasis_utils::{find_emphasis_markers, find_single_emphasis_spans, replace_inline_code};
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    // Reference definition pattern - matches [ref]: url "title"
+    static ref REF_DEF_REGEX: Regex = Regex::new(
+        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
+    ).unwrap();
+}
 
 mod md049_config;
 use md049_config::MD049Config;
@@ -30,6 +39,32 @@ impl MD049EmphasisStyle {
 
     pub fn from_config_struct(config: MD049Config) -> Self {
         Self { config }
+    }
+
+    /// Check if a byte position is within a link (inline links, reference links, or reference definitions)
+    fn is_in_link(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+        // Check inline and reference links
+        for link in &ctx.links {
+            if link.byte_offset <= byte_pos && byte_pos < link.byte_end {
+                return true;
+            }
+        }
+
+        // Check images (which use similar syntax)
+        for image in &ctx.images {
+            if image.byte_offset <= byte_pos && byte_pos < image.byte_end {
+                return true;
+            }
+        }
+
+        // Check reference definitions [ref]: url "title" using regex pattern
+        for m in REF_DEF_REGEX.find_iter(ctx.content) {
+            if m.start() <= byte_pos && byte_pos < m.end() {
+                return true;
+            }
+        }
+
+        false
     }
 
     // Collect emphasis from a single line
@@ -120,6 +155,9 @@ impl Rule for MD049EmphasisStyle {
 
             abs_pos += line.len() + 1;
         }
+
+        // Filter out emphasis markers that are inside links
+        emphasis_info.retain(|(_, abs_col, _, _)| !self.is_in_link(ctx, *abs_col));
 
         match self.config.style {
             EmphasisStyle::Consistent => {
@@ -270,5 +308,41 @@ mod tests {
         assert_eq!(EmphasisStyle::from("asterisk"), EmphasisStyle::Asterisk);
         assert_eq!(EmphasisStyle::from("underscore"), EmphasisStyle::Underscore);
         assert_eq!(EmphasisStyle::from("other"), EmphasisStyle::Consistent);
+    }
+
+    #[test]
+    fn test_emphasis_in_links_not_flagged() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        let content = r#"Check this [*asterisk*](https://example.com/*pattern*) link and [_underscore_](https://example.com/_private_).
+
+Also see the [`__init__`][__init__] reference.
+
+This should be _flagged_ since we're using asterisk style.
+
+[__init__]: https://example.com/__init__.py"#;
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the real emphasis outside links should be flagged
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Emphasis should use * instead of _"));
+        // Should flag "_flagged_" but not emphasis patterns inside links
+        assert!(result[0].line == 5); // Line with "_flagged_"
+    }
+
+    #[test]
+    fn test_emphasis_in_links_vs_outside_links() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+        let content = r#"Check [*emphasis*](https://example.com/*test*) and inline *real emphasis* text.
+
+[*link*]: https://example.com/*path*"#;
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the actual emphasis outside links should be flagged
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Emphasis should use _ instead of *"));
+        // Should be the "real emphasis" text on line 1
+        assert!(result[0].line == 1);
     }
 }
