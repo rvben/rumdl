@@ -41,20 +41,41 @@ impl TableUtils {
 
         // Check if it looks like a table row by having reasonable content between pipes
         let mut valid_parts = 0;
+        let mut total_non_empty_parts = 0;
+        
         for part in &parts {
             let part_trimmed = part.trim();
             // Skip empty parts (from leading/trailing pipes)
             if part_trimmed.is_empty() {
                 continue;
             }
+            total_non_empty_parts += 1;
+            
             // Count parts that look like table cells (reasonable content, no newlines)
             if !part_trimmed.contains('\n') {
                 valid_parts += 1;
             }
         }
 
-        // Must have at least 2 valid cell-like parts
-        valid_parts >= 2
+        // All non-empty parts must be valid (no newlines) for the row to be valid
+        if total_non_empty_parts == 0 {
+            return false;
+        }
+        
+        if valid_parts != total_non_empty_parts {
+            // Some cells contain newlines, not a valid table row
+            return false;
+        }
+
+        // GFM allows single-column tables, so >= 1 valid part is enough
+        // when the line has proper table formatting (pipes)
+        if trimmed.starts_with('|') && trimmed.ends_with('|') {
+            // Properly formatted table row with pipes on both ends
+            valid_parts >= 1
+        } else {
+            // For rows without proper pipe formatting, require at least 2 cells
+            valid_parts >= 2
+        }
     }
 
     /// Check if a line is a table delimiter row (e.g., |---|---|)
@@ -213,7 +234,7 @@ mod tests {
         assert!(TableUtils::is_potential_table_row("| Header 1 | Header 2 |"));
         assert!(TableUtils::is_potential_table_row("| Cell 1 | Cell 2 |"));
         assert!(TableUtils::is_potential_table_row("Cell 1 | Cell 2"));
-        assert!(!TableUtils::is_potential_table_row("| Cell |")); // Only 1 cell, not a table
+        assert!(TableUtils::is_potential_table_row("| Cell |")); // Single-column tables are valid in GFM
 
         // Multiple cells
         assert!(TableUtils::is_potential_table_row("| A | B | C | D | E |"));
@@ -503,8 +524,12 @@ But no delimiter row
         assert_eq!(TableUtils::count_cells("|"), 0); // Need at least 2 parts
 
         // Test very long lines are valid table rows (no length limit)
-        let long_line = format!("| {} |", "a".repeat(200));
-        assert!(TableUtils::is_potential_table_row(&long_line)); // Valid table row regardless of length
+        // Test both single-column and multi-column long lines
+        let long_single = format!("| {} |", "a".repeat(200));
+        assert!(TableUtils::is_potential_table_row(&long_single)); // Single-column table with long content
+        
+        let long_multi = format!("| {} | {} |", "a".repeat(200), "b".repeat(200));
+        assert!(TableUtils::is_potential_table_row(&long_multi)); // Multi-column table with long content
 
         // Test unicode
         assert!(TableUtils::is_potential_table_row("| 你好 | 世界 |"));

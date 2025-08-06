@@ -69,6 +69,13 @@ test-nextest:
 test-quick:
 	cargo nextest run --profile quick
 
+test-pre-commit:
+	cargo nextest run --profile pre-commit
+
+test-push:
+	@echo "Running full test suite (this may take a few minutes)..."
+	cargo nextest run
+
 test-ci:
 	cargo nextest run --profile ci
 
@@ -81,7 +88,10 @@ fmt:
 	cargo fix --allow-dirty --allow-staged
 
 lint:
-	cargo clippy --all-targets --all-features -- -D warnings
+	CARGO_INCREMENTAL=1 cargo clippy --all-targets --all-features -- -D warnings
+
+lint-fast:
+	CARGO_INCREMENTAL=1 cargo clippy --workspace --lib --bins -- -D warnings
 
 check:
 	cargo check --all-targets --all-features

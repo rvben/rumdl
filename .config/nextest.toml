@@ -44,3 +44,23 @@ test-threads = "num-cpus"
 
 # Less verbose output
 status-level = "fail"
+
+# Ultra-fast profile for pre-commit hooks
+[profile.pre-commit]
+
+# Only run unit tests in lib, skip all integration tests and binaries
+default-filter = 'package(rumdl) and kind(lib) and not test(/slow|stress|large|integration|comprehensive|cli|config|advanced|commonmark|consistency|performance|benchmark|parity/)'
+
+# Maximum parallelism for speed
+test-threads = "num-cpus"
+
+# Minimal output for speed
+status-level = "fail"
+failure-output = "immediate"
+success-output = "never"
+
+# No retries to save time
+retries = 0
+
+# Fail fast on first failure
+fail-fast = true
