@@ -98,7 +98,7 @@ Final content.
                 // Process may have terminated
                 break;
             }
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_millis(50)); // Reduced delay
         }
     });
 
@@ -243,7 +243,7 @@ fn test_lsp_memory_stress_with_large_files() {
         return;
     }
 
-    thread::sleep(Duration::from_secs(2)); // Allow processing time
+    thread::sleep(Duration::from_millis(100)); // Reduced delay // Allow processing time
 
     let after_open_memory = get_process_memory(lsp_process.id()).unwrap_or(0);
 
@@ -272,7 +272,7 @@ fn test_lsp_memory_stress_with_large_files() {
     );
     let _ = writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_close.len(), did_close);
 
-    thread::sleep(Duration::from_secs(1)); // Allow cleanup time
+    thread::sleep(Duration::from_millis(50)); // Reduced delay // Allow cleanup time
 
     let after_close_memory = get_process_memory(lsp_process.id()).unwrap_or(after_edits_memory);
 
@@ -361,7 +361,7 @@ fn test_lsp_concurrent_document_handling() {
         }
     }
 
-    thread::sleep(Duration::from_secs(2));
+    thread::sleep(Duration::from_millis(100)); // Reduced delay
     let after_open_memory = get_process_memory(lsp_process.id()).unwrap_or(initial_memory);
 
     // Close all documents with error handling
@@ -373,7 +373,7 @@ fn test_lsp_concurrent_document_handling() {
         let _ = writeln!(stdin, "Content-Length: {}\r\n\r\n{}", did_close.len(), did_close);
     }
 
-    thread::sleep(Duration::from_secs(2));
+    thread::sleep(Duration::from_millis(100)); // Reduced delay
     let after_close_memory = get_process_memory(lsp_process.id()).unwrap_or(after_open_memory);
 
     println!("Concurrent document memory analysis:");

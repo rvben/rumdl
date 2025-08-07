@@ -4,7 +4,7 @@ use rumdl::rule::Rule;
 use rumdl::rules::*;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+// Duration removed - no longer needed after optimizations
 
 #[test]
 fn test_concurrent_rule_execution() {
@@ -295,7 +295,7 @@ Text with *bad emphasis * here.
             }
 
             // Add small delay to increase contention
-            thread::sleep(Duration::from_millis(1));
+            // Removed artificial delay for test performance
         });
 
         handles.push(handle);
@@ -399,7 +399,7 @@ Content for section 10.
                 }
 
                 // Small delay to allow other threads to access
-                thread::sleep(Duration::from_millis(1));
+                // Removed artificial delay for test performance
             }
         });
 
