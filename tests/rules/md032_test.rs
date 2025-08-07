@@ -97,6 +97,40 @@ fn test_emphasis_followed_by_list_needs_blank() {
 }
 
 #[test]
+fn test_nested_lists_issue_33() {
+    // Test for GitHub issue #33 - Nested lists should not require blank lines between levels
+    let rule = MD032BlanksAroundLists::default();
+    let content = "## Heading\n\n1. List item 1\n   - sub list 1.1\n   - sub list 1.2\n1. List item 2\n   - sub list 2.1\n\nThat was a nice list.";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // Should have no warnings - the nested list is properly surrounded by blank lines
+    assert!(
+        result.is_empty(),
+        "Nested lists should not require blank lines between parent and child items. Got {} warnings: {:?}",
+        result.len(),
+        result
+    );
+}
+
+#[test]
+fn test_blockquote_numbers_issue_32() {
+    // Test for GitHub issue #32 - Lines starting with numbers in blockquotes should not be detected as lists
+    let rule = MD032BlanksAroundLists::default();
+    let content = "> The following versions are vulnerable:\n>   all versions 9 and before\n>   10.5 - 10.6\n>   11.1 - 11.2\n> Other information";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    
+    // Should have no MD032 warnings - these are not list items
+    assert!(
+        result.is_empty(),
+        "Version numbers like '10.5 - 10.6' should not be detected as list items. Got {} warnings: {:?}",
+        result.len(),
+        result
+    );
+}
+
+#[test]
 fn test_emphasis_patterns_not_lists() {
     // Test various emphasis patterns that contain * or + characters
     let rule = MD032BlanksAroundLists::default();

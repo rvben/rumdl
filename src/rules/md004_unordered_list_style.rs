@@ -118,16 +118,12 @@ impl Rule for MD004UnorderedListStyle {
 
         // Use centralized list blocks for better performance and accuracy
         for list_block in &ctx.list_blocks {
-            // Skip ordered lists
-            if list_block.is_ordered {
-                continue;
-            }
-
             // Check each list item in this block
+            // We need to check individual items even in mixed lists (ordered with nested unordered)
             for &item_line in &list_block.item_lines {
                 if let Some(line_info) = ctx.line_info(item_line) {
                     if let Some(list_item) = &line_info.list_item {
-                        // Skip ordered lists (safety check)
+                        // Skip ordered list items - we only care about unordered ones
                         if list_item.is_ordered {
                             continue;
                         }
@@ -245,16 +241,12 @@ impl Rule for MD004UnorderedListStyle {
 
         // Use centralized list blocks
         for list_block in &ctx.list_blocks {
-            // Skip ordered lists
-            if list_block.is_ordered {
-                continue;
-            }
-
             // Process each list item in this block
+            // We need to check individual items even in mixed lists
             for &item_line in &list_block.item_lines {
                 if let Some(line_info) = ctx.line_info(item_line) {
                     if let Some(list_item) = &line_info.list_item {
-                        // Skip ordered lists (safety check)
+                        // Skip ordered list items - we only care about unordered ones
                         if list_item.is_ordered {
                             continue;
                         }
@@ -615,12 +607,13 @@ mod tests {
     #[test]
     fn test_edge_case_marker_at_end() {
         let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
-        let content = "*\n-\n+";
+        // These are valid list items with minimal content (just a space)
+        let content = "* \n- \n+ ";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2);
+        assert_eq!(result.len(), 2); // Should flag - and + as wrong markers
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "*\n*\n*");
+        assert_eq!(fixed, "* \n* \n* ");
     }
 
     #[test]

@@ -90,21 +90,29 @@ impl Rule for MD029OrderedListPrefix {
 
         let mut warnings = Vec::new();
 
-        // Group ordered list blocks that are only separated by code blocks
-        // This handles cases where the centralized system splits lists that should be continuous
-        let ordered_blocks: Vec<_> = ctx.list_blocks.iter().filter(|block| block.is_ordered).collect();
+        // Collect all list blocks that contain ordered items (not just purely ordered blocks)
+        // This handles mixed lists where ordered items are nested within unordered lists
+        let blocks_with_ordered: Vec<_> = ctx.list_blocks.iter().filter(|block| {
+            // Check if this block contains any ordered items
+            block.item_lines.iter().any(|&line| {
+                ctx.line_info(line)
+                    .and_then(|info| info.list_item.as_ref())
+                    .map(|item| item.is_ordered)
+                    .unwrap_or(false)
+            })
+        }).collect();
 
-        if ordered_blocks.is_empty() {
+        if blocks_with_ordered.is_empty() {
             return Ok(Vec::new());
         }
 
         // Group consecutive list blocks that should be treated as continuous
         let mut block_groups = Vec::new();
-        let mut current_group = vec![ordered_blocks[0]];
+        let mut current_group = vec![blocks_with_ordered[0]];
 
-        for i in 1..ordered_blocks.len() {
-            let prev_block = ordered_blocks[i - 1];
-            let current_block = ordered_blocks[i];
+        for i in 1..blocks_with_ordered.len() {
+            let prev_block = blocks_with_ordered[i - 1];
+            let current_block = blocks_with_ordered[i];
 
             // Check if there are only code blocks/fences between these list blocks
             let between_content_is_code_only =
@@ -411,6 +419,33 @@ impl MD029OrderedListPrefix {
         true
     }
 
+    /// Find the parent unordered item for an ordered item
+    /// Returns the line number of the parent, or 0 if no parent found
+    fn find_parent_unordered_item(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        ordered_line: usize,
+        ordered_indent: usize,
+    ) -> usize {
+        // Look backward from the ordered item to find its unordered parent
+        for line_num in (1..ordered_line).rev() {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                if let Some(list_item) = &line_info.list_item {
+                    // Found a list item - check if it could be the parent
+                    if list_item.marker_column < ordered_indent && !list_item.is_ordered {
+                        // This unordered item is at a lower indentation, so it's the parent
+                        return line_num;
+                    }
+                }
+                // If we encounter non-blank, non-list content at column 0, stop looking
+                else if !line_info.is_blank && line_info.indent == 0 {
+                    break;
+                }
+            }
+        }
+        0 // No parent found
+    }
+
     /// Check a group of ordered list blocks that should be treated as continuous
     fn check_ordered_list_group(
         &self,
@@ -441,9 +476,10 @@ impl MD029OrderedListPrefix {
         // Sort by line number to ensure correct order
         all_items.sort_by_key(|(line_num, _, _)| *line_num);
 
-        // Group items by indentation level and process each level independently
+        // Group items by indentation level AND parent context
+        // Use (indent_level, parent_line) as the key to separate sequences under different parents
         let mut level_groups: std::collections::HashMap<
-            usize,
+            (usize, usize),
             Vec<(
                 usize,
                 &crate::lint_context::LineInfo,
@@ -452,15 +488,18 @@ impl MD029OrderedListPrefix {
         > = std::collections::HashMap::new();
 
         for (line_num, line_info, list_item) in all_items {
-            // Group by marker column (indentation level)
+            // Find the parent unordered item for this ordered item
+            let parent_line = self.find_parent_unordered_item(ctx, line_num, list_item.marker_column);
+            
+            // Group by both marker column (indentation level) and parent context
             level_groups
-                .entry(list_item.marker_column)
+                .entry((list_item.marker_column, parent_line))
                 .or_default()
                 .push((line_num, line_info, list_item));
         }
 
-        // Process each indentation level separately
-        for (_indent, mut group) in level_groups {
+        // Process each indentation level and parent context separately
+        for ((_indent, _parent), mut group) in level_groups {
             // Sort by line number to ensure correct order
             group.sort_by_key(|(line_num, _, _)| *line_num);
 

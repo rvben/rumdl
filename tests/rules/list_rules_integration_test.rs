@@ -176,14 +176,9 @@ fn test_deep_nesting_with_multiple_list_types() {
 
     assert!(md005_result.is_empty(), "MD005 should pass with proper indentation");
     assert!(md007_result.is_empty(), "MD007 should pass with proper nesting");
-    // MD029 should detect that "2. Second top level" starts a new list after nested content
-    assert_eq!(md029_result.len(), 1, "MD029 should detect numbering issue");
-    assert_eq!(md029_result[0].line, 7, "Should detect issue on line 7");
-    assert!(md029_result[0].message.contains("2"), "Should mention actual number 2");
-    assert!(
-        md029_result[0].message.contains("1"),
-        "Should mention expected number 1"
-    );
+    // MD029 should pass - the sequence "1. ... 2." is correct with sequential numbering
+    // The nested content doesn't interrupt the top-level ordered list
+    assert!(md029_result.is_empty(), "MD029 should pass with correct sequential numbering");
 }
 
 #[test]

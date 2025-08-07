@@ -948,39 +948,18 @@ impl<'a> LintContext<'a> {
                     let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
                     let marker = caps.get(2).map_or("", |m| m.as_str());
                     let spacing = caps.get(3).map_or("", |m| m.as_str());
-                    let content = caps.get(4).map_or("", |m| m.as_str());
+                    let _content = caps.get(4).map_or("", |m| m.as_str());
                     let marker_column = blockquote_prefix_len + leading_spaces.len();
                     let content_column = marker_column + marker.len() + spacing.len();
 
-                    // Check if this is likely emphasis or not a list item
+                    // According to CommonMark spec, unordered list items MUST have at least one space
+                    // after the marker (-, *, or +). Without a space, it's not a list item.
+                    // This also naturally handles cases like:
+                    // - *emphasis* (not a list)
+                    // - **bold** (not a list)  
+                    // - --- (horizontal rule, not a list)
                     if spacing.is_empty() {
-                        // No space after marker - check if it's likely emphasis or just text
-                        if marker == "*" && content.ends_with('*') && !content[..content.len() - 1].contains('*') {
-                            // Likely emphasis like *text*
-                            None
-                        } else if marker == "*" && content.starts_with('*') {
-                            // Likely bold emphasis like **text** or horizontal rule like ***
-                            None
-                        } else if (marker == "*" || marker == "-")
-                            && content.chars().all(|c| c == marker.chars().next().unwrap())
-                            && content.len() >= 2
-                        {
-                            // Likely horizontal rule like *** or ---
-                            None
-                        } else if !content.is_empty() && content.chars().next().unwrap().is_alphabetic() {
-                            // Single word starting with marker, likely not intended as list
-                            // This matches markdownlint behavior
-                            None
-                        } else {
-                            // Other cases with no space - treat as malformed list item
-                            Some(ListItemInfo {
-                                marker: marker.to_string(),
-                                is_ordered: false,
-                                number: None,
-                                marker_column,
-                                content_column,
-                            })
-                        }
+                        None
                     } else {
                         Some(ListItemInfo {
                             marker: marker.to_string(),
@@ -995,15 +974,14 @@ impl<'a> LintContext<'a> {
                     let number_str = caps.get(2).map_or("", |m| m.as_str());
                     let delimiter = caps.get(3).map_or("", |m| m.as_str());
                     let spacing = caps.get(4).map_or("", |m| m.as_str());
-                    let content = caps.get(5).map_or("", |m| m.as_str());
+                    let _content = caps.get(5).map_or("", |m| m.as_str());
                     let marker = format!("{number_str}{delimiter}");
                     let marker_column = blockquote_prefix_len + leading_spaces.len();
                     let content_column = marker_column + marker.len() + spacing.len();
 
-                    // Check if this is likely not a list item
-                    if spacing.is_empty() && !content.is_empty() && content.chars().next().unwrap().is_alphabetic() {
-                        // No space after marker and starts with alphabetic, likely not intended as list
-                        // This matches markdownlint behavior
+                    // According to CommonMark spec, ordered list items MUST have at least one space
+                    // after the marker (period or parenthesis). Without a space, it's not a list item.
+                    if spacing.is_empty() {
                         None
                     } else {
                         Some(ListItemInfo {
@@ -1343,6 +1321,9 @@ impl<'a> LintContext<'a> {
 
                 if let Some(ref mut block) = current_block {
                     // Check if this continues the current block
+                    // For nested lists, we need to check if this is a nested item (higher nesting level)
+                    // or a continuation at the same or lower level
+                    let is_nested = nesting > block.nesting_level;
                     let same_type =
                         (block.is_ordered && list_item.is_ordered) || (!block.is_ordered && !list_item.is_ordered);
                     let same_context = block.blockquote_prefix == blockquote_prefix;
@@ -1392,7 +1373,18 @@ impl<'a> LintContext<'a> {
                         found_non_list
                     };
 
-                    if same_type && same_context && reasonable_distance && marker_compatible && !has_non_list_content {
+                    // A list continues if:
+                    // 1. It's a nested item (indented more than the parent), OR
+                    // 2. It's the same type at the same level with reasonable distance
+                    let continues_list = if is_nested {
+                        // Nested items always continue the list if they're in the same context
+                        same_context && reasonable_distance && !has_non_list_content
+                    } else {
+                        // Same-level items need to match type and markers
+                        same_type && same_context && reasonable_distance && marker_compatible && !has_non_list_content
+                    };
+
+                    if continues_list {
                         // Extend current block
                         block.end_line = line_num;
                         block.item_lines.push(line_num);

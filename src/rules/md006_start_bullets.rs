@@ -16,21 +16,28 @@ use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 pub struct MD006StartBullets;
 
 impl MD006StartBullets {
-    /// Check if a bullet is nested under an ordered list item
+    /// Check if a bullet is nested under an ordered list item (anywhere in the hierarchy)
     fn is_nested_under_ordered_item(
         &self,
         ctx: &crate::lint_context::LintContext,
         current_line: usize,
         current_indent: usize,
     ) -> bool {
-        // Look backward from current line to find parent item
+        // Look backward from current line to find any ordered ancestor
+        let mut check_indent = current_indent;
+        
         for line_idx in (1..current_line).rev() {
             if let Some(line_info) = ctx.line_info(line_idx) {
                 if let Some(list_item) = &line_info.list_item {
-                    // Found a list item - check if it's at a lower indentation (parent level)
-                    if list_item.marker_column < current_indent {
-                        // This is a parent item - check if it's ordered
-                        return list_item.is_ordered;
+                    // Found a list item - check if it's at a lower indentation (ancestor level)
+                    if list_item.marker_column < check_indent {
+                        // This is an ancestor item
+                        if list_item.is_ordered {
+                            // Found an ordered ancestor
+                            return true;
+                        }
+                        // Continue looking for higher-level ancestors
+                        check_indent = list_item.marker_column;
                     }
                 }
                 // If we encounter non-blank, non-list content at column 0, stop looking
@@ -52,17 +59,17 @@ impl MD006StartBullets {
         // Track which lines contain valid bullet items
         let mut valid_bullet_lines = vec![false; lines.len()];
 
-        // Process each unordered list block
+        // Process each list block
         for list_block in &ctx.list_blocks {
-            // Skip ordered lists
-            if list_block.is_ordered {
-                continue;
-            }
-
             // Check each list item in this block
+            // We need to check unordered items even in mixed lists
             for &item_line in &list_block.item_lines {
                 if let Some(line_info) = ctx.line_info(item_line) {
                     if let Some(list_item) = &line_info.list_item {
+                        // Skip ordered list items - we only care about unordered ones
+                        if list_item.is_ordered {
+                            continue;
+                        }
                         let line_idx = item_line - 1;
                         let indent = list_item.marker_column;
                         let line = &lines[line_idx];
@@ -73,9 +80,16 @@ impl MD006StartBullets {
                             // Top-level items are always valid
                             is_valid = true;
                         } else {
-                            // Check if this is nested under an ordered item with correct indentation (3 spaces)
-                            if indent == 3 && self.is_nested_under_ordered_item(ctx, item_line, indent) {
-                                is_valid = true;
+                            // Check if this is nested under an ordered item with correct indentation
+                            // For single-digit ordered lists (1.), need at least 3 spaces for proper nesting
+                            // For double-digit (10.), need at least 4 spaces, etc.
+                            // But MD006's purpose is to flag top-level indented lists, not validate nesting depth
+                            if self.is_nested_under_ordered_item(ctx, item_line, indent) {
+                                // It's nested under an ordered item
+                                // Only flag if indentation is less than 3 (won't nest properly in CommonMark)
+                                if indent >= 3 {
+                                    is_valid = true;
+                                }
                             } else {
                                 // Check if this is a valid nested item under another bullet
                                 match Self::find_relevant_previous_bullet(&lines, line_idx) {
@@ -120,14 +134,28 @@ impl MD006StartBullets {
                                 end_col - start_col,
                             );
 
+                            // Generate appropriate message based on context
+                            let message = if self.is_nested_under_ordered_item(ctx, item_line, indent) {
+                                // It's trying to nest under an ordered item but has insufficient indentation
+                                format!(
+                                    "Nested list needs at least 3 spaces of indentation under ordered item (found {indent})"
+                                )
+                            } else if indent > 0 {
+                                // It's indented but not nested under anything - should start at column 0
+                                format!(
+                                    "Consider starting bulleted lists at the beginning of the line (found {indent} leading spaces)"
+                                )
+                            } else {
+                                // Shouldn't happen, but just in case
+                                format!("List indentation issue (found {indent} leading spaces)")
+                            };
+
                             result.push(LintWarning {
                                 line: item_line,
                                 column: start_col,
                                 end_line: item_line,
                                 end_column: end_col,
-                                message: format!(
-                                    "Consider starting bulleted lists at the beginning of the line (found {indent} leading spaces)"
-                                ),
+                                message,
                                 severity: Severity::Warning,
                                 rule_name: Some(self.name()),
                                 fix: Some(Fix {
@@ -501,14 +529,14 @@ mod tests {
         let content = "\
 1. **Active Directory/LDAP**
   - Wrong: only 2 spaces
-    - Also wrong: 4 spaces";
+ - Wrong: only 1 space";
         let ctx = crate::lint_context::LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        // Should flag the incorrect indentations
+        // Should flag the incorrect indentations (less than 3 spaces)
         assert_eq!(
             result.len(),
             2,
-            "Expected warnings for bullets with incorrect spacing under numbered items"
+            "Expected warnings for bullets with insufficient spacing under numbered items"
         );
         assert!(result.iter().any(|w| w.line == 2));
         assert!(result.iter().any(|w| w.line == 3));
