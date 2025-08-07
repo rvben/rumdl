@@ -178,7 +178,10 @@ fn test_deep_nesting_with_multiple_list_types() {
     assert!(md007_result.is_empty(), "MD007 should pass with proper nesting");
     // MD029 should pass - the sequence "1. ... 2." is correct with sequential numbering
     // The nested content doesn't interrupt the top-level ordered list
-    assert!(md029_result.is_empty(), "MD029 should pass with correct sequential numbering");
+    assert!(
+        md029_result.is_empty(),
+        "MD029 should pass with correct sequential numbering"
+    );
 }
 
 #[test]

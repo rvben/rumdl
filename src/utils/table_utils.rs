@@ -42,7 +42,7 @@ impl TableUtils {
         // Check if it looks like a table row by having reasonable content between pipes
         let mut valid_parts = 0;
         let mut total_non_empty_parts = 0;
-        
+
         for part in &parts {
             let part_trimmed = part.trim();
             // Skip empty parts (from leading/trailing pipes)
@@ -50,7 +50,7 @@ impl TableUtils {
                 continue;
             }
             total_non_empty_parts += 1;
-            
+
             // Count parts that look like table cells (reasonable content, no newlines)
             if !part_trimmed.contains('\n') {
                 valid_parts += 1;
@@ -61,7 +61,7 @@ impl TableUtils {
         if total_non_empty_parts == 0 {
             return false;
         }
-        
+
         if valid_parts != total_non_empty_parts {
             // Some cells contain newlines, not a valid table row
             return false;
@@ -183,9 +183,12 @@ impl TableUtils {
             return 0;
         }
 
+        // Users shouldn't have to escape pipes in regex patterns, etc.
+        let masked_row = Self::mask_pipes_in_inline_code(trimmed);
+
         // Handle case with leading/trailing pipes
         let mut cell_count = 0;
-        let parts: Vec<&str> = trimmed.split('|').collect();
+        let parts: Vec<&str> = masked_row.split('|').collect();
 
         for (i, part) in parts.iter().enumerate() {
             // Skip first part if it's empty and there's a leading pipe
@@ -202,6 +205,74 @@ impl TableUtils {
         }
 
         cell_count
+    }
+
+    /// Mask pipes inside inline code blocks with a placeholder character
+    fn mask_pipes_in_inline_code(text: &str) -> String {
+        let mut result = String::new();
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            if chars[i] == '`' {
+                // Count consecutive backticks at start
+                let start = i;
+                let mut backtick_count = 0;
+                while i < chars.len() && chars[i] == '`' {
+                    backtick_count += 1;
+                    i += 1;
+                }
+
+                // Look for matching closing backticks
+                let mut found_closing = false;
+                let mut j = i;
+
+                while j < chars.len() {
+                    if chars[j] == '`' {
+                        // Count potential closing backticks
+                        let close_start = j;
+                        let mut close_count = 0;
+                        while j < chars.len() && chars[j] == '`' {
+                            close_count += 1;
+                            j += 1;
+                        }
+
+                        if close_count == backtick_count {
+                            // Found matching closing backticks
+                            found_closing = true;
+
+                            // Valid inline code - add with pipes masked
+                            result.extend(chars[start..i].iter());
+
+                            for &ch in chars.iter().take(close_start).skip(i) {
+                                if ch == '|' {
+                                    result.push('_'); // Mask pipe with underscore
+                                } else {
+                                    result.push(ch);
+                                }
+                            }
+
+                            result.extend(chars[close_start..j].iter());
+                            i = j;
+                            break;
+                        }
+                        // If not matching, continue searching (j is already past these backticks)
+                    } else {
+                        j += 1;
+                    }
+                }
+
+                if !found_closing {
+                    // No matching closing found, treat as regular text
+                    result.extend(chars[start..i].iter());
+                }
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+
+        result
     }
 
     /// Determine the pipe style of a table row
@@ -337,6 +408,34 @@ mod tests {
         // Whitespace handling
         assert_eq!(TableUtils::count_cells("  | A | B |  "), 2);
         assert_eq!(TableUtils::count_cells("|   A   |   B   |"), 2);
+    }
+
+    #[test]
+    fn test_count_cells_with_inline_code() {
+        // Test the user's actual example from Issue #34
+        assert_eq!(TableUtils::count_cells("| Challenge | Solution |"), 2);
+        assert_eq!(
+            TableUtils::count_cells("| Hour:minute:second formats | `^([0-1]?\\d|2[0-3]):[0-5]\\d:[0-5]\\d$` |"),
+            2
+        );
+
+        // Test basic inline code with pipes
+        assert_eq!(TableUtils::count_cells("| Command | `echo | grep` |"), 2);
+        assert_eq!(TableUtils::count_cells("| A | `code | with | pipes` | B |"), 3);
+
+        // Test escaped pipes (correct GFM)
+        assert_eq!(TableUtils::count_cells("| Command | `echo \\| grep` |"), 2);
+
+        // Test multiple inline code blocks
+        assert_eq!(TableUtils::count_cells("| `code | one` | `code | two` |"), 2);
+
+        // Test edge cases
+        assert_eq!(TableUtils::count_cells("| Empty inline | `` | cell |"), 3);
+        assert_eq!(TableUtils::count_cells("| `single|pipe` |"), 1);
+
+        // Test that basic table structure still works
+        assert_eq!(TableUtils::count_cells("| A | B | C |"), 3);
+        assert_eq!(TableUtils::count_cells("| One | Two |"), 2);
     }
 
     #[test]
@@ -527,7 +626,7 @@ But no delimiter row
         // Test both single-column and multi-column long lines
         let long_single = format!("| {} |", "a".repeat(200));
         assert!(TableUtils::is_potential_table_row(&long_single)); // Single-column table with long content
-        
+
         let long_multi = format!("| {} | {} |", "a".repeat(200), "b".repeat(200));
         assert!(TableUtils::is_potential_table_row(&long_multi)); // Multi-column table with long content
 

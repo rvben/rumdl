@@ -956,7 +956,7 @@ impl<'a> LintContext<'a> {
                     // after the marker (-, *, or +). Without a space, it's not a list item.
                     // This also naturally handles cases like:
                     // - *emphasis* (not a list)
-                    // - **bold** (not a list)  
+                    // - **bold** (not a list)
                     // - --- (horizontal rule, not a list)
                     if spacing.is_empty() {
                         None

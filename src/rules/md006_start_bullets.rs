@@ -25,7 +25,7 @@ impl MD006StartBullets {
     ) -> bool {
         // Look backward from current line to find any ordered ancestor
         let mut check_indent = current_indent;
-        
+
         for line_idx in (1..current_line).rev() {
             if let Some(line_info) = ctx.line_info(line_idx) {
                 if let Some(list_item) = &line_info.list_item {

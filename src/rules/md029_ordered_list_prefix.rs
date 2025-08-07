@@ -92,15 +92,19 @@ impl Rule for MD029OrderedListPrefix {
 
         // Collect all list blocks that contain ordered items (not just purely ordered blocks)
         // This handles mixed lists where ordered items are nested within unordered lists
-        let blocks_with_ordered: Vec<_> = ctx.list_blocks.iter().filter(|block| {
-            // Check if this block contains any ordered items
-            block.item_lines.iter().any(|&line| {
-                ctx.line_info(line)
-                    .and_then(|info| info.list_item.as_ref())
-                    .map(|item| item.is_ordered)
-                    .unwrap_or(false)
+        let blocks_with_ordered: Vec<_> = ctx
+            .list_blocks
+            .iter()
+            .filter(|block| {
+                // Check if this block contains any ordered items
+                block.item_lines.iter().any(|&line| {
+                    ctx.line_info(line)
+                        .and_then(|info| info.list_item.as_ref())
+                        .map(|item| item.is_ordered)
+                        .unwrap_or(false)
+                })
             })
-        }).collect();
+            .collect();
 
         if blocks_with_ordered.is_empty() {
             return Ok(Vec::new());
@@ -478,19 +482,20 @@ impl MD029OrderedListPrefix {
 
         // Group items by indentation level AND parent context
         // Use (indent_level, parent_line) as the key to separate sequences under different parents
-        let mut level_groups: std::collections::HashMap<
+        type LevelGroups<'a> = std::collections::HashMap<
             (usize, usize),
             Vec<(
                 usize,
-                &crate::lint_context::LineInfo,
-                &crate::lint_context::ListItemInfo,
+                &'a crate::lint_context::LineInfo,
+                &'a crate::lint_context::ListItemInfo,
             )>,
-        > = std::collections::HashMap::new();
+        >;
+        let mut level_groups: LevelGroups = std::collections::HashMap::new();
 
         for (line_num, line_info, list_item) in all_items {
             // Find the parent unordered item for this ordered item
             let parent_line = self.find_parent_unordered_item(ctx, line_num, list_item.marker_column);
-            
+
             // Group by both marker column (indentation level) and parent context
             level_groups
                 .entry((list_item.marker_column, parent_line))
