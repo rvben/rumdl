@@ -61,10 +61,16 @@ build:
 	cargo build --release
 
 test:
+	cargo nextest run --profile dev
+
+test-legacy:
 	cargo test
 
 test-nextest:
 	cargo nextest run
+
+test-dev:
+	cargo nextest run --profile dev
 
 test-quick:
 	cargo nextest run --profile quick
@@ -100,7 +106,7 @@ doc:
 	cargo doc --no-deps
 
 watch-test:
-	cargo watch -x test
+	cargo watch -x "nextest run --profile quick"
 
 all: fmt check test build
 

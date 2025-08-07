@@ -36,8 +36,8 @@ retries = 0
 # Quick profile for development
 [profile.quick]
 
-# Skip slow tests
-default-filter = 'not test(/memory/) and not test(/stress/) and not test(/large/)'
+# Skip slow tests and performance tests
+default-filter = 'not test(/memory/) and not test(/stress/) and not test(/large/) and not test(/error_propagation/) and not test(/performance/) and not test(/comprehensive/) and not test(/deeply_nested/)'
 
 # Even more parallel execution locally
 test-threads = "num-cpus"
@@ -45,11 +45,27 @@ test-threads = "num-cpus"
 # Less verbose output
 status-level = "fail"
 
+# Development profile - balance between speed and coverage
+[profile.dev]
+
+# Skip the slowest tests but include integration tests
+default-filter = 'not test(/error_propagation/) and not test(/deeply_nested/) and not test(/memory/) and not test(/stress/) and not test(/large/)'
+
+# Good parallelization for dev machines
+test-threads = "num-cpus"
+
+# Show failures immediately
+failure-output = "immediate"
+status-level = "fail"
+
+# No retries for faster feedback
+retries = 0
+
 # Ultra-fast profile for pre-commit hooks
 [profile.pre-commit]
 
 # Only run unit tests in lib, skip all integration tests and binaries
-default-filter = 'package(rumdl) and kind(lib) and not test(/slow|stress|large|integration|comprehensive|cli|config|advanced|commonmark|consistency|performance|benchmark|parity/)'
+default-filter = 'package(rumdl) and kind(lib) and not test(/slow|stress|large|integration|comprehensive|cli|config|advanced|commonmark|consistency|performance|benchmark|parity|error_propagation|deeply_nested|memory/)'
 
 # Maximum parallelism for speed
 test-threads = "num-cpus"
