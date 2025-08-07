@@ -28,7 +28,7 @@ impl InMemoryTestRunner {
     }
 
     /// Run linting on a file without disk I/O
-    pub fn lint_file(&self, path: &str) -> Result<Vec<rumdl::rule::Warning>, Box<dyn std::error::Error>> {
+    pub fn lint_file(&self, path: &str) -> Result<Vec<rumdl::rule::LintWarning>, Box<dyn std::error::Error>> {
         let content = self.files.get(path)
             .ok_or_else(|| format!("File not found: {}", path))?;
 
@@ -39,11 +39,16 @@ impl InMemoryTestRunner {
 
         // Add a few common rules for basic validation
         use rumdl::rule::Rule;
-        use rumdl::rules::*;
+        use rumdl::rules::{
+            MD001HeadingIncrement,
+            MD013LineLength,
+            MD022BlanksAroundHeadings,
+            MD032BlanksAroundLists,
+        };
 
         let rules: Vec<Box<dyn Rule>> = vec![
-            Box::new(MD001HeaderIncrement::default()),
-            Box::new(MD013LineLengthRule::default()),
+            Box::new(MD001HeadingIncrement::default()),
+            Box::new(MD013LineLength::default()),
             Box::new(MD022BlanksAroundHeadings::default()),
             Box::new(MD032BlanksAroundLists::default()),
         ];

@@ -55,9 +55,9 @@ impl MockCli {
         let mut processed_files = Vec::new();
 
         // Find files to process (simulate glob matching)
-        let files_to_process = if path.to_string_lossy() == "." {
+        let files_to_process: Vec<&Path> = if path.to_string_lossy() == "." {
             // Process all .md files in current directory
-            self.files.keys().filter(|p| p.extension().map_or(false, |e| e == "md")).collect::<Vec<_>>()
+            self.files.keys().filter(|p| p.extension().map_or(false, |e| e == "md")).map(|p| p.as_path()).collect()
         } else if path.is_file() || path.to_string_lossy().ends_with(".md") {
             // Process single file
             vec![path]
@@ -65,15 +65,17 @@ impl MockCli {
             // Process directory - find all .md files in it
             self.files.keys()
                 .filter(|p| p.starts_with(path) && p.extension().map_or(false, |e| e == "md"))
+                .map(|p| p.as_path())
                 .collect()
         };
 
         for file_path in files_to_process {
             if let Some(content) = self.files.get(file_path) {
-                processed_files.push(file_path.clone());
+                processed_files.push(file_path.to_path_buf());
 
                 let ctx = LintContext::new(content);
-                let config = self.config.as_ref().unwrap_or(&Config::default());
+                let default_config = Config::default();
+                let config = self.config.as_ref().unwrap_or(&default_config);
                 let all_rules = rules::all_rules(config);
 
                 for rule in all_rules {
@@ -84,18 +86,20 @@ impl MockCli {
             }
         }
 
+        let stdout = if self.verbose {
+            processed_files.iter()
+                .map(|p| format!("Processing file: {}", p.display()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            String::new()
+        };
+
         MockCliResult {
             success: true,
             warnings: all_warnings,
             processed_files,
-            stdout: if self.verbose {
-                processed_files.iter()
-                    .map(|p| format!("Processing file: {}", p.display()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            } else {
-                String::new()
-            },
+            stdout,
             stderr: String::new(),
         }
     }
@@ -133,10 +137,11 @@ impl MockCli {
 
         for file_path in files_to_process {
             if let Some(content) = self.files.get(file_path) {
-                processed_files.push(file_path.clone());
+                processed_files.push(file_path.to_path_buf());
 
                 let ctx = LintContext::new(content);
-                let config = self.config.as_ref().unwrap_or(&Config::default());
+                let default_config = Config::default();
+                let config = self.config.as_ref().unwrap_or(&default_config);
                 let all_rules = rules::all_rules(config);
 
                 for rule in all_rules {
@@ -147,18 +152,20 @@ impl MockCli {
             }
         }
 
+        let stdout = if self.verbose {
+            processed_files.iter()
+                .map(|p| format!("Processing file: {}", p.display()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            String::new()
+        };
+
         MockCliResult {
             success: true,
             warnings: all_warnings,
             processed_files,
-            stdout: if self.verbose {
-                processed_files.iter()
-                    .map(|p| format!("Processing file: {}", p.display()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            } else {
-                String::new()
-            },
+            stdout,
             stderr: String::new(),
         }
     }
@@ -174,7 +181,7 @@ impl Default for MockCli {
 #[derive(Debug, Clone)]
 pub struct MockCliResult {
     pub success: bool,
-    pub warnings: Vec<rumdl::rule::Warning>,
+    pub warnings: Vec<rumdl::rule::LintWarning>,
     pub processed_files: Vec<PathBuf>,
     pub stdout: String,
     pub stderr: String,

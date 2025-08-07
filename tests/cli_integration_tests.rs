@@ -5,32 +5,12 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
 
+#[path = "common/fixtures.rs"]
+mod fixtures;
+
 fn setup_test_files() -> tempfile::TempDir {
     let temp_dir = tempfile::tempdir().unwrap();
-    let base_path = temp_dir.path();
-
-    println!("Creating test files in: {}", base_path.display());
-
-    // Create test files and directories
-    fs::create_dir_all(base_path.join("docs")).unwrap();
-    fs::create_dir_all(base_path.join("docs/temp")).unwrap();
-    fs::create_dir_all(base_path.join("src")).unwrap();
-    fs::create_dir_all(base_path.join("subfolder")).unwrap();
-
-    fs::write(base_path.join("README.md"), "# Test\n").unwrap();
-    fs::write(base_path.join("docs/doc1.md"), "# Doc 1\n").unwrap();
-    fs::write(base_path.join("docs/temp/temp.md"), "# Temp\n").unwrap();
-    fs::write(base_path.join("src/test.md"), "# Source\n").unwrap();
-    fs::write(base_path.join("subfolder/README.md"), "# Subfolder README\n").unwrap();
-
-    // Print the created files for debugging
-    println!("Created test files:");
-    println!("  {}/README.md", base_path.display());
-    println!("  {}/docs/doc1.md", base_path.display());
-    println!("  {}/docs/temp/temp.md", base_path.display());
-    println!("  {}/src/test.md", base_path.display());
-    println!("  {}/subfolder/README.md", base_path.display());
-
+    fixtures::create_test_files(temp_dir.path(), "basic").unwrap();
     temp_dir
 }
 
@@ -282,27 +262,8 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempdir()?;
     let base_path = temp_dir.path();
 
-    println!("Creating test files in: {}", base_path.display());
-
-    // Create test files and directories
-    fs::create_dir_all(base_path.join("docs"))?;
-    fs::create_dir_all(base_path.join("docs/temp"))?;
-    fs::create_dir_all(base_path.join("src"))?;
-    fs::create_dir_all(base_path.join("subfolder"))?;
-
-    fs::write(base_path.join("README.md"), "# Test\n")?;
-    fs::write(base_path.join("docs/doc1.md"), "# Doc 1\n")?;
-    fs::write(base_path.join("docs/temp/temp.md"), "# Temp\n")?;
-    fs::write(base_path.join("src/test.md"), "# Source\n")?;
-    fs::write(base_path.join("subfolder/README.md"), "# Subfolder README\n")?;
-
-    // Print the created files for debugging
-    println!("Created test files:");
-    println!("  {}/README.md", base_path.display());
-    println!("  {}/docs/doc1.md", base_path.display());
-    println!("  {}/docs/temp/temp.md", base_path.display());
-    println!("  {}/src/test.md", base_path.display());
-    println!("  {}/subfolder/README.md", base_path.display());
+    // Create test structure using fixtures
+    fixtures::create_test_files(base_path, "basic")?;
 
     // Helper to run command and get stdout/stderr
     let run_cmd = |args: &[&str]| -> (bool, String, String) {
