@@ -80,6 +80,79 @@ impl MD046CodeBlockStyle {
         true
     }
 
+    /// Check if a line looks like HTML content
+    fn looks_like_html(&self, line: &str) -> bool {
+        let trimmed = line.trim();
+
+        // HTML comments
+        if trimmed.starts_with("<!--") || trimmed.ends_with("-->") {
+            return true;
+        }
+
+        // DOCTYPE declaration
+        if trimmed.starts_with("<!DOCTYPE") || trimmed.starts_with("<!doctype") {
+            return true;
+        }
+
+        // Check for HTML tag pattern: <tag>, </tag>, or <tag ...>
+        if trimmed.starts_with('<') {
+            // Find the closing >
+            if let Some(close_pos) = trimmed.find('>') {
+                let tag_content = &trimmed[1..close_pos];
+
+                // Empty tag
+                if tag_content.is_empty() {
+                    return false;
+                }
+
+                // Self-closing tag like <br/> or <img/>
+                if let Some(tag_without_slash) = tag_content.strip_suffix('/') {
+                    let tag_name = tag_without_slash.trim();
+                    return Self::is_valid_html_tag_name(tag_name);
+                }
+
+                // Closing tag like </div>
+                if let Some(tag_without_slash) = tag_content.strip_prefix('/') {
+                    let tag_name = tag_without_slash.trim();
+                    return Self::is_valid_html_tag_name(tag_name);
+                }
+
+                // Opening tag - might have attributes
+                // Split by whitespace to get the tag name
+                let parts: Vec<&str> = tag_content.split_whitespace().collect();
+                if !parts.is_empty() {
+                    return Self::is_valid_html_tag_name(parts[0]);
+                }
+            }
+        }
+
+        false
+    }
+
+    fn is_valid_html_tag_name(name: &str) -> bool {
+        // HTML tag names must start with a letter and can contain letters, numbers, and hyphens
+        // Avoid false positives on mathematical expressions like "a < b"
+        if name.is_empty() {
+            return false;
+        }
+
+        // Check first character is a letter
+        let first_char = name.chars().next().unwrap();
+        if !first_char.is_ascii_alphabetic() {
+            return false;
+        }
+
+        // Check remaining characters are valid for HTML tag names
+        for c in name.chars() {
+            if !c.is_ascii_alphanumeric() && c != '-' && c != ':' {
+                // ':' is for namespaced tags like svg:rect
+                return false;
+            }
+        }
+
+        true
+    }
+
     /// Check if an indented line is part of a formatted text block (like license text)
     /// rather than a code block
     fn is_part_of_formatted_text_block(&self, lines: &[&str], i: usize) -> bool {
@@ -88,7 +161,21 @@ impl MD046CodeBlockStyle {
 
         // Look for patterns that suggest this is formatted text, not code:
 
-        // 1. License/legal text patterns
+        // 1. HTML tag patterns
+        // Check if this line or surrounding lines contain HTML tags
+        if self.looks_like_html(trimmed) {
+            return true;
+        }
+
+        // Also check surrounding lines for HTML context
+        if i > 0 && self.looks_like_html(lines[i - 1].trim()) {
+            return true;
+        }
+        if i + 1 < lines.len() && self.looks_like_html(lines[i + 1].trim()) {
+            return true;
+        }
+
+        // 2. License/legal text patterns
         if trimmed.contains("Copyright")
             || trimmed.contains("License")
             || trimmed.contains("Foundation")
@@ -102,7 +189,7 @@ impl MD046CodeBlockStyle {
             return true;
         }
 
-        // 2. Address/contact information patterns
+        // 3. Address/contact information patterns
         if trimmed.contains("Drive")
             || trimmed.contains("Suite")
             || trimmed.contains("CA,")
@@ -111,7 +198,7 @@ impl MD046CodeBlockStyle {
             return true;
         }
 
-        // 3. Email signature patterns
+        // 4. Email signature patterns
         if trimmed.contains("Signed-off-by:") || trimmed.contains("@") && trimmed.contains(".com") {
             return true;
         }

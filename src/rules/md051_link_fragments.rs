@@ -353,6 +353,11 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // Skip Jekyll/Liquid template links (e.g., {% post_url ... %})
+            if url.contains("{%") || url.contains("%}") || url.contains("{{") || url.contains("}}") {
+                continue;
+            }
+
             // Check if URL has a fragment
             if let Some(hash_pos) = url.find('#') {
                 let fragment = &url[hash_pos + 1..].to_lowercase();
