@@ -13,6 +13,7 @@ readme = "README.md"
 keywords = ["markdown", "linter", "markdown-linter", "static-analysis", "documentation"]
 categories = ["command-line-utilities", "development-tools", "text-processing"]
 exclude = [".github/", ".gitignore", "*.bak"]
+autobins = false  # Prevent automatic binary discovery in src/bin/
 
 [lib]
 name = "rumdl"
