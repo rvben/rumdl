@@ -163,13 +163,6 @@ jobs:
             fi
           fi
 
-          # Also keep raw binary for backward compatibility (will remove in future)
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp target/${{ matrix.target }}/release/rumdl.exe rumdl-${{ matrix.target }}.exe
-          else
-            cp target/${{ matrix.target }}/release/rumdl rumdl-${{ matrix.target }}
-          fi
-
           # Clean up
           rm -rf release-package
         shell: bash
@@ -187,7 +180,6 @@ jobs:
           path: |
             rumdl-*-${{ matrix.target }}.tar.gz*
             rumdl-*-${{ matrix.target }}.zip*
-            rumdl-${{ matrix.target }}*
           name: release-${{ matrix.target }}
 
   sdist:
@@ -282,9 +274,6 @@ jobs:
             artifacts/release-*/rumdl-*.tar.gz.sha256
             artifacts/release-*/rumdl-*.zip
             artifacts/release-*/rumdl-*.zip.sha256
-            artifacts/release-*/rumdl-*.exe
-            artifacts/release-*/rumdl-*-apple-darwin
-            artifacts/release-*/rumdl-*-linux-musl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -294,9 +283,7 @@ jobs:
           echo "DRY RUN: Would create release with:"
           echo "- Release notes from: release-notes.md"
           echo "- Archives:"
-          find artifacts/release-* -name "*.tar.gz*" -o -name "*.zip*" -type f 2>/dev/null | sort
-          echo "- Raw binaries (for backward compatibility):"
-          find artifacts/release-* -name "rumdl-*" ! -name "*.tar.gz*" ! -name "*.zip*" -type f 2>/dev/null | sort
+          find artifacts/release-* \( -name "*.tar.gz*" -o -name "*.zip*" \) -type f 2>/dev/null | sort
 
       - name: Notify rumdl-pre-commit
         if: ${{ success() && inputs.dry_run != true }}
