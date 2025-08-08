@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rule_config_serde::RuleConfig;
+use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::range_utils::LineIndex;
 use crate::utils::table_utils::TableUtils;
 use serde::{Deserialize, Serialize};
@@ -149,31 +150,41 @@ impl Rule for MD058BlanksAroundTables {
 
             // Check for sufficient blank lines after table
             if table_block.end_line < lines.len() - 1 {
-                let blank_lines_after = self.count_blank_lines_after(&lines, table_block.end_line);
-                if blank_lines_after < self.config.minimum_after {
-                    let needed = self.config.minimum_after - blank_lines_after;
-                    let message = if self.config.minimum_after == 1 {
-                        "Missing blank line after table".to_string()
-                    } else {
-                        format!("Missing {needed} blank lines after table")
-                    };
+                // Check if the next line is a Kramdown block attribute
+                let next_line_is_attribute = if table_block.end_line + 1 < lines.len() {
+                    is_kramdown_block_attribute(lines[table_block.end_line + 1])
+                } else {
+                    false
+                };
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message,
-                        line: table_block.end_line + 1,
-                        column: lines[table_block.end_line].len() + 1,
-                        end_line: table_block.end_line + 1,
-                        end_column: lines[table_block.end_line].len() + 2,
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(
-                                table_block.end_line + 1,
-                                lines[table_block.end_line].len() + 1,
-                            ),
-                            replacement: format!("{}{}", lines[table_block.end_line], "\n".repeat(needed)),
-                        }),
-                    });
+                // Skip check if next line is a block attribute
+                if !next_line_is_attribute {
+                    let blank_lines_after = self.count_blank_lines_after(&lines, table_block.end_line);
+                    if blank_lines_after < self.config.minimum_after {
+                        let needed = self.config.minimum_after - blank_lines_after;
+                        let message = if self.config.minimum_after == 1 {
+                            "Missing blank line after table".to_string()
+                        } else {
+                            format!("Missing {needed} blank lines after table")
+                        };
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message,
+                            line: table_block.end_line + 1,
+                            column: lines[table_block.end_line].len() + 1,
+                            end_line: table_block.end_line + 1,
+                            end_column: lines[table_block.end_line].len() + 2,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: _line_index.line_col_to_byte_range(
+                                    table_block.end_line + 1,
+                                    lines[table_block.end_line].len() + 1,
+                                ),
+                                replacement: format!("{}{}", lines[table_block.end_line], "\n".repeat(needed)),
+                            }),
+                        });
+                    }
                 }
             }
         }

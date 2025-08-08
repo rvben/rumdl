@@ -906,6 +906,19 @@ impl<'a> LintContext<'a> {
         let content_lines: Vec<&str> = content.lines().collect();
         let mut lines = Vec::with_capacity(content_lines.len());
 
+        // Detect front matter boundaries FIRST, before any other parsing
+        let mut in_front_matter = false;
+        let mut front_matter_end = 0;
+        if content_lines.first().map(|l| l.trim()) == Some("---") {
+            in_front_matter = true;
+            for (idx, line) in content_lines.iter().enumerate().skip(1) {
+                if line.trim() == "---" {
+                    front_matter_end = idx;
+                    break;
+                }
+            }
+        }
+
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
             let indent = line.len() - line.trim_start().len();
@@ -933,8 +946,8 @@ impl<'a> LintContext<'a> {
                 byte_offset >= start && byte_offset < end && (is_multiline || is_fenced || is_indented)
             });
 
-            // Detect list items
-            let list_item = if !in_code_block && !is_blank {
+            // Detect list items (skip if in frontmatter)
+            let list_item = if !(in_code_block || is_blank || in_front_matter && i <= front_matter_end) {
                 // Strip blockquote prefix if present for list detection
                 let (line_for_list_check, blockquote_prefix_len) = if let Some(caps) = BLOCKQUOTE_REGEX.captures(line) {
                     let prefix = caps.get(1).unwrap().as_str();
@@ -1009,19 +1022,6 @@ impl<'a> LintContext<'a> {
                 heading: None,    // Will be populated in second pass for Setext headings
                 blockquote: None, // Will be populated after line creation
             });
-        }
-
-        // Detect front matter boundaries
-        let mut in_front_matter = false;
-        let mut front_matter_end = 0;
-        if content_lines.first().map(|l| l.trim()) == Some("---") {
-            in_front_matter = true;
-            for (idx, line) in content_lines.iter().enumerate().skip(1) {
-                if line.trim() == "---" {
-                    front_matter_end = idx;
-                    break;
-                }
-            }
         }
 
         // Second pass: detect headings (including Setext which needs look-ahead) and blockquotes

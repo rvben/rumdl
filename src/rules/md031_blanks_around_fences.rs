@@ -4,6 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use serde::{Deserialize, Serialize};
 
@@ -169,8 +170,10 @@ impl Rule for MD031BlanksAroundFences {
                             current_fence_marker = None;
 
                             // Check for blank line after closing fence
+                            // Allow Kramdown block attributes if configured
                             if i + 1 < lines.len()
                                 && !Self::is_empty_line(lines[i + 1])
+                                && !is_kramdown_block_attribute(lines[i + 1])
                                 && self.should_require_blank_line(i, &lines)
                             {
                                 let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
@@ -277,8 +280,10 @@ impl Rule for MD031BlanksAroundFences {
                             current_fence_marker = None;
 
                             // Add blank line after closing fence if needed
+                            // Don't add if next line is a Kramdown block attribute
                             if i + 1 < lines.len()
                                 && !Self::is_empty_line(lines[i + 1])
+                                && !is_kramdown_block_attribute(lines[i + 1])
                                 && self.should_require_blank_line(i, &lines)
                             {
                                 result.push(String::new());

@@ -25,6 +25,7 @@ mod md027_test;
 mod md028_test;
 mod md029_test;
 mod md030_test;
+mod md031_kramdown_test;
 mod md031_test;
 mod md032_test;
 mod md033_test;
@@ -56,6 +57,7 @@ mod md054_test;
 mod md055_test;
 mod md056_test;
 mod md057_test;
+mod md058_kramdown_test;
 mod md058_test;
 
 // Unicode-specific test modules

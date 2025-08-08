@@ -33,6 +33,39 @@ fn test_valid_ordered_list() {
 }
 
 #[test]
+fn test_frontmatter_yaml_lists_not_detected() {
+    // Test for issue #35 - YAML lists in frontmatter should not be detected as Markdown lists
+    let rule = MD005ListIndent;
+    let content = "\
+---
+layout: post
+title: \"title\"
+creator:
+  - 'user1'
+  - 'user2'
+creator_num:
+  - 1253217
+  - 1615089
+tags: [tag1, tag2, tag3]
+---
+
+# TITLE
+
+## Heading
+
+Whatever
+
+And a list:
+
+- Item1
+- Item2";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    // Should not flag YAML lists in frontmatter
+    assert!(result.is_empty(), "MD005 should not check lists in frontmatter");
+}
+
+#[test]
 fn test_invalid_unordered_indent() {
     let rule = MD005ListIndent;
     let content = "\
