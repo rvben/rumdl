@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release
+.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all
 
 # Development environment setup
 setup-mise:
@@ -59,6 +59,22 @@ ci-install-mise:
 
 build:
 	cargo build --release
+
+# Static binary builds for Linux (musl)
+build-static-linux-x64:
+	@echo "Building static Linux x86_64 binary..."
+	rustup target add x86_64-unknown-linux-musl 2>/dev/null || true
+	mise exec -- cargo zigbuild --release --target x86_64-unknown-linux-musl
+	@echo "Static binary built at: target/x86_64-unknown-linux-musl/release/rumdl"
+
+build-static-linux-arm64:
+	@echo "Building static Linux ARM64 binary..."
+	rustup target add aarch64-unknown-linux-musl 2>/dev/null || true
+	mise exec -- cargo zigbuild --release --target aarch64-unknown-linux-musl
+	@echo "Static binary built at: target/aarch64-unknown-linux-musl/release/rumdl"
+
+build-static-all: build-static-linux-x64 build-static-linux-arm64
+	@echo "All static Linux binaries built successfully"
 
 test:
 	cargo nextest run --profile dev

@@ -68,10 +68,12 @@ jobs:
     strategy:
       matrix:
         include:
+          # Linux musl targets (static binaries)
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
           - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
+            target: aarch64-unknown-linux-musl
+          # Windows and macOS targets
           - os: windows-latest
             target: x86_64-pc-windows-msvc
           - os: macos-latest
@@ -104,14 +106,11 @@ jobs:
       # Build wheel
       - name: Build wheel
         run: |
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-            # Use zig for cross-compilation to Linux ARM64
-            mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
-          elif [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
-            # Use manylinux2014 with zig for better compatibility on x86_64 Linux
-            mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
+          if [[ "${{ matrix.target }}" == *"-musl" ]]; then
+            # Use musllinux_1_2 with zig for static Linux binaries
+            mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility musllinux_1_2 --zig
           else
-            # Native compilation or standard cross-compilation
+            # Native compilation for Windows and macOS
             mise exec -- maturin build --release --target ${{ matrix.target }}
           fi
         shell: bash
@@ -119,56 +118,61 @@ jobs:
       # Build binary
       - name: Build binary
         run: |
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-            # Use cargo-zigbuild for cross-compilation to Linux ARM64
+          if [[ "${{ matrix.target }}" == *"-linux-"* ]]; then
+            # Use cargo-zigbuild for all Linux builds (both musl and gnu)
             cargo install cargo-zigbuild --locked
             mise exec -- cargo zigbuild --release --target ${{ matrix.target }}
           else
-            # Native compilation or standard cross-compilation
+            # Native compilation for Windows and macOS
             cargo build --release --target ${{ matrix.target }}
           fi
         shell: bash
 
-      # Rename binary
-      - name: Prepare artifacts
-        run: |
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            mv target/${{ matrix.target }}/release/rumdl.exe rumdl-${{ matrix.target }}.exe
-          else
-            mv target/${{ matrix.target }}/release/rumdl rumdl-${{ matrix.target }}
-          fi
-        shell: bash
-
-      # Create Homebrew archives for macOS builds
-      - name: Create Homebrew archives
-        if: runner.os == 'macOS'
+      # Create release archives
+      - name: Create release archives
         run: |
           # Extract version from ref (e.g., refs/tags/v0.0.97 -> v0.0.97)
           VERSION=${GITHUB_REF#refs/tags/}
 
           # Create directory structure for archive
-          mkdir -p homebrew-package
-          cp rumdl-${{ matrix.target }} homebrew-package/rumdl
+          mkdir -p release-package
 
-          # Create tar.gz archive
-          tar -czf rumdl-${VERSION}-${{ matrix.target }}.tar.gz -C homebrew-package rumdl
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            # Windows: Create a zip archive
+            cp target/${{ matrix.target }}/release/rumdl.exe release-package/rumdl.exe
 
-          # Calculate SHA256
-          shasum -a 256 rumdl-${VERSION}-${{ matrix.target }}.tar.gz > rumdl-${VERSION}-${{ matrix.target }}.tar.gz.sha256
+            # Create zip archive (using PowerShell via bash)
+            cd release-package
+            powershell -command "Compress-Archive -Path rumdl.exe -DestinationPath ../rumdl-${VERSION}-${{ matrix.target }}.zip"
+            cd ..
+
+            # Calculate SHA256 for zip
+            powershell -command "Get-FileHash -Path rumdl-${VERSION}-${{ matrix.target }}.zip -Algorithm SHA256 | Select-Object -ExpandProperty Hash" > rumdl-${VERSION}-${{ matrix.target }}.zip.sha256
+          else
+            # Unix: Create tar.gz archive
+            cp target/${{ matrix.target }}/release/rumdl release-package/rumdl
+
+            # Create tar.gz archive
+            tar -czf rumdl-${VERSION}-${{ matrix.target }}.tar.gz -C release-package rumdl
+
+            # Calculate SHA256
+            if [[ "${{ runner.os }}" == "macOS" ]]; then
+              shasum -a 256 rumdl-${VERSION}-${{ matrix.target }}.tar.gz > rumdl-${VERSION}-${{ matrix.target }}.tar.gz.sha256
+            else
+              sha256sum rumdl-${VERSION}-${{ matrix.target }}.tar.gz > rumdl-${VERSION}-${{ matrix.target }}.tar.gz.sha256
+            fi
+          fi
+
+          # Also keep raw binary for backward compatibility (will remove in future)
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp target/${{ matrix.target }}/release/rumdl.exe rumdl-${{ matrix.target }}.exe
+          else
+            cp target/${{ matrix.target }}/release/rumdl rumdl-${{ matrix.target }}
+          fi
 
           # Clean up
-          rm -rf homebrew-package
+          rm -rf release-package
         shell: bash
-
-      # Upload Homebrew archives
-      - name: Upload Homebrew archives
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          path: |
-            rumdl-*-${{ matrix.target }}.tar.gz
-            rumdl-*-${{ matrix.target }}.tar.gz.sha256
-          name: homebrew-${{ matrix.target }}
 
       # Upload artifacts
       - name: Upload wheel
@@ -177,11 +181,14 @@ jobs:
           path: target/wheels/*
           name: wheel-${{ matrix.target }}
 
-      - name: Upload binary
+      - name: Upload release archives
         uses: actions/upload-artifact@v4
         with:
-          path: rumdl-${{ matrix.target }}*
-          name: rumdl-${{ matrix.target }}
+          path: |
+            rumdl-*-${{ matrix.target }}.tar.gz*
+            rumdl-*-${{ matrix.target }}.zip*
+            rumdl-${{ matrix.target }}*
+          name: release-${{ matrix.target }}
 
   sdist:
     runs-on: ubuntu-latest
@@ -271,9 +278,13 @@ jobs:
         with:
           body_path: release-notes.md
           files: |
-            artifacts/rumdl-*/rumdl-*
-            artifacts/homebrew-*/rumdl-*.tar.gz
-            artifacts/homebrew-*/rumdl-*.tar.gz.sha256
+            artifacts/release-*/rumdl-*.tar.gz
+            artifacts/release-*/rumdl-*.tar.gz.sha256
+            artifacts/release-*/rumdl-*.zip
+            artifacts/release-*/rumdl-*.zip.sha256
+            artifacts/release-*/rumdl-*.exe
+            artifacts/release-*/rumdl-*-apple-darwin
+            artifacts/release-*/rumdl-*-linux-musl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -282,11 +293,10 @@ jobs:
         run: |
           echo "DRY RUN: Would create release with:"
           echo "- Release notes from: release-notes.md"
-          echo "- Artifacts:"
-          find artifacts -name "rumdl-*" -type f | sort
-          echo ""
-          echo "- Homebrew archives:"
-          find artifacts/homebrew-* -name "*.tar.gz*" -type f 2>/dev/null | sort || echo "  (none for non-macOS builds)"
+          echo "- Archives:"
+          find artifacts/release-* -name "*.tar.gz*" -o -name "*.zip*" -type f 2>/dev/null | sort
+          echo "- Raw binaries (for backward compatibility):"
+          find artifacts/release-* -name "rumdl-*" ! -name "*.tar.gz*" ! -name "*.zip*" -type f 2>/dev/null | sort
 
       - name: Notify rumdl-pre-commit
         if: ${{ success() && inputs.dry_run != true }}

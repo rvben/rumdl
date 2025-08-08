@@ -20,6 +20,7 @@ uv = "latest"
 "cargo:cargo-watch" = "latest"
 "cargo:maturin" = "latest"
 "cargo:cargo-binstall" = "latest"
+"cargo:cargo-zigbuild" = "latest"  # For building static Linux binaries
 
 # Zig for cross-compilation (used by maturin)
 zig = "0.13"
