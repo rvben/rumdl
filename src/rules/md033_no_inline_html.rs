@@ -299,6 +299,11 @@ impl Rule for MD033NoInlineHtml {
             if structure.is_in_code_block(line_num) {
                 continue;
             }
+            // Skip lines that are indented code blocks (4+ spaces or tab) per CommonMark spec
+            // Even if they're not in the structure's code blocks (e.g., HTML blocks)
+            if line.starts_with("    ") || line.starts_with('\t') {
+                continue;
+            }
 
             // Find all HTML tags in the line using regex
             for tag_match in HTML_TAG_FINDER.find_iter(line) {
