@@ -18,6 +18,8 @@ impl CodeBlockUtils {
         let mut blocks = Vec::new();
         let mut in_code_block = false;
         let mut code_block_start = 0;
+        let mut opening_fence_char = ' ';
+        let mut opening_fence_len = 0;
 
         // Pre-compute line positions for efficient offset calculation
         let lines: Vec<&str> = content.lines().collect();
@@ -31,16 +33,28 @@ impl CodeBlockUtils {
         // Find fenced code blocks
         for (i, line) in lines.iter().enumerate() {
             let line_start = line_positions[i];
+            let trimmed = line.trim_start();
 
-            if CODE_BLOCK_PATTERN.is_match(line.trim()) {
-                if !in_code_block {
+            // Check if this line could be a code fence
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                let fence_char = trimmed.chars().next().unwrap();
+                let fence_len = trimmed.chars().take_while(|&c| c == fence_char).count();
+
+                if !in_code_block && fence_len >= 3 {
+                    // Opening fence
                     code_block_start = line_start;
                     in_code_block = true;
-                } else {
+                    opening_fence_char = fence_char;
+                    opening_fence_len = fence_len;
+                } else if in_code_block && fence_char == opening_fence_char && fence_len >= opening_fence_len {
+                    // Closing fence - must match opening fence character and be at least as long
                     let code_block_end = line_start + line.len();
                     blocks.push((code_block_start, code_block_end));
                     in_code_block = false;
+                    opening_fence_char = ' ';
+                    opening_fence_len = 0;
                 }
+                // If we're in a code block but the fence doesn't match, it's just content
             }
         }
 

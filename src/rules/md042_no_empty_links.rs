@@ -483,4 +483,41 @@ Code block should be ignored:
             );
         }
     }
+
+    #[test]
+    fn test_issue_29_code_block_with_tildes() {
+        // Test for issue #29 - code blocks with tilde markers should not break reference links
+        let content = r#"In addition to the [local scope][] and the [global scope][], Python also has a **built-in scope**.
+
+```pycon
+>>> @count_calls
+... def greet(name):
+...     print("Hi", name)
+...
+>>> greet("Trey")
+Traceback (most recent call last):
+  File "<python-input-2>", line 1, in <module>
+    greet("Trey")
+    ~~~~~^^^^^^^^
+  File "<python-input-0>", line 4, in wrapper
+    calls += 1
+    ^^^^^
+UnboundLocalError: cannot access local variable 'calls' where it is not associated with a value
+```
+
+
+[local scope]: https://www.pythonmorsels.com/local-and-global-variables/
+[global scope]: https://www.pythonmorsels.com/assigning-global-variables/"#;
+
+        let ctx = LintContext::new(content);
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+
+        // These reference links should NOT be flagged as empty
+        assert!(
+            result.is_empty(),
+            "Should not flag reference links as empty when code blocks contain tildes (issue #29). Got: {:?}",
+            result
+        );
+    }
 }
