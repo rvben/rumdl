@@ -3,9 +3,7 @@
 /// See [docs/md037.md](../../docs/md037.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::emphasis_utils::{
-    EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
-};
+use crate::utils::emphasis_utils::{EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns};
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -113,11 +111,8 @@ impl Rule for MD037NoSpaceInEmphasis {
                 continue;
             }
 
-            // Replace inline code with placeholders to avoid false positives
-            let line_no_code = replace_inline_code(line);
-
-            // Use the optimized emphasis parsing logic
-            self.check_line_for_emphasis_issues_fast(&line_no_code, line_num + 1, &mut warnings);
+            // Check for emphasis issues on the original line
+            self.check_line_for_emphasis_issues_fast(line, line_num + 1, &mut warnings);
         }
 
         // Filter out warnings for emphasis markers that are inside links
@@ -465,5 +460,58 @@ This has * real spaced emphasis * that should be flagged."#;
         assert!(result[0].message.contains("Spaces inside emphasis markers"));
         // Should be the "* real spaced *" text on line 1
         assert!(result[0].line == 1);
+    }
+
+    #[test]
+    fn test_issue_28_inline_code_in_emphasis() {
+        // Test for issue #28 - MD037 should not flag inline code inside emphasis as spaces
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Test case 1: inline code with single backticks inside bold emphasis
+        let content = "Though, we often call this an **inline `if`** because it looks sort of like an `if`-`else` statement all in *one line* of code.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag inline code inside emphasis as spaces (issue #28). Got: {:?}",
+            result
+        );
+
+        // Test case 2: multiple inline code snippets inside emphasis
+        let content2 = "The **`foo` and `bar`** methods are important.";
+        let ctx2 = LintContext::new(content2);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "Should not flag multiple inline code snippets inside emphasis. Got: {:?}",
+            result2
+        );
+
+        // Test case 3: inline code with underscores for emphasis
+        let content3 = "This is __inline `code`__ with underscores.";
+        let ctx3 = LintContext::new(content3);
+        let result3 = rule.check(&ctx3).unwrap();
+        assert!(
+            result3.is_empty(),
+            "Should not flag inline code with underscore emphasis. Got: {:?}",
+            result3
+        );
+
+        // Test case 4: single asterisk emphasis with inline code
+        let content4 = "This is *inline `test`* with single asterisks.";
+        let ctx4 = LintContext::new(content4);
+        let result4 = rule.check(&ctx4).unwrap();
+        assert!(
+            result4.is_empty(),
+            "Should not flag inline code with single asterisk emphasis. Got: {:?}",
+            result4
+        );
+
+        // Test case 5: actual spaces that should be flagged
+        let content5 = "This has * real spaces * that should be flagged.";
+        let ctx5 = LintContext::new(content5);
+        let result5 = rule.check(&ctx5).unwrap();
+        assert!(!result5.is_empty(), "Should still flag actual spaces in emphasis");
+        assert!(result5[0].message.contains("Spaces inside emphasis markers"));
     }
 }
