@@ -244,7 +244,16 @@ impl DocumentStructure {
         // Detect front matter FIRST (needed before heading detection)
         self.detect_front_matter(content);
 
-        // Compute code blocks (needed for other analyses)
+        // Quick checks to skip expensive operations if not needed
+        let has_blockquote_markers = CONTAINS_BLOCKQUOTE.is_match(content);
+        let has_html_blocks = CONTAINS_HTML_BLOCK.is_match(content);
+
+        // Detect HTML blocks BEFORE computing code blocks (HTML blocks should not be treated as indented code)
+        if has_html_blocks {
+            self.detect_html_blocks(content);
+        }
+
+        // Compute code blocks
         self.code_blocks = self.compute_code_blocks(content);
         self.has_code_blocks = !self.code_blocks.is_empty();
 
@@ -253,10 +262,6 @@ impl DocumentStructure {
 
         // Populate fenced code block starts and ends
         self.populate_fenced_code_blocks();
-
-        // Quick checks to skip expensive operations if not needed
-        let has_blockquote_markers = CONTAINS_BLOCKQUOTE.is_match(content);
-        let has_html_blocks = CONTAINS_HTML_BLOCK.is_match(content);
         let has_backticks = content.contains('`');
         let has_brackets = content.contains('[');
         let has_headings = CONTAINS_ATX_HEADING.is_match(content) || CONTAINS_SETEXT_UNDERLINE.is_match(content);
@@ -281,11 +286,6 @@ impl DocumentStructure {
         // OPTIMIZATION 4: Detect blockquotes only if needed
         if has_blockquote_markers {
             self.detect_blockquotes(content);
-        }
-
-        // Detect HTML blocks only if needed
-        if has_html_blocks {
-            self.detect_html_blocks(content);
         }
 
         // OPTIMIZATION 1: Detect inline code spans only if needed
@@ -509,9 +509,11 @@ impl DocumentStructure {
                     current_language = lang.filter(|l| !l.is_empty());
                 }
                 // Check for indented code block (CommonMark compliant)
-                else if Self::is_indented_code_line(line) && !line.trim().is_empty() {
+                // But skip if we're inside an HTML block
+                else if Self::is_indented_code_line(line) && !line.trim().is_empty() && !self.is_in_html_block(i + 1)
+                {
                     // According to CommonMark, any content indented by 4+ spaces OR a tab is a code block
-                    // regardless of what the content is (including HTML)
+                    // unless it's inside an HTML block
                     let mut end_line = i;
 
                     // Find the end of this indented code block
@@ -519,8 +521,11 @@ impl DocumentStructure {
                     while end_line + 1 < lines.len() {
                         let next_line = lines[end_line + 1];
 
-                        if Self::is_indented_code_line(next_line) && !next_line.trim().is_empty() {
-                            // Found another indented line, continue the block
+                        if Self::is_indented_code_line(next_line)
+                            && !next_line.trim().is_empty()
+                            && !self.is_in_html_block(end_line + 2)
+                        {
+                            // Found another indented line that's not in HTML, continue the block
                             end_line += 1;
                         } else if next_line.trim().is_empty() {
                             // Found a blank line, check if there are more indented lines after it
@@ -529,7 +534,10 @@ impl DocumentStructure {
 
                             while lookahead < lines.len() {
                                 let lookahead_line = lines[lookahead];
-                                if Self::is_indented_code_line(lookahead_line) && !lookahead_line.trim().is_empty() {
+                                if Self::is_indented_code_line(lookahead_line)
+                                    && !lookahead_line.trim().is_empty()
+                                    && !self.is_in_html_block(lookahead + 1)
+                                {
                                     found_indented = true;
                                     break;
                                 } else if !lookahead_line.trim().is_empty() {

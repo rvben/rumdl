@@ -640,4 +640,19 @@ result = inspect.stack()[1]
         assert_eq!(result.len(), 1, "Should only flag the actual reversed link");
         assert_eq!(result[0].line, 4, "Should flag the reversed link on line 4");
     }
+
+    #[test]
+    fn test_issue_26_specific_case() {
+        // Test for issue #26 - specific case reported
+        let rule = MD011NoReversedLinks;
+
+        let content = r#"The first thing I need to find is the name of the redacted key name, `doc.<key_name_omitted>`. I'll use `SUBSTRING(ATTRIBUTES(doc)[0], 0, 1) == '<c>'` as that test, where `<c>` is different characters. This gets the first attribute from `doc` and uses `SUBSTRING` to get the first character."#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag ATTRIBUTES(doc)[0] inside inline code (issue #26)"
+        );
+    }
 }

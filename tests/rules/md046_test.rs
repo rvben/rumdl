@@ -527,3 +527,29 @@ The code block above should be properly closed.
         "Invalid fence patterns inside code blocks should be ignored"
     );
 }
+
+#[test]
+fn test_issue_27_html_blocks_not_indented_code() {
+    // Test for issue #27 - HTML blocks with indentation should not be treated as indented code blocks
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = r#"<div>
+<ul>
+    <li>Variables are pointers in Python</li>
+    <li>Assignment versus Mutation in Python</li>
+</ul>
+</div>
+
+```pycon
+>>> numbers = [2, 1, 3, 4, 7]
+>>> numbers2 = [11, 18, 29]
+>>> name = "Trey"
+```"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "HTML blocks with indentation should not be flagged as indented code blocks (issue #27)"
+    );
+}
