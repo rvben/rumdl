@@ -2,6 +2,7 @@
 ///
 /// See [docs/md026.md](../../docs/md026.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::kramdown_utils::has_header_id;
 use crate::utils::range_utils::calculate_match_range;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -195,6 +196,16 @@ impl MD026NoTrailingPunctuation {
             let space = captures.get(3).unwrap().as_str();
             let content = captures.get(4).unwrap().as_str();
 
+            // If content has a valid Kramdown header ID, don't fix it
+            if has_header_id(content) {
+                // Return the line unchanged
+                if let Some(trailing) = captures.get(5) {
+                    return format!("{}{}{}{}{}", indentation, hashes, space, content, trailing.as_str());
+                }
+                return format!("{indentation}{hashes}{space}{content}");
+            }
+
+            // Otherwise, remove trailing punctuation
             let fixed_content = self.remove_trailing_punctuation(content, re);
 
             // Preserve any trailing hashes if present
@@ -297,10 +308,26 @@ impl Rule for MD026NoTrailingPunctuation {
                     continue;
                 }
 
-                // Check for trailing punctuation
-                if self.has_trailing_punctuation(&heading.text, &re) {
+                // For headers with potential Kramdown syntax, we need to be more careful
+                let text_to_check = if has_header_id(&heading.text) {
+                    // Valid Kramdown ID - skip this header entirely
+                    continue;
+                } else if heading.text.contains("{") && heading.text.trim().ends_with("}") {
+                    // Has curly braces but not a valid Kramdown ID
+                    // Check for punctuation before the opening brace
+                    if let Some(brace_pos) = heading.text.rfind('{') {
+                        heading.text[..brace_pos].trim().to_string()
+                    } else {
+                        heading.text.clone()
+                    }
+                } else {
+                    // Regular header without Kramdown syntax
+                    heading.text.clone()
+                };
+
+                if self.has_trailing_punctuation(&text_to_check, &re) {
                     // Find the trailing punctuation
-                    if let Some(punctuation_match) = re.find(&heading.text) {
+                    if let Some(punctuation_match) = re.find(&text_to_check) {
                         let line = &line_info.content;
 
                         // For ATX headings, find the punctuation position in the line
@@ -316,14 +343,14 @@ impl Rule for MD026NoTrailingPunctuation {
                             punctuation_len,
                         );
 
-                        let last_char = heading.text.chars().last().unwrap_or(' ');
+                        let last_char = text_to_check.chars().last().unwrap_or(' ');
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
                             line: start_line,
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Heading '{}' ends with punctuation '{}'", heading.text, last_char),
+                            message: format!("Heading '{text_to_check}' ends with punctuation '{last_char}'"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: self.get_line_byte_range(content, line_num + 1),
@@ -386,8 +413,25 @@ impl Rule for MD026NoTrailingPunctuation {
                     continue;
                 }
 
+                // Handle headers with potential Kramdown syntax
+                let text_to_check = if has_header_id(&heading.text) {
+                    // Valid Kramdown ID - skip this header entirely
+                    continue;
+                } else if heading.text.contains("{") && heading.text.trim().ends_with("}") {
+                    // Has curly braces but not a valid Kramdown ID
+                    // Check for punctuation before the opening brace
+                    if let Some(brace_pos) = heading.text.rfind('{') {
+                        heading.text[..brace_pos].trim().to_string()
+                    } else {
+                        heading.text.clone()
+                    }
+                } else {
+                    // Regular header without Kramdown syntax
+                    heading.text.clone()
+                };
+
                 // Check and fix trailing punctuation
-                if self.has_trailing_punctuation(&heading.text, &re) {
+                if self.has_trailing_punctuation(&text_to_check, &re) {
                     fixed_lines[line_num] = if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                         self.fix_atx_heading(&line_info.content, &re)
                     } else {

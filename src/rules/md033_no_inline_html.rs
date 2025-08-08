@@ -5,6 +5,7 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::kramdown_utils::{is_kramdown_block_attribute, is_kramdown_extension};
 use crate::utils::range_utils::calculate_html_tag_range;
 use crate::utils::regex_cache::*;
 use lazy_static::lazy_static;
@@ -157,7 +158,13 @@ impl MD033NoInlineHtml {
     }
 
     /// Find HTML tags that span multiple lines
-    fn find_multiline_html_tags(&self, content: &str, structure: &DocumentStructure, warnings: &mut Vec<LintWarning>) {
+    fn find_multiline_html_tags(
+        &self,
+        content: &str,
+        structure: &DocumentStructure,
+        nomarkdown_ranges: &[(usize, usize)],
+        warnings: &mut Vec<LintWarning>,
+    ) {
         // Early return: if content has no incomplete tags at line ends, skip processing
         if !content.contains('<') || !content.lines().any(|line| line.trim_end().ends_with('<')) {
             return;
@@ -175,6 +182,14 @@ impl MD033NoInlineHtml {
 
             // Skip code blocks and empty lines
             if line.trim().is_empty() || structure.is_in_code_block(line_num) {
+                continue;
+            }
+
+            // Skip lines inside nomarkdown blocks
+            if nomarkdown_ranges
+                .iter()
+                .any(|(start, end)| line_num >= *start && line_num <= *end)
+            {
                 continue;
             }
 
@@ -288,7 +303,37 @@ impl Rule for MD033NoInlineHtml {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
-        // First pass: find single-line HTML tags
+        // Track nomarkdown and comment blocks
+        let mut in_nomarkdown = false;
+        let mut in_comment = false;
+        let mut nomarkdown_ranges: Vec<(usize, usize)> = Vec::new();
+        let mut nomarkdown_start = 0;
+        let mut comment_start = 0;
+
+        // First pass: identify nomarkdown and comment blocks
+        for (i, line) in lines.iter().enumerate() {
+            let line_num = i + 1;
+
+            // Check for nomarkdown start
+            if line.trim() == "{::nomarkdown}" {
+                in_nomarkdown = true;
+                nomarkdown_start = line_num;
+            } else if line.trim() == "{:/nomarkdown}" && in_nomarkdown {
+                in_nomarkdown = false;
+                nomarkdown_ranges.push((nomarkdown_start, line_num));
+            }
+
+            // Check for comment blocks
+            if line.trim() == "{::comment}" {
+                in_comment = true;
+                comment_start = line_num;
+            } else if line.trim() == "{:/comment}" && in_comment {
+                in_comment = false;
+                nomarkdown_ranges.push((comment_start, line_num));
+            }
+        }
+
+        // Second pass: find single-line HTML tags
         // To match markdownlint behavior, report one warning per HTML tag
         for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1;
@@ -302,6 +347,19 @@ impl Rule for MD033NoInlineHtml {
             // Skip lines that are indented code blocks (4+ spaces or tab) per CommonMark spec
             // Even if they're not in the structure's code blocks (e.g., HTML blocks)
             if line.starts_with("    ") || line.starts_with('\t') {
+                continue;
+            }
+
+            // Skip lines inside nomarkdown blocks
+            if nomarkdown_ranges
+                .iter()
+                .any(|(start, end)| line_num >= *start && line_num <= *end)
+            {
+                continue;
+            }
+
+            // Skip Kramdown extensions and block attributes
+            if is_kramdown_extension(line) || is_kramdown_block_attribute(line) {
                 continue;
             }
 
@@ -356,8 +414,8 @@ impl Rule for MD033NoInlineHtml {
             }
         }
 
-        // Second pass: find multi-line HTML tags
-        self.find_multiline_html_tags(ctx.content, structure, &mut warnings);
+        // Third pass: find multi-line HTML tags
+        self.find_multiline_html_tags(ctx.content, structure, &nomarkdown_ranges, &mut warnings);
 
         Ok(warnings)
     }

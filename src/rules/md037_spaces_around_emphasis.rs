@@ -4,6 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::emphasis_utils::{EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns};
+use crate::utils::kramdown_utils::has_span_ial;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -329,6 +330,16 @@ impl MD037NoSpaceInEmphasis {
                 let full_start = span.opening.start_pos;
                 let full_end = span.closing.end_pos();
                 let full_text = &content[full_start..full_end];
+
+                // Skip if this emphasis has a Kramdown span IAL immediately after it
+                // (no space between emphasis and IAL)
+                if full_end < content.len() {
+                    let remaining = &content[full_end..];
+                    // Check if IAL starts immediately after the emphasis (no whitespace)
+                    if remaining.starts_with('{') && has_span_ial(remaining.split_whitespace().next().unwrap_or("")) {
+                        continue;
+                    }
+                }
 
                 // Create the marker string efficiently
                 let marker_char = span.opening.as_char();
