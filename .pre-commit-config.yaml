@@ -1,8 +1,8 @@
 # Pre-commit hooks for rumdl
-# Install with: 
+# Install with:
 #   pre-commit install                    # Install commit hooks
 #   pre-commit install --hook-type pre-push  # Install push hooks
-# Run manually: 
+# Run manually:
 #   pre-commit run --all-files           # Run commit hooks
 #   pre-commit run --hook-stage push --all-files  # Run push hooks
 
@@ -64,7 +64,7 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
-        stages: [push]
+        stages: [pre-push]
         verbose: true
 
       - id: cargo-lint-full
@@ -73,7 +73,7 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
-        stages: [push]
+        stages: [pre-push]
         verbose: true
 
       - id: cargo-doc-check
@@ -82,5 +82,5 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
-        stages: [push]
+        stages: [pre-push]
         verbose: true
