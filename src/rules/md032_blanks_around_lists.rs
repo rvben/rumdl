@@ -111,12 +111,18 @@ impl MD032BlanksAroundLists {
         ctx: &crate::lint_context::LintContext,
         structure: &DocumentStructure,
         prev_line_num: usize,
+        current_line_num: usize,
     ) -> bool {
         let trimmed_prev = prev_line.trim();
 
         // Always require blank lines after code blocks, front matter, etc.
         if structure.is_in_code_block(prev_line_num) || structure.is_in_front_matter(prev_line_num) {
             return true;
+        }
+
+        // Always allow nested lists (lists indented within other list items)
+        if self.is_nested_list(ctx, prev_line_num, current_line_num) {
+            return false;
         }
 
         // Allow lists after headings if configured
@@ -140,6 +146,30 @@ impl MD032BlanksAroundLists {
         } else {
             false
         }
+    }
+
+    /// Check if the current list is nested within another list item
+    fn is_nested_list(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        prev_line_num: usize,    // 1-indexed
+        current_line_num: usize, // 1-indexed
+    ) -> bool {
+        // Check if current line is indented (typical for nested lists)
+        if current_line_num > 0 && current_line_num - 1 < ctx.lines.len() {
+            let current_line = &ctx.lines[current_line_num - 1];
+            if current_line.indent >= 2 {
+                // Check if previous line is a list item or list content
+                if prev_line_num > 0 && prev_line_num - 1 < ctx.lines.len() {
+                    let prev_line = &ctx.lines[prev_line_num - 1];
+                    // Previous line is a list item or indented content
+                    if prev_line.list_item.is_some() || prev_line.indent >= 2 {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     // Convert centralized list blocks to the format expected by perform_checks
@@ -291,8 +321,13 @@ impl MD032BlanksAroundLists {
 
                 // Only require blank lines for content in the same context (same blockquote level)
                 // and when the context actually requires it
-                let should_require =
-                    self.should_require_blank_line_before(prev_line_str, ctx, structure, prev_line_actual_idx_1);
+                let should_require = self.should_require_blank_line_before(
+                    prev_line_str,
+                    ctx,
+                    structure,
+                    prev_line_actual_idx_1,
+                    start_line,
+                );
                 if !is_prev_excluded && !prev_is_blank && prefixes_match && should_require {
                     // Calculate precise character range for the entire list line that needs a blank line before it
                     let (start_line, start_col, end_line, end_col) =
@@ -488,6 +523,7 @@ impl MD032BlanksAroundLists {
                     ctx,
                     structure,
                     prev_line_actual_idx_1,
+                    start_line,
                 );
                 if !is_prev_excluded
                     && !is_blank_in_context(lines[prev_line_actual_idx_0])

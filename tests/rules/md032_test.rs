@@ -171,14 +171,65 @@ fn test_multiple_lists() {
 
 #[test]
 fn test_nested_lists() {
+    // Nested lists should not require blank lines between parent and child items
     let rule = MD032BlanksAroundLists::default();
     let content = "Text\n* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2\nText";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
+    // Should only warn about missing blank lines around the outer list, not the nested items
+    assert_eq!(
+        result.len(),
+        2,
+        "Should only warn about outer list boundaries, not nested items"
+    );
     let fixed = rule.fix(&ctx).unwrap();
     let _ctx_fixed = LintContext::new(&fixed);
     assert_eq!(fixed, "Text\n\n* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2\n\nText");
+}
+
+#[test]
+fn test_nested_lists_with_strict_mode() {
+    // Even in strict mode, nested lists are a standard Markdown pattern and shouldn't require blank lines
+    let rule = MD032BlanksAroundLists::strict();
+    let content = "Text\n\n* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2\n\nText";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    // Even strict mode should not warn about nested lists - this is standard Markdown
+    assert!(
+        result.is_empty(),
+        "Nested lists are standard Markdown and shouldn't trigger warnings even in strict mode"
+    );
+}
+
+#[test]
+fn test_deeply_nested_lists() {
+    // Test multiple levels of nesting
+    let rule = MD032BlanksAroundLists::default();
+    let content = "## Section\n\n* Level 1\n  * Level 2\n    * Level 3\n      * Level 4\n  * Back to Level 2\n* Back to Level 1\n\nText";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    // Should not warn about nested list transitions
+    assert!(result.is_empty(), "Should not warn about deeply nested lists");
+}
+
+#[test]
+fn test_nested_ordered_lists() {
+    // Test nested ordered lists
+    let rule = MD032BlanksAroundLists::default();
+    let content = "## Section\n\n1. First item\n   1. Sub item 1.1\n   2. Sub item 1.2\n2. Second item\n   1. Sub item 2.1\n\nText";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should not warn about nested ordered lists");
+}
+
+#[test]
+fn test_mixed_nested_list_types() {
+    // Test mixing ordered and unordered lists in nesting
+    let rule = MD032BlanksAroundLists::default();
+    let content = "## Section\n\n1. Ordered item\n   - Unordered sub-item\n   - Another unordered sub-item\n2. Another ordered item\n   * Different unordered marker\n\nText";
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should not warn about mixed nested list types");
 }
 
 #[test]
