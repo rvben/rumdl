@@ -3,16 +3,9 @@ use std::path::Path;
 use tempfile::TempDir;
 
 fn run_rumdl_check(dir: &Path) -> String {
-    let output = std::process::Command::new("cargo")
-        .args([
-            "run",
-            "--release",
-            "--bin",
-            "rumdl",
-            "--",
-            "check",
-            dir.to_str().unwrap(),
-        ])
+    // Use the binary built by the test harness for speed and reliability
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["check", dir.to_str().unwrap()])
         .output()
         .expect("Failed to execute rumdl");
 

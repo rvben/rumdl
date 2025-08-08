@@ -35,9 +35,9 @@ Final content.
         fs::write(project_path.join(format!("test{i}.md")), test_content).unwrap();
     }
 
-    // Start LSP server
-    let mut lsp_process = Command::new("cargo")
-        .args(["run", "--bin", "rumdl", "--", "lsp"])
+    // Start LSP server using the built binary
+    let mut lsp_process = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("lsp")
         .current_dir(project_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -192,9 +192,9 @@ fn test_lsp_memory_stress_with_large_files() {
 
     fs::write(project_path.join("large.md"), &large_content).unwrap();
 
-    // Start LSP server
-    let mut lsp_process = Command::new("cargo")
-        .args(["run", "--bin", "rumdl", "--", "lsp"])
+    // Start LSP server using the built binary
+    let mut lsp_process = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("lsp")
         .current_dir(project_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -311,9 +311,9 @@ fn test_lsp_concurrent_document_handling() {
         fs::write(project_path.join(format!("doc{i}.md")), content).unwrap();
     }
 
-    // Start LSP server
-    let mut lsp_process = Command::new("cargo")
-        .args(["run", "--bin", "rumdl", "--", "lsp"])
+    // Start LSP server using the built binary
+    let mut lsp_process = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("lsp")
         .current_dir(project_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

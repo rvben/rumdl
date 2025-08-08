@@ -3,17 +3,6 @@ use std::io::Write;
 use std::process::Command;
 use tempfile::tempdir;
 
-/// Returns the absolute path to the built rumdl binary (debug build)
-fn rumdl_bin_path() -> std::path::PathBuf {
-    // Use the CARGO_MANIFEST_DIR env var to get the project root
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    let mut path = std::path::PathBuf::from(manifest_dir);
-    path.push("target");
-    path.push("debug");
-    path.push("rumdl");
-    path
-}
-
 #[test]
 fn test_markdownlint_config_cli_output_matches() {
     // Create a temporary directory
@@ -29,7 +18,7 @@ fn test_markdownlint_config_cli_output_matches() {
     file.write_all(config_content.as_bytes()).unwrap();
 
     // Run the built rumdl CLI binary in the tempdir
-    let output = Command::new(rumdl_bin_path())
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .args(["config", "--output", "toml"])
         .current_dir(&dir)
         .output()
@@ -77,7 +66,7 @@ line-length = 88
     ml_file.write_all(config_content.as_bytes()).unwrap();
 
     // Run the built rumdl CLI binary in the tempdir
-    let output = Command::new(rumdl_bin_path())
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .args(["config", "--output", "toml"])
         .current_dir(&dir)
         .output()
@@ -117,7 +106,7 @@ fn test_config_command_prints_source_markdownlint_json() {
     file.write_all(config_content.as_bytes()).unwrap();
 
     // Run the built rumdl CLI binary in the tempdir WITHOUT --output toml
-    let output = Command::new(rumdl_bin_path())
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .arg("config")
         .current_dir(&dir)
         .output()
@@ -152,7 +141,7 @@ fn test_invalid_markdownlint_json_prints_helpful_error() {
 
     // Run the built rumdl CLI binary in the tempdir
     // Run 'config get' specifically to trigger the load
-    let output = Command::new(rumdl_bin_path())
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .args([
             "config",
             "get",

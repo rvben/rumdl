@@ -49,7 +49,7 @@ status-level = "fail"
 [profile.dev]
 
 # Skip the slowest tests but include integration tests
-default-filter = 'not test(/error_propagation/) and not test(/deeply_nested/) and not test(/memory/) and not test(/stress/) and not test(/large/)'
+default-filter = 'not test(/error_propagation/) and not test(/deeply_nested/) and not test(/memory/) and not test(/stress/) and not test(/large/) and not test(/performance/) and not test(/perf_check/)'
 
 # Good parallelization for dev machines
 test-threads = "num-cpus"
