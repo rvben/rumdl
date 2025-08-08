@@ -154,11 +154,11 @@ This document should lint cleanly with no false positives from Kramdown syntax.
     // but should not have Kramdown-specific false positives
 
     if !output.status.success() {
-        println!("STDOUT:\n{}", stdout);
-        println!("STDERR:\n{}", stderr);
+        println!("STDOUT:\n{stdout}");
+        println!("STDERR:\n{stderr}");
 
         // Check if failures are only from acceptable rules
-        let acceptable_patterns = vec![
+        let acceptable_patterns = [
             "MD041", // First line (front matter)
             "MD022", // Blank lines around headings
             "MD025", // Multiple top-level headings

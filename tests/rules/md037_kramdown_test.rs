@@ -4,7 +4,7 @@ use rumdl::rules::MD037NoSpaceInEmphasis;
 
 #[test]
 fn test_md037_with_kramdown_span_ial() {
-    let rule = MD037NoSpaceInEmphasis::default();
+    let rule = MD037NoSpaceInEmphasis;
 
     // Emphasis with spaces but has span IAL - should not trigger
     let content = "This is * emphasized *{:.highlight} text";
@@ -22,7 +22,7 @@ fn test_md037_with_kramdown_span_ial() {
 
 #[test]
 fn test_md037_various_span_ial_patterns() {
-    let rule = MD037NoSpaceInEmphasis::default();
+    let rule = MD037NoSpaceInEmphasis;
 
     let content = r#"Some * text *{:.class} here
 Another ** bold **{:#id} example
@@ -36,7 +36,7 @@ And __double__{:.class #id} underscore"#;
 
 #[test]
 fn test_md037_mixed_with_and_without_ial() {
-    let rule = MD037NoSpaceInEmphasis::default();
+    let rule = MD037NoSpaceInEmphasis;
 
     let content = r#"Good: *text*{:.class}
 Bad: * text *
@@ -57,7 +57,7 @@ Bad: _ italic _"#;
 
 #[test]
 fn test_md037_span_ial_on_links() {
-    let rule = MD037NoSpaceInEmphasis::default();
+    let rule = MD037NoSpaceInEmphasis;
 
     // Links can also have span IAL
     let content = r#"[link text](url){:target="_blank"}
@@ -70,7 +70,7 @@ fn test_md037_span_ial_on_links() {
 
 #[test]
 fn test_md037_inline_code_with_ial() {
-    let rule = MD037NoSpaceInEmphasis::default();
+    let rule = MD037NoSpaceInEmphasis;
 
     // Inline code with IAL (though less common)
     let content = "`code`{:#special-code}";
@@ -82,7 +82,7 @@ fn test_md037_inline_code_with_ial() {
 
 #[test]
 fn test_md037_false_positive_ial() {
-    let rule = MD037NoSpaceInEmphasis::default();
+    let rule = MD037NoSpaceInEmphasis;
 
     // Not actually span IAL - missing colon or special char, or space before IAL
     let content = r#"Some * text * {not-ial}

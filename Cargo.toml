@@ -1,6 +1,6 @@
 [package]
 name = "rumdl"
-version = "0.0.111"
+version = "0.0.112"
 edition = "2024"
 rust-version = "1.88.0"
 description = "A fast Markdown linter written in Rust (Ru(st) MarkDown Linter)"
@@ -14,6 +14,7 @@ keywords = ["markdown", "linter", "markdown-linter", "static-analysis", "documen
 categories = ["command-line-utilities", "development-tools", "text-processing"]
 exclude = [".github/", ".gitignore", "*.bak"]
 autobins = false  # Prevent automatic binary discovery in src/bin/
+default-run = "rumdl"  # Default binary for cargo run
 
 [lib]
 name = "rumdl"
