@@ -265,11 +265,20 @@ jobs:
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
           VERSION=${TAG_NAME#v}
+          
+          # Extract changelog if available
           if [ -f scripts/extract-changelog.sh ] && [ -f CHANGELOG.md ]; then
             chmod +x scripts/extract-changelog.sh
             ./scripts/extract-changelog.sh "$VERSION" > release-notes.md || echo "No changelog entry found for $VERSION" > release-notes.md
           else
             echo "No changelog found" > release-notes.md
+          fi
+          
+          # Add downloads table
+          if [ -f scripts/generate-downloads-table.sh ]; then
+            chmod +x scripts/generate-downloads-table.sh
+            echo "" >> release-notes.md
+            ./scripts/generate-downloads-table.sh "$TAG_NAME" >> release-notes.md
           fi
 
       - name: Create Release
