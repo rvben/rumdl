@@ -516,8 +516,7 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
         // These reference links should NOT be flagged as empty
         assert!(
             result.is_empty(),
-            "Should not flag reference links as empty when code blocks contain tildes (issue #29). Got: {:?}",
-            result
+            "Should not flag reference links as empty when code blocks contain tildes (issue #29). Got: {result:?}"
         );
     }
 }

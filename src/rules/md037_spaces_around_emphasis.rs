@@ -473,8 +473,7 @@ This has * real spaced emphasis * that should be flagged."#;
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "Should not flag inline code inside emphasis as spaces (issue #28). Got: {:?}",
-            result
+            "Should not flag inline code inside emphasis as spaces (issue #28). Got: {result:?}"
         );
 
         // Test case 2: multiple inline code snippets inside emphasis
@@ -483,8 +482,7 @@ This has * real spaced emphasis * that should be flagged."#;
         let result2 = rule.check(&ctx2).unwrap();
         assert!(
             result2.is_empty(),
-            "Should not flag multiple inline code snippets inside emphasis. Got: {:?}",
-            result2
+            "Should not flag multiple inline code snippets inside emphasis. Got: {result2:?}"
         );
 
         // Test case 3: inline code with underscores for emphasis
@@ -493,8 +491,7 @@ This has * real spaced emphasis * that should be flagged."#;
         let result3 = rule.check(&ctx3).unwrap();
         assert!(
             result3.is_empty(),
-            "Should not flag inline code with underscore emphasis. Got: {:?}",
-            result3
+            "Should not flag inline code with underscore emphasis. Got: {result3:?}"
         );
 
         // Test case 4: single asterisk emphasis with inline code
@@ -503,8 +500,7 @@ This has * real spaced emphasis * that should be flagged."#;
         let result4 = rule.check(&ctx4).unwrap();
         assert!(
             result4.is_empty(),
-            "Should not flag inline code with single asterisk emphasis. Got: {:?}",
-            result4
+            "Should not flag inline code with single asterisk emphasis. Got: {result4:?}"
         );
 
         // Test case 5: actual spaces that should be flagged
