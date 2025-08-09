@@ -70,6 +70,8 @@ pub struct LineInfo {
     pub is_blank: bool,
     /// Whether this line is inside a code block
     pub in_code_block: bool,
+    /// Whether this line is inside front matter
+    pub in_front_matter: bool,
     /// List item information if this line starts a list item
     pub list_item: Option<ListItemInfo>,
     /// Heading information if this line is a heading
@@ -1018,6 +1020,7 @@ impl<'a> LintContext<'a> {
                 indent,
                 is_blank,
                 in_code_block,
+                in_front_matter: in_front_matter && i <= front_matter_end,
                 list_item,
                 heading: None,    // Will be populated in second pass for Setext headings
                 blockquote: None, // Will be populated after line creation

@@ -66,10 +66,16 @@ impl MD050StrongStyle {
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
         let content = ctx.content;
 
-        // Find the first occurrence of either style that's not in a code block or link
+        // Find the first occurrence of either style that's not in a code block, link, or front matter
         let mut first_asterisk = None;
         for m in BOLD_ASTERISK_REGEX.find_iter(content) {
-            if !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) {
+            // Skip matches in front matter
+            let (line_num, _) = ctx.offset_to_line_col(m.start());
+            let in_front_matter = ctx.line_info(line_num)
+                .map(|info| info.in_front_matter)
+                .unwrap_or(false);
+            
+            if !in_front_matter && !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) {
                 first_asterisk = Some(m);
                 break;
             }
@@ -77,7 +83,13 @@ impl MD050StrongStyle {
 
         let mut first_underscore = None;
         for m in BOLD_UNDERSCORE_REGEX.find_iter(content) {
-            if !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) {
+            // Skip matches in front matter
+            let (line_num, _) = ctx.offset_to_line_col(m.start());
+            let in_front_matter = ctx.line_info(line_num)
+                .map(|info| info.in_front_matter)
+                .unwrap_or(false);
+            
+            if !in_front_matter && !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) {
                 first_underscore = Some(m);
                 break;
             }
@@ -151,6 +163,14 @@ impl Rule for MD050StrongStyle {
         let mut byte_pos = 0;
 
         for (line_num, line) in content.lines().enumerate() {
+            // Skip if this line is in front matter
+            if let Some(line_info) = ctx.line_info(line_num + 1) {
+                if line_info.in_front_matter {
+                    byte_pos += line.len() + 1; // +1 for newline
+                    continue;
+                }
+            }
+            
             for m in strong_regex.find_iter(line) {
                 // Calculate the byte position of this match in the document
                 let match_byte_pos = byte_pos + m.start();
@@ -229,7 +249,16 @@ impl Rule for MD050StrongStyle {
 
         let matches: Vec<(usize, usize)> = strong_regex
             .find_iter(content)
-            .filter(|m| !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()))
+            .filter(|m| {
+                // Skip matches in front matter
+                let (line_num, _) = ctx.offset_to_line_col(m.start());
+                if let Some(line_info) = ctx.line_info(line_num) {
+                    if line_info.in_front_matter {
+                        return false;
+                    }
+                }
+                !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start())
+            })
             .filter(|m| !self.is_escaped(content, m.start()))
             .map(|m| (m.start(), m.end()))
             .collect();
@@ -551,5 +580,18 @@ This is __real strong text__ that should be flagged.
         );
         // The flagged text should be "real strong text"
         assert!(result[0].line > 4); // Should be on the line with "real strong text"
+    }
+
+    #[test]
+    fn test_front_matter_not_flagged() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "---\ntitle: What's __init__.py?\nother: __value__\n---\n\nThis __should be flagged__.";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the strong text outside front matter should be flagged
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 6);
+        assert!(result[0].message.contains("Strong emphasis should use ** instead of __"));
     }
 }

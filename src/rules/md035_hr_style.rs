@@ -58,12 +58,19 @@ impl MD035HRStyle {
         (is_dash_line || is_equals_line) && prev_line_has_content
     }
 
-    /// Find the most prevalent HR style in the document (excluding setext headings)
-    fn most_prevalent_hr_style(lines: &[&str]) -> Option<String> {
+    /// Find the most prevalent HR style in the document (excluding setext headings and code blocks)
+    fn most_prevalent_hr_style(lines: &[&str], ctx: &crate::lint_context::LintContext) -> Option<String> {
         use std::collections::HashMap;
         let mut counts: HashMap<&str, usize> = HashMap::new();
         let mut order: Vec<&str> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
+            // Skip if this line is in a code block
+            if let Some(line_info) = ctx.line_info(i + 1) {
+                if line_info.in_code_block {
+                    continue;
+                }
+            }
+            
             if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(lines, i) {
                 let style = line.trim();
                 let counter = counts.entry(style).or_insert(0);
@@ -104,12 +111,19 @@ impl Rule for MD035HRStyle {
 
         // Use the configured style or find the most prevalent HR style
         let expected_style = if self.config.style.is_empty() || self.config.style == "consistent" {
-            Self::most_prevalent_hr_style(&lines).unwrap_or_else(|| "---".to_string())
+            Self::most_prevalent_hr_style(&lines, ctx).unwrap_or_else(|| "---".to_string())
         } else {
             self.config.style.clone()
         };
 
         for (i, line) in lines.iter().enumerate() {
+            // Skip if this line is in a code block or code span
+            if let Some(line_info) = ctx.line_info(i + 1) {
+                if line_info.in_code_block {
+                    continue;
+                }
+            }
+            
             // Skip if this is a potential Setext heading underline
             if Self::is_potential_setext_heading(&lines, i) {
                 continue;
@@ -157,12 +171,20 @@ impl Rule for MD035HRStyle {
 
         // Use the configured style or find the most prevalent HR style
         let expected_style = if self.config.style.is_empty() || self.config.style == "consistent" {
-            Self::most_prevalent_hr_style(&lines).unwrap_or_else(|| "---".to_string())
+            Self::most_prevalent_hr_style(&lines, ctx).unwrap_or_else(|| "---".to_string())
         } else {
             self.config.style.clone()
         };
 
         for (i, line) in lines.iter().enumerate() {
+            // Skip if this line is in a code block or code span
+            if let Some(line_info) = ctx.line_info(i + 1) {
+                if line_info.in_code_block {
+                    result.push(line.to_string());
+                    continue;
+                }
+            }
+            
             // Skip if this is a potential Setext heading underline
             if Self::is_potential_setext_heading(&lines, i) {
                 result.push(line.to_string());
@@ -259,24 +281,34 @@ mod tests {
     #[test]
     fn test_most_prevalent_hr_style() {
         // Single style (with blank lines to avoid Setext interpretation)
-        let lines = vec!["Content", "", "---", "", "More", "", "---", "", "Text"];
-        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("---".to_string()));
+        let content = "Content\n\n---\n\nMore\n\n---\n\nText";
+        let lines: Vec<&str> = content.lines().collect();
+        let ctx = crate::lint_context::LintContext::new(content);
+        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines, &ctx), Some("---".to_string()));
 
         // Multiple styles, one more prevalent
-        let lines = vec!["Content", "", "---", "", "More", "", "***", "", "Text", "", "---"];
-        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("---".to_string()));
+        let content = "Content\n\n---\n\nMore\n\n***\n\nText\n\n---";
+        let lines: Vec<&str> = content.lines().collect();
+        let ctx = crate::lint_context::LintContext::new(content);
+        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines, &ctx), Some("---".to_string()));
 
         // Multiple styles, tie broken by first encountered
-        let lines = vec!["Content", "", "***", "", "More", "", "---", "", "Text"];
-        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("***".to_string()));
+        let content = "Content\n\n***\n\nMore\n\n---\n\nText";
+        let lines: Vec<&str> = content.lines().collect();
+        let ctx = crate::lint_context::LintContext::new(content);
+        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines, &ctx), Some("***".to_string()));
 
         // No horizontal rules
-        let lines = vec!["Just", "Regular", "Content"];
-        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), None);
+        let content = "Just\nRegular\nContent";
+        let lines: Vec<&str> = content.lines().collect();
+        let ctx = crate::lint_context::LintContext::new(content);
+        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines, &ctx), None);
 
         // Exclude Setext headings
-        let lines = vec!["Heading", "---", "Content", "", "***"];
-        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines), Some("***".to_string()));
+        let content = "Heading\n---\nContent\n\n***";
+        let lines: Vec<&str> = content.lines().collect();
+        let ctx = crate::lint_context::LintContext::new(content);
+        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines, &ctx), Some("***".to_string()));
     }
 
     #[test]
@@ -365,7 +397,7 @@ mod tests {
     #[test]
     fn test_fix_removes_indentation() {
         let rule = MD035HRStyle::new("---".to_string());
-        let content = "Content\n\n  ***\n\nMore\n\n    ___\n\nText";
+        let content = "Content\n\n  ***\n\nMore\n\n   ___\n\nText";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -437,6 +469,28 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         // Trailing whitespace is OK for HRs
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_hr_in_code_block_not_flagged() {
+        let rule = MD035HRStyle::new("---".to_string());
+        let content = "Text\n\n```bash\n----------------------------------------------------------------------\n```\n\nMore";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag horizontal rule patterns inside code blocks
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_hr_in_code_span_not_flagged() {
+        let rule = MD035HRStyle::new("---".to_string());
+        let content = "Text with inline `---` code span";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag horizontal rule patterns inside code spans
         assert_eq!(result.len(), 0);
     }
 
