@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MD033Config {
-    #[serde(default, rename = "allowed_elements")]
+    #[serde(default, rename = "allowed-elements", alias = "allowed_elements", alias = "allowed")]
     pub allowed: Vec<String>,
 }
 

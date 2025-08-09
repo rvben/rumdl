@@ -329,9 +329,7 @@ impl Rule for MD051LinkFragments {
     {
         // Config keys are normalized to kebab-case by the config system
         let anchor_style = if let Some(rule_config) = config.rules.get("MD051") {
-            if let Some(style_str) = rule_config.values.get("anchor-style")
-                .and_then(|v| v.as_str()) 
-            {
+            if let Some(style_str) = rule_config.values.get("anchor-style").and_then(|v| v.as_str()) {
                 match style_str.to_lowercase().as_str() {
                     "kramdown" | "jekyll" => AnchorStyle::Kramdown,
                     _ => AnchorStyle::GitHub,
