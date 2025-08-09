@@ -122,7 +122,15 @@ impl Rule for MD029OrderedListPrefix {
             let between_content_is_code_only =
                 self.is_only_code_between_blocks(ctx, prev_block.end_line, current_block.start_line);
 
-            if between_content_is_code_only {
+            // Be more conservative: only group if there are no structural separators
+            // Check specifically for headings between the blocks
+            let has_heading_between = self.has_heading_between_blocks(ctx, prev_block.end_line, current_block.start_line);
+            
+            let should_group = between_content_is_code_only && 
+                self.blocks_are_logically_continuous(ctx, prev_block.end_line, current_block.start_line) &&
+                !has_heading_between;
+
+            if should_group {
                 // Treat as continuation of the same logical list
                 current_group.push(current_block);
             } else {
@@ -362,6 +370,11 @@ impl MD029OrderedListPrefix {
                     continue;
                 }
 
+                // Skip headings - they should never be treated as lazy continuation
+                if line_info.heading.is_some() {
+                    continue;
+                }
+                
                 // Check if this is a lazy continuation (0-2 spaces)
                 if line_info.indent <= 2 && !line_info.content.trim().is_empty() {
                     // This is a lazy continuation - add a style warning
@@ -415,12 +428,80 @@ impl MD029OrderedListPrefix {
                     continue;
                 }
 
+                // If there's a heading, lists are definitely separated
+                if line_info.heading.is_some() {
+                    return false;
+                }
+
                 // Any other non-empty content means lists are truly separated
                 return false;
             }
         }
 
         true
+    }
+
+    /// Check if two list blocks are logically continuous (no major structural separators)
+    fn blocks_are_logically_continuous(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        end_line: usize,
+        start_line: usize,
+    ) -> bool {
+        if end_line >= start_line {
+            return false;
+        }
+
+        for line_num in (end_line + 1)..start_line {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                // Skip empty lines
+                if line_info.is_blank {
+                    continue;
+                }
+
+                // Skip lines in code blocks
+                if line_info.in_code_block {
+                    continue;
+                }
+
+                // If there's any heading, the lists are not continuous
+                if line_info.heading.is_some() {
+                    return false;
+                }
+
+                // If there's any other non-empty content, be conservative and separate
+                let trimmed = line_info.content.trim();
+                if !trimmed.is_empty() && 
+                   !trimmed.starts_with("```") && 
+                   !trimmed.starts_with("~~~") {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Check if there are any headings between two list blocks
+    fn has_heading_between_blocks(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        end_line: usize,
+        start_line: usize,
+    ) -> bool {
+        if end_line >= start_line {
+            return false;
+        }
+
+        for line_num in (end_line + 1)..start_line {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                if line_info.heading.is_some() {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     /// Find the parent unordered item for an ordered item

@@ -38,10 +38,16 @@ impl MD051LinkFragments {
     /// Extract headings from cached LintContext information
     fn extract_headings_from_context(&self, ctx: &crate::lint_context::LintContext) -> HashSet<String> {
         let mut headings = HashSet::with_capacity(32); // Pre-allocate reasonable capacity
+        let mut fragment_counts = std::collections::HashMap::new(); // Track duplicate fragments
         let mut in_toc = false;
 
         // Single pass through lines, only processing lines with headings
         for line_info in &ctx.lines {
+            // Skip front matter
+            if line_info.in_front_matter {
+                continue;
+            }
+            
             if let Some(heading) = &line_info.heading {
                 let line = &line_info.content;
 
@@ -62,9 +68,19 @@ impl MD051LinkFragments {
                 }
 
                 // Use optimized fragment generation
-                let fragment = self.heading_to_fragment_fast(&heading.text);
-                if !fragment.is_empty() {
-                    headings.insert(fragment);
+                let base_fragment = self.heading_to_fragment_fast(&heading.text);
+                if !base_fragment.is_empty() {
+                    // Handle duplicate fragments by adding suffixes (GitHub's approach)
+                    let final_fragment = if let Some(count) = fragment_counts.get_mut(&base_fragment) {
+                        let suffix = *count;
+                        *count += 1;
+                        format!("{}-{}", base_fragment, suffix)
+                    } else {
+                        fragment_counts.insert(base_fragment.clone(), 1);
+                        base_fragment
+                    };
+                    
+                    headings.insert(final_fragment);
                 }
             }
         }
@@ -89,23 +105,32 @@ impl MD051LinkFragments {
             heading.to_string()
         };
 
+        // First pass: handle special sequence " - " -> "---"
+        // This matches GitHub's behavior for space-hyphen-space sequences
+        let preprocessed = text.replace(" - ", "---");
+
         // Optimized character processing using byte iteration for ASCII
-        let mut fragment = String::with_capacity(text.len());
+        let mut fragment = String::with_capacity(preprocessed.len());
         let mut prev_was_hyphen = false;
 
-        for c in text.to_lowercase().chars() {
+        for c in preprocessed.to_lowercase().chars() {
             match c {
                 // Keep ASCII alphanumeric characters and underscores
                 'a'..='z' | '0'..='9' | '_' => {
                     fragment.push(c);
                     prev_was_hyphen = false;
                 }
+                // Keep hyphens (including consecutive ones from preprocessing)
+                '-' => {
+                    fragment.push(c);
+                    prev_was_hyphen = true;
+                }
                 // Ampersand becomes double hyphen (special case)
                 '&' => {
                     if !prev_was_hyphen {
                         fragment.push_str("--");
                     } else {
-                        fragment.push('-'); // Make it double
+                        fragment.push('-'); // Make it triple
                     }
                     prev_was_hyphen = true;
                 }
@@ -748,5 +773,27 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 3);
         assert_eq!(result[0].column, 11); // 1-indexed position of '['
+    }
+
+    #[test]
+    fn test_duplicate_heading_numbering() {
+        let rule = MD051LinkFragments::new();
+        let content = "## Section\nLink to [second section](#section-1)\n## Section";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag the link to section-1 because there are two "Section" headings
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_heading_with_hyphens() {
+        let rule = MD051LinkFragments::new();
+        let content = "## The End - yay\n\nLink to [this heading](#the-end---yay)";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag the link because "The End - yay" becomes "the-end---yay"
+        assert_eq!(result.len(), 0);
     }
 }

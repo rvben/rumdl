@@ -63,10 +63,21 @@ impl MD050StrongStyle {
         false
     }
 
+    /// Check if a byte position is within an HTML tag
+    fn is_in_html_tag(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+        // Check HTML tags
+        for html_tag in ctx.html_tags().iter() {
+            if html_tag.byte_offset <= byte_pos && byte_pos < html_tag.byte_end {
+                return true;
+            }
+        }
+        false
+    }
+
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
         let content = ctx.content;
 
-        // Find the first occurrence of either style that's not in a code block, link, or front matter
+        // Find the first occurrence of either style that's not in a code block, link, HTML tag, or front matter
         let mut first_asterisk = None;
         for m in BOLD_ASTERISK_REGEX.find_iter(content) {
             // Skip matches in front matter
@@ -75,7 +86,7 @@ impl MD050StrongStyle {
                 .map(|info| info.in_front_matter)
                 .unwrap_or(false);
             
-            if !in_front_matter && !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) {
+            if !in_front_matter && !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) && !self.is_in_html_tag(ctx, m.start()) {
                 first_asterisk = Some(m);
                 break;
             }
@@ -89,7 +100,7 @@ impl MD050StrongStyle {
                 .map(|info| info.in_front_matter)
                 .unwrap_or(false);
             
-            if !in_front_matter && !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) {
+            if !in_front_matter && !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) && !self.is_in_html_tag(ctx, m.start()) {
                 first_underscore = Some(m);
                 break;
             }
@@ -175,8 +186,8 @@ impl Rule for MD050StrongStyle {
                 // Calculate the byte position of this match in the document
                 let match_byte_pos = byte_pos + m.start();
 
-                // Skip if this strong text is inside a code block, code span, or link
-                if ctx.is_in_code_block_or_span(match_byte_pos) || self.is_in_link(ctx, match_byte_pos) {
+                // Skip if this strong text is inside a code block, code span, link, or HTML tag
+                if ctx.is_in_code_block_or_span(match_byte_pos) || self.is_in_link(ctx, match_byte_pos) || self.is_in_html_tag(ctx, match_byte_pos) {
                     continue;
                 }
 
@@ -257,7 +268,7 @@ impl Rule for MD050StrongStyle {
                         return false;
                     }
                 }
-                !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start())
+                !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) && !self.is_in_html_tag(ctx, m.start())
             })
             .filter(|m| !self.is_escaped(content, m.start()))
             .map(|m| (m.start(), m.end()))
@@ -592,6 +603,25 @@ This is __real strong text__ that should be flagged.
         // Only the strong text outside front matter should be flagged
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 6);
+        assert!(result[0].message.contains("Strong emphasis should use ** instead of __"));
+    }
+
+    #[test]
+    fn test_html_tags_not_flagged() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = r#"# Test
+
+This has HTML with underscores:
+
+<iframe src="https://example.com/__init__/__repr__"> </iframe>
+
+This __should be flagged__ as inconsistent."#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the strong text outside HTML tags should be flagged
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 7);
         assert!(result[0].message.contains("Strong emphasis should use ** instead of __"));
     }
 }
