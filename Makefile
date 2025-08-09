@@ -106,14 +106,14 @@ clean:
 
 fmt:
 	cargo fmt
-	cargo clippy --fix --allow-dirty --allow-staged
+	cargo clippy --fix --allow-dirty --allow-staged -- -D clippy::uninlined_format_args
 	cargo fix --allow-dirty --allow-staged
 
 lint:
-	CARGO_INCREMENTAL=1 cargo clippy --all-targets --all-features -- -D warnings
+	CARGO_INCREMENTAL=1 cargo clippy --all-targets --all-features -- -D warnings -D clippy::uninlined_format_args
 
 lint-fast:
-	CARGO_INCREMENTAL=1 cargo clippy --workspace --lib --bins -- -D warnings
+	CARGO_INCREMENTAL=1 cargo clippy --workspace --lib --bins -- -D warnings -D clippy::uninlined_format_args
 
 check:
 	cargo check --all-targets --all-features

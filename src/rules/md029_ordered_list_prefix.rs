@@ -124,11 +124,12 @@ impl Rule for MD029OrderedListPrefix {
 
             // Be more conservative: only group if there are no structural separators
             // Check specifically for headings between the blocks
-            let has_heading_between = self.has_heading_between_blocks(ctx, prev_block.end_line, current_block.start_line);
-            
-            let should_group = between_content_is_code_only && 
-                self.blocks_are_logically_continuous(ctx, prev_block.end_line, current_block.start_line) &&
-                !has_heading_between;
+            let has_heading_between =
+                self.has_heading_between_blocks(ctx, prev_block.end_line, current_block.start_line);
+
+            let should_group = between_content_is_code_only
+                && self.blocks_are_logically_continuous(ctx, prev_block.end_line, current_block.start_line)
+                && !has_heading_between;
 
             if should_group {
                 // Treat as continuation of the same logical list
@@ -374,7 +375,7 @@ impl MD029OrderedListPrefix {
                 if line_info.heading.is_some() {
                     continue;
                 }
-                
+
                 // Check if this is a lazy continuation (0-2 spaces)
                 if line_info.indent <= 2 && !line_info.content.trim().is_empty() {
                     // This is a lazy continuation - add a style warning
@@ -471,9 +472,7 @@ impl MD029OrderedListPrefix {
 
                 // If there's any other non-empty content, be conservative and separate
                 let trimmed = line_info.content.trim();
-                if !trimmed.is_empty() && 
-                   !trimmed.starts_with("```") && 
-                   !trimmed.starts_with("~~~") {
+                if !trimmed.is_empty() && !trimmed.starts_with("```") && !trimmed.starts_with("~~~") {
                     return false;
                 }
             }

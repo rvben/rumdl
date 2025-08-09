@@ -47,7 +47,7 @@ impl MD051LinkFragments {
             if line_info.in_front_matter {
                 continue;
             }
-            
+
             if let Some(heading) = &line_info.heading {
                 let line = &line_info.content;
 
@@ -79,7 +79,7 @@ impl MD051LinkFragments {
                         fragment_counts.insert(base_fragment.clone(), 1);
                         base_fragment
                     };
-                    
+
                     headings.insert(final_fragment);
                 }
             }

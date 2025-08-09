@@ -82,11 +82,16 @@ impl MD050StrongStyle {
         for m in BOLD_ASTERISK_REGEX.find_iter(content) {
             // Skip matches in front matter
             let (line_num, _) = ctx.offset_to_line_col(m.start());
-            let in_front_matter = ctx.line_info(line_num)
+            let in_front_matter = ctx
+                .line_info(line_num)
                 .map(|info| info.in_front_matter)
                 .unwrap_or(false);
-            
-            if !in_front_matter && !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) && !self.is_in_html_tag(ctx, m.start()) {
+
+            if !in_front_matter
+                && !ctx.is_in_code_block_or_span(m.start())
+                && !self.is_in_link(ctx, m.start())
+                && !self.is_in_html_tag(ctx, m.start())
+            {
                 first_asterisk = Some(m);
                 break;
             }
@@ -96,11 +101,16 @@ impl MD050StrongStyle {
         for m in BOLD_UNDERSCORE_REGEX.find_iter(content) {
             // Skip matches in front matter
             let (line_num, _) = ctx.offset_to_line_col(m.start());
-            let in_front_matter = ctx.line_info(line_num)
+            let in_front_matter = ctx
+                .line_info(line_num)
                 .map(|info| info.in_front_matter)
                 .unwrap_or(false);
-            
-            if !in_front_matter && !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) && !self.is_in_html_tag(ctx, m.start()) {
+
+            if !in_front_matter
+                && !ctx.is_in_code_block_or_span(m.start())
+                && !self.is_in_link(ctx, m.start())
+                && !self.is_in_html_tag(ctx, m.start())
+            {
                 first_underscore = Some(m);
                 break;
             }
@@ -181,13 +191,16 @@ impl Rule for MD050StrongStyle {
                     continue;
                 }
             }
-            
+
             for m in strong_regex.find_iter(line) {
                 // Calculate the byte position of this match in the document
                 let match_byte_pos = byte_pos + m.start();
 
                 // Skip if this strong text is inside a code block, code span, link, or HTML tag
-                if ctx.is_in_code_block_or_span(match_byte_pos) || self.is_in_link(ctx, match_byte_pos) || self.is_in_html_tag(ctx, match_byte_pos) {
+                if ctx.is_in_code_block_or_span(match_byte_pos)
+                    || self.is_in_link(ctx, match_byte_pos)
+                    || self.is_in_html_tag(ctx, match_byte_pos)
+                {
                     continue;
                 }
 
@@ -268,7 +281,9 @@ impl Rule for MD050StrongStyle {
                         return false;
                     }
                 }
-                !ctx.is_in_code_block_or_span(m.start()) && !self.is_in_link(ctx, m.start()) && !self.is_in_html_tag(ctx, m.start())
+                !ctx.is_in_code_block_or_span(m.start())
+                    && !self.is_in_link(ctx, m.start())
+                    && !self.is_in_html_tag(ctx, m.start())
             })
             .filter(|m| !self.is_escaped(content, m.start()))
             .map(|m| (m.start(), m.end()))
@@ -603,7 +618,11 @@ This is __real strong text__ that should be flagged.
         // Only the strong text outside front matter should be flagged
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 6);
-        assert!(result[0].message.contains("Strong emphasis should use ** instead of __"));
+        assert!(
+            result[0]
+                .message
+                .contains("Strong emphasis should use ** instead of __")
+        );
     }
 
     #[test]
@@ -622,6 +641,10 @@ This __should be flagged__ as inconsistent."#;
         // Only the strong text outside HTML tags should be flagged
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 7);
-        assert!(result[0].message.contains("Strong emphasis should use ** instead of __"));
+        assert!(
+            result[0]
+                .message
+                .contains("Strong emphasis should use ** instead of __")
+        );
     }
 }

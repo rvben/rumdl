@@ -70,7 +70,7 @@ impl MD035HRStyle {
                     continue;
                 }
             }
-            
+
             if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(lines, i) {
                 let style = line.trim();
                 let counter = counts.entry(style).or_insert(0);
@@ -123,7 +123,7 @@ impl Rule for MD035HRStyle {
                     continue;
                 }
             }
-            
+
             // Skip if this is a potential Setext heading underline
             if Self::is_potential_setext_heading(&lines, i) {
                 continue;
@@ -184,7 +184,7 @@ impl Rule for MD035HRStyle {
                     continue;
                 }
             }
-            
+
             // Skip if this is a potential Setext heading underline
             if Self::is_potential_setext_heading(&lines, i) {
                 result.push(line.to_string());
@@ -284,19 +284,28 @@ mod tests {
         let content = "Content\n\n---\n\nMore\n\n---\n\nText";
         let lines: Vec<&str> = content.lines().collect();
         let ctx = crate::lint_context::LintContext::new(content);
-        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines, &ctx), Some("---".to_string()));
+        assert_eq!(
+            MD035HRStyle::most_prevalent_hr_style(&lines, &ctx),
+            Some("---".to_string())
+        );
 
         // Multiple styles, one more prevalent
         let content = "Content\n\n---\n\nMore\n\n***\n\nText\n\n---";
         let lines: Vec<&str> = content.lines().collect();
         let ctx = crate::lint_context::LintContext::new(content);
-        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines, &ctx), Some("---".to_string()));
+        assert_eq!(
+            MD035HRStyle::most_prevalent_hr_style(&lines, &ctx),
+            Some("---".to_string())
+        );
 
         // Multiple styles, tie broken by first encountered
         let content = "Content\n\n***\n\nMore\n\n---\n\nText";
         let lines: Vec<&str> = content.lines().collect();
         let ctx = crate::lint_context::LintContext::new(content);
-        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines, &ctx), Some("***".to_string()));
+        assert_eq!(
+            MD035HRStyle::most_prevalent_hr_style(&lines, &ctx),
+            Some("***".to_string())
+        );
 
         // No horizontal rules
         let content = "Just\nRegular\nContent";
@@ -308,7 +317,10 @@ mod tests {
         let content = "Heading\n---\nContent\n\n***";
         let lines: Vec<&str> = content.lines().collect();
         let ctx = crate::lint_context::LintContext::new(content);
-        assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines, &ctx), Some("***".to_string()));
+        assert_eq!(
+            MD035HRStyle::most_prevalent_hr_style(&lines, &ctx),
+            Some("***".to_string())
+        );
     }
 
     #[test]
@@ -475,7 +487,8 @@ mod tests {
     #[test]
     fn test_hr_in_code_block_not_flagged() {
         let rule = MD035HRStyle::new("---".to_string());
-        let content = "Text\n\n```bash\n----------------------------------------------------------------------\n```\n\nMore";
+        let content =
+            "Text\n\n```bash\n----------------------------------------------------------------------\n```\n\nMore";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
