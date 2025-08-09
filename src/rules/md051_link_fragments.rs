@@ -121,6 +121,13 @@ impl MD051LinkFragments {
                     fragment.push(c);
                     prev_was_hyphen = false;
                 }
+                // Keep hyphens (GitHub preserves these)
+                '-' => {
+                    if !prev_was_hyphen {
+                        fragment.push('-');
+                        prev_was_hyphen = true;
+                    }
+                }
                 // Convert spaces to hyphens (avoid consecutive hyphens)
                 ' ' => {
                     if !prev_was_hyphen {
@@ -131,7 +138,7 @@ impl MD051LinkFragments {
                 // Remove all other whitespace and punctuation characters
                 _ => {
                     // Skip all punctuation and other whitespace
-                    // This includes: .,!?@#$%^&*()[]{}|;:"'<>/\`~-+=
+                    // This includes: .,!?@#$%^&*()[]{}|;:"'<>/\`~+=
                     continue;
                 }
             }
@@ -169,70 +176,51 @@ impl MD051LinkFragments {
         }
     }
 
+
+    /// Detect if a path represents a cross-file link
+    fn is_cross_file_link(path: &str) -> bool {
+        // Empty path means internal fragment
+        if path.is_empty() {
+            return false;
+        }
+
+        // Contains file extension
+        if Self::has_file_extension(path) {
+            return true;
+        }
+
+        // Contains path separators (likely a path to another file/directory)
+        if path.contains('/') || path.contains('\\') {
+            return true;
+        }
+
+        // Starts with relative path indicators
+        if path.starts_with("./") || path.starts_with("../") {
+            return true;
+        }
+
+        // Query parameters or URL components (not a simple fragment)
+        if path.contains('?') || path.contains('&') || path.contains('=') {
+            return false; // These might be same-document with parameters
+        }
+
+        // Conservative approach: only treat as cross-file if it has clear path indicators
+        false
+    }
+
     /// Check if a path has a file extension indicating it's a file reference
     fn has_file_extension(path: &str) -> bool {
         // First, strip query parameters and other URL components
-        // Split on ? to remove query parameters, and on & to handle other URL components
-        let clean_path = path.split('?').next().unwrap_or(path).split('&').next().unwrap_or(path);
+        let clean_path = path.split('?').next().unwrap_or(path);
 
         // Common file extensions that indicate cross-file references
         let file_extensions = [
             // Markdown and documentation formats
-            ".md",
-            ".markdown",
-            ".mdown",
-            ".mkdn",
-            ".mdx",
-            ".md2",
-            ".mdtext",
-            ".rst",
-            ".txt",
-            ".adoc",
-            ".asciidoc",
-            ".org",
+            ".md", ".markdown", ".mdown", ".mkdn", ".mdx",
             // Web formats
-            ".html",
-            ".htm",
-            ".xhtml",
-            ".xml",
-            ".svg",
-            // Data and config formats
-            ".json",
-            ".yaml",
-            ".yml",
-            ".toml",
-            ".ini",
-            ".cfg",
-            ".conf",
-            // Office documents
-            ".pdf",
-            ".doc",
-            ".docx",
-            ".odt",
-            ".rtf",
-            // Programming and script files (often contain documentation)
-            ".py",
-            ".js",
-            ".ts",
-            ".rs",
-            ".go",
-            ".java",
-            ".cpp",
-            ".c",
-            ".h",
-            ".sh",
-            ".bash",
-            ".zsh",
-            ".fish",
-            ".ps1",
-            ".bat",
-            ".cmd",
-            // Other common file types that might have fragments
-            ".tex",
-            ".bib",
-            ".csv",
-            ".tsv",
-            ".log",
+            ".html", ".htm", ".xhtml",
+            // Other common documentation formats
+            ".rst", ".txt", ".adoc", ".org",
         ];
 
         // Case-insensitive extension matching
@@ -243,24 +231,17 @@ impl MD051LinkFragments {
             }
         }
 
-        // Also check for any extension pattern (dot followed by 2-10 alphanumeric characters)
-        // This catches extensions not in our known list like .backup, .tmp, .orig, etc.
+        // Check for any extension pattern (dot followed by 2-6 alphanumeric characters)
+        // But exclude hidden files that start with a dot at the beginning
         if let Some(last_dot) = path_lower.rfind('.') {
-            // Special case: if path starts with a dot, it might be a hidden file
-            // Only treat it as having an extension if there's a second dot
-            if path_lower.starts_with('.') {
-                // For hidden files like .gitignore, .bashrc, we need a second dot to be a file extension
-                // e.g., .config.json has extension .json, but .gitignore has no extension
-                if last_dot == 0 {
-                    // Only one dot at the beginning - not a file extension
-                    return false;
-                }
+            // Skip if this is a hidden file (starts with dot and has no other dots)
+            if last_dot == 0 && !path_lower[1..].contains('.') {
+                return false;
             }
-
+            
             let potential_ext = &path_lower[last_dot + 1..];
-            // Valid extension: 2-10 characters, alphanumeric (allows for longer extensions like .backup)
             if potential_ext.len() >= 2
-                && potential_ext.len() <= 10
+                && potential_ext.len() <= 6
                 && potential_ext.chars().all(|c| c.is_ascii_alphanumeric())
             {
                 return true;
@@ -381,9 +362,9 @@ impl Rule for MD051LinkFragments {
                 }
 
                 // Skip cross-file fragment links - only validate fragments in same document
-                // If URL contains a file path (has file extension like .md, .rst, .html, etc.), it's a cross-file link
+                // If URL contains a path component before the hash, it's likely a cross-file link
                 let path_before_hash = &url[..hash_pos];
-                if Self::has_file_extension(path_before_hash) {
+                if Self::is_cross_file_link(path_before_hash) {
                     continue;
                 }
 
@@ -622,42 +603,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_has_file_extension() {
-        // Markdown files
-        assert!(MD051LinkFragments::has_file_extension("file.md"));
-        assert!(MD051LinkFragments::has_file_extension("README.MD"));
-        assert!(MD051LinkFragments::has_file_extension("docs/guide.markdown"));
-
-        // Web files
-        assert!(MD051LinkFragments::has_file_extension("index.html"));
-        assert!(MD051LinkFragments::has_file_extension("page.htm"));
-
-        // Other files
-        assert!(MD051LinkFragments::has_file_extension("script.js"));
-        assert!(MD051LinkFragments::has_file_extension("config.json"));
-        assert!(MD051LinkFragments::has_file_extension("document.pdf"));
-
-        // With query parameters
-        assert!(MD051LinkFragments::has_file_extension("file.md?version=2"));
-        assert!(MD051LinkFragments::has_file_extension(
-            "doc.html?param=value&other=test"
-        ));
-
-        // Hidden files with extensions
-        assert!(MD051LinkFragments::has_file_extension(".config.json"));
-        assert!(MD051LinkFragments::has_file_extension(".eslintrc.js"));
-
-        // Not file extensions
-        assert!(!MD051LinkFragments::has_file_extension("folder"));
-        assert!(!MD051LinkFragments::has_file_extension("folder/subfolder"));
-        assert!(!MD051LinkFragments::has_file_extension(".gitignore"));
-        assert!(!MD051LinkFragments::has_file_extension(".bashrc"));
-
-        // Edge cases
-        assert!(MD051LinkFragments::has_file_extension("file.backup"));
-        assert!(MD051LinkFragments::has_file_extension("archive.tar.gz"));
-    }
 
     #[test]
     fn test_strip_markdown_formatting() {

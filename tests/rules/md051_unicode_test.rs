@@ -84,7 +84,7 @@ fn test_md051_fragment_generation() {
         ("Mixed CASE with УниКОД", "mixed-case-with-уникод"),
         ("Multiple   Spaces", "multiple-spaces"),
         ("Über café 北京", "über-café-北京"),
-        ("Special & Characters", "special--characters"), // & becomes --
+        ("Special & Characters", "special-characters"), // & removed per GitHub spec
         ("!!!Leading and Trailing!!!", "leading-and-trailing"),
     ];
 

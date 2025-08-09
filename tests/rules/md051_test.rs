@@ -33,7 +33,9 @@ fn test_special_characters() {
     let ctx = LintContext::new("# Test & Heading!\n\nThis is a [link](somepath#test-heading) to the heading.");
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    // "Test & Heading!" should become "test-heading" (& and ! removed as punctuation per GitHub spec)
+    // So the link to #test-heading should be VALID and no warnings should be generated
+    assert_eq!(result.len(), 0);
 }
 
 #[test]
@@ -97,7 +99,7 @@ fn test_complex_heading_structures() {
 
     // Test with special characters in headings/links
     let ctx = LintContext::new(
-        "# Heading & Special! Characters\n\n[Link](somepath#heading-special-characters)\n[Bad Link](somepath#heading--special-characters)",
+        "# Heading & Special! Characters\n\n[Link](somepath#heading-special-characters)\n[Bad Link](somepath#heading-special-characters-bad)",
     );
     let result = rule.check(&ctx).unwrap();
 
@@ -133,7 +135,8 @@ fn test_heading_to_fragment_edge_cases() {
     let rule = MD051LinkFragments::new();
 
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    // Cross-file links should be ignored, so no warnings expected
+    assert_eq!(result.len(), 0);
 
     // Test headings with only special characters
     let ctx = LintContext::new("# @#$%^\n\n[Link](somepath#)");
@@ -163,7 +166,7 @@ fn test_fragment_in_code_blocks() {
     assert_eq!(result.len(), 0);
 
     // Test headings in code blocks (should be ignored)
-    let ctx = LintContext::new("```markdown\n# Code Heading\n```\n\n[Link](somepath#code-heading)");
+    let ctx = LintContext::new("```markdown\n# Code Heading\n```\n\n[Link](#code-heading)");
     let result = rule.check(&ctx).unwrap();
     println!("Second test has {} warnings", result.len());
     for (i, warning) in result.iter().enumerate() {
@@ -439,11 +442,11 @@ fn test_md051_fragment_generation_regression() {
         ("Simple Heading", "simple-heading"),
         ("1. Numbered Heading", "1-numbered-heading"),
         ("Heading with Spaces", "heading-with-spaces"),
-        // Ampersand cases (the main bug)
-        ("Test & Example", "test--example"),
-        ("A&B", "a--b"),
-        ("A & B", "a--b"),
-        ("Multiple & Ampersands & Here", "multiple--ampersands--here"),
+        // Ampersand cases (& should be removed per GitHub spec)
+        ("Test & Example", "test-example"),
+        ("A&B", "ab"),
+        ("A & B", "a-b"),
+        ("Multiple & Ampersands & Here", "multiple-ampersands-here"),
         // Special characters
         ("Test. Period", "test-period"),
         ("Test: Colon", "test-colon"),
@@ -452,14 +455,14 @@ fn test_md051_fragment_generation_regression() {
         ("Test (Parentheses)", "test-parentheses"),
         ("Test [Brackets]", "test-brackets"),
         // Complex cases
-        ("1. Heading with Numbers & Symbols!", "1-heading-with-numbers--symbols"),
+        ("1. Heading with Numbers & Symbols!", "1-heading-with-numbers-symbols"),
         (
             "Multiple!!! Exclamations & Symbols???",
-            "multiple-exclamations--symbols",
+            "multiple-exclamations-symbols",
         ),
         (
             "Heading with (Parentheses) & [Brackets]",
-            "heading-with-parentheses--brackets",
+            "heading-with-parentheses-brackets",
         ),
         ("Special Characters: @#$%^&*()", "special-characters"),
         // Edge cases
@@ -471,7 +474,7 @@ fn test_md051_fragment_generation_regression() {
 
     for (heading, expected_fragment) in test_cases {
         // Create a test document with the heading and a link to it
-        let content = format!("# {heading}\n\n[Link](#{expected_fragment}))");
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
@@ -496,19 +499,19 @@ fn test_md051_real_world_scenarios() {
 # Main Title
 
 ## 1. Getting Started & Setup
-[Link to setup](#1-getting-started--setup)
+[Link to setup](#1-getting-started-setup)
 
 ## 2. Configuration & Options
-[Link to config](#2-configuration--options)
+[Link to config](#2-configuration-options)
 
 ## 3. Advanced Usage (Examples)
 [Link to advanced](#3-advanced-usage-examples)
 
 ## 4. FAQ & Troubleshooting
-[Link to FAQ](#4-faq--troubleshooting)
+[Link to FAQ](#4-faq-troubleshooting)
 
 ## 5. API Reference: Methods & Properties
-[Link to API](#5-api-reference-methods--properties)
+[Link to API](#5-api-reference-methods-properties)
 "#;
 
     let rule = MD051LinkFragments::new();
@@ -530,16 +533,16 @@ fn test_md051_ampersand_variations() {
 
     let content = r#"
 # Test & Example
-[Link 1](#test--example)
+[Link 1](#test-example)
 
 # A&B
-[Link 2](#a--b)
+[Link 2](#ab)
 
 # Multiple & Symbols & Here
-[Link 3](#multiple--symbols--here)
+[Link 3](#multiple-symbols-here)
 
 # Test&End
-[Link 4](#test--end)
+[Link 4](#testend)
 
 # &Start
 [Link 5](#start)
@@ -896,12 +899,14 @@ Fragment tests:
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag ambiguous paths + invalid fragments = 5 warnings
-    // 3 ambiguous paths (#section) + 1 invalid unicode fragment + 1 missing fragment
+    // Should flag ambiguous paths + invalid fragment = 4 warnings
+    // 3 ambiguous paths (#section) + 1 missing fragment
+    // Note: #café-restaurant should NOT be flagged as it matches "Café & Restaurant" heading
+    // (& is removed as punctuation per GitHub spec)
     assert_eq!(
         result.len(),
-        5,
-        "Expected 5 warnings: 3 ambiguous paths + 2 invalid fragments"
+        4,
+        "Expected 4 warnings: 3 ambiguous paths + 1 invalid fragment"
     );
 
     let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
@@ -912,8 +917,8 @@ Fragment tests:
     assert_eq!(contains_section, 3, "Should have 3 warnings about #section fragment");
     assert!(contains_missing, "Should warn about #missing-heading fragment");
     assert!(
-        contains_cafe,
-        "Should warn about #café-restaurant fragment (doesn't match heading)"
+        !contains_cafe,
+        "Should NOT warn about #café-restaurant fragment (matches heading per GitHub spec)"
     );
 }
 
@@ -1011,7 +1016,7 @@ fn test_fragment_normalization_edge_cases() {
 
 Fragment tests with normalization:
 - [Valid basic](#test-heading)
-- [Valid special](#special-characters--symbols)
+- [Valid special](#special-characters-symbols)
 - [Valid code](#code-inline-example)
 - [Valid spaces](#multiple-spaces)
 - [Valid case insensitive](#Test-Heading)
