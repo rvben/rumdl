@@ -88,7 +88,8 @@ impl MD051LinkFragments {
         headings
     }
 
-    /// Optimized fragment generation with minimal allocations
+    /// Fragment generation following GitHub's official algorithm
+    /// Rules: lowercase, spaces→hyphens, remove punctuation/whitespace, strip markup
     #[inline]
     fn heading_to_fragment_fast(&self, heading: &str) -> String {
         // Early return for empty headings
@@ -96,60 +97,47 @@ impl MD051LinkFragments {
             return String::new();
         }
 
-        // Quick check: if no markdown formatting, use fast path
+        // Step 1: Strip markdown formatting first
         let needs_markdown_stripping = QUICK_MARKDOWN_CHECK.is_match(heading);
-
         let text = if needs_markdown_stripping {
             self.strip_markdown_formatting_fast(heading)
         } else {
             heading.to_string()
         };
 
-        // First pass: handle special sequence " - " -> "---"
-        // This matches GitHub's behavior for space-hyphen-space sequences
-        let preprocessed = text.replace(" - ", "---");
-
-        // Optimized character processing using byte iteration for ASCII
-        let mut fragment = String::with_capacity(preprocessed.len());
+        // Step 2: Follow GitHub's documented algorithm
+        let mut fragment = String::with_capacity(text.len());
         let mut prev_was_hyphen = false;
 
-        for c in preprocessed.to_lowercase().chars() {
+        for c in text.to_lowercase().chars() {
             match c {
-                // Keep ASCII alphanumeric characters and underscores
-                'a'..='z' | '0'..='9' | '_' => {
-                    fragment.push(c);
-                    prev_was_hyphen = false;
-                }
-                // Keep hyphens (including consecutive ones from preprocessing)
-                '-' => {
-                    fragment.push(c);
-                    prev_was_hyphen = true;
-                }
-                // Ampersand becomes double hyphen (special case)
-                '&' => {
-                    if !prev_was_hyphen {
-                        fragment.push_str("--");
-                    } else {
-                        fragment.push('-'); // Make it triple
-                    }
-                    prev_was_hyphen = true;
-                }
-                // Keep Unicode letters and numbers
+                // Keep letters and numbers (including Unicode)
                 c if c.is_alphabetic() || c.is_numeric() => {
                     fragment.push(c);
                     prev_was_hyphen = false;
                 }
-                // Spaces and other characters become single hyphen (but avoid consecutive hyphens)
-                _ => {
+                // Keep underscores (GitHub preserves these)
+                '_' => {
+                    fragment.push(c);
+                    prev_was_hyphen = false;
+                }
+                // Convert spaces to hyphens (avoid consecutive hyphens)
+                ' ' => {
                     if !prev_was_hyphen {
                         fragment.push('-');
                         prev_was_hyphen = true;
                     }
                 }
+                // Remove all other whitespace and punctuation characters
+                _ => {
+                    // Skip all punctuation and other whitespace
+                    // This includes: .,!?@#$%^&*()[]{}|;:"'<>/\`~-+=
+                    continue;
+                }
             }
         }
 
-        // Remove leading and trailing hyphens
+        // Step 3: Remove leading and trailing whitespace/hyphens
         fragment.trim_matches('-').to_string()
     }
 
@@ -557,8 +545,8 @@ mod tests {
         // With code
         assert_eq!(rule.heading_to_fragment_fast("Using `code` here"), "using-code-here");
 
-        // With ampersand
-        assert_eq!(rule.heading_to_fragment_fast("This & That"), "this--that");
+        // With ampersand (punctuation removed per spec)
+        assert_eq!(rule.heading_to_fragment_fast("This & That"), "this-that");
 
         // Leading/trailing spaces and hyphens
         assert_eq!(rule.heading_to_fragment_fast("  Spaces  "), "spaces");
@@ -573,8 +561,8 @@ mod tests {
             "respect_gitignore"
         );
 
-        // Test slash conversion
-        assert_eq!(rule.heading_to_fragment_fast("CI/CD Migration"), "ci-cd-migration");
+        // Test slash conversion (punctuation removed per spec)
+        assert_eq!(rule.heading_to_fragment_fast("CI/CD Migration"), "cicd-migration");
     }
 
     #[test]
@@ -742,8 +730,8 @@ mod tests {
     #[test]
     fn test_complex_heading_with_special_chars() {
         let rule = MD051LinkFragments::new();
-        // The apostrophe in "What's" becomes a hyphen, so the fragment is "what-s" not "whats"
-        let content = "# FAQ: What's New & Improved?\n\n[faq](#faq-what-s-new--improved)";
+        // Per GitHub spec: punctuation removed, spaces become hyphens
+        let content = "# FAQ: What's New & Improved?\n\n[faq](#faq-whats-new-improved)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
@@ -789,11 +777,11 @@ mod tests {
     #[test]
     fn test_heading_with_hyphens() {
         let rule = MD051LinkFragments::new();
-        let content = "## The End - yay\n\nLink to [this heading](#the-end---yay)";
+        let content = "## The End - yay\n\nLink to [this heading](#the-end-yay)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
-        // Should not flag the link because "The End - yay" becomes "the-end---yay"
+        // Should not flag the link because "The End - yay" becomes "the-end-yay" (spaces->hyphens, punctuation removed)
         assert_eq!(result.len(), 0);
     }
 }
