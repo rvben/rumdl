@@ -165,7 +165,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             "Text __strong__ text",
             Box::new(MD050StrongStyle::new(StrongStyle::Underscore)),
         )),
-        "MD051" => Some(("[link](#nonexistent)", Box::new(MD051LinkFragments))),
+        "MD051" => Some(("[link](#nonexistent)", Box::new(MD051LinkFragments::new()))),
         "MD052" => Some(("[ref link][ref]", Box::new(MD052ReferenceLinkImages))),
         "MD053" => Some((
             "[ref]: https://example.com",

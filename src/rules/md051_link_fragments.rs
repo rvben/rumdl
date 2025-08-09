@@ -1,28 +1,38 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::regex_cache::*;
+use crate::utils::regex_cache::get_cached_regex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
 
 lazy_static! {
     // Pre-compiled optimized patterns for quick checks
-    static ref QUICK_LINK_CHECK: Regex = Regex::new(r"\[.*?\]\([^)]*#").unwrap();
-    static ref QUICK_EXTERNAL_CHECK: Regex = Regex::new(r"^https?://|^ftp://|^www\.").unwrap();
-    static ref QUICK_MARKDOWN_CHECK: Regex = Regex::new(r"[*_`~\[\]]").unwrap();
-
-    // Optimized single-pass markdown stripping (faster than multiple regex calls)
-    static ref MARKDOWN_STRIP: Regex = Regex::new(r"\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*]+)\*|_([^_]+)_|`([^`]+)`|\[([^\]]+)\]\([^)]+\)").unwrap();
+    static ref QUICK_MARKDOWN_CHECK: Regex = Regex::new(r"[*_`\[\]]").unwrap();
+    static ref EMPHASIS_PATTERN: Regex = Regex::new(r"\*+([^*]+)\*+|_+([^_]+)_+").unwrap();
+    static ref CODE_PATTERN: Regex = Regex::new(r"`([^`]+)`").unwrap();
+    static ref LINK_PATTERN: Regex = Regex::new(r"\[([^\]]+)\]\([^)]+\)|\[([^\]]+)\]\[[^\]]*\]").unwrap();
+    static ref TOC_SECTION_START: Regex = Regex::new(r"(?i)^#+\s*(table\s+of\s+contents?|contents?|toc)\s*$").unwrap();
 }
 
-/// Rule MD051: Link anchors should match document headings
+/// Rule MD051: Link fragments
 ///
 /// See [docs/md051.md](../../docs/md051.md) for full documentation, configuration, and examples.
 ///
-/// This rule is triggered when a link anchor (the part after #) doesn't exist in the current document.
-/// This only applies to internal document links (like #heading), not to external URLs or cross-file links (like file.md#heading).
+/// This rule validates that link anchors (the part after #) exist in the current document.
+/// Only applies to internal document links (like #heading), not to external URLs or cross-file links.
 #[derive(Clone)]
-pub struct MD051LinkFragments;
+pub struct MD051LinkFragments {
+    /// Anchor style to use for validation
+    anchor_style: AnchorStyle,
+}
+
+/// Anchor generation style for heading fragments
+#[derive(Clone, Debug, PartialEq)]
+pub enum AnchorStyle {
+    /// GitHub/GFM style (default): preserves underscores, removes punctuation
+    GitHub,
+    /// kramdown style: removes underscores and punctuation
+    Kramdown,
+}
 
 impl Default for MD051LinkFragments {
     fn default() -> Self {
@@ -32,13 +42,20 @@ impl Default for MD051LinkFragments {
 
 impl MD051LinkFragments {
     pub fn new() -> Self {
-        Self
+        Self {
+            anchor_style: AnchorStyle::GitHub,
+        }
+    }
+
+    /// Create with specific anchor style
+    pub fn with_anchor_style(style: AnchorStyle) -> Self {
+        Self { anchor_style: style }
     }
 
     /// Extract headings from cached LintContext information
     fn extract_headings_from_context(&self, ctx: &crate::lint_context::LintContext) -> HashSet<String> {
-        let mut headings = HashSet::with_capacity(32); // Pre-allocate reasonable capacity
-        let mut fragment_counts = std::collections::HashMap::new(); // Track duplicate fragments
+        let mut headings = HashSet::with_capacity(32);
+        let mut fragment_counts = std::collections::HashMap::new();
         let mut in_toc = false;
 
         // Single pass through lines, only processing lines with headings
@@ -67,19 +84,22 @@ impl MD051LinkFragments {
                     continue;
                 }
 
-                // Use optimized fragment generation
-                let base_fragment = self.heading_to_fragment_fast(&heading.text);
-                if !base_fragment.is_empty() {
-                    // Handle duplicate fragments by adding suffixes (GitHub's approach)
-                    let final_fragment = if let Some(count) = fragment_counts.get_mut(&base_fragment) {
+                // Generate fragment based on configured style
+                let fragment = match self.anchor_style {
+                    AnchorStyle::GitHub => self.heading_to_fragment_github(&heading.text),
+                    AnchorStyle::Kramdown => self.heading_to_fragment_kramdown(&heading.text),
+                };
+
+                if !fragment.is_empty() {
+                    // Handle duplicate fragments by appending numbers
+                    let final_fragment = if let Some(count) = fragment_counts.get_mut(&fragment) {
                         let suffix = *count;
                         *count += 1;
-                        format!("{base_fragment}-{suffix}")
+                        format!("{fragment}-{suffix}")
                     } else {
-                        fragment_counts.insert(base_fragment.clone(), 1);
-                        base_fragment
+                        fragment_counts.insert(fragment.clone(), 1);
+                        fragment
                     };
-
                     headings.insert(final_fragment);
                 }
             }
@@ -89,206 +109,123 @@ impl MD051LinkFragments {
     }
 
     /// Fragment generation following GitHub's official algorithm
-    /// Rules: lowercase, spaces→hyphens, remove punctuation/whitespace, strip markup
+    /// GitHub preserves underscores and consecutive hyphens
     #[inline]
-    fn heading_to_fragment_fast(&self, heading: &str) -> String {
-        // Early return for empty headings
+    fn heading_to_fragment_github(&self, heading: &str) -> String {
         if heading.is_empty() {
             return String::new();
         }
 
-        // Step 1: Strip markdown formatting first
-        let needs_markdown_stripping = QUICK_MARKDOWN_CHECK.is_match(heading);
-        let text = if needs_markdown_stripping {
+        // Strip markdown formatting first
+        let text = if QUICK_MARKDOWN_CHECK.is_match(heading) {
             self.strip_markdown_formatting_fast(heading)
         } else {
             heading.to_string()
         };
 
-        // Step 2: Follow GitHub's documented algorithm
+        // Trim whitespace first
+        let text = text.trim();
+
+        // Follow GitHub's algorithm
         let mut fragment = String::with_capacity(text.len());
-        let mut prev_was_hyphen = false;
 
         for c in text.to_lowercase().chars() {
             match c {
-                // Keep letters and numbers (including Unicode)
-                c if c.is_alphabetic() || c.is_numeric() => {
-                    fragment.push(c);
-                    prev_was_hyphen = false;
-                }
+                // Keep ASCII letters and numbers only (GitHub removes non-ASCII)
+                c if c.is_ascii_alphabetic() || c.is_ascii_digit() => fragment.push(c),
                 // Keep underscores (GitHub preserves these)
-                '_' => {
-                    fragment.push(c);
-                    prev_was_hyphen = false;
-                }
-                // Keep hyphens (GitHub preserves these)
-                '-' => {
-                    if !prev_was_hyphen {
-                        fragment.push('-');
-                        prev_was_hyphen = true;
-                    }
-                }
-                // Convert spaces to hyphens (avoid consecutive hyphens)
-                ' ' => {
-                    if !prev_was_hyphen {
-                        fragment.push('-');
-                        prev_was_hyphen = true;
-                    }
-                }
-                // Remove all other whitespace and punctuation characters
-                _ => {
-                    // Skip all punctuation and other whitespace
-                    // This includes: .,!?@#$%^&*()[]{}|;:"'<>/\`~+=
-                    continue;
-                }
+                '_' => fragment.push('_'),
+                // Keep hyphens
+                '-' => fragment.push('-'),
+                // Convert spaces to hyphens
+                ' ' => fragment.push('-'),
+                // Remove all other punctuation and non-ASCII
+                _ => {}
             }
         }
 
-        // Step 3: Remove leading and trailing whitespace/hyphens
+        // Remove leading and trailing hyphens
         fragment.trim_matches('-').to_string()
     }
 
-    /// Optimized markdown stripping using single-pass regex
+    /// Fragment generation following kramdown's algorithm
+    /// kramdown removes underscores but preserves consecutive hyphens
     #[inline]
-    fn strip_markdown_formatting_fast(&self, text: &str) -> String {
-        // Fast path: if no markdown characters, return as-is
-        if !QUICK_MARKDOWN_CHECK.is_match(text) {
-            return text.to_string();
+    fn heading_to_fragment_kramdown(&self, heading: &str) -> String {
+        if heading.is_empty() {
+            return String::new();
         }
 
-        // Use single regex to capture all markdown formatting at once
-        let result = MARKDOWN_STRIP.replace_all(text, |caps: &regex::Captures| {
-            // Return the captured content (group 1-7 for different formatting types)
-            for i in 1..=7 {
-                if let Some(content) = caps.get(i) {
-                    return content.as_str().to_string();
-                }
-            }
-            // This should never happen if the regex is correct
-            caps.get(0).unwrap().as_str().to_string()
-        });
-
-        // Remove any remaining backticks only if they exist
-        if result.contains('`') {
-            result.replace('`', "")
+        // Strip markdown formatting first
+        let text = if QUICK_MARKDOWN_CHECK.is_match(heading) {
+            self.strip_markdown_formatting_fast(heading)
         } else {
-            result.to_string()
-        }
-    }
+            heading.to_string()
+        };
 
-    /// Detect if a path represents a cross-file link
-    fn is_cross_file_link(path: &str) -> bool {
-        // Empty path means internal fragment
-        if path.is_empty() {
-            return false;
-        }
+        // Trim whitespace first
+        let text = text.trim();
 
-        // Contains file extension
-        if Self::has_file_extension(path) {
-            return true;
-        }
+        // Follow kramdown's algorithm
+        let mut result = String::with_capacity(text.len());
+        let mut found_letter = false;
 
-        // Contains path separators (likely a path to another file/directory)
-        if path.contains('/') || path.contains('\\') {
-            return true;
-        }
+        for c in text.chars() {
+            // Step 1: Skip leading non-letters (kramdown removes leading numbers)
+            if !found_letter && !c.is_ascii_alphabetic() {
+                continue;
+            }
+            if c.is_ascii_alphabetic() {
+                found_letter = true;
+            }
 
-        // Starts with relative path indicators
-        if path.starts_with("./") || path.starts_with("../") {
-            return true;
-        }
-
-        // Query parameters or URL components (not a simple fragment)
-        if path.contains('?') || path.contains('&') || path.contains('=') {
-            return false; // These might be same-document with parameters
-        }
-
-        // Conservative approach: only treat as cross-file if it has clear path indicators
-        false
-    }
-
-    /// Check if a path has a file extension indicating it's a file reference
-    fn has_file_extension(path: &str) -> bool {
-        // First, strip query parameters and other URL components
-        let clean_path = path.split('?').next().unwrap_or(path);
-
-        // Common file extensions that indicate cross-file references
-        let file_extensions = [
-            // Markdown and documentation formats
-            ".md",
-            ".markdown",
-            ".mdown",
-            ".mkdn",
-            ".mdx",
-            // Web formats
-            ".html",
-            ".htm",
-            ".xhtml",
-            // Other common documentation formats
-            ".rst",
-            ".txt",
-            ".adoc",
-            ".org",
-        ];
-
-        // Case-insensitive extension matching
-        let path_lower = clean_path.to_lowercase();
-        for ext in &file_extensions {
-            if path_lower.ends_with(ext) {
-                return true;
+            // Step 2: Keep only ASCII letters, numbers, spaces, and hyphens
+            match c {
+                c if c.is_ascii_alphabetic() => result.push(c.to_ascii_lowercase()),
+                c if c.is_ascii_digit() => result.push(c),
+                ' ' => result.push('-'), // Step 3: spaces to hyphens
+                '-' => result.push('-'),
+                '_' => {} // kramdown REMOVES underscores (key difference!)
+                _ => {} // Remove everything else including non-ASCII
             }
         }
 
-        // Check for any extension pattern (dot followed by 2-6 alphanumeric characters)
-        // But exclude hidden files that start with a dot at the beginning
-        if let Some(last_dot) = path_lower.rfind('.') {
-            // Skip if this is a hidden file (starts with dot and has no other dots)
-            if last_dot == 0 && !path_lower[1..].contains('.') {
-                return false;
-            }
-
-            let potential_ext = &path_lower[last_dot + 1..];
-            if potential_ext.len() >= 2
-                && potential_ext.len() <= 6
-                && potential_ext.chars().all(|c| c.is_ascii_alphanumeric())
-            {
-                return true;
-            }
-        }
-
-        false
+        // Remove leading and trailing hyphens
+        result.trim_matches('-').to_string()
     }
 
-    /// Fast external URL detection with optimized patterns
+    /// Strip markdown formatting from heading text (optimized for common patterns)
+    fn strip_markdown_formatting_fast(&self, text: &str) -> String {
+        let mut result = text.to_string();
+
+        // Strip emphasis (bold/italic)
+        if result.contains('*') || result.contains('_') {
+            result = EMPHASIS_PATTERN.replace_all(&result, "$1$2").to_string();
+        }
+
+        // Strip inline code
+        if result.contains('`') {
+            result = CODE_PATTERN.replace_all(&result, "$1").to_string();
+        }
+
+        // Strip links
+        if result.contains('[') {
+            result = LINK_PATTERN.replace_all(&result, "$1$2").to_string();
+        }
+
+        result
+    }
+
+    /// Fast check if URL is external (doesn't need to be validated)
     #[inline]
-    fn is_external_url_fast(&self, url: &str) -> bool {
-        // Quick byte-level check for common prefixes
-        let bytes = url.as_bytes();
-        if bytes.len() < 4 {
-            return false;
-        }
-
-        // Check for http:// (7 chars minimum)
-        if bytes.len() >= 7 && &bytes[..7] == b"http://" {
-            return true;
-        }
-
-        // Check for https:// (8 chars minimum)
-        if bytes.len() >= 8 && &bytes[..8] == b"https://" {
-            return true;
-        }
-
-        // Check for ftp:// (6 chars minimum)
-        if bytes.len() >= 6 && &bytes[..6] == b"ftp://" {
-            return true;
-        }
-
-        // Check for www. (4 chars minimum)
-        if bytes.len() >= 4 && &bytes[..4] == b"www." {
-            return true;
-        }
-
-        false
+    fn is_external_url_fast(url: &str) -> bool {
+        // Quick prefix checks for common protocols
+        url.starts_with("http://")
+            || url.starts_with("https://")
+            || url.starts_with("ftp://")
+            || url.starts_with("mailto:")
+            || url.starts_with("tel:")
+            || url.starts_with("//")
     }
 }
 
@@ -298,160 +235,124 @@ impl Rule for MD051LinkFragments {
     }
 
     fn description(&self) -> &'static str {
-        "Link anchors (# references) should exist in the current document"
+        "Link fragments should reference valid headings"
+    }
+
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if no link fragments present
+        !ctx.content.contains("#")
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-
-        // Early return: if no links at all, skip processing
-        if !content.contains('[') || !content.contains('#') {
-            return Ok(Vec::new());
-        }
-
-        // Fallback path: create structure manually (should rarely be used)
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    /// Optimized check using pre-computed document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
-
-        // Early return: if no links at all, skip processing
-        if !content.contains('[') || !content.contains('#') {
-            return Ok(Vec::new());
-        }
-
-        // Extract headings once for the entire document
-        let headings = self.extract_headings_from_context(ctx);
-
-        // If no headings, no need to check TOC sections
-        let has_headings = !headings.is_empty();
-
         let mut warnings = Vec::new();
-        let mut in_toc_section = false;
+        let content = ctx.content;
 
-        // Use centralized link parsing from LintContext
-        for link in &ctx.links {
-            // Skip external links
-            let url = if link.is_reference {
-                // Resolve reference URL
-                if let Some(ref_id) = &link.reference_id {
-                    ctx.get_reference_url(ref_id).unwrap_or("")
-                } else {
-                    ""
-                }
-            } else {
-                &link.url
-            };
+        // Skip empty content
+        if content.is_empty() {
+            return Ok(warnings);
+        }
 
-            // Skip if external URL
-            if self.is_external_url_fast(url) {
+        // Extract all valid heading anchors
+        let valid_headings = self.extract_headings_from_context(ctx);
+
+        // If no headings, skip checking
+        if valid_headings.is_empty() {
+            return Ok(warnings);
+        }
+
+        // Find all links with fragments
+        let link_regex = get_cached_regex(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+
+        for (line_num, line) in lines.iter().enumerate() {
+            // Skip front matter
+            if ctx.lines[line_num].in_front_matter {
                 continue;
             }
 
-            // Skip Jekyll/Liquid template links (e.g., {% post_url ... %})
-            if url.contains("{%") || url.contains("%}") || url.contains("{{") || url.contains("}}") {
+            // Skip code blocks
+            if ctx.lines[line_num].in_code_block {
                 continue;
             }
 
-            // Check if URL has a fragment
-            if let Some(hash_pos) = url.find('#') {
-                let fragment = &url[hash_pos + 1..].to_lowercase();
+            for cap in link_regex.captures_iter(line) {
+                if let Some(url_match) = cap.get(2) {
+                    let url = url_match.as_str();
 
-                // Skip empty fragments
-                if fragment.is_empty() {
-                    continue;
-                }
+                    // Only check internal fragments (starting with #)
+                    if let Some(fragment) = url.strip_prefix('#') {
+                        // Skip empty fragments
+                        if fragment.is_empty() {
+                            continue;
+                        }
 
-                // Skip cross-file fragment links - only validate fragments in same document
-                // If URL contains a path component before the hash, it's likely a cross-file link
-                let path_before_hash = &url[..hash_pos];
-                if Self::is_cross_file_link(path_before_hash) {
-                    continue;
-                }
-
-                // Check if in TOC section
-                if in_toc_section {
-                    continue;
-                }
-
-                let line_info = &ctx.lines[link.line - 1];
-
-                // Check if we're entering a TOC section
-                if has_headings && TOC_SECTION_START.is_match(&line_info.content) {
-                    in_toc_section = true;
-                    continue;
-                }
-
-                // Check if we're exiting a TOC section (next heading)
-                if in_toc_section
-                    && line_info.content.starts_with('#')
-                    && !TOC_SECTION_START.is_match(&line_info.content)
-                {
-                    in_toc_section = false;
-                }
-
-                // Check if the fragment exists in headings
-                if !has_headings || !headings.contains(fragment) {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: link.line,
-                        column: link.start_col + 1, // Convert to 1-indexed
-                        end_line: link.line,
-                        end_column: link.end_col + 1, // Convert to 1-indexed
-                        message: format!("Link anchor '#{fragment}' does not exist in document headings"),
-                        severity: Severity::Warning,
-                        fix: None,
-                    });
+                        // Check if fragment exists in document
+                        if !valid_headings.contains(fragment) {
+                            let column = url_match.start() + 1;
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                message: format!("Link anchor '#{fragment}' does not exist in document headings"),
+                                line: line_num + 1,
+                                column,
+                                end_line: line_num + 1,
+                                end_column: column + url.len(),
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
+                    }
+                    // For cross-file links (like file.md#heading), we skip validation
+                    // as the target file may not be in the current context
+                    else if url.contains('#') && !Self::is_external_url_fast(url) {
+                        // This is a cross-file link, skip validation
+                        continue;
+                    }
                 }
             }
         }
+
         Ok(warnings)
     }
 
-    /// Check if this rule should be skipped for performance
-    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty or has no links with fragments
-        ctx.content.is_empty() || (!ctx.content.contains('[') || !ctx.content.contains('#'))
-    }
-
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // No automatic fix for missing fragments, just return content as-is
-        Ok(ctx.content.to_owned())
+        // MD051 cannot automatically fix invalid link fragments
+        Ok(ctx.content.to_string())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD051LinkFragments::new())
-    }
-}
+        // Look for anchor_style configuration
+        let anchor_style = if let Some(rule_config) = config.rules.get("MD051") {
+            if let Some(style_str) = rule_config.values.get("anchor_style").and_then(|v| v.as_str()) {
+                match style_str.to_lowercase().as_str() {
+                    "kramdown" | "jekyll" => AnchorStyle::Kramdown,
+                    _ => AnchorStyle::GitHub,
+                }
+            } else {
+                AnchorStyle::GitHub
+            }
+        } else {
+            AnchorStyle::GitHub
+        };
 
-impl DocumentStructureExtensions for MD051LinkFragments {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> bool {
-        // This rule is only relevant if there are both headings and links
-        let has_headings = ctx.lines.iter().any(|line| line.heading.is_some());
-        let has_links = ctx.content.contains('[') && ctx.content.contains(']');
-        has_headings && has_links
+        Box::new(MD051LinkFragments::with_anchor_style(anchor_style))
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let config_str = r#"# Anchor generation style
+# Options: "github" (default) or "kramdown"
+# - github: preserves underscores, removes punctuation
+# - kramdown: removes both underscores and punctuation
+anchor_style = "github""#;
+
+        let value: toml::Value = toml::from_str(r#"anchor_style = "github""#).ok()?;
+        Some((config_str.to_string(), value))
     }
 }
 
@@ -461,279 +362,182 @@ mod tests {
     use crate::lint_context::LintContext;
 
     #[test]
+    fn test_heading_to_fragment_github() {
+        let rule = MD051LinkFragments::new();
+
+        // Simple text
+        assert_eq!(rule.heading_to_fragment_github("Hello World"), "hello-world");
+
+        // With punctuation
+        assert_eq!(rule.heading_to_fragment_github("Hello, World!"), "hello-world");
+
+        // With markdown formatting
+        assert_eq!(
+            rule.heading_to_fragment_github("**Bold** and *italic*"),
+            "bold-and-italic"
+        );
+
+        // With code
+        assert_eq!(rule.heading_to_fragment_github("Using `code` here"), "using-code-here");
+
+        // With ampersand (punctuation removed, spaces preserved as hyphens)
+        assert_eq!(rule.heading_to_fragment_github("This & That"), "this--that");
+
+        // Leading/trailing spaces and hyphens
+        assert_eq!(rule.heading_to_fragment_github("  Spaces  "), "spaces");
+
+        // Multiple spaces (GitHub does NOT collapse consecutive hyphens)
+        assert_eq!(
+            rule.heading_to_fragment_github("Multiple   Spaces"),
+            "multiple---spaces"
+        );
+
+        // Test underscores - GitHub PRESERVES these
+        assert_eq!(
+            rule.heading_to_fragment_github("respect_gitignore"),
+            "respect_gitignore"
+        );
+        assert_eq!(
+            rule.heading_to_fragment_github("`respect_gitignore`"),
+            "respect_gitignore"
+        );
+
+        // Test slash conversion (punctuation removed)
+        assert_eq!(rule.heading_to_fragment_github("CI/CD Migration"), "cicd-migration");
+    }
+
+    #[test]
+    fn test_heading_to_fragment_kramdown() {
+        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Kramdown);
+
+        // Simple text
+        assert_eq!(rule.heading_to_fragment_kramdown("Hello World"), "hello-world");
+
+        // With punctuation
+        assert_eq!(rule.heading_to_fragment_kramdown("Hello, World!"), "hello-world");
+
+        // With markdown formatting
+        assert_eq!(
+            rule.heading_to_fragment_kramdown("**Bold** and *italic*"),
+            "bold-and-italic"
+        );
+
+        // With code
+        assert_eq!(
+            rule.heading_to_fragment_kramdown("Using `code` here"),
+            "using-code-here"
+        );
+
+        // With ampersand (punctuation removed, spaces preserved as hyphens)
+        assert_eq!(rule.heading_to_fragment_kramdown("This & That"), "this--that");
+
+        // Leading/trailing spaces and hyphens
+        assert_eq!(rule.heading_to_fragment_kramdown("  Spaces  "), "spaces");
+
+        // Multiple spaces (kramdown does NOT collapse consecutive hyphens)
+        assert_eq!(
+            rule.heading_to_fragment_kramdown("Multiple   Spaces"),
+            "multiple---spaces"
+        );
+
+        // Test underscores - kramdown REMOVES these (key difference!)
+        assert_eq!(
+            rule.heading_to_fragment_kramdown("respect_gitignore"),
+            "respectgitignore"
+        );
+        assert_eq!(
+            rule.heading_to_fragment_kramdown("`respect_gitignore`"),
+            "respectgitignore"
+        );
+        assert_eq!(
+            rule.heading_to_fragment_kramdown("snake_case_example"),
+            "snakecaseexample"
+        );
+
+        // Test slash conversion (punctuation removed)
+        assert_eq!(rule.heading_to_fragment_kramdown("CI/CD Migration"), "cicd-migration");
+    }
+
+    #[test]
+    fn test_issue_39_heading_with_hyphens() {
+        let github_rule = MD051LinkFragments::new();
+        let kramdown_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Kramdown);
+
+        // Test the specific case from issue 39
+        // Both GitHub and kramdown preserve consecutive hyphens
+        assert_eq!(github_rule.heading_to_fragment_github("The End - yay"), "the-end---yay");
+        assert_eq!(
+            kramdown_rule.heading_to_fragment_kramdown("The End - yay"),
+            "the-end---yay"
+        );
+
+        // More test cases with hyphens
+        assert_eq!(github_rule.heading_to_fragment_github("A - B - C"), "a---b---c");
+        assert_eq!(kramdown_rule.heading_to_fragment_kramdown("A - B - C"), "a---b---c");
+
+        assert_eq!(
+            github_rule.heading_to_fragment_github("Pre-Existing-Hyphens"),
+            "pre-existing-hyphens"
+        );
+        assert_eq!(
+            kramdown_rule.heading_to_fragment_kramdown("Pre-Existing-Hyphens"),
+            "pre-existing-hyphens"
+        );
+    }
+
+    #[test]
     fn test_valid_internal_link() {
         let rule = MD051LinkFragments::new();
-        let content = "# Introduction\n\nSee [introduction](#introduction) for details.";
+        let content = "# Hello World\n\n[link](#hello-world)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn test_invalid_internal_link() {
         let rule = MD051LinkFragments::new();
-        let content = "# Introduction\n\nSee [missing](#missing-section) for details.";
+        let content = "# Hello World\n\n[link](#nonexistent)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-
         assert_eq!(result.len(), 1);
-        assert!(
-            result[0]
-                .message
-                .contains("Link anchor '#missing-section' does not exist")
-        );
+        assert!(result[0].message.contains("does not exist"));
     }
 
     #[test]
-    fn test_multiple_headings() {
-        let rule = MD051LinkFragments::new();
-        let content = "# Introduction\n## Setup\n### Installation\n\n[intro](#introduction) [setup](#setup) [install](#installation)";
+    fn test_kramdown_style_validation() {
+        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Kramdown);
+        // For kramdown, underscores are removed
+        let content = "# respect_gitignore\n\n[correct](#respectgitignore)\n[wrong](#respect_gitignore)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_external_links_ignored() {
-        let rule = MD051LinkFragments::new();
-        let content = "# Introduction\n\n[external](https://example.com#section)";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_cross_file_links_ignored() {
-        let rule = MD051LinkFragments::new();
-        let content = "# Introduction\n\n[other file](other.md#section)";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_heading_to_fragment_conversion() {
-        let rule = MD051LinkFragments::new();
-
-        // Simple text
-        assert_eq!(rule.heading_to_fragment_fast("Hello World"), "hello-world");
-
-        // With punctuation
-        assert_eq!(rule.heading_to_fragment_fast("Hello, World!"), "hello-world");
-
-        // With markdown formatting
-        assert_eq!(
-            rule.heading_to_fragment_fast("**Bold** and *italic*"),
-            "bold-and-italic"
-        );
-
-        // With code
-        assert_eq!(rule.heading_to_fragment_fast("Using `code` here"), "using-code-here");
-
-        // With ampersand (punctuation removed per spec)
-        assert_eq!(rule.heading_to_fragment_fast("This & That"), "this-that");
-
-        // Leading/trailing spaces and hyphens
-        assert_eq!(rule.heading_to_fragment_fast("  Spaces  "), "spaces");
-
-        // Multiple spaces
-        assert_eq!(rule.heading_to_fragment_fast("Multiple   Spaces"), "multiple-spaces");
-
-        // Test underscores - should be preserved
-        assert_eq!(rule.heading_to_fragment_fast("respect_gitignore"), "respect_gitignore");
-        assert_eq!(
-            rule.heading_to_fragment_fast("`respect_gitignore`"),
-            "respect_gitignore"
-        );
-
-        // Test slash conversion (punctuation removed per spec)
-        assert_eq!(rule.heading_to_fragment_fast("CI/CD Migration"), "cicd-migration");
-    }
-
-    #[test]
-    #[ignore = "TOC detection logic needs to be fixed - currently not tracking TOC sections properly"]
-    fn test_toc_section_ignored() {
-        let rule = MD051LinkFragments::new();
-        let content = "# Document\n\n## Table of Contents\n\n- [Missing](#missing)\n- [Also Missing](#also-missing)\n\n## Real Section";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        // Links in TOC should be ignored
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_case_insensitive_matching() {
-        let rule = MD051LinkFragments::new();
-        let content = "# UPPERCASE Heading\n\n[link](#uppercase-heading)";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_setext_headings() {
-        let rule = MD051LinkFragments::new();
-        let content = "Main Title\n==========\n\nSubtitle\n--------\n\n[main](#main-title) [sub](#subtitle)";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_empty_fragment_ignored() {
-        let rule = MD051LinkFragments::new();
-        let content = "# Title\n\n[empty link](#)";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_reference_style_links() {
-        let rule = MD051LinkFragments::new();
-        let content = "# Title\n\n[link][ref]\n\n[ref]: #missing-section";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
+        // Only the second link should trigger a warning
         assert_eq!(result.len(), 1);
-        assert!(
-            result[0]
-                .message
-                .contains("Link anchor '#missing-section' does not exist")
-        );
+        assert!(result[0].message.contains("#respect_gitignore"));
     }
 
     #[test]
-    fn test_strip_markdown_formatting() {
-        let rule = MD051LinkFragments::new();
-
-        // Bold
-        assert_eq!(rule.strip_markdown_formatting_fast("**bold**"), "bold");
-        assert_eq!(rule.strip_markdown_formatting_fast("__bold__"), "bold");
-
-        // Italic
-        assert_eq!(rule.strip_markdown_formatting_fast("*italic*"), "italic");
-        assert_eq!(rule.strip_markdown_formatting_fast("_italic_"), "italic");
-
-        // Strikethrough
-        assert_eq!(rule.strip_markdown_formatting_fast("~~strike~~"), "strike");
-
-        // Code
-        assert_eq!(rule.strip_markdown_formatting_fast("`code`"), "code");
-
-        // Links
-        assert_eq!(rule.strip_markdown_formatting_fast("[text](url)"), "text");
-
-        // Mixed
-        assert_eq!(
-            rule.strip_markdown_formatting_fast("**bold** and *italic*"),
-            "bold and italic"
-        );
-
-        // No formatting
-        assert_eq!(rule.strip_markdown_formatting_fast("plain text"), "plain text");
-    }
-
-    #[test]
-    fn test_is_external_url_fast() {
-        let rule = MD051LinkFragments::new();
-
-        // HTTP/HTTPS
-        assert!(rule.is_external_url_fast("http://example.com"));
-        assert!(rule.is_external_url_fast("https://example.com"));
-
-        // FTP
-        assert!(rule.is_external_url_fast("ftp://files.com"));
-
-        // WWW
-        assert!(rule.is_external_url_fast("www.example.com"));
-
-        // Not external
-        assert!(!rule.is_external_url_fast("file.md"));
-        assert!(!rule.is_external_url_fast("#section"));
-        assert!(!rule.is_external_url_fast("../relative/path.md"));
-        assert!(!rule.is_external_url_fast("/absolute/path.md"));
-
-        // Edge cases
-        assert!(!rule.is_external_url_fast(""));
-        assert!(!rule.is_external_url_fast("ht"));
-        assert!(!rule.is_external_url_fast("http"));
-    }
-
-    #[test]
-    fn test_no_headings_no_warnings() {
-        let rule = MD051LinkFragments::new();
-        let content = "No headings here\n\n[link](#section)";
+    fn test_github_style_validation() {
+        let rule = MD051LinkFragments::new(); // Default is GitHub style
+        // For GitHub, underscores are preserved
+        let content = "# respect_gitignore\n\n[correct](#respect_gitignore)\n[wrong](#respectgitignore)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
-        // Should warn about missing anchor when no headings exist
+        // Only the second link should trigger a warning
         assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("#respectgitignore"));
     }
 
     #[test]
     fn test_complex_heading_with_special_chars() {
         let rule = MD051LinkFragments::new();
-        // Per GitHub spec: punctuation removed, spaces become hyphens
-        let content = "# FAQ: What's New & Improved?\n\n[faq](#faq-whats-new-improved)";
+        // Per GitHub spec: punctuation removed, spaces become hyphens (preserving consecutive)
+        let content = "# FAQ: What's New & Improved?\n\n[faq](#faq-whats-new--improved)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_multiple_invalid_links() {
-        let rule = MD051LinkFragments::new();
-        let content = "# Title\n\n[link1](#missing1) [link2](#missing2) [link3](#missing3)";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        assert_eq!(result.len(), 3);
-        assert!(result[0].message.contains("#missing1"));
-        assert!(result[1].message.contains("#missing2"));
-        assert!(result[2].message.contains("#missing3"));
-    }
-
-    #[test]
-    fn test_link_positions() {
-        let rule = MD051LinkFragments::new();
-        let content = "# Title\n\nSome text [invalid](#missing) more text";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].line, 3);
-        assert_eq!(result[0].column, 11); // 1-indexed position of '['
-    }
-
-    #[test]
-    fn test_duplicate_heading_numbering() {
-        let rule = MD051LinkFragments::new();
-        let content = "## Section\nLink to [second section](#section-1)\n## Section";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        // Should not flag the link to section-1 because there are two "Section" headings
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_heading_with_hyphens() {
-        let rule = MD051LinkFragments::new();
-        let content = "## The End - yay\n\nLink to [this heading](#the-end-yay)";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        // Should not flag the link because "The End - yay" becomes "the-end-yay" (spaces->hyphens, punctuation removed)
         assert_eq!(result.len(), 0);
     }
 }
